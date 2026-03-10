@@ -156,6 +156,7 @@
     .kpi-block:nth-child(2) { background: var(--success-bg); }
     .kpi-block:nth-child(3) { background: var(--warning-bg); }
     .kpi-block:nth-child(4) { background: var(--purple-bg); }
+    .kpi-block:nth-child(5) { background: rgba(15,123,108,0.08); }
 
     .kpi-block .kpi-label {
       font-size: 0.75rem;
@@ -567,12 +568,17 @@
       <div class="kpi-block">
         <div class="kpi-label">Pipeline</div>
         <div class="kpi-value" id="kpiPipeline">--</div>
-        <div class="kpi-sub" id="kpiPipelineSub">Deals en cours</div>
+        <div class="kpi-sub"><span id="kpiPipelineSub">Deals en cours</span></div>
       </div>
       <div class="kpi-block">
-        <div class="kpi-label">Meilleur mois</div>
-        <div class="kpi-value" id="kpiBestMonth">--</div>
-        <div class="kpi-sub" id="kpiBestMonthSub"></div>
+        <div class="kpi-label">Pipeline pondere</div>
+        <div class="kpi-value" id="kpiPipelineWeighted">--</div>
+        <div class="kpi-sub" id="kpiPipelineWeightedSub"></div>
+      </div>
+      <div class="kpi-block">
+        <div class="kpi-label">Projection annuelle</div>
+        <div class="kpi-value" id="kpiProjection">--</div>
+        <div class="kpi-sub"><span id="kpiProjectionSub"></span> <span id="kpiProjectionVsObj" class="tag" style="margin-left:0.3rem"></span></div>
       </div>
     </div>
 
@@ -748,21 +754,43 @@
       document.getElementById('kpiObjYtd').textContent = formatEuro(objYTD);
       document.getElementById('kpiObjYtdSub').textContent = objAnnual > 0 ? `Annuel : ${formatEuro(objAnnual)}` : 'Non defini';
 
-      // Pipeline KPI
+      // Pipeline KPI (brut + pondéré)
       let pipelineTotal = 0;
+      let pipelineWeighted = 0;
       let pipelineCount = 0;
       if (dashboardData.pipelineDeals) {
         for (const deals of Object.values(dashboardData.pipelineDeals)) {
           pipelineCount += deals.length;
-          pipelineTotal += deals.reduce((s, d) => s + d.amount, 0);
+          for (const d of deals) {
+            pipelineTotal += d.amount;
+            pipelineWeighted += d.amount * (d.probability / 100);
+          }
         }
       }
       document.getElementById('kpiPipeline').textContent = formatEuro(pipelineTotal);
       document.getElementById('kpiPipelineSub').textContent = `${pipelineCount} deals en cours`;
 
-      const bestMonth = data.reduce((best, m) => m.total > best.total ? m : best, {total:0, label:'-'});
-      document.getElementById('kpiBestMonth').textContent = formatEuro(bestMonth.total);
-      document.getElementById('kpiBestMonthSub').textContent = bestMonth.label.charAt(0).toUpperCase() + bestMonth.label.slice(1);
+      document.getElementById('kpiPipelineWeighted').textContent = formatEuro(pipelineWeighted);
+      document.getElementById('kpiPipelineWeightedSub').textContent = `${Math.round(pipelineTotal > 0 ? (pipelineWeighted / pipelineTotal) * 100 : 0)}% du pipeline brut`;
+
+      // Projection fin d'année : CA signé + pipeline pondéré + extrapolation rythme
+      const monthsElapsed = currentMonth + 1;
+      const monthsRemaining = 12 - monthsElapsed;
+      const avgMonthly = monthsElapsed > 0 ? caYTD / monthsElapsed : 0;
+      const projection = caYTD + pipelineWeighted + (avgMonthly * Math.max(0, monthsRemaining - 1));
+      // On retire 1 mois du rythme car le pipeline pondéré couvre environ 1 mois d'activité
+
+      document.getElementById('kpiProjection').textContent = formatEuro(projection);
+      const projVsObj = objAnnual > 0 ? Math.round((projection / objAnnual) * 100) : null;
+      document.getElementById('kpiProjectionSub').textContent = 'CA + pipe + rythme';
+      const projTag = document.getElementById('kpiProjectionVsObj');
+      if (projVsObj !== null) {
+        projTag.textContent = projVsObj + '% de l\'obj';
+        projTag.className = 'tag ' + (projVsObj >= 100 ? 'tag-green' : 'tag-red');
+        projTag.style.display = 'inline-block';
+      } else {
+        projTag.style.display = 'none';
+      }
 
       renderChart(data, objectives);
       renderTable(data, objectives);
