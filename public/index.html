@@ -31,6 +31,35 @@
       --radius: 4px;
     }
 
+    [data-theme="dark"] {
+      --primary: #4a9fee;
+      --primary-bg: rgba(74,159,238,0.12);
+      --success: #34d399;
+      --success-bg: rgba(52,211,153,0.1);
+      --danger: #f87171;
+      --danger-bg: rgba(248,113,113,0.1);
+      --warning: #fbbf24;
+      --warning-bg: rgba(251,191,36,0.1);
+      --purple: #a78bfa;
+      --purple-bg: rgba(167,139,250,0.1);
+      --bg: #191919;
+      --bg-secondary: #202020;
+      --card: #252525;
+      --text: #ffffffde;
+      --text-secondary: #999999;
+      --text-light: #5a5a5a;
+      --border: #2e2e2e;
+      --hover: #2a2a2a;
+    }
+
+    [data-theme="dark"] .kanban-card {
+      background: var(--card);
+    }
+
+    [data-theme="dark"] .modal {
+      background: var(--card);
+    }
+
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
@@ -532,6 +561,9 @@
       <span style="color:var(--text)">Dashboard</span>
     </div>
     <div class="topbar-right">
+      <button class="btn" id="themeToggle" onclick="toggleTheme()" title="Mode sombre">
+        <svg id="themeIcon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1a7 7 0 1 0 0 14A5 5 0 0 1 8 1z"/></svg>
+      </button>
       <button class="btn" onclick="openObjectivesModal()">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M3 8h10"/></svg>
         Objectifs
@@ -555,7 +587,7 @@
 
     <!-- KPIs -->
     <div class="kpi-row">
-      <div class="kpi-block">
+      <div class="kpi-block" onclick="openYtdDealsModal()" style="cursor:pointer">
         <div class="kpi-label">CA YTD</div>
         <div class="kpi-value" id="kpiCaYtd">--</div>
         <div class="kpi-sub"><span id="kpiCaYtdSub"></span> <span id="kpiCaVsObj" class="tag" style="margin-left:0.3rem"></span></div>
@@ -669,6 +701,38 @@
   </div>
 
   <script>
+    // --- Dark mode ---
+    function initTheme() {
+      const saved = localStorage.getItem('theme');
+      if (saved === 'dark') {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
+      updateThemeIcon();
+    }
+
+    function toggleTheme() {
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      if (isDark) {
+        document.documentElement.removeAttribute('data-theme');
+        localStorage.setItem('theme', 'light');
+      } else {
+        document.documentElement.setAttribute('data-theme', 'dark');
+        localStorage.setItem('theme', 'dark');
+      }
+      updateThemeIcon();
+      // Re-render chart with correct colors
+      if (dashboardData) render();
+    }
+
+    function updateThemeIcon() {
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      document.getElementById('themeIcon').innerHTML = isDark
+        ? '<circle cx="8" cy="8" r="4"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41"/>'
+        : '<path d="M8 1a7 7 0 1 0 0 14A5 5 0 0 1 8 1z"/>';
+    }
+
+    initTheme();
+
     const MONTHS_FR = [
       'Janvier','Fevrier','Mars','Avril','Mai','Juin',
       'Juillet','Aout','Septembre','Octobre','Novembre','Decembre'
@@ -730,12 +794,18 @@
 
       // KPIs
       const caYTD = data.slice(0, currentMonth + 1).reduce((s, m) => s + m.total, 0);
+      const forecastKPI = getForecastTotal();
+      const caYTDWithForecast = caYTD + forecastKPI;
 
       const objYTD = objectives.slice(0, currentMonth + 1).reduce((s, v) => s + v, 0);
-      const pctVsObjYTD = objYTD > 0 ? Math.round((caYTD / objYTD) * 100) : null;
+      const pctVsObjYTD = objYTD > 0 ? Math.round((caYTDWithForecast / objYTD) * 100) : null;
 
-      document.getElementById('kpiCaYtd').textContent = formatEuro(caYTD);
-      document.getElementById('kpiCaYtdSub').textContent = `Cumul a fin ${MONTHS_FR[currentMonth].toLowerCase()}`;
+      document.getElementById('kpiCaYtd').textContent = formatEuro(caYTDWithForecast);
+      if (forecastKPI > 0) {
+        document.getElementById('kpiCaYtdSub').innerHTML = `Cumul a fin ${MONTHS_FR[currentMonth].toLowerCase()} <span style="color:var(--primary);font-weight:500">(dont ${formatEuro(forecastKPI)} forecast)</span>`;
+      } else {
+        document.getElementById('kpiCaYtdSub').textContent = `Cumul a fin ${MONTHS_FR[currentMonth].toLowerCase()}`;
+      }
 
       // % vs objectif tag
       const tagEl = document.getElementById('kpiCaVsObj');
@@ -772,7 +842,7 @@
       const monthsElapsed = currentMonth + 1;
       const monthsRemaining = 12 - monthsElapsed;
       const avgMonthly = monthsElapsed > 0 ? caYTD / monthsElapsed : 0;
-      const projection = caYTD + pipelineWeighted + (avgMonthly * Math.max(0, monthsRemaining - 1));
+      const projection = caYTDWithForecast + pipelineWeighted + (avgMonthly * Math.max(0, monthsRemaining - 1));
       // On retire 1 mois du rythme car le pipeline pondéré couvre environ 1 mois d'activité
 
       document.getElementById('kpiProjection').textContent = formatEuro(projection);
@@ -793,6 +863,7 @@
     }
 
     function renderChart(data, prevData, objectives) {
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
       const ctx = document.getElementById('mainChart').getContext('2d');
       const labels = MONTHS_FR.map(m => m.substring(0, 3));
 
@@ -896,30 +967,26 @@
             {
               label: '2025',
               data: prevValues,
-              backgroundColor: 'rgba(200,200,197,0.4)',
-              hoverBackgroundColor: 'rgba(200,200,197,0.6)',
+              backgroundColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(200,200,197,0.4)',
+              hoverBackgroundColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(200,200,197,0.6)',
               borderRadius: 4,
               borderSkipped: false,
               barPercentage: 0.7,
               categoryPercentage: 0.7,
               stack: 'previous',
               order: 3,
-              datalabels: { display: false },
-            },
-            {
-              label: 'Objectif',
-              data: objValues,
-              type: 'line',
-              borderColor: '#d9730d',
-              backgroundColor: 'transparent',
-              borderWidth: 1.5,
-              borderDash: [5, 4],
-              tension: 0,
-              pointRadius: 0,
-              pointHoverRadius: 4,
-              pointHoverBackgroundColor: '#d9730d',
-              order: 1,
-              datalabels: { display: false },
+              datalabels: {
+                display: (ctx) => prevValues[ctx.dataIndex] > 0,
+                anchor: 'end',
+                align: 'end',
+                offset: 2,
+                formatter: (value) => {
+                  if (value >= 1000) return (value/1000).toFixed(0) + 'k €';
+                  return value + ' €';
+                },
+                font: { size: 9, family: 'Inter', weight: '500' },
+                color: isDark ? '#777' : '#9a9a97',
+              },
             },
           ],
         },
@@ -935,10 +1002,10 @@
           },
           plugins: {
             tooltip: {
-              backgroundColor: 'white',
-              titleColor: '#37352f',
-              bodyColor: '#37352f',
-              borderColor: '#e9e9e7',
+              backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--card').trim(),
+              titleColor: getComputedStyle(document.documentElement).getPropertyValue('--text').trim(),
+              bodyColor: getComputedStyle(document.documentElement).getPropertyValue('--text').trim(),
+              borderColor: getComputedStyle(document.documentElement).getPropertyValue('--border').trim(),
               borderWidth: 1,
               cornerRadius: 6,
               padding: 12,
@@ -958,14 +1025,14 @@
                 pointStyle: 'rectRounded',
                 padding: 16,
                 font: { size: 11, family: 'Inter', weight: '500' },
-                color: '#787774',
+                color: getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim(),
               },
             },
           },
           scales: {
             x: {
               stacked: true,
-              ticks: { font: { size: 11, family: 'Inter' }, color: '#b4b4b0' },
+              ticks: { font: { size: 11, family: 'Inter' }, color: getComputedStyle(document.documentElement).getPropertyValue('--text-light').trim() },
               grid: { display: false },
               border: { display: false },
             },
@@ -980,10 +1047,10 @@
                   return v;
                 },
                 font: { size: 11, family: 'Inter' },
-                color: '#b4b4b0',
+                color: getComputedStyle(document.documentElement).getPropertyValue('--text-light').trim(),
                 padding: 8,
               },
-              grid: { color: '#f5f5f4', drawBorder: false },
+              grid: { color: getComputedStyle(document.documentElement).getPropertyValue('--border').trim(), drawBorder: false },
               border: { display: false },
             },
           },
@@ -1065,6 +1132,71 @@
           <td style="text-align:right;padding:0.5rem 1rem;font-weight:600">${formatEuro(d.amount)}</td>
         </tr>`;
       });
+      document.getElementById('dealsModalBody').innerHTML = html;
+      document.getElementById('dealsModalOverlay').classList.add('active');
+    }
+
+    function openYtdDealsModal() {
+      if (!dashboardData || !dashboardData.yearlyData[CURRENT_YEAR]) return;
+      const data = dashboardData.yearlyData[CURRENT_YEAR];
+      const currentMonth = new Date().getMonth();
+
+      // Collect all signed deals from January to current month
+      const allDeals = [];
+      for (let m = 0; m <= currentMonth; m++) {
+        if (data[m] && data[m].deals) {
+          for (const d of data[m].deals) {
+            allDeals.push({ ...d, month: MONTHS_FR[m], isForecast: false });
+          }
+        }
+      }
+
+      // Collect selected forecast deals
+      const forecastDeals = [];
+      if (dashboardData.pipelineDeals) {
+        for (const [stageName, deals] of Object.entries(dashboardData.pipelineDeals)) {
+          for (const d of deals) {
+            if (selectedDealIds.has(d.id)) {
+              forecastDeals.push({ name: d.name, amount: d.amount, month: stageName, isForecast: true, probability: d.probability });
+            }
+          }
+        }
+      }
+
+      const combined = [...allDeals, ...forecastDeals];
+      if (combined.length === 0) return;
+
+      const totalSigned = allDeals.reduce((s, d) => s + d.amount, 0);
+      const totalForecast = forecastDeals.reduce((s, d) => s + d.amount, 0);
+      const totalAll = totalSigned + totalForecast;
+
+      document.getElementById('dealsModalTitle').textContent = `CA YTD — Jan a ${MONTHS_FR[currentMonth]} ${CURRENT_YEAR}`;
+      document.getElementById('dealsModalTotal').textContent = formatEuro(totalAll) + ' — ' + combined.length + ' deal(s)';
+
+      // Signed deals first (sorted by amount), then forecast deals
+      const sortedSigned = allDeals.sort((a, b) => b.amount - a.amount);
+      const sortedForecast = forecastDeals.sort((a, b) => b.amount - a.amount);
+
+      let html = '';
+      sortedSigned.forEach(d => {
+        html += `<tr>
+          <td style="text-align:left;padding:0.5rem 1rem">${d.name} <span style="color:var(--text-light);font-size:0.75rem">${d.month}</span></td>
+          <td style="text-align:right;padding:0.5rem 1rem;font-weight:600">${formatEuro(d.amount)}</td>
+        </tr>`;
+      });
+
+      if (sortedForecast.length > 0) {
+        html += `<tr style="background:var(--primary-bg)">
+          <td colspan="2" style="text-align:left;padding:0.5rem 1rem;font-size:0.75rem;font-weight:600;color:var(--primary);text-transform:uppercase;letter-spacing:0.03em">Forecast — ${formatEuro(totalForecast)}</td>
+        </tr>`;
+        sortedForecast.forEach(d => {
+          html += `<tr style="background:rgba(35,131,226,0.03)">
+            <td style="text-align:left;padding:0.5rem 1rem;color:var(--primary)">${d.name} <span style="font-size:0.75rem;opacity:0.6">${d.month} · ${d.probability}%</span></td>
+            <td style="text-align:right;padding:0.5rem 1rem;font-weight:600;color:var(--primary)">${formatEuro(d.amount)}</td>
+          </tr>`;
+        });
+      }
+
       document.getElementById('dealsModalBody').innerHTML = html;
       document.getElementById('dealsModalOverlay').classList.add('active');
     }
