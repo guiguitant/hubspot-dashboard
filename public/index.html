@@ -156,7 +156,6 @@
     .kpi-block:nth-child(2) { background: var(--success-bg); }
     .kpi-block:nth-child(3) { background: var(--warning-bg); }
     .kpi-block:nth-child(4) { background: var(--purple-bg); }
-    .kpi-block:nth-child(5) { background: rgba(15,123,108,0.08); }
 
     .kpi-block .kpi-label {
       font-size: 0.75rem;
@@ -566,11 +565,6 @@
         <div class="kpi-sub" id="kpiObjYtdSub"></div>
       </div>
       <div class="kpi-block">
-        <div class="kpi-label">Pipeline</div>
-        <div class="kpi-value" id="kpiPipeline">--</div>
-        <div class="kpi-sub"><span id="kpiPipelineSub">Deals en cours</span></div>
-      </div>
-      <div class="kpi-block">
         <div class="kpi-label">Pipeline pondere</div>
         <div class="kpi-value" id="kpiPipelineWeighted">--</div>
         <div class="kpi-sub" id="kpiPipelineWeightedSub"></div>
@@ -767,11 +761,8 @@
           }
         }
       }
-      document.getElementById('kpiPipeline').textContent = formatEuro(pipelineTotal);
-      document.getElementById('kpiPipelineSub').textContent = `${pipelineCount} deals en cours`;
-
       document.getElementById('kpiPipelineWeighted').textContent = formatEuro(pipelineWeighted);
-      document.getElementById('kpiPipelineWeightedSub').textContent = `${Math.round(pipelineTotal > 0 ? (pipelineWeighted / pipelineTotal) * 100 : 0)}% du pipeline brut`;
+      document.getElementById('kpiPipelineWeightedSub').textContent = `${pipelineCount} deals — brut : ${formatEuro(pipelineTotal)}`;
 
       // Projection fin d'année : CA signé + pipeline pondéré + extrapolation rythme
       const monthsElapsed = currentMonth + 1;
