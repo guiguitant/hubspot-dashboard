@@ -172,6 +172,67 @@ async function fetchPipelineStages() {
   return stages;
 }
 
+// --- Target pipeline stages for kanban ---
+const KANBAN_STAGES = [
+  { id: 'qualifiedtobuy', label: 'RDV Qualif', probability: 30 },
+  { id: 'presentationscheduled', label: 'RDV Propale', probability: 50 },
+  { id: 'decisionmakerboughtin', label: 'Négociation', probability: 60 },
+  { id: 'contractsent', label: 'Contrat envoyé', probability: 80 },
+];
+
+// --- Fetch open deals for pipeline kanban ---
+async function fetchOpenDeals() {
+  const allDeals = [];
+  let after = undefined;
+  const stageIds = KANBAN_STAGES.map(s => s.id);
+
+  while (true) {
+    const body = {
+      filterGroups: [
+        {
+          filters: [
+            { propertyName: 'hs_is_closed', operator: 'EQ', value: 'false' },
+            { propertyName: 'pipeline', operator: 'EQ', value: 'default' },
+          ],
+        },
+      ],
+      properties: ['dealname', 'amount', 'dealstage', 'closedate'],
+      limit: 100,
+    };
+    if (after) body.after = after;
+
+    const result = await hubspotSearch(body);
+    if (result.results) allDeals.push(...result.results);
+
+    if (result.paging && result.paging.next && result.paging.next.after) {
+      after = result.paging.next.after;
+    } else {
+      break;
+    }
+  }
+
+  // Group by stage, only keep target stages
+  const pipelineDeals = {};
+  for (const stage of KANBAN_STAGES) {
+    pipelineDeals[stage.label] = [];
+  }
+
+  for (const deal of allDeals) {
+    const stageId = deal.properties.dealstage;
+    const stageInfo = KANBAN_STAGES.find(s => s.id === stageId);
+    if (!stageInfo) continue;
+
+    pipelineDeals[stageInfo.label].push({
+      id: deal.id,
+      name: deal.properties.dealname || 'Sans nom',
+      amount: parseFloat(deal.properties.amount) || 0,
+      probability: stageInfo.probability,
+    });
+  }
+
+  return pipelineDeals;
+}
+
 // --- Aggregate revenue by month/year ---
 function aggregateByMonth(deals) {
   const monthly = {};
@@ -187,10 +248,14 @@ function aggregateByMonth(deals) {
 
     const key = `${year}-${month}`;
     if (!monthly[key]) {
-      monthly[key] = { year, month, total: 0, count: 0 };
+      monthly[key] = { year, month, total: 0, count: 0, deals: [] };
     }
     monthly[key].total += amount;
     monthly[key].count += 1;
+    monthly[key].deals.push({
+      name: deal.properties.dealname || 'Sans nom',
+      amount,
+    });
   }
 
   return monthly;
@@ -202,10 +267,11 @@ app.get('/api/dashboard', async (req, res) => {
     const currentYear = new Date().getFullYear();
     const previousYear = currentYear - 1;
 
-    const [deals, openDealsCount, stages] = await Promise.all([
+    const [deals, openDealsCount, stages, pipelineDeals] = await Promise.all([
       fetchClosedWonDeals(),
       fetchOpenDealsCount(),
       fetchPipelineStages(),
+      fetchOpenDeals(),
     ]);
 
     const monthly = aggregateByMonth(deals);
@@ -220,6 +286,7 @@ app.get('/api/dashboard', async (req, res) => {
           label: new Date(year, m).toLocaleDateString('fr-FR', { month: 'long' }),
           total: monthly[key] ? Math.round(monthly[key].total * 100) / 100 : 0,
           count: monthly[key] ? monthly[key].count : 0,
+          deals: monthly[key] ? monthly[key].deals : [],
         });
       }
       return months;
@@ -264,6 +331,7 @@ app.get('/api/dashboard', async (req, res) => {
         openDeals: openDealsCount,
       },
       stages,
+      pipelineDeals,
       fetchedAt: new Date().toISOString(),
     });
   } catch (err) {

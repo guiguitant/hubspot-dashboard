@@ -5,142 +5,225 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Dashboard Commercial</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
-      --primary: #2563eb;
-      --primary-light: #3b82f6;
-      --success: #16a34a;
-      --danger: #dc2626;
-      --warning: #f59e0b;
-      --bg: #f1f5f9;
+      --primary: #2383e2;
+      --primary-bg: rgba(35,131,226,0.08);
+      --success: #0f7b6c;
+      --success-bg: rgba(15,123,108,0.08);
+      --danger: #e03e3e;
+      --danger-bg: rgba(224,62,62,0.08);
+      --warning: #d9730d;
+      --warning-bg: rgba(217,115,13,0.08);
+      --purple: #6940a5;
+      --purple-bg: rgba(105,64,165,0.08);
+      --bg: #ffffff;
+      --bg-secondary: #fbfbfa;
       --card: #ffffff;
-      --text: #1e293b;
-      --text-muted: #64748b;
-      --border: #e2e8f0;
+      --text: #37352f;
+      --text-secondary: #787774;
+      --text-light: #b4b4b0;
+      --border: #e9e9e7;
+      --hover: #f7f7f5;
+      --radius: 4px;
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       background: var(--bg);
       color: var(--text);
-      line-height: 1.5;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
     }
 
-    .header {
-      background: linear-gradient(135deg, #1e3a5f, #2563eb);
-      color: white;
-      padding: 1.25rem 2rem;
+    /* --- Header / Breadcrumb bar --- */
+    .topbar {
+      border-bottom: 1px solid var(--border);
+      padding: 0.6rem 1.5rem;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      flex-wrap: wrap;
-      gap: 1rem;
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+      background: var(--bg);
+      position: sticky;
+      top: 0;
+      z-index: 50;
     }
 
-    .header h1 { font-size: 1.4rem; font-weight: 700; }
-
-    .header-actions {
+    .topbar-left {
       display: flex;
       align-items: center;
-      gap: 0.75rem;
-      flex-wrap: wrap;
+      gap: 0.4rem;
     }
 
-    .header select, .header button {
-      padding: 0.5rem 1rem;
-      border-radius: 8px;
-      border: 1px solid rgba(255,255,255,0.3);
-      background: rgba(255,255,255,0.15);
-      color: white;
-      font-size: 0.85rem;
-      cursor: pointer;
-      transition: background 0.2s;
+    .topbar-left .breadcrumb-sep { color: var(--text-light); }
+
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
     }
 
-    .header select option { color: #1e293b; background: white; }
-    .header button:hover { background: rgba(255,255,255,0.3); }
-
-    .btn-primary {
-      background: rgba(255,255,255,0.25) !important;
-      font-weight: 600;
-    }
-
-    .status {
-      font-size: 0.75rem;
-      opacity: 0.8;
-    }
-
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 1.5rem;
-    }
-
-    /* KPI Cards */
-    .kpi-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 1rem;
-      margin-bottom: 1.5rem;
-    }
-
-    .kpi-card {
-      background: var(--card);
-      border-radius: 12px;
-      padding: 1.25rem;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-      border: 1px solid var(--border);
-    }
-
-    .kpi-card .kpi-label {
+    /* --- Notion-style buttons --- */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.3rem 0.6rem;
+      border-radius: var(--radius);
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
       font-size: 0.8rem;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 0.5rem;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.12s;
+      white-space: nowrap;
     }
 
-    .kpi-card .kpi-value {
-      font-size: 1.8rem;
+    .btn:hover { background: var(--hover); color: var(--text); }
+
+    .btn-filled {
+      background: var(--primary);
+      color: white;
+      padding: 0.35rem 0.75rem;
+      font-weight: 500;
+    }
+
+    .btn-filled:hover { background: #1b6ec2; color: white; }
+
+    .notion-select {
+      padding: 0.3rem 0.5rem;
+      border-radius: var(--radius);
+      border: none;
+      background: var(--hover);
+      color: var(--text);
+      font-size: 0.8rem;
+      font-family: inherit;
+      cursor: pointer;
+      outline: none;
+    }
+
+    .notion-select:hover { background: var(--border); }
+
+    .sync-time {
+      font-size: 0.75rem;
+      color: var(--text-light);
+    }
+
+    /* --- Page content --- */
+    .page {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 2.5rem 5rem;
+    }
+
+    .page-icon { font-size: 3rem; margin-bottom: 0.5rem; }
+
+    .page-title {
+      font-size: 2.2rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.25rem;
+    }
+
+    .page-desc {
+      color: var(--text-secondary);
+      font-size: 0.95rem;
+      margin-bottom: 2.5rem;
+    }
+
+    /* --- KPI Callout blocks --- */
+    .kpi-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.75rem;
+      margin-bottom: 2.5rem;
+    }
+
+    .kpi-block {
+      border-radius: var(--radius);
+      padding: 1rem 1.1rem;
+      transition: background 0.12s;
+    }
+
+    .kpi-block:nth-child(1) { background: var(--primary-bg); }
+    .kpi-block:nth-child(2) { background: var(--success-bg); }
+    .kpi-block:nth-child(3) { background: var(--warning-bg); }
+    .kpi-block:nth-child(4) { background: var(--purple-bg); }
+
+    .kpi-block .kpi-label {
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--text-secondary);
+      margin-bottom: 0.35rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    .kpi-block .kpi-value {
+      font-size: 1.6rem;
       font-weight: 700;
       color: var(--text);
+      line-height: 1.2;
     }
 
-    .kpi-card .kpi-sub {
-      font-size: 0.8rem;
-      color: var(--text-muted);
-      margin-top: 0.25rem;
+    .kpi-block .kpi-sub {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      margin-top: 0.2rem;
     }
 
     .kpi-positive { color: var(--success) !important; }
     .kpi-negative { color: var(--danger) !important; }
 
-    /* Charts */
-    .chart-section {
-      background: var(--card);
-      border-radius: 12px;
-      padding: 1.5rem;
-      margin-bottom: 1.5rem;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-      border: 1px solid var(--border);
+    /* --- Sections --- */
+    .section {
+      margin-bottom: 2.5rem;
     }
 
-    .chart-section h2 {
-      font-size: 1.1rem;
+    .section-title {
+      font-size: 1.15rem;
+      font-weight: 600;
       margin-bottom: 1rem;
       color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .section-title::before {
+      content: '';
+      display: inline-block;
+      width: 3px;
+      height: 1.1em;
+      background: var(--primary);
+      border-radius: 2px;
+    }
+
+    /* --- Chart --- */
+    .chart-wrap {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem;
+      background: var(--bg);
     }
 
     .chart-container {
       position: relative;
-      height: 400px;
+      height: 380px;
     }
 
-    /* Table */
+    /* --- Table --- */
     .table-wrapper {
       overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
     }
 
     table {
@@ -150,23 +233,26 @@
     }
 
     th, td {
-      padding: 0.75rem 1rem;
+      padding: 0.55rem 0.9rem;
       text-align: right;
       border-bottom: 1px solid var(--border);
     }
 
     th {
-      background: #f8fafc;
-      font-weight: 600;
-      color: var(--text-muted);
-      text-transform: uppercase;
+      background: var(--bg-secondary);
+      font-weight: 500;
+      color: var(--text-secondary);
       font-size: 0.75rem;
-      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      position: sticky;
+      top: 0;
     }
 
     th:first-child, td:first-child { text-align: left; }
 
-    tr:hover td { background: #f8fafc; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: var(--hover); }
 
     .progress-cell {
       display: flex;
@@ -176,16 +262,16 @@
     }
 
     .progress-bar {
-      width: 100px;
-      height: 8px;
-      background: #e2e8f0;
-      border-radius: 4px;
+      width: 80px;
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
       overflow: hidden;
     }
 
     .progress-fill {
       height: 100%;
-      border-radius: 4px;
+      border-radius: 3px;
       transition: width 0.5s ease;
     }
 
@@ -193,12 +279,142 @@
     .progress-fill.yellow { background: var(--warning); }
     .progress-fill.red { background: var(--danger); }
 
-    /* Modal */
+    .tag {
+      display: inline-block;
+      padding: 0.1rem 0.45rem;
+      border-radius: var(--radius);
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+
+    .tag-green { background: var(--success-bg); color: var(--success); }
+    .tag-red { background: var(--danger-bg); color: var(--danger); }
+
+    /* --- Kanban --- */
+    .kanban-board {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.75rem;
+    }
+
+    .kanban-column {
+      background: var(--bg-secondary);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      min-height: 120px;
+    }
+
+    .kanban-header {
+      padding: 0.6rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .kanban-header-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    .kanban-header-count {
+      font-size: 0.7rem;
+      color: var(--text-light);
+      background: var(--border);
+      padding: 0.1rem 0.4rem;
+      border-radius: 3px;
+    }
+
+    .kanban-cards {
+      padding: 0.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+
+    .kanban-card {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.55rem 0.65rem;
+      cursor: pointer;
+      transition: all 0.12s;
+      user-select: none;
+    }
+
+    .kanban-card:hover { border-color: #ccc; }
+
+    .kanban-card.selected {
+      border-left: 3px solid var(--primary);
+      background: var(--primary-bg);
+      border-color: rgba(35,131,226,0.3);
+    }
+
+    .kanban-card-name {
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--text);
+      margin-bottom: 0.25rem;
+      line-height: 1.3;
+    }
+
+    .kanban-card-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .kanban-card-amount {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .kanban-card-proba {
+      font-size: 0.7rem;
+      font-weight: 500;
+      padding: 0.1rem 0.35rem;
+      border-radius: 3px;
+    }
+
+    .proba-high { background: var(--success-bg); color: var(--success); }
+    .proba-mid { background: var(--warning-bg); color: var(--warning); }
+    .proba-low { background: var(--purple-bg); color: var(--purple); }
+
+    .forecast-bar {
+      display: none;
+      background: var(--primary-bg);
+      border: 1px solid rgba(35,131,226,0.15);
+      border-radius: var(--radius);
+      padding: 0.6rem 1rem;
+      margin-bottom: 1rem;
+      font-size: 0.85rem;
+      color: var(--text);
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .forecast-bar.active { display: flex; }
+
+    .forecast-bar strong { color: var(--primary); }
+
+    @media (max-width: 768px) {
+      .kanban-board { grid-template-columns: 1fr 1fr; }
+    }
+
+    @media (max-width: 480px) {
+      .kanban-board { grid-template-columns: 1fr; }
+    }
+
+    /* --- Modal --- */
     .modal-overlay {
       display: none;
       position: fixed;
       top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.5);
+      background: rgba(15,15,15,0.6);
       z-index: 1000;
       justify-content: center;
       align-items: center;
@@ -208,167 +424,185 @@
 
     .modal {
       background: white;
-      border-radius: 16px;
-      padding: 2rem;
+      border-radius: 8px;
+      padding: 0;
       width: 90%;
-      max-width: 600px;
+      max-width: 560px;
       max-height: 80vh;
       overflow-y: auto;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+      box-shadow: 0 0 0 1px rgba(15,15,15,0.05), 0 9px 40px rgba(15,15,15,0.2);
     }
 
-    .modal h2 {
-      margin-bottom: 1.5rem;
-      font-size: 1.2rem;
+    .modal-header {
+      padding: 1.25rem 1.5rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .modal-header h2 {
+      font-size: 1rem;
+      font-weight: 600;
+    }
+
+    .modal-body {
+      padding: 1rem 1.5rem;
     }
 
     .modal-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 0.75rem;
+      gap: 0.6rem;
     }
 
     .modal-field {
       display: flex;
       flex-direction: column;
-      gap: 0.25rem;
+      gap: 0.15rem;
     }
 
     .modal-field label {
-      font-size: 0.8rem;
-      color: var(--text-muted);
+      font-size: 0.75rem;
+      color: var(--text-secondary);
       font-weight: 500;
     }
 
     .modal-field input {
-      padding: 0.5rem 0.75rem;
+      padding: 0.4rem 0.6rem;
       border: 1px solid var(--border);
-      border-radius: 8px;
-      font-size: 0.9rem;
+      border-radius: var(--radius);
+      font-size: 0.85rem;
+      font-family: inherit;
+      outline: none;
+      transition: border 0.12s, box-shadow 0.12s;
     }
 
-    .modal-actions {
+    .modal-field input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px rgba(35,131,226,0.15);
+    }
+
+    .modal-footer {
+      padding: 0.75rem 1.5rem;
+      border-top: 1px solid var(--border);
       display: flex;
       justify-content: flex-end;
-      gap: 0.75rem;
-      margin-top: 1.5rem;
+      gap: 0.5rem;
     }
 
-    .modal-actions button {
-      padding: 0.6rem 1.5rem;
-      border-radius: 8px;
-      border: none;
-      cursor: pointer;
-      font-weight: 600;
+    /* --- Error --- */
+    .error-banner {
+      background: var(--danger-bg);
+      border: 1px solid rgba(224,62,62,0.2);
+      color: var(--danger);
+      padding: 0.75rem 1rem;
+      border-radius: var(--radius);
+      margin-bottom: 1.5rem;
+      display: none;
       font-size: 0.85rem;
     }
 
-    .btn-cancel {
-      background: #f1f5f9;
-      color: var(--text);
-    }
-
-    .btn-save {
-      background: var(--primary);
-      color: white;
-    }
-
-    .btn-save:hover { background: var(--primary-light); }
-
-    /* Loading */
-    .loading {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 300px;
-      font-size: 1rem;
-      color: var(--text-muted);
-    }
-
-    .spinner {
-      display: inline-block;
-      width: 24px;
-      height: 24px;
-      border: 3px solid var(--border);
-      border-top-color: var(--primary);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      margin-right: 0.75rem;
-    }
-
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    .error-banner {
-      background: #fef2f2;
-      border: 1px solid #fecaca;
-      color: var(--danger);
-      padding: 1rem;
-      border-radius: 8px;
-      margin-bottom: 1rem;
-      display: none;
+    /* --- Divider --- */
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 2.5rem 0;
     }
 
     @media (max-width: 768px) {
-      .container { padding: 1rem; }
-      .kpi-card .kpi-value { font-size: 1.4rem; }
-      .chart-container { height: 300px; }
+      .page { padding: 1.5rem 1.25rem; }
+      .kpi-row { grid-template-columns: 1fr 1fr; }
+      .kpi-block .kpi-value { font-size: 1.3rem; }
+      .chart-container { height: 280px; }
       .modal-grid { grid-template-columns: 1fr; }
+      .page-title { font-size: 1.6rem; }
+    }
+
+    @media (max-width: 480px) {
+      .kpi-row { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
 
-  <div class="header">
-    <h1>Dashboard Commercial</h1>
-    <div class="header-actions">
-      <select id="yearSelect">
-        <option value="2025">2025</option>
-        <option value="2024">2024</option>
-      </select>
-      <button onclick="openObjectivesModal()" class="btn-primary">Objectifs</button>
-      <button onclick="refreshData()">Sync</button>
-      <span class="status" id="lastSync">--</span>
+  <!-- Topbar -->
+  <div class="topbar">
+    <div class="topbar-left">
+      <span>Commercial</span>
+      <span class="breadcrumb-sep">/</span>
+      <span style="color:var(--text)">Dashboard</span>
+    </div>
+    <div class="topbar-right">
+      <button class="btn" onclick="openObjectivesModal()">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M3 8h10"/></svg>
+        Objectifs
+      </button>
+      <button class="btn-filled btn" onclick="refreshData()">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 8a6 6 0 0 1 10.3-4.1M14 8a6 6 0 0 1-10.3 4.1"/><path d="M14 2v4h-4M2 14v-4h4"/></svg>
+        Sync
+      </button>
+      <span class="sync-time" id="lastSync">--</span>
     </div>
   </div>
 
-  <div class="container">
+  <!-- Page content -->
+  <div class="page">
+
+    <div class="page-icon">&#128200;</div>
+    <h1 class="page-title">Dashboard Commercial</h1>
+    <p class="page-desc">Suivi du chiffre d'affaires et performance de l'equipe commerciale.</p>
+
     <div class="error-banner" id="errorBanner"></div>
 
     <!-- KPIs -->
-    <div class="kpi-grid">
-      <div class="kpi-card">
+    <div class="kpi-row">
+      <div class="kpi-block">
         <div class="kpi-label">CA YTD</div>
         <div class="kpi-value" id="kpiCaYtd">--</div>
-        <div class="kpi-sub" id="kpiCaYtdSub"></div>
+        <div class="kpi-sub"><span id="kpiCaYtdSub"></span> <span id="kpiCaVsObj" class="tag" style="margin-left:0.3rem"></span></div>
       </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Delta vs N-1</div>
-        <div class="kpi-value" id="kpiDelta">--</div>
-        <div class="kpi-sub" id="kpiDeltaSub"></div>
+      <div class="kpi-block">
+        <div class="kpi-label">Objectif YTD</div>
+        <div class="kpi-value" id="kpiObjYtd">--</div>
+        <div class="kpi-sub" id="kpiObjYtdSub"></div>
       </div>
-      <div class="kpi-card">
+      <div class="kpi-block">
+        <div class="kpi-label">Pipeline</div>
+        <div class="kpi-value" id="kpiPipeline">--</div>
+        <div class="kpi-sub" id="kpiPipelineSub">Deals en cours</div>
+      </div>
+      <div class="kpi-block">
         <div class="kpi-label">Meilleur mois</div>
         <div class="kpi-value" id="kpiBestMonth">--</div>
         <div class="kpi-sub" id="kpiBestMonthSub"></div>
       </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Deals ouverts</div>
-        <div class="kpi-value" id="kpiOpenDeals">--</div>
-        <div class="kpi-sub">En cours de traitement</div>
-      </div>
     </div>
 
     <!-- Chart -->
-    <div class="chart-section">
-      <h2>CA mensuel : <span id="chartTitle">N vs N-1</span></h2>
-      <div class="chart-container">
-        <canvas id="mainChart"></canvas>
+    <div class="section">
+      <div class="section-title">CA mensuel <span style="font-weight:400;color:var(--text-secondary);font-size:0.9rem">2026</span></div>
+      <div class="chart-wrap">
+        <div class="chart-container">
+          <canvas id="mainChart"></canvas>
+        </div>
       </div>
     </div>
 
+    <hr class="divider">
+
+    <!-- Pipeline Kanban -->
+    <div class="section">
+      <div class="section-title">Pipeline &mdash; Deals en cours</div>
+      <div class="forecast-bar" id="forecastBar">
+        <span><strong id="forecastCount">0</strong> deal(s) selectionne(s) &mdash; Forecast : <strong id="forecastAmount">0 €</strong></span>
+        <button class="btn" onclick="clearForecast()">Tout deselectionner</button>
+      </div>
+      <div class="kanban-board" id="kanbanBoard"></div>
+    </div>
+
+    <hr class="divider">
+
     <!-- Table -->
-    <div class="chart-section">
-      <h2>Détail mois par mois</h2>
+    <div class="section">
+      <div class="section-title">Detail mois par mois</div>
       <div class="table-wrapper">
         <table>
           <thead>
@@ -377,8 +611,6 @@
               <th>CA</th>
               <th>Objectif</th>
               <th>% vs Obj</th>
-              <th>CA N-1</th>
-              <th>% vs N-1</th>
               <th>Progression</th>
             </tr>
           </thead>
@@ -391,24 +623,59 @@
   <!-- Modal Objectifs -->
   <div class="modal-overlay" id="modalOverlay">
     <div class="modal">
-      <h2>Objectifs mensuels (<span id="modalYear"></span>)</h2>
-      <div class="modal-grid" id="modalGrid"></div>
-      <div class="modal-actions">
-        <button class="btn-cancel" onclick="closeModal()">Annuler</button>
-        <button class="btn-save" onclick="saveObjectives()">Enregistrer</button>
+      <div class="modal-header">
+        <h2>Objectif annuel &mdash; <span id="modalYear"></span></h2>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:0.75rem">Le montant sera reparti de facon egale sur les 12 mois.</p>
+        <div class="modal-field">
+          <label>Objectif annuel (€)</label>
+          <input type="number" id="objAnnual" placeholder="Ex: 600000" min="0" step="1000" style="font-size:1.1rem;padding:0.6rem 0.75rem">
+        </div>
+        <p style="font-size:0.8rem;color:var(--text-light);margin-top:0.5rem" id="objMonthlyPreview"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeModal()">Annuler</button>
+        <button class="btn btn-filled" onclick="saveObjectives()">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Deals -->
+  <div class="modal-overlay" id="dealsModalOverlay">
+    <div class="modal">
+      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
+        <h2 id="dealsModalTitle">Deals</h2>
+        <span id="dealsModalTotal" style="font-size:0.85rem;font-weight:600;color:var(--primary)"></span>
+      </div>
+      <div class="modal-body" style="padding:0">
+        <table style="width:100%;font-size:0.85rem">
+          <thead>
+            <tr>
+              <th style="text-align:left;padding:0.5rem 1rem">Deal</th>
+              <th style="text-align:right;padding:0.5rem 1rem">Montant</th>
+            </tr>
+          </thead>
+          <tbody id="dealsModalBody"></tbody>
+        </table>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeDealsModal()">Fermer</button>
       </div>
     </div>
   </div>
 
   <script>
     const MONTHS_FR = [
-      'Janvier','Février','Mars','Avril','Mai','Juin',
-      'Juillet','Août','Septembre','Octobre','Novembre','Décembre'
+      'Janvier','Fevrier','Mars','Avril','Mai','Juin',
+      'Juillet','Aout','Septembre','Octobre','Novembre','Decembre'
     ];
 
     let dashboardData = null;
     let mainChart = null;
     let refreshTimer = null;
+    let selectedDealIds = new Set();
+    const KANBAN_STAGES_ORDER = ['RDV Qualif', 'RDV Propale', 'Négociation', 'Contrat envoyé'];
 
     // --- LocalStorage objectives ---
     function getObjectives(year) {
@@ -448,125 +715,174 @@
     }
 
     // --- Render ---
-    function getSelectedYear() {
-      return parseInt(document.getElementById('yearSelect').value);
-    }
+    const CURRENT_YEAR = 2026;
 
     function render() {
       if (!dashboardData) return;
 
-      const year = getSelectedYear();
-      const prevYear = year - 1;
-      const data = dashboardData.yearlyData[year] || Array.from({length:12}, (_,i) => ({month:i, label:MONTHS_FR[i].toLowerCase(), total:0, count:0}));
-      const prevData = dashboardData.yearlyData[prevYear] || Array.from({length:12}, (_,i) => ({month:i, label:MONTHS_FR[i].toLowerCase(), total:0, count:0}));
-      const objectives = getObjectives(year);
-      const now = new Date();
-      const currentMonth = (year === now.getFullYear()) ? now.getMonth() : 11;
+      const data = dashboardData.yearlyData[CURRENT_YEAR] || Array.from({length:12}, (_,i) => ({month:i, label:MONTHS_FR[i].toLowerCase(), total:0, count:0}));
+      const objectives = getObjectives(CURRENT_YEAR);
+      const currentMonth = new Date().getMonth();
 
       // KPIs
       const caYTD = data.slice(0, currentMonth + 1).reduce((s, m) => s + m.total, 0);
-      const caYTDPrev = prevData.slice(0, currentMonth + 1).reduce((s, m) => s + m.total, 0);
-      const delta = caYTDPrev > 0 ? ((caYTD - caYTDPrev) / caYTDPrev) * 100 : (caYTD > 0 ? 100 : 0);
+
+      const objYTD = objectives.slice(0, currentMonth + 1).reduce((s, v) => s + v, 0);
+      const pctVsObjYTD = objYTD > 0 ? Math.round((caYTD / objYTD) * 100) : null;
 
       document.getElementById('kpiCaYtd').textContent = formatEuro(caYTD);
-      document.getElementById('kpiCaYtdSub').textContent = `Cumul à fin ${MONTHS_FR[currentMonth].toLowerCase()}`;
+      document.getElementById('kpiCaYtdSub').textContent = `Cumul a fin ${MONTHS_FR[currentMonth].toLowerCase()}`;
 
-      const deltaEl = document.getElementById('kpiDelta');
-      deltaEl.textContent = formatPercent(delta);
-      deltaEl.className = 'kpi-value ' + (delta >= 0 ? 'kpi-positive' : 'kpi-negative');
-      document.getElementById('kpiDeltaSub').textContent = `vs ${prevYear} à date`;
+      // % vs objectif tag
+      const tagEl = document.getElementById('kpiCaVsObj');
+      if (pctVsObjYTD !== null) {
+        tagEl.textContent = pctVsObjYTD + '% vs obj';
+        tagEl.className = 'tag ' + (pctVsObjYTD >= 100 ? 'tag-green' : pctVsObjYTD >= 70 ? 'tag-red' : 'tag-red');
+        tagEl.style.display = 'inline-block';
+      } else {
+        tagEl.style.display = 'none';
+      }
+
+      // Objectif YTD KPI
+      const objAnnual = objectives.reduce((s, v) => s + v, 0);
+      document.getElementById('kpiObjYtd').textContent = formatEuro(objYTD);
+      document.getElementById('kpiObjYtdSub').textContent = objAnnual > 0 ? `Annuel : ${formatEuro(objAnnual)}` : 'Non defini';
+
+      // Pipeline KPI
+      let pipelineTotal = 0;
+      let pipelineCount = 0;
+      if (dashboardData.pipelineDeals) {
+        for (const deals of Object.values(dashboardData.pipelineDeals)) {
+          pipelineCount += deals.length;
+          pipelineTotal += deals.reduce((s, d) => s + d.amount, 0);
+        }
+      }
+      document.getElementById('kpiPipeline').textContent = formatEuro(pipelineTotal);
+      document.getElementById('kpiPipelineSub').textContent = `${pipelineCount} deals en cours`;
 
       const bestMonth = data.reduce((best, m) => m.total > best.total ? m : best, {total:0, label:'-'});
       document.getElementById('kpiBestMonth').textContent = formatEuro(bestMonth.total);
       document.getElementById('kpiBestMonthSub').textContent = bestMonth.label.charAt(0).toUpperCase() + bestMonth.label.slice(1);
 
-      document.getElementById('kpiOpenDeals').textContent = dashboardData.kpis.openDeals;
-
-      // Chart title
-      document.getElementById('chartTitle').textContent = `${year} vs ${prevYear}`;
-
-      // Build chart
-      renderChart(data, prevData, objectives, year, prevYear);
-
-      // Table
-      renderTable(data, prevData, objectives);
+      renderChart(data, objectives);
+      renderTable(data, objectives);
+      renderKanban();
     }
 
-    function renderChart(data, prevData, objectives, year, prevYear) {
+    function renderChart(data, objectives) {
       const ctx = document.getElementById('mainChart').getContext('2d');
-      const labels = MONTHS_FR;
+      const labels = MONTHS_FR.map(m => m.substring(0, 3));
 
       const currentValues = data.map(m => m.total);
-      const prevValues = prevData.map(m => m.total);
+      const objValues = objectives;
 
-      // Cumulative
-      let cumCurrent = 0, cumPrev = 0, cumObj = 0;
-      const cumulCurrent = currentValues.map(v => cumCurrent += v);
-      const cumulPrev = prevValues.map(v => cumPrev += v);
-      const cumulObj = objectives.map(v => cumObj += v);
+      // Forecast: add selected deals to current month
+      const forecastTotal = getForecastTotal();
+      const currentMonth = new Date().getMonth();
+      const forecastData = Array(12).fill(0);
+      if (forecastTotal > 0) {
+        forecastData[currentMonth] = forecastTotal;
+      }
+
+      // Pre-compute % vs objective for datalabels
+      const pctVsObj = currentValues.map((v, i) => {
+        const obj = objValues[i] || 0;
+        return obj > 0 ? Math.round((v / obj) * 100) : null;
+      });
+
+      // Stripe pattern for forecast
+      const stripePattern = ctx.createPattern(createStripePattern(), 'repeat');
 
       if (mainChart) mainChart.destroy();
 
       mainChart = new Chart(ctx, {
         type: 'bar',
+        plugins: [ChartDataLabels],
         data: {
           labels,
           datasets: [
             {
-              label: `CA ${year}`,
+              label: 'CA 2026',
               data: currentValues,
-              backgroundColor: 'rgba(37, 99, 235, 0.7)',
-              borderColor: 'rgba(37, 99, 235, 1)',
-              borderWidth: 1,
+              backgroundColor: 'rgba(35,131,226,0.65)',
+              hoverBackgroundColor: 'rgba(35,131,226,0.85)',
+              borderRadius: { topLeft: 4, topRight: 4 },
+              borderSkipped: false,
+              barPercentage: 0.7,
+              categoryPercentage: 0.7,
+              stack: 'current',
               order: 2,
-              yAxisID: 'y',
+              datalabels: {
+                display: (ctx) => pctVsObj[ctx.dataIndex] !== null && forecastData[ctx.dataIndex] === 0,
+                anchor: 'end',
+                align: 'end',
+                offset: 2,
+                formatter: (value, ctx) => {
+                  const pct = pctVsObj[ctx.dataIndex];
+                  if (pct === null) return '';
+                  const k = value >= 1000 ? (value/1000).toFixed(0) + 'k' : value;
+                  return [k + ' €', pct + '%'];
+                },
+                font: { size: 10, family: 'Inter', weight: '600' },
+                textAlign: 'center',
+                color: (ctx) => {
+                  const pct = pctVsObj[ctx.dataIndex];
+                  if (pct >= 100) return '#0f7b6c';
+                  if (pct >= 70) return '#d9730d';
+                  return '#e03e3e';
+                },
+              },
             },
             {
-              label: `CA ${prevYear}`,
-              data: prevValues,
-              backgroundColor: 'rgba(148, 163, 184, 0.5)',
-              borderColor: 'rgba(148, 163, 184, 1)',
-              borderWidth: 1,
-              order: 3,
-              yAxisID: 'y',
+              label: 'Forecast',
+              data: forecastData,
+              backgroundColor: stripePattern,
+              borderRadius: { topLeft: 4, topRight: 4 },
+              borderSkipped: false,
+              barPercentage: 0.7,
+              categoryPercentage: 0.7,
+              stack: 'current',
+              order: 2,
+              datalabels: {
+                display: (ctx) => forecastData[ctx.dataIndex] > 0,
+                anchor: 'end',
+                align: 'end',
+                offset: 2,
+                formatter: (value, ctx) => {
+                  const i = ctx.dataIndex;
+                  const total = currentValues[i] + forecastData[i];
+                  const obj = objValues[i] || 0;
+                  const k = total >= 1000 ? (total/1000).toFixed(0) + 'k' : total;
+                  const pct = obj > 0 ? Math.round((total / obj) * 100) : null;
+                  return pct !== null ? [k + ' €', pct + '%'] : k + ' €';
+                },
+                font: { size: 10, family: 'Inter', weight: '600' },
+                textAlign: 'center',
+                color: (ctx) => {
+                  const i = ctx.dataIndex;
+                  const total = currentValues[i] + forecastData[i];
+                  const obj = objValues[i] || 0;
+                  const pct = obj > 0 ? Math.round((total / obj) * 100) : 0;
+                  if (pct >= 100) return '#0f7b6c';
+                  if (pct >= 70) return '#d9730d';
+                  return '#2383e2';
+                },
+              },
             },
             {
-              label: `Cumul ${year}`,
-              data: cumulCurrent,
+              label: 'Objectif',
+              data: objValues,
               type: 'line',
-              borderColor: '#2563eb',
+              borderColor: '#d9730d',
               backgroundColor: 'transparent',
-              borderWidth: 2,
-              tension: 0.3,
-              pointRadius: 3,
-              order: 1,
-              yAxisID: 'y1',
-            },
-            {
-              label: `Cumul ${prevYear}`,
-              data: cumulPrev,
-              type: 'line',
-              borderColor: '#94a3b8',
-              backgroundColor: 'transparent',
-              borderWidth: 2,
-              borderDash: [5, 5],
-              tension: 0.3,
-              pointRadius: 3,
-              order: 1,
-              yAxisID: 'y1',
-            },
-            {
-              label: 'Objectif cumulé',
-              data: cumulObj,
-              type: 'line',
-              borderColor: '#f59e0b',
-              backgroundColor: 'transparent',
-              borderWidth: 2,
-              borderDash: [3, 3],
-              tension: 0.3,
+              borderWidth: 1.5,
+              borderDash: [5, 4],
+              tension: 0,
               pointRadius: 0,
+              pointHoverRadius: 4,
+              pointHoverBackgroundColor: '#d9730d',
               order: 1,
-              yAxisID: 'y1',
+              datalabels: { display: false },
             },
           ],
         },
@@ -574,111 +890,273 @@
           responsive: true,
           maintainAspectRatio: false,
           interaction: { mode: 'index', intersect: false },
+          onClick: (e, elements) => {
+            if (elements.length > 0) {
+              const idx = elements[0].index;
+              openDealsModal(idx);
+            }
+          },
           plugins: {
             tooltip: {
+              backgroundColor: 'white',
+              titleColor: '#37352f',
+              bodyColor: '#37352f',
+              borderColor: '#e9e9e7',
+              borderWidth: 1,
+              cornerRadius: 6,
+              padding: 12,
+              titleFont: { weight: '600', size: 12, family: 'Inter' },
+              bodyFont: { size: 12, family: 'Inter' },
+              boxPadding: 4,
+              usePointStyle: true,
               callbacks: {
-                label: (ctx) => `${ctx.dataset.label}: ${formatEuro(ctx.raw)}`,
+                label: (ctx) => ` ${ctx.dataset.label}: ${formatEuro(ctx.raw)}`,
               },
             },
-            legend: { position: 'top', labels: { usePointStyle: true, padding: 16 } },
+            legend: {
+              position: 'top',
+              align: 'end',
+              labels: {
+                usePointStyle: true,
+                pointStyle: 'rectRounded',
+                padding: 16,
+                font: { size: 11, family: 'Inter', weight: '500' },
+                color: '#787774',
+              },
+            },
           },
           scales: {
-            y: {
-              position: 'left',
-              title: { display: true, text: 'CA mensuel (€)' },
-              ticks: { callback: (v) => formatEuro(v) },
-              grid: { color: '#f1f5f9' },
-            },
-            y1: {
-              position: 'right',
-              title: { display: true, text: 'Cumul (€)' },
-              ticks: { callback: (v) => formatEuro(v) },
+            x: {
+              stacked: true,
+              ticks: { font: { size: 11, family: 'Inter' }, color: '#b4b4b0' },
               grid: { display: false },
+              border: { display: false },
+            },
+            y: {
+              stacked: true,
+              position: 'left',
+              title: { display: false },
+              ticks: {
+                callback: (v) => {
+                  if (v >= 1000000) return (v/1000000).toFixed(1) + 'M';
+                  if (v >= 1000) return (v/1000).toFixed(0) + 'k';
+                  return v;
+                },
+                font: { size: 11, family: 'Inter' },
+                color: '#b4b4b0',
+                padding: 8,
+              },
+              grid: { color: '#f5f5f4', drawBorder: false },
+              border: { display: false },
             },
           },
         },
       });
     }
 
-    function renderTable(data, prevData, objectives) {
+    function renderTable(data, objectives) {
       const tbody = document.getElementById('tableBody');
       let html = '';
-
-      let totalCA = 0, totalObj = 0, totalPrev = 0;
+      let totalCA = 0, totalObj = 0;
 
       data.forEach((m, i) => {
         const ca = m.total;
         const obj = objectives[i] || 0;
-        const prev = prevData[i] ? prevData[i].total : 0;
 
         totalCA += ca;
         totalObj += obj;
-        totalPrev += prev;
 
         const pctObj = obj > 0 ? (ca / obj) * 100 : (ca > 0 ? 999 : 0);
-        const pctN1 = prev > 0 ? ((ca - prev) / prev) * 100 : (ca > 0 ? 100 : 0);
         const progressPct = Math.min(pctObj, 100);
 
         let barColor = 'red';
         if (pctObj >= 100) barColor = 'green';
         else if (pctObj >= 70) barColor = 'yellow';
 
-        const pctN1Class = pctN1 >= 0 ? 'kpi-positive' : 'kpi-negative';
-
         html += `<tr>
           <td><strong>${MONTHS_FR[i]}</strong></td>
           <td>${formatEuro(ca)}</td>
-          <td>${obj > 0 ? formatEuro(obj) : '<span style="color:#94a3b8">--</span>'}</td>
-          <td>${obj > 0 ? '<span class="' + (pctObj >= 100 ? 'kpi-positive' : 'kpi-negative') + '">' + pctObj.toFixed(0) + '%</span>' : '--'}</td>
-          <td>${formatEuro(prev)}</td>
-          <td><span class="${pctN1Class}">${prev > 0 || ca > 0 ? formatPercent(pctN1) : '--'}</span></td>
+          <td>${obj > 0 ? formatEuro(obj) : '<span style="color:var(--text-light)">--</span>'}</td>
+          <td>${obj > 0 ? '<span class="tag ' + (pctObj >= 100 ? 'tag-green' : 'tag-red') + '">' + pctObj.toFixed(0) + '%</span>' : '<span style="color:var(--text-light)">--</span>'}</td>
           <td>
             <div class="progress-cell">
               <div class="progress-bar">
                 <div class="progress-fill ${barColor}" style="width:${progressPct}%"></div>
               </div>
-              <span style="font-size:0.8rem;min-width:35px">${obj > 0 ? pctObj.toFixed(0) + '%' : '--'}</span>
+              <span style="font-size:0.75rem;min-width:32px;color:var(--text-secondary)">${obj > 0 ? pctObj.toFixed(0) + '%' : '--'}</span>
             </div>
           </td>
         </tr>`;
       });
 
-      // Total row
       const totalPctObj = totalObj > 0 ? (totalCA / totalObj) * 100 : 0;
-      const totalPctN1 = totalPrev > 0 ? ((totalCA - totalPrev) / totalPrev) * 100 : 0;
 
-      html += `<tr style="font-weight:700;background:#f8fafc">
-        <td>TOTAL</td>
+      html += `<tr style="font-weight:600;background:var(--bg-secondary)">
+        <td>Total</td>
         <td>${formatEuro(totalCA)}</td>
         <td>${totalObj > 0 ? formatEuro(totalObj) : '--'}</td>
-        <td>${totalObj > 0 ? totalPctObj.toFixed(0) + '%' : '--'}</td>
-        <td>${formatEuro(totalPrev)}</td>
-        <td><span class="${totalPctN1 >= 0 ? 'kpi-positive' : 'kpi-negative'}">${formatPercent(totalPctN1)}</span></td>
+        <td>${totalObj > 0 ? '<span class="tag ' + (totalPctObj >= 100 ? 'tag-green' : 'tag-red') + '">' + totalPctObj.toFixed(0) + '%</span>' : '--'}</td>
         <td></td>
       </tr>`;
 
       tbody.innerHTML = html;
     }
 
+    // --- Deals modal ---
+    function openDealsModal(monthIndex) {
+      const data = dashboardData.yearlyData[CURRENT_YEAR];
+      if (!data || !data[monthIndex]) return;
+      const monthData = data[monthIndex];
+      if (!monthData.deals || monthData.deals.length === 0) return;
+
+      document.getElementById('dealsModalTitle').textContent = MONTHS_FR[monthIndex] + ' 2026';
+      document.getElementById('dealsModalTotal').textContent = formatEuro(monthData.total) + ' — ' + monthData.deals.length + ' deal(s)';
+
+      const sorted = [...monthData.deals].sort((a, b) => b.amount - a.amount);
+      let html = '';
+      sorted.forEach(d => {
+        html += `<tr>
+          <td style="text-align:left;padding:0.5rem 1rem">${d.name}</td>
+          <td style="text-align:right;padding:0.5rem 1rem;font-weight:600">${formatEuro(d.amount)}</td>
+        </tr>`;
+      });
+      document.getElementById('dealsModalBody').innerHTML = html;
+      document.getElementById('dealsModalOverlay').classList.add('active');
+    }
+
+    function closeDealsModal() {
+      document.getElementById('dealsModalOverlay').classList.remove('active');
+    }
+
+    document.getElementById('dealsModalOverlay').addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) closeDealsModal();
+    });
+
+    // --- Kanban ---
+    function renderKanban() {
+      if (!dashboardData || !dashboardData.pipelineDeals) return;
+      const board = document.getElementById('kanbanBoard');
+      let html = '';
+
+      for (const stageName of KANBAN_STAGES_ORDER) {
+        const deals = dashboardData.pipelineDeals[stageName] || [];
+        const total = deals.reduce((s, d) => s + d.amount, 0);
+
+        html += `<div class="kanban-column">
+          <div class="kanban-header">
+            <span class="kanban-header-label">${stageName}</span>
+            <span class="kanban-header-count">${deals.length} &middot; ${formatEuro(total)}</span>
+          </div>
+          <div class="kanban-cards">`;
+
+        for (const deal of deals) {
+          const selected = selectedDealIds.has(deal.id) ? ' selected' : '';
+          let probaClass = 'proba-low';
+          if (deal.probability >= 70) probaClass = 'proba-high';
+          else if (deal.probability >= 50) probaClass = 'proba-mid';
+
+          html += `<div class="kanban-card${selected}" data-deal-id="${deal.id}" data-deal-amount="${deal.amount}" onclick="toggleDeal(this)">
+            <div class="kanban-card-name">${deal.name}</div>
+            <div class="kanban-card-meta">
+              <span class="kanban-card-amount">${formatEuro(deal.amount)}</span>
+              <span class="kanban-card-proba ${probaClass}">${deal.probability}%</span>
+            </div>
+          </div>`;
+        }
+
+        html += `</div></div>`;
+      }
+
+      board.innerHTML = html;
+      updateForecastBar();
+    }
+
+    function toggleDeal(el) {
+      const id = el.dataset.dealId;
+      if (selectedDealIds.has(id)) {
+        selectedDealIds.delete(id);
+        el.classList.remove('selected');
+      } else {
+        selectedDealIds.add(id);
+        el.classList.add('selected');
+      }
+      updateForecastBar();
+      render();
+    }
+
+    function clearForecast() {
+      selectedDealIds.clear();
+      document.querySelectorAll('.kanban-card.selected').forEach(el => el.classList.remove('selected'));
+      updateForecastBar();
+      render();
+    }
+
+    function getForecastTotal() {
+      if (!dashboardData || !dashboardData.pipelineDeals) return 0;
+      let total = 0;
+      for (const deals of Object.values(dashboardData.pipelineDeals)) {
+        for (const deal of deals) {
+          if (selectedDealIds.has(deal.id)) total += deal.amount;
+        }
+      }
+      return total;
+    }
+
+    function updateForecastBar() {
+      const bar = document.getElementById('forecastBar');
+      const count = selectedDealIds.size;
+      if (count === 0) {
+        bar.classList.remove('active');
+        return;
+      }
+      bar.classList.add('active');
+      document.getElementById('forecastCount').textContent = count;
+      document.getElementById('forecastAmount').textContent = formatEuro(getForecastTotal());
+    }
+
+    // --- Stripe pattern for forecast bars ---
+    function createStripePattern() {
+      const patternCanvas = document.createElement('canvas');
+      patternCanvas.width = 10;
+      patternCanvas.height = 10;
+      const pctx = patternCanvas.getContext('2d');
+      pctx.strokeStyle = 'rgba(35,131,226,0.35)';
+      pctx.lineWidth = 2;
+      pctx.beginPath();
+      pctx.moveTo(0, 10);
+      pctx.lineTo(10, 0);
+      pctx.stroke();
+      pctx.beginPath();
+      pctx.moveTo(-2, 2);
+      pctx.lineTo(2, -2);
+      pctx.stroke();
+      pctx.beginPath();
+      pctx.moveTo(8, 12);
+      pctx.lineTo(12, 8);
+      pctx.stroke();
+      return patternCanvas;
+    }
+
     // --- Modal ---
     function openObjectivesModal() {
-      const year = getSelectedYear();
+      const year = CURRENT_YEAR;
       const objectives = getObjectives(year);
+      const annual = objectives.reduce((s, v) => s + v, 0);
       document.getElementById('modalYear').textContent = year;
 
-      const grid = document.getElementById('modalGrid');
-      grid.innerHTML = '';
+      const input = document.getElementById('objAnnual');
+      input.value = annual || '';
+      updateMonthlyPreview(annual);
 
-      MONTHS_FR.forEach((label, i) => {
-        grid.innerHTML += `
-          <div class="modal-field">
-            <label>${label}</label>
-            <input type="number" id="obj_${i}" value="${objectives[i] || ''}" placeholder="0" min="0" step="1000">
-          </div>
-        `;
-      });
+      input.oninput = () => updateMonthlyPreview(parseFloat(input.value) || 0);
 
       document.getElementById('modalOverlay').classList.add('active');
+    }
+
+    function updateMonthlyPreview(annual) {
+      const monthly = annual > 0 ? Math.round(annual / 12) : 0;
+      document.getElementById('objMonthlyPreview').textContent =
+        monthly > 0 ? `Soit ${formatEuro(monthly)} / mois` : '';
     }
 
     function closeModal() {
@@ -686,18 +1164,15 @@
     }
 
     function saveObjectives() {
-      const year = getSelectedYear();
-      const objectives = [];
-      for (let i = 0; i < 12; i++) {
-        const val = parseFloat(document.getElementById(`obj_${i}`).value) || 0;
-        objectives.push(val);
-      }
+      const year = CURRENT_YEAR;
+      const annual = parseFloat(document.getElementById('objAnnual').value) || 0;
+      const monthly = Math.round(annual / 12);
+      const objectives = Array(12).fill(monthly);
       setObjectives(year, objectives);
       closeModal();
       render();
     }
 
-    // Close modal on overlay click
     document.getElementById('modalOverlay').addEventListener('click', (e) => {
       if (e.target === e.currentTarget) closeModal();
     });
@@ -709,38 +1184,19 @@
 
       try {
         dashboardData = await fetchDashboard();
-
-        // Update year selector with available years
-        const select = document.getElementById('yearSelect');
-        const currentVal = select.value;
-        const years = dashboardData.availableYears.length > 0
-          ? dashboardData.availableYears
-          : [dashboardData.currentYear, dashboardData.previousYear];
-
-        // Ensure current and previous year are in the list
-        const allYears = [...new Set([...years, dashboardData.currentYear, dashboardData.previousYear])].sort((a, b) => b - a);
-
-        select.innerHTML = allYears.map(y => `<option value="${y}" ${y == currentVal ? 'selected' : ''}>${y}</option>`).join('');
-
         render();
 
         const now = new Date();
         document.getElementById('lastSync').textContent =
-          `Sync: ${now.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}`;
+          `${now.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}`;
       } catch (err) {
-        errorBanner.textContent = 'Erreur de chargement : ' + err.message;
+        errorBanner.textContent = err.message;
         errorBanner.style.display = 'block';
         console.error(err);
       }
     }
 
-    // Year change
-    document.getElementById('yearSelect').addEventListener('change', render);
-
-    // Initial load
     refreshData();
-
-    // Auto-refresh every 5 minutes
     refreshTimer = setInterval(refreshData, 5 * 60 * 1000);
   </script>
 
