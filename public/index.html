@@ -579,7 +579,7 @@
 
     <!-- Chart -->
     <div class="section">
-      <div class="section-title">CA mensuel <span style="font-weight:400;color:var(--text-secondary);font-size:0.9rem">2026</span></div>
+      <div class="section-title">CA mensuel <span style="font-weight:400;color:var(--text-secondary);font-size:0.9rem">2026 vs 2025</span></div>
       <div class="chart-wrap">
         <div class="chart-container">
           <canvas id="mainChart"></canvas>
@@ -609,7 +609,9 @@
           <thead>
             <tr>
               <th>Mois</th>
-              <th>CA</th>
+              <th>CA 2026</th>
+              <th>CA 2025</th>
+              <th>% vs N-1</th>
               <th>Objectif</th>
               <th>% vs Obj</th>
               <th>Progression</th>
@@ -722,6 +724,7 @@
       if (!dashboardData) return;
 
       const data = dashboardData.yearlyData[CURRENT_YEAR] || Array.from({length:12}, (_,i) => ({month:i, label:MONTHS_FR[i].toLowerCase(), total:0, count:0}));
+      const prevData = dashboardData.yearlyData[CURRENT_YEAR - 1] || Array.from({length:12}, (_,i) => ({month:i, label:MONTHS_FR[i].toLowerCase(), total:0, count:0}));
       const objectives = getObjectives(CURRENT_YEAR);
       const currentMonth = new Date().getMonth();
 
@@ -784,16 +787,17 @@
         projTag.style.display = 'none';
       }
 
-      renderChart(data, objectives);
-      renderTable(data, objectives);
+      renderChart(data, prevData, objectives);
+      renderTable(data, prevData, objectives);
       renderKanban();
     }
 
-    function renderChart(data, objectives) {
+    function renderChart(data, prevData, objectives) {
       const ctx = document.getElementById('mainChart').getContext('2d');
       const labels = MONTHS_FR.map(m => m.substring(0, 3));
 
       const currentValues = data.map(m => m.total);
+      const prevValues = prevData.map(m => m.total);
       const objValues = objectives;
 
       // Forecast: add selected deals to current month
@@ -890,6 +894,19 @@
               },
             },
             {
+              label: '2025',
+              data: prevValues,
+              backgroundColor: 'rgba(200,200,197,0.4)',
+              hoverBackgroundColor: 'rgba(200,200,197,0.6)',
+              borderRadius: 4,
+              borderSkipped: false,
+              barPercentage: 0.7,
+              categoryPercentage: 0.7,
+              stack: 'previous',
+              order: 3,
+              datalabels: { display: false },
+            },
+            {
               label: 'Objectif',
               data: objValues,
               type: 'line',
@@ -974,19 +991,22 @@
       });
     }
 
-    function renderTable(data, objectives) {
+    function renderTable(data, prevData, objectives) {
       const tbody = document.getElementById('tableBody');
       let html = '';
-      let totalCA = 0, totalObj = 0;
+      let totalCA = 0, totalObj = 0, totalPrev = 0;
 
       data.forEach((m, i) => {
         const ca = m.total;
         const obj = objectives[i] || 0;
+        const prev = prevData[i] ? prevData[i].total : 0;
 
         totalCA += ca;
         totalObj += obj;
+        totalPrev += prev;
 
         const pctObj = obj > 0 ? (ca / obj) * 100 : (ca > 0 ? 999 : 0);
+        const pctN1 = prev > 0 ? ((ca - prev) / prev) * 100 : (ca > 0 ? 100 : 0);
         const progressPct = Math.min(pctObj, 100);
 
         let barColor = 'red';
@@ -996,6 +1016,8 @@
         html += `<tr>
           <td><strong>${MONTHS_FR[i]}</strong></td>
           <td>${formatEuro(ca)}</td>
+          <td style="color:var(--text-secondary)">${formatEuro(prev)}</td>
+          <td>${prev > 0 || ca > 0 ? '<span class="tag ' + (pctN1 >= 0 ? 'tag-green' : 'tag-red') + '">' + formatPercent(pctN1) + '</span>' : '<span style="color:var(--text-light)">--</span>'}</td>
           <td>${obj > 0 ? formatEuro(obj) : '<span style="color:var(--text-light)">--</span>'}</td>
           <td>${obj > 0 ? '<span class="tag ' + (pctObj >= 100 ? 'tag-green' : 'tag-red') + '">' + pctObj.toFixed(0) + '%</span>' : '<span style="color:var(--text-light)">--</span>'}</td>
           <td>
@@ -1010,10 +1032,13 @@
       });
 
       const totalPctObj = totalObj > 0 ? (totalCA / totalObj) * 100 : 0;
+      const totalPctN1 = totalPrev > 0 ? ((totalCA - totalPrev) / totalPrev) * 100 : 0;
 
       html += `<tr style="font-weight:600;background:var(--bg-secondary)">
         <td>Total</td>
         <td>${formatEuro(totalCA)}</td>
+        <td style="color:var(--text-secondary)">${formatEuro(totalPrev)}</td>
+        <td><span class="tag ${totalPctN1 >= 0 ? 'tag-green' : 'tag-red'}">${formatPercent(totalPctN1)}</span></td>
         <td>${totalObj > 0 ? formatEuro(totalObj) : '--'}</td>
         <td>${totalObj > 0 ? '<span class="tag ' + (totalPctObj >= 100 ? 'tag-green' : 'tag-red') + '">' + totalPctObj.toFixed(0) + '%</span>' : '--'}</td>
         <td></td>

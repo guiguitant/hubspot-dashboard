@@ -276,6 +276,19 @@ app.get('/api/dashboard', async (req, res) => {
 
     const monthly = aggregateByMonth(deals);
 
+    // Hardcoded 2025 data (import HubSpot faussé)
+    const hardcoded2025 = [0, 0, 109400, 53500, 24500, 69500, 29000, 0, 36000, 48900, 55000, 0];
+    for (let m = 0; m < 12; m++) {
+      const key = `2025-${m}`;
+      monthly[key] = {
+        year: 2025,
+        month: m,
+        total: hardcoded2025[m],
+        count: 0,
+        deals: [],
+      };
+    }
+
     // Build monthly arrays for a given year
     const buildYearData = (year) => {
       const months = [];
