@@ -209,6 +209,14 @@
       margin-top: 0.2rem;
     }
 
+    .kpi-clickable { cursor: pointer; position: relative; }
+    .kpi-clickable:hover { opacity: 0.85; }
+    .kpi-clickable.kpi-active {
+      outline: 2.5px solid var(--primary);
+      outline-offset: -2.5px;
+      box-shadow: 0 0 0 4px rgba(37,99,235,0.12);
+    }
+
     .kpi-positive { color: var(--success) !important; }
     .kpi-negative { color: var(--danger) !important; }
 
@@ -530,6 +538,118 @@
       font-size: 0.85rem;
     }
 
+    /* --- Reconciliation --- */
+    .recon-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .recon-stat {
+      background: var(--bg-secondary);
+      border-radius: var(--radius);
+      padding: 0.75rem;
+      text-align: center;
+    }
+
+    .recon-stat-value {
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .recon-stat-label {
+      font-size: 0.72rem;
+      color: var(--text-secondary);
+      margin-top: 0.15rem;
+    }
+
+    .recon-tabs {
+      display: flex;
+      gap: 0.25rem;
+      margin-bottom: 1rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .recon-tab {
+      padding: 0.5rem 1rem;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--text-secondary);
+      cursor: pointer;
+      border: none;
+      background: none;
+      border-bottom: 2px solid transparent;
+      font-family: inherit;
+      transition: color 0.12s, border-color 0.12s;
+    }
+
+    .recon-tab:hover { color: var(--text); }
+    .recon-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+    .recon-tab .recon-tab-count {
+      display: inline-block;
+      background: var(--bg-secondary);
+      border-radius: 10px;
+      padding: 0.1rem 0.4rem;
+      font-size: 0.7rem;
+      margin-left: 0.3rem;
+      font-weight: 600;
+    }
+
+    .recon-table {
+      width: 100%;
+      font-size: 0.8rem;
+      border-collapse: collapse;
+    }
+
+    .recon-table th {
+      text-align: left;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    .recon-table td {
+      padding: 0.55rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+
+    .recon-table tr:hover { background: var(--hover); }
+
+    .recon-match-score {
+      display: inline-block;
+      padding: 0.1rem 0.35rem;
+      border-radius: 3px;
+      font-size: 0.7rem;
+      font-weight: 600;
+    }
+
+    .recon-match-score.score-high { background: var(--success-bg); color: var(--success); }
+    .recon-match-score.score-mid { background: var(--warning-bg); color: var(--warning); }
+    .recon-match-score.score-low { background: var(--danger-bg); color: var(--danger); }
+
+    .recon-amount-ok { color: var(--success); }
+    .recon-amount-diff { color: var(--danger); font-weight: 600; }
+
+    .recon-source-tag {
+      display: inline-block;
+      padding: 0.1rem 0.4rem;
+      border-radius: 3px;
+      font-size: 0.68rem;
+      font-weight: 600;
+    }
+
+    .recon-source-tag.tag-hs { background: var(--warning-bg); color: var(--warning); }
+    .recon-source-tag.tag-notion { background: var(--purple-bg); color: var(--purple); }
+
     /* --- Divider --- */
     .divider {
       border: none;
@@ -549,26 +669,198 @@
     @media (max-width: 480px) {
       .kpi-row { grid-template-columns: 1fr; }
     }
+
+    /* --- Sidebar --- */
+    .app-layout {
+      display: flex;
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      width: 220px;
+      min-width: 220px;
+      background: var(--bg-secondary);
+      border-right: 1px solid var(--border);
+      padding: 1rem 0.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      z-index: 60;
+    }
+
+    .sidebar-brand {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--text);
+      padding: 0.5rem 0.75rem 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .sidebar-nav {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .sidebar-link {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.45rem 0.75rem;
+      border-radius: var(--radius);
+      font-size: 0.82rem;
+      color: var(--text-secondary);
+      cursor: pointer;
+      border: none;
+      background: none;
+      font-family: inherit;
+      width: 100%;
+      text-align: left;
+      transition: background 0.12s, color 0.12s;
+    }
+
+    .sidebar-link:hover { background: var(--hover); color: var(--text); }
+    .sidebar-link.active { background: var(--primary-bg); color: var(--primary); font-weight: 500; }
+
+    .sidebar-link svg { flex-shrink: 0; }
+
+    .sidebar-section-label {
+      font-size: 0.68rem;
+      font-weight: 600;
+      color: var(--text-light);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 1rem 0.75rem 0.3rem;
+    }
+
+    .app-main {
+      margin-left: 220px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .app-page { display: none; }
+    .app-page.active { display: block; }
+
+    /* --- Facturation --- */
+    .fact-filters {
+      display: flex;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+
+    .fact-filter-btn {
+      padding: 0.3rem 0.65rem;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text-secondary);
+      font-size: 0.75rem;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.12s;
+    }
+
+    .fact-filter-btn:hover { border-color: var(--primary); color: var(--primary); }
+    .fact-filter-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+
+    .fact-status {
+      display: inline-block;
+      padding: 0.12rem 0.4rem;
+      border-radius: 3px;
+      font-size: 0.7rem;
+      font-weight: 600;
+    }
+
+    .fact-status.green { background: var(--success-bg); color: var(--success); }
+    .fact-status.yellow { background: var(--warning-bg); color: var(--warning); }
+    .fact-status.red { background: var(--danger-bg); color: var(--danger); }
+    .fact-status:not(.green):not(.yellow):not(.red) { background: var(--hover); color: var(--text-light); }
+
+    .fact-alert {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+      padding: 0.65rem 0.85rem;
+      border-radius: var(--radius);
+      font-size: 0.8rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .fact-alert-warn { background: var(--warning-bg); color: var(--warning); }
+    .fact-alert-info { background: var(--primary-bg); color: var(--primary); }
+
+    .fact-alert strong { font-weight: 600; }
+
+    .fact-year-tag {
+      display: inline-block;
+      padding: 0.05rem 0.3rem;
+      border-radius: 3px;
+      font-size: 0.65rem;
+      font-weight: 700;
+      margin-left: 0.3rem;
+    }
+
+    .fact-year-tag.y2025 { background: var(--warning-bg); color: var(--warning); }
+    .fact-year-tag.y2026 { background: var(--primary-bg); color: var(--primary); }
+
+    tr.row-2025 { opacity: 0.7; }
+
+    @media (max-width: 768px) {
+      .sidebar { display: none; }
+      .app-main { margin-left: 0; }
+    }
   </style>
 </head>
 <body>
+
+  <!-- Sidebar -->
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="sidebar-brand">
+        <span style="font-size:1.2rem">&#128200;</span> Commercial
+      </div>
+      <div class="sidebar-section-label">Navigation</div>
+      <div class="sidebar-nav">
+        <button class="sidebar-link active" onclick="navigateTo('dashboard')" data-page="dashboard">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
+          Dashboard
+        </button>
+        <button class="sidebar-link" onclick="navigateTo('facturation')" data-page="facturation">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 1h8a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z"/><path d="M6 5h4M6 8h4M6 11h2"/></svg>
+          Facturation
+        </button>
+      </div>
+      <div style="flex:1"></div>
+      <div style="padding:0.5rem 0.75rem;display:flex;align-items:center;gap:0.5rem">
+        <button class="btn" id="themeToggle" onclick="toggleTheme()" title="Mode sombre" style="padding:0.4rem">
+          <svg id="themeIcon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1a7 7 0 1 0 0 14A5 5 0 0 1 8 1z"/></svg>
+        </button>
+      </div>
+    </nav>
+
+    <div class="app-main">
 
   <!-- Topbar -->
   <div class="topbar">
     <div class="topbar-left">
       <span>Commercial</span>
       <span class="breadcrumb-sep">/</span>
-      <span style="color:var(--text)">Dashboard</span>
+      <span style="color:var(--text)" id="topbarPageName">Dashboard</span>
     </div>
     <div class="topbar-right">
-      <button class="btn" id="themeToggle" onclick="toggleTheme()" title="Mode sombre">
-        <svg id="themeIcon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1a7 7 0 1 0 0 14A5 5 0 0 1 8 1z"/></svg>
-      </button>
-      <button class="btn" onclick="openObjectivesModal()">
+      <button class="btn" onclick="openObjectivesModal()" id="btnObjectifs">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M3 8h10"/></svg>
         Objectifs
       </button>
-      <button class="btn-filled btn" onclick="refreshData()">
+      <button class="btn-filled btn" id="btnSync" onclick="refreshCurrentPage()">
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 8a6 6 0 0 1 10.3-4.1M14 8a6 6 0 0 1-10.3 4.1"/><path d="M14 2v4h-4M2 14v-4h4"/></svg>
         Sync
       </button>
@@ -576,7 +868,8 @@
     </div>
   </div>
 
-  <!-- Page content -->
+  <!-- PAGE: Dashboard -->
+  <div class="app-page active" id="page-dashboard">
   <div class="page">
 
     <div class="page-icon">&#128200;</div>
@@ -653,7 +946,104 @@
         </table>
       </div>
     </div>
+
+    <hr class="divider">
+
+    <!-- Reconciliation HubSpot / Notion -->
+    <div class="section">
+      <div class="section-title">Réconciliation HubSpot &harr; Notion &mdash; <span id="reconYear"></span></div>
+      <div class="recon-stats" id="reconStats"></div>
+      <div class="recon-tabs" id="reconTabs">
+        <button class="recon-tab active" data-tab="matched" onclick="switchReconTab('matched')">Matchés <span class="recon-tab-count" id="reconCountMatched">0</span></button>
+        <button class="recon-tab" data-tab="hsOnly" onclick="switchReconTab('hsOnly')">HubSpot seul <span class="recon-tab-count" id="reconCountHs">0</span></button>
+        <button class="recon-tab" data-tab="notionOnly" onclick="switchReconTab('notionOnly')">Notion seul <span class="recon-tab-count" id="reconCountNotion">0</span></button>
+      </div>
+      <div class="table-wrapper">
+        <div id="reconContent">
+          <p style="color:var(--text-secondary);font-size:0.85rem">Chargement de la réconciliation...</p>
+        </div>
+      </div>
+    </div>
   </div>
+  </div>
+  <!-- end page-dashboard -->
+
+  <!-- PAGE: Facturation -->
+  <div class="app-page" id="page-facturation">
+  <div class="page">
+    <div class="page-icon">&#128203;</div>
+    <h1 class="page-title">Facturation</h1>
+    <p class="page-desc">Suivi de la facturation des missions Notion.</p>
+
+    <div class="kpi-row" id="factKpis">
+      <div class="kpi-block kpi-clickable" id="factKpiBlockCA" onclick="toggleKpiFilter('ca2026')">
+        <div class="kpi-label">CA 2026</div>
+        <div class="kpi-value" id="factKpiCA">--</div>
+        <div class="kpi-sub" id="factKpiCASub"></div>
+      </div>
+      <div class="kpi-block kpi-clickable" id="factKpiBlockMontant" onclick="toggleKpiFilter('aFacturer')">
+        <div class="kpi-label">Montant a facturer</div>
+        <div class="kpi-value" id="factKpiMontant">--</div>
+        <div class="kpi-sub" id="factKpiMontantSub"></div>
+      </div>
+      <div class="kpi-block kpi-clickable" id="factKpiBlockEnvoye" onclick="toggleKpiFilter('envoye')">
+        <div class="kpi-label">En attente paiement</div>
+        <div class="kpi-value" id="factKpiEnvoye">--</div>
+        <div class="kpi-sub" id="factKpiEnvoyeSub"></div>
+      </div>
+      <div class="kpi-block kpi-clickable" id="factKpiBlockImpaye" onclick="toggleKpiFilter('impaye2025')">
+        <div class="kpi-label">Impaye 2025</div>
+        <div class="kpi-value" id="factKpiImpaye2025">--</div>
+        <div class="kpi-sub" id="factKpiImpaye2025Sub"></div>
+      </div>
+    </div>
+
+    <div id="factAlerts"></div>
+
+    <div class="section">
+      <div class="section-title">Factures</div>
+      <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.75rem;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:0.4rem">
+          <span style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em">Mois</span>
+          <select class="notion-select" id="factMonthSelect" onchange="setFactMonth(this.value)">
+            <option value="all">Tous les mois</option>
+            <option value="1">Janvier</option>
+            <option value="2">Fevrier</option>
+            <option value="3">Mars</option>
+            <option value="4">Avril</option>
+            <option value="5">Mai</option>
+            <option value="6">Juin</option>
+            <option value="7">Juillet</option>
+            <option value="8">Aout</option>
+            <option value="9">Septembre</option>
+            <option value="10">Octobre</option>
+            <option value="11">Novembre</option>
+            <option value="12">Decembre</option>
+          </select>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.4rem">
+          <span style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em">Statut</span>
+          <select class="notion-select" id="factStatusSelect" onchange="setFactFilter(this.value)">
+            <option value="all">Tous</option>
+            <option value="A envoyer">A envoyer</option>
+            <option value="En attente">En attente (acompte non fait)</option>
+            <option value="Envoye">Envoye (attente paiement)</option>
+            <option value="Paye">Paye</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-wrapper">
+        <div id="factContent">
+          <p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  </div>
+  <!-- end page-facturation -->
+
+  </div><!-- end app-main -->
+  </div><!-- end app-layout -->
 
   <!-- Modal Objectifs -->
   <div class="modal-overlay" id="modalOverlay">
@@ -732,6 +1122,25 @@
     }
 
     initTheme();
+
+    // --- Navigation ---
+    let currentPage = 'dashboard';
+
+    function navigateTo(page) {
+      currentPage = page;
+      document.querySelectorAll('.app-page').forEach(p => p.classList.remove('active'));
+      document.getElementById('page-' + page).classList.add('active');
+      document.querySelectorAll('.sidebar-link').forEach(l => l.classList.toggle('active', l.dataset.page === page));
+      document.getElementById('topbarPageName').textContent = page === 'dashboard' ? 'Dashboard' : 'Facturation';
+      document.getElementById('btnObjectifs').style.display = page === 'dashboard' ? '' : 'none';
+
+      if (page === 'facturation' && !factData) refreshFactData();
+    }
+
+    function refreshCurrentPage() {
+      if (currentPage === 'dashboard') refreshData();
+      else if (currentPage === 'facturation') refreshFactData();
+    }
 
     const MONTHS_FR = [
       'Janvier','Fevrier','Mars','Avril','Mai','Juin',
@@ -1373,8 +1782,427 @@
       }
     }
 
+    // --- Reconciliation HubSpot <-> Notion ---
+    let reconData = null;
+    let currentReconTab = 'matched';
+
+    async function fetchReconciliation() {
+      const res = await fetch('/api/reconciliation');
+      if (!res.ok) throw new Error('Erreur chargement réconciliation');
+      return res.json();
+    }
+
+    function switchReconTab(tab) {
+      currentReconTab = tab;
+      document.querySelectorAll('.recon-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+      renderReconContent();
+    }
+
+    function renderReconStats(stats) {
+      document.getElementById('reconStats').innerHTML = `
+        <div class="recon-stat">
+          <div class="recon-stat-value">${stats.totalHubspot}</div>
+          <div class="recon-stat-label">Deals HubSpot</div>
+        </div>
+        <div class="recon-stat">
+          <div class="recon-stat-value">${stats.totalNotion}</div>
+          <div class="recon-stat-label">Missions Notion</div>
+        </div>
+        <div class="recon-stat">
+          <div class="recon-stat-value" style="color:var(--success)">${stats.matched}</div>
+          <div class="recon-stat-label">Matchés</div>
+        </div>
+        <div class="recon-stat">
+          <div class="recon-stat-value" style="color:var(--warning)">${stats.hubspotOnly}</div>
+          <div class="recon-stat-label">HubSpot seul</div>
+        </div>
+        <div class="recon-stat">
+          <div class="recon-stat-value" style="color:var(--purple)">${stats.notionOnly}</div>
+          <div class="recon-stat-label">Notion seul</div>
+        </div>
+        <div class="recon-stat">
+          <div class="recon-stat-value" style="color:var(--danger)">${stats.amountMismatches}</div>
+          <div class="recon-stat-label">Écarts montant</div>
+        </div>
+      `;
+      document.getElementById('reconCountMatched').textContent = stats.matched;
+      document.getElementById('reconCountHs').textContent = stats.hubspotOnly;
+      document.getElementById('reconCountNotion').textContent = stats.notionOnly;
+    }
+
+    function scoreClass(score) {
+      if (score >= 80) return 'score-high';
+      if (score >= 60) return 'score-mid';
+      return 'score-low';
+    }
+
+    function renderReconContent() {
+      if (!reconData) return;
+      const el = document.getElementById('reconContent');
+      let html = '';
+
+      if (currentReconTab === 'matched') {
+        html = `<table class="recon-table">
+          <thead><tr>
+            <th>HubSpot</th><th>Montant HS</th><th>Notion</th><th>Montant Notion</th><th>Écart</th><th>Score</th>
+          </tr></thead><tbody>`;
+        for (const m of reconData.matched) {
+          const diff = m.amountDiff;
+          const diffStr = m.notion.ca > 0
+            ? (Math.abs(diff) < 1 ? '<span class="recon-amount-ok">OK</span>' : `<span class="recon-amount-diff">${diff > 0 ? '+' : ''}${formatEuro(diff)}</span>`)
+            : '<span style="color:var(--text-light)">--</span>';
+          html += `<tr>
+            <td>${m.hubspot.name}</td>
+            <td style="font-weight:600">${formatEuro(m.hubspot.amount)}</td>
+            <td>${m.notion.nom}${m.notion.client ? ' <span style="color:var(--text-light);font-size:0.72rem">(' + m.notion.client + ')</span>' : ''}</td>
+            <td style="font-weight:600">${m.notion.ca > 0 ? formatEuro(m.notion.ca) : '<span style="color:var(--text-light)">--</span>'}</td>
+            <td>${diffStr}</td>
+            <td><span class="recon-match-score ${scoreClass(m.score)}">${m.score}%</span></td>
+          </tr>`;
+        }
+        html += '</tbody></table>';
+      }
+
+      if (currentReconTab === 'hsOnly') {
+        html = `<table class="recon-table">
+          <thead><tr><th>Deal HubSpot</th><th>Montant</th><th>Date closing</th><th>Source</th></tr></thead><tbody>`;
+        for (const d of reconData.hubspotOnly) {
+          const date = d.closedate ? new Date(d.closedate).toLocaleDateString('fr-FR') : '--';
+          html += `<tr>
+            <td>${d.name}</td>
+            <td style="font-weight:600">${formatEuro(d.amount)}</td>
+            <td>${date}</td>
+            <td><span class="recon-source-tag tag-hs">HubSpot</span></td>
+          </tr>`;
+        }
+        html += '</tbody></table>';
+        if (reconData.hubspotOnly.length === 0) html = '<p style="color:var(--success);font-size:0.85rem;padding:1rem">Tous les deals HubSpot ont un match Notion.</p>';
+      }
+
+      if (currentReconTab === 'notionOnly') {
+        html = `<table class="recon-table">
+          <thead><tr><th>Mission Notion</th><th>Client</th><th>CA</th><th>État</th><th>Source</th></tr></thead><tbody>`;
+        for (const m of reconData.notionOnly) {
+          html += `<tr>
+            <td>${m.nom}</td>
+            <td>${m.client}</td>
+            <td style="font-weight:600">${m.ca > 0 ? formatEuro(m.ca) : '--'}</td>
+            <td>${m.etat}</td>
+            <td><span class="recon-source-tag tag-notion">Notion</span></td>
+          </tr>`;
+        }
+        html += '</tbody></table>';
+        if (reconData.notionOnly.length === 0) html = '<p style="color:var(--success);font-size:0.85rem;padding:1rem">Toutes les missions Notion ont un match HubSpot.</p>';
+      }
+
+      el.innerHTML = html;
+    }
+
+    async function refreshReconData() {
+      try {
+        reconData = await fetchReconciliation();
+        document.getElementById('reconYear').textContent = reconData.year || '';
+        renderReconStats(reconData.stats);
+        renderReconContent();
+      } catch (err) {
+        console.error('Erreur réconciliation:', err);
+        document.getElementById('reconContent').innerHTML =
+          '<p style="color:var(--danger);font-size:0.85rem">Erreur de chargement de la réconciliation.</p>';
+      }
+    }
+
     refreshData();
+    refreshReconData();
     refreshTimer = setInterval(refreshData, 5 * 60 * 1000);
+    setInterval(refreshReconData, 5 * 60 * 1000);
+
+    // --- Facturation ---
+    let factData = null;
+    let factFilter = 'all';
+    let factMonth = 'all';
+    let factKpiFilter = null; // active KPI filter: 'ca2026', 'aFacturer', 'envoye', 'impaye2025'
+
+    function normFact(s) {
+      return (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    }
+
+    function invoiceStatusClass(status) {
+      if (status === 'Paye') return 'green';
+      if (status === 'Envoye') return 'yellow';
+      if (status === 'En attente') return '';
+      return 'red';
+    }
+
+    function dateMonth(dateStr) {
+      if (!dateStr) return null;
+      return new Date(dateStr).getMonth() + 1;
+    }
+
+    function formatDateFR(dateStr) {
+      if (!dateStr) return '--';
+      return new Date(dateStr).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+    }
+
+    // Transform missions into invoice lines
+    function buildInvoiceLines(missions) {
+      const lines = [];
+      for (const m of missions) {
+        const nf = normFact(m.facturation);
+
+        // Acompte line
+        let acompteStatus = null;
+        if (nf.includes('acompte a envoyer')) acompteStatus = 'A envoyer';
+        else if (nf.includes('acompte envoye')) acompteStatus = 'Envoye';
+        else acompteStatus = 'Paye';
+
+        lines.push({
+          mission: m.nom,
+          client: m.client,
+          type: 'Acompte',
+          montant: m.montantAcompte,
+          date: m.dateFactureAcompte,
+          status: acompteStatus,
+          retard: m.jrsAcompteRetard,
+        });
+
+        // Solde line - always shown
+        let soldeStatus = null;
+        if (nf.includes('acompte a envoyer') || nf.includes('acompte envoye')) soldeStatus = 'En attente';
+        else if (nf.includes('acompte paye') || nf.includes('solde a envoyer')) soldeStatus = 'A envoyer';
+        else if (nf.includes('solde envoye')) soldeStatus = 'Envoye';
+        else soldeStatus = 'Paye';
+
+        lines.push({
+          mission: m.nom,
+          client: m.client,
+          type: 'Solde',
+          montant: m.montantFinal,
+          date: m.dateFactureFinale,
+          status: soldeStatus,
+          retard: m.jrsSoldeRetard,
+        });
+      }
+      return lines;
+    }
+
+    function getFilteredInvoices() {
+      if (!factData) return [];
+      let lines = buildInvoiceLines(factData.missions);
+
+      // KPI filter takes priority when active
+      if (factKpiFilter) {
+        lines = applyKpiFilter(lines);
+        return lines;
+      }
+
+      // Month filter
+      if (factMonth !== 'all') {
+        const m = parseInt(factMonth);
+        lines = lines.filter(l => dateMonth(l.date) === m);
+      }
+
+      // Status filter
+      if (factFilter !== 'all') {
+        const f = normFact(factFilter);
+        lines = lines.filter(l => normFact(l.status) === f);
+      }
+
+      return lines;
+    }
+
+    function applyKpiFilter(lines) {
+      switch (factKpiFilter) {
+        case 'ca2026':
+          return lines.filter(l => l.date && new Date(l.date).getFullYear() === 2026);
+        case 'aFacturer':
+          return lines.filter(l => l.status === 'A envoyer' || l.status === 'En attente');
+        case 'envoye':
+          return lines.filter(l => l.status === 'Envoye');
+        case 'impaye2025':
+          return lines.filter(l => l.status === 'Envoye' && l.date && new Date(l.date).getFullYear() === 2025);
+        default:
+          return lines;
+      }
+    }
+
+    function toggleKpiFilter(kpi) {
+      factKpiFilter = (factKpiFilter === kpi) ? null : kpi;
+      // Update active visual state
+      document.querySelectorAll('#factKpis .kpi-clickable').forEach(el => el.classList.remove('kpi-active'));
+      if (factKpiFilter) {
+        const map = { ca2026: 'factKpiBlockCA', aFacturer: 'factKpiBlockMontant', envoye: 'factKpiBlockEnvoye', impaye2025: 'factKpiBlockImpaye' };
+        document.getElementById(map[factKpiFilter]).classList.add('kpi-active');
+      }
+      renderFactTable();
+    }
+
+    function setFactFilter(filter) {
+      factFilter = filter;
+      factKpiFilter = null;
+      document.querySelectorAll('#factKpis .kpi-clickable').forEach(el => el.classList.remove('kpi-active'));
+      renderFactKpis();
+      renderFactTable();
+    }
+
+    function setFactMonth(month) {
+      factMonth = month;
+      factKpiFilter = null;
+      document.querySelectorAll('#factKpis .kpi-clickable').forEach(el => el.classList.remove('kpi-active'));
+      renderFactKpis();
+      renderFactTable();
+    }
+
+    function renderFactKpis() {
+      if (!factData) return;
+      const lines = getFilteredInvoices();
+      const allLines = buildInvoiceLines(factData.missions);
+
+      // CA 2026 = somme des factures avec date d'émission en 2026
+      const allLines2026 = allLines.filter(l => {
+        if (!l.date) return false;
+        return new Date(l.date).getFullYear() === 2026;
+      });
+      const ca2026 = allLines2026.reduce((s, l) => s + l.montant, 0);
+      const nbFactures2026 = allLines2026.length;
+
+      // Montant à facturer (à envoyer + en attente) - suit les filtres
+      const nonFacture = lines.filter(l => l.status === 'A envoyer' || l.status === 'En attente');
+      const aEnvoyer = lines.filter(l => l.status === 'A envoyer');
+      const enAttente = lines.filter(l => l.status === 'En attente');
+      const montantAFacturer = nonFacture.reduce((s, l) => s + l.montant, 0);
+
+      // En attente paiement (envoyé) - suit les filtres
+      const envoyes = lines.filter(l => l.status === 'Envoye');
+      const montantEnvoye = envoyes.reduce((s, l) => s + l.montant, 0);
+
+      document.getElementById('factKpiCA').textContent = formatEuro(ca2026);
+      document.getElementById('factKpiCASub').textContent = nbFactures2026 + ' factures';
+      document.getElementById('factKpiMontant').textContent = formatEuro(montantAFacturer);
+      document.getElementById('factKpiMontantSub').textContent = aEnvoyer.length + ' a envoyer, ' + enAttente.length + ' en attente';
+      document.getElementById('factKpiEnvoye').textContent = formatEuro(montantEnvoye);
+      document.getElementById('factKpiEnvoyeSub').textContent = envoyes.length + ' facture' + (envoyes.length > 1 ? 's' : '');
+      // Impayés 2025 : factures envoyées en 2025 pas encore payées
+      const impayes2025 = allLines.filter(l => {
+        if (l.status !== 'Envoye') return false;
+        if (!l.date) return false;
+        return new Date(l.date).getFullYear() === 2025;
+      });
+      const montantImpayes2025 = impayes2025.reduce((s, l) => s + l.montant, 0);
+      document.getElementById('factKpiImpaye2025').textContent = formatEuro(montantImpayes2025);
+      document.getElementById('factKpiImpaye2025Sub').textContent = impayes2025.length + ' facture' + (impayes2025.length > 1 ? 's' : '');
+    }
+
+    function getInvoiceYear(l) {
+      if (!l.date) return null;
+      return new Date(l.date).getFullYear();
+    }
+
+    function renderFactAlerts() {
+      if (!factData) return;
+      const allLines = buildInvoiceLines(factData.missions);
+      const sansDate = allLines.filter(l => !l.date && l.status !== 'Paye');
+      let html = '';
+
+      if (sansDate.length > 0) {
+        html += '<div class="fact-alert fact-alert-warn">';
+        html += '<strong>' + sansDate.length + ' facture' + (sansDate.length > 1 ? 's' : '') + ' sans date :</strong> ';
+        const noms = [...new Set(sansDate.map(l => l.mission + ' (' + l.type + ')'))];
+        html += noms.join(', ');
+        html += '</div>';
+      }
+
+      document.getElementById('factAlerts').innerHTML = html;
+    }
+
+    function renderFactTable() {
+      if (!factData) return;
+      const lines = getFilteredInvoices();
+
+      if (lines.length === 0) {
+        document.getElementById('factContent').innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Aucune facture pour ces filtres.</p>';
+        return;
+      }
+
+      // Sort: A envoyer first, then En attente, Envoye, Paye
+      const order = { 'A envoyer': 0, 'En attente': 1, 'Envoye': 2, 'Paye': 3 };
+      lines.sort((a, b) => (order[a.status] || 0) - (order[b.status] || 0));
+
+      // Sous-totaux par année
+      const byYear = {};
+      for (const l of lines) {
+        const y = getInvoiceYear(l) || 'Sans date';
+        if (!byYear[y]) byYear[y] = { count: 0, total: 0 };
+        byYear[y].count++;
+        byYear[y].total += l.montant;
+      }
+      const total = lines.reduce((s, l) => s + l.montant, 0);
+
+      let html = '<table class="recon-table"><thead><tr>';
+      html += '<th>Mission</th><th>Client</th><th>Type</th><th>Montant</th><th>Date</th><th>Statut</th>';
+      html += '</tr></thead><tbody>';
+
+      for (const l of lines) {
+        const year = getInvoiceYear(l);
+        const is2025 = year === 2025;
+        const isSansDate = !l.date;
+
+        const typeTag = l.type === 'Acompte'
+          ? '<span class="recon-source-tag tag-hs">' + l.type + '</span>'
+          : '<span class="recon-source-tag tag-notion">' + l.type + '</span>';
+        const statusLabel = l.status === 'Envoye' ? 'Envoy\u00e9' : l.status === 'Paye' ? 'Pay\u00e9' : l.status === 'En attente' ? 'En attente' : '\u00c0 envoyer';
+
+        const yearTag = is2025 ? ' <span class="fact-year-tag y2025">2025</span>' : '';
+        const dateCell = isSansDate
+          ? '<span style="color:var(--danger);font-weight:600;font-size:0.7rem">Date manquante</span>'
+          : formatDateFR(l.date) + yearTag;
+
+        html += '<tr' + (is2025 ? ' class="row-2025"' : '') + '>';
+        html += '<td>' + l.mission + '</td>';
+        html += '<td style="color:var(--text-secondary)">' + l.client + '</td>';
+        html += '<td>' + typeTag + '</td>';
+        html += '<td style="font-weight:600">' + formatEuro(l.montant) + '</td>';
+        html += '<td style="font-size:0.75rem">' + dateCell + '</td>';
+        html += '<td><span class="fact-status ' + invoiceStatusClass(l.status) + '">' + statusLabel + '</span></td>';
+        html += '</tr>';
+      }
+
+      // Sous-totaux par année
+      const years = Object.keys(byYear).sort();
+      if (years.length > 1) {
+        for (const y of years) {
+          html += '<tr style="background:var(--bg-secondary);font-size:0.78rem">';
+          html += '<td colspan="3" style="color:var(--text-secondary)">Sous-total ' + y + ' (' + byYear[y].count + ' factures)</td>';
+          html += '<td style="font-weight:600">' + formatEuro(byYear[y].total) + '</td>';
+          html += '<td colspan="2"></td>';
+          html += '</tr>';
+        }
+      }
+
+      // Total
+      html += '<tr style="background:var(--bg-secondary);font-weight:700">';
+      html += '<td colspan="3">Total (' + lines.length + ' factures)</td>';
+      html += '<td>' + formatEuro(total) + '</td>';
+      html += '<td colspan="2"></td>';
+      html += '</tr>';
+
+      html += '</tbody></table>';
+      document.getElementById('factContent').innerHTML = html;
+    }
+
+    async function refreshFactData() {
+      try {
+        const res = await fetch('/api/facturation');
+        if (!res.ok) throw new Error('Erreur chargement facturation');
+        factData = await res.json();
+        renderFactAlerts();
+        renderFactKpis();
+        renderFactTable();
+      } catch (err) {
+        console.error('Erreur facturation:', err);
+        document.getElementById('factContent').innerHTML =
+          '<p style="color:var(--danger);font-size:0.85rem;padding:1rem">Erreur de chargement de la facturation.</p>';
+      }
+    }
   </script>
 
 </body>
