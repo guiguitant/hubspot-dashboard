@@ -12,8 +12,8 @@ if (!HUBSPOT_API_KEY) {
   process.exit(1);
 }
 
-// Detect EU tokens (prefix "eu1-") and use the EU API base
-const IS_EU = HUBSPOT_API_KEY.startsWith('eu1-');
+// Detect EU tokens (contains "eu1" in the token)
+const IS_EU = HUBSPOT_API_KEY.includes('eu1');
 const HUBSPOT_HOST = IS_EU ? 'api-eu1.hubapi.com' : 'api.hubapi.com';
 
 // Detect auth mode: pat-* tokens use Bearer, others use hapikey query param
@@ -356,6 +356,10 @@ app.get('/api/dashboard', async (req, res) => {
 // --- Notion API ---
 const NOTION_API_KEY = process.env.NOTION_API_KEY;
 const NOTION_MISSIONS_DB = process.env.NOTION_MISSIONS_DB;
+
+if (!NOTION_API_KEY || !NOTION_MISSIONS_DB) {
+  console.warn('⚠ NOTION_API_KEY ou NOTION_MISSIONS_DB manquante — les endpoints Notion ne fonctionneront pas.');
+}
 
 function notionRequest(endpoint, method = 'GET', body = null) {
   return new Promise((resolve, reject) => {
