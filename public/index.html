@@ -83,6 +83,100 @@
       animation: ck-spin 1s linear infinite;
     }
 
+    /* Orbite animation */
+    .ck-orbit-stage {
+      position: relative;
+      width: 200px;
+      height: 200px;
+      margin: 1rem auto 0;
+    }
+    .ck-orbit-logo {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 50px; height: 50px;
+      z-index: 2;
+      transition: filter 0.5s, transform 0.5s;
+    }
+    .ck-orbit-ring {
+      position: absolute;
+      top: 50%; left: 50%;
+      border: 1px solid var(--border);
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      transition: border-color 0.5s, box-shadow 0.5s;
+    }
+    .ck-orbit-ring.ring1 { width: 120px; height: 120px; }
+    .ck-orbit-ring.ring2 { width: 170px; height: 170px; opacity: 0.5; }
+    .ck-orbit-dot {
+      position: absolute;
+      top: 50%; left: 50%;
+      width: 36px; height: 36px;
+      margin: -18px 0 0 -18px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      z-index: 3;
+      background: var(--bg);
+      border: 2px solid var(--border);
+      transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.4s, border-color 0.4s;
+    }
+    .ck-orbit-dot.waiting { border-color: var(--border); opacity: 0.5; }
+    .ck-orbit-dot.loading { border-color: var(--warning); box-shadow: 0 0 12px rgba(217,115,13,0.3); opacity: 1; }
+    .ck-orbit-dot.done { border-color: var(--success); box-shadow: 0 0 12px rgba(15,123,108,0.4); opacity: 1; }
+    @keyframes ck-orbit-spin {
+      from { transform: rotate(var(--ck-start)) translateX(var(--ck-radius)) rotate(calc(-1 * var(--ck-start))); }
+      to { transform: rotate(calc(var(--ck-start) + 360deg)) translateX(var(--ck-radius)) rotate(calc(-1 * (var(--ck-start) + 360deg))); }
+    }
+    .ck-orbit-dot.orbiting {
+      animation: ck-orbit-spin var(--ck-speed) linear infinite;
+    }
+    @keyframes ck-orbit-accelerate {
+      0% { animation-duration: var(--ck-speed); }
+      100% { animation-duration: 0.3s; }
+    }
+    @keyframes ck-orbit-converge {
+      to { transform: translate(0, 0) scale(0); opacity: 0; }
+    }
+    @keyframes ck-logo-reveal {
+      0% { opacity: 0.15; transform: translate(-50%, -50%) scale(1); filter: drop-shadow(0 0 0 transparent); }
+      40% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); filter: drop-shadow(0 0 30px var(--success)); }
+      70% { transform: translate(-50%, -50%) scale(1.15); filter: drop-shadow(0 0 40px var(--success)) drop-shadow(0 0 60px rgba(0,61,46,0.3)); }
+      100% { opacity: 1; transform: translate(-50%, -50%) scale(1.1); filter: drop-shadow(0 0 20px var(--success)); }
+    }
+    @keyframes ck-final-burst {
+      0% { opacity: 1; transform: scale(1); }
+      100% { opacity: 0; transform: scale(1.1); filter: blur(8px); }
+    }
+    @keyframes ck-content-enter {
+      0% { opacity: 0; transform: translateY(20px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+    .ck-content-entering {
+      animation: ck-content-enter 0.5s ease-out both;
+    }
+    @keyframes ck-shimmer {
+      0% { background-position: -200% center; }
+      100% { background-position: 200% center; }
+    }
+    .ck-shimmer-text {
+      font-size: 0.82rem;
+      font-weight: 300;
+      letter-spacing: 0.03em;
+      background: linear-gradient(
+        90deg,
+        var(--text-secondary) 0%,
+        var(--text-secondary) 35%,
+        var(--success) 50%,
+        var(--text-secondary) 65%,
+        var(--text-secondary) 100%
+      );
+      background-size: 200% auto;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: ck-shimmer 2.5s linear infinite;
+    }
+
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
@@ -921,38 +1015,19 @@
   <!-- Loading overlay -->
   <div id="cockpitLoader" style="position:absolute;inset:0;background:var(--bg);z-index:40;display:flex;align-items:center;justify-content:center">
     <div style="text-align:center">
-      <div style="font-size:2rem;margin-bottom:1.5rem">&#127919;</div>
-      <h2 style="font-size:1.1rem;font-weight:600;margin-bottom:1.5rem;color:var(--text)">Chargement du Cockpit</h2>
-      <div style="display:flex;flex-direction:column;gap:0.75rem;min-width:280px">
-        <div class="ck-loader-item" id="ckLoaderHubspot" style="display:flex;align-items:center;gap:0.75rem;padding:0.5rem 0.75rem;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg-secondary)">
-          <span class="ck-loader-icon" style="width:20px;text-align:center">
-            <svg class="ck-spinner" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--text-secondary)" stroke-width="2"><circle cx="8" cy="8" r="6" stroke-dasharray="30" stroke-dashoffset="10" stroke-linecap="round"/></svg>
-          </span>
-          <span style="font-size:0.85rem;color:var(--text)">HubSpot</span>
-          <span style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)" class="ck-loader-status">Connexion...</span>
-        </div>
-        <div class="ck-loader-item" id="ckLoaderNotion" style="display:flex;align-items:center;gap:0.75rem;padding:0.5rem 0.75rem;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg-secondary)">
-          <span class="ck-loader-icon" style="width:20px;text-align:center">
-            <svg class="ck-spinner" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--text-secondary)" stroke-width="2"><circle cx="8" cy="8" r="6" stroke-dasharray="30" stroke-dashoffset="10" stroke-linecap="round"/></svg>
-          </span>
-          <span style="font-size:0.85rem;color:var(--text)">Notion</span>
-          <span style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)" class="ck-loader-status">Connexion...</span>
-        </div>
-        <div class="ck-loader-item" id="ckLoaderPennylane" style="display:flex;align-items:center;gap:0.75rem;padding:0.5rem 0.75rem;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg-secondary)">
-          <span class="ck-loader-icon" style="width:20px;text-align:center">
-            <svg class="ck-spinner" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--text-secondary)" stroke-width="2"><circle cx="8" cy="8" r="6" stroke-dasharray="30" stroke-dashoffset="10" stroke-linecap="round"/></svg>
-          </span>
-          <span style="font-size:0.85rem;color:var(--text)">Pennylane</span>
-          <span style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)" class="ck-loader-status">Connexion...</span>
-        </div>
-        <div class="ck-loader-item" id="ckLoaderQonto" style="display:flex;align-items:center;gap:0.75rem;padding:0.5rem 0.75rem;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg-secondary)">
-          <span class="ck-loader-icon" style="width:20px;text-align:center">
-            <svg class="ck-spinner" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--text-secondary)" stroke-width="2"><circle cx="8" cy="8" r="6" stroke-dasharray="30" stroke-dashoffset="10" stroke-linecap="round"/></svg>
-          </span>
-          <span style="font-size:0.85rem;color:var(--text)">Qonto</span>
-          <span style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)" class="ck-loader-status">Connexion...</span>
-        </div>
+      <div class="ck-orbit-stage" id="ckOrbitStage">
+        <!-- Anneaux d'orbite -->
+        <div class="ck-orbit-ring ring2"></div>
+        <div class="ck-orbit-ring ring1"></div>
+        <!-- Logo central -->
+        <img class="ck-orbit-logo" id="ckOrbitLogo" src="/logo-bichrome.png" alt="" style="width:120px;height:auto;opacity:0.1">
+        <!-- 4 dots API -->
+        <div class="ck-orbit-dot waiting" id="ckDotHubspot" style="--ck-start:0deg;--ck-radius:60px;--ck-speed:8s;"><img src="/logo-hubspot.png" alt="HubSpot" style="width:20px;height:20px;border-radius:4px"></div>
+        <div class="ck-orbit-dot waiting" id="ckDotNotion" style="--ck-start:90deg;--ck-radius:60px;--ck-speed:8s;"><img src="/logo-notion.png" alt="Notion" style="width:20px;height:20px;border-radius:4px"></div>
+        <div class="ck-orbit-dot waiting" id="ckDotPennylane" style="--ck-start:180deg;--ck-radius:60px;--ck-speed:8s;"><img src="/logo-pennylane.png" alt="Pennylane" style="width:22px;height:22px;border-radius:4px"></div>
+        <div class="ck-orbit-dot waiting" id="ckDotQonto" style="--ck-start:270deg;--ck-radius:60px;--ck-speed:8s;"><img src="/logo-qonto.png" alt="Qonto" style="width:22px;height:22px;border-radius:4px"></div>
       </div>
+      <div id="ckOrbitLabel" class="ck-shimmer-text" style="margin-top:0.75rem;min-height:1.2em">Connexion aux services...</div>
     </div>
   </div>
 
@@ -4284,24 +4359,22 @@
     let ckTresoData = null;
     let ckFactDataCache = null;
 
-    function ckLoaderUpdate(id, status, ok) {
-      const el = document.getElementById(id);
-      if (!el) return;
-      const iconEl = el.querySelector('.ck-loader-icon');
-      const statusEl = el.querySelector('.ck-loader-status');
-      if (ok === true) {
-        iconEl.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--success)" stroke-width="2"><path d="M3 8.5l3 3 7-7"/></svg>';
-        statusEl.textContent = status;
-        statusEl.style.color = 'var(--success)';
-        el.style.borderColor = 'var(--success)';
-      } else if (ok === false) {
-        iconEl.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--danger)" stroke-width="2"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
-        statusEl.textContent = status;
-        statusEl.style.color = 'var(--danger)';
-        el.style.borderColor = 'var(--danger)';
-      } else {
-        statusEl.textContent = status;
-      }
+    function ckOrbitStart() {
+      document.querySelectorAll('.ck-orbit-dot').forEach(dot => {
+        dot.classList.add('orbiting');
+      });
+    }
+
+    function ckOrbitDotUpdate(id, status) {
+      const dot = document.getElementById(id);
+      if (!dot) return;
+      dot.classList.remove('waiting', 'loading');
+      dot.classList.add(status); // 'loading' or 'done'
+    }
+
+    function ckOrbitLabel(text) {
+      const el = document.getElementById('ckOrbitLabel');
+      if (el) el.textContent = text;
     }
 
     async function refreshCockpit() {
@@ -4310,31 +4383,31 @@
       const loader = document.getElementById('cockpitLoader');
       const isFirstLoad = loader && loader.style.display !== 'none';
 
+      if (isFirstLoad) ckOrbitStart();
+
       try {
         // HubSpot (dashboard)
-        if (isFirstLoad) ckLoaderUpdate('ckLoaderHubspot', 'Chargement...', null);
+        if (isFirstLoad) { ckOrbitDotUpdate('ckDotHubspot', 'loading'); ckOrbitLabel('Connexion a HubSpot...'); }
         const dashRes = await fetch('/api/dashboard');
         if (!dashRes.ok) throw new Error('Erreur HubSpot');
         ckDashData = await dashRes.json();
         dashboardData = ckDashData;
-        if (isFirstLoad) ckLoaderUpdate('ckLoaderHubspot', 'Connecte', true);
+        if (isFirstLoad) ckOrbitDotUpdate('ckDotHubspot', 'done');
 
         // Notion + Pennylane (facturation)
-        if (isFirstLoad) ckLoaderUpdate('ckLoaderNotion', 'Chargement...', null);
-        if (isFirstLoad) ckLoaderUpdate('ckLoaderPennylane', 'Chargement...', null);
+        if (isFirstLoad) { ckOrbitDotUpdate('ckDotNotion', 'loading'); ckOrbitDotUpdate('ckDotPennylane', 'loading'); ckOrbitLabel('Synchronisation Notion & Pennylane...'); }
         const factRes = await fetch('/api/facturation');
         ckFactDataCache = factRes.ok ? await factRes.json() : null;
         factData = ckFactDataCache;
-        if (isFirstLoad) ckLoaderUpdate('ckLoaderNotion', 'Connecte', true);
-        if (isFirstLoad) ckLoaderUpdate('ckLoaderPennylane', 'Connecte', true);
+        if (isFirstLoad) { ckOrbitDotUpdate('ckDotNotion', 'done'); ckOrbitDotUpdate('ckDotPennylane', 'done'); }
 
         // Qonto (tresorerie)
-        if (isFirstLoad) ckLoaderUpdate('ckLoaderQonto', 'Chargement...', null);
+        if (isFirstLoad) { ckOrbitDotUpdate('ckDotQonto', 'loading'); ckOrbitLabel('Connexion a Qonto...'); }
         const tresoRes = await fetch('/api/tresorerie');
         if (!tresoRes.ok) throw new Error('Erreur Qonto');
         ckTresoData = await tresoRes.json();
         tresoData = ckTresoData;
-        if (isFirstLoad) ckLoaderUpdate('ckLoaderQonto', 'Connecte', true);
+        if (isFirstLoad) { ckOrbitDotUpdate('ckDotQonto', 'done'); ckOrbitLabel('Pret !'); }
 
         renderCockpitKpis();
         renderCockpitAlerts();
@@ -4345,27 +4418,68 @@
         document.getElementById('lastSync').textContent =
           now.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
 
-        // Masquer le loader avec une petite transition
+        // Orbite → accélère progressivement → converge → révèle cockpit
         if (isFirstLoad) {
+          // Étape 1 : accélérer progressivement l'orbite
+          document.querySelectorAll('.ck-orbit-dot').forEach(dot => {
+            dot.style.setProperty('--ck-speed', '4s');
+          });
+
           setTimeout(() => {
-            loader.style.opacity = '0';
-            loader.style.transition = 'opacity 0.4s';
-            setTimeout(() => { loader.style.display = 'none'; }, 400);
-          }, 500);
+            document.querySelectorAll('.ck-orbit-dot').forEach(dot => {
+              dot.style.setProperty('--ck-speed', '2s');
+            });
+          }, 600);
+
+          setTimeout(() => {
+            document.querySelectorAll('.ck-orbit-dot').forEach(dot => {
+              dot.style.setProperty('--ck-speed', '0.8s');
+            });
+            // Les anneaux brillent
+            document.querySelectorAll('.ck-orbit-ring').forEach(ring => {
+              ring.style.borderColor = 'var(--success)';
+              ring.style.boxShadow = '0 0 15px rgba(15,123,108,0.2)';
+            });
+          }, 1200);
+
+          // Étape 2 : converge les dots vers le logo
+          setTimeout(() => {
+            document.querySelectorAll('.ck-orbit-dot').forEach(dot => {
+              dot.style.animation = 'none';
+              dot.style.animation = 'ck-orbit-converge 0.8s ease-in forwards';
+            });
+          }, 1800);
+
+          // Étape 3 : logo se révèle en grand avec glow
+          setTimeout(() => {
+            const logo = document.getElementById('ckOrbitLogo');
+            logo.style.animation = 'ck-logo-reveal 1.5s ease-out forwards';
+            // Masquer les anneaux
+            document.querySelectorAll('.ck-orbit-ring').forEach(ring => {
+              ring.style.transition = 'opacity 0.8s';
+              ring.style.opacity = '0';
+            });
+            ckOrbitLabel('');
+          }, 2600);
+
+          // Étape 4 : pause pour admirer, puis burst final
+          setTimeout(() => {
+            loader.style.animation = 'ck-final-burst 0.6s ease-in forwards';
+            setTimeout(() => {
+              loader.style.display = 'none';
+              const cockpitPage = document.querySelector('#page-cockpit > .page');
+              if (cockpitPage) cockpitPage.classList.add('ck-content-entering');
+            }, 550);
+          }, 4800);
         }
       } catch (err) {
         console.error('Erreur cockpit:', err);
         if (isFirstLoad) {
-          if (err.message.includes('HubSpot')) ckLoaderUpdate('ckLoaderHubspot', 'Erreur', false);
-          else if (err.message.includes('Qonto')) ckLoaderUpdate('ckLoaderQonto', 'Erreur', false);
-          else {
-            ckLoaderUpdate('ckLoaderNotion', 'Erreur', false);
-            ckLoaderUpdate('ckLoaderPennylane', 'Erreur', false);
-          }
+          ckOrbitLabel('Erreur : ' + err.message);
+          document.getElementById('ckOrbitLabel').style.color = 'var(--danger)';
           setTimeout(() => {
-            loader.style.opacity = '0';
-            loader.style.transition = 'opacity 0.4s';
-            setTimeout(() => { loader.style.display = 'none'; }, 400);
+            loader.style.animation = 'ck-final-burst 0.5s ease-in forwards';
+            setTimeout(() => { loader.style.display = 'none'; }, 500);
           }, 2000);
         }
         errorBanner.textContent = err.message;
