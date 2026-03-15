@@ -1348,9 +1348,17 @@ app.delete('/api/revenus-exceptionnels/:id', async (req, res) => {
 // --- Salariés (Supabase) ---
 
 app.get('/api/salaries', async (req, res) => {
-  const { data, error } = await supabase.from('salaries').select('*').order('nom');
-  if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+  try {
+    const { data, error } = await supabase.from('salaries').select('*').order('nom');
+    if (error) {
+      console.error('[GET /api/salaries] Supabase error:', error);
+      return res.status(500).json({ error: error.message });
+    }
+    res.json(data);
+  } catch (err) {
+    console.error('[GET /api/salaries] Exception:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/salaries', async (req, res) => {
