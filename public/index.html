@@ -837,6 +837,10 @@
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 1h8a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z"/><path d="M6 5h4M6 8h4M6 11h2"/></svg>
           Facturation
         </button>
+        <button class="sidebar-link" onclick="navigateTo('tresorerie')" data-page="tresorerie">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 13V5l4-3 3 2 4-3 3 3v10H1z"/><path d="M1 9l4-2 3 2 4-3 3 2"/></svg>
+          Tresorerie
+        </button>
       </div>
       <div style="flex:1"></div>
       <div style="padding:0.5rem 0.75rem;display:flex;align-items:center;gap:0.5rem">
@@ -1042,6 +1046,66 @@
   </div>
   <!-- end page-facturation -->
 
+  <!-- PAGE: Tresorerie -->
+  <div class="app-page" id="page-tresorerie">
+  <div class="page">
+
+    <div class="page-icon">&#128176;</div>
+    <h1 class="page-title">Tresorerie</h1>
+    <p class="page-desc">Donnees temps reel depuis Qonto + Pennylane + pipeline HubSpot.</p>
+
+    <div class="error-banner" id="tresoErrorBanner"></div>
+
+    <!-- KPIs -->
+    <div class="kpi-row" id="tresoKpis">
+      <div class="kpi-block">
+        <div class="kpi-label">Solde bancaire</div>
+        <div class="kpi-value" id="tresoKpiTreso">--</div>
+        <div class="kpi-sub" id="tresoKpiTresoSub"></div>
+      </div>
+      <div class="kpi-block" onclick="openFacturesImpayeesModal()" style="cursor:pointer">
+        <div class="kpi-label">A encaisser</div>
+        <div class="kpi-value" id="tresoKpiAEncaisser">--</div>
+        <div class="kpi-sub" id="tresoKpiAEncaisserSub"></div>
+      </div>
+      <div class="kpi-block">
+        <div class="kpi-label">Charges du mois</div>
+        <div class="kpi-value" id="tresoKpiCharges">--</div>
+        <div class="kpi-sub" id="tresoKpiChargesSub"></div>
+      </div>
+      <div class="kpi-block">
+        <div class="kpi-label">Pipeline pondere</div>
+        <div class="kpi-value" id="tresoKpiPipeline">--</div>
+        <div class="kpi-sub" id="tresoKpiPipelineSub"></div>
+      </div>
+    </div>
+
+    <!-- Chart: Projection tresorerie -->
+    <div class="section">
+      <div class="section-title">Projection de tresorerie (12 mois)</div>
+      <div style="position:relative;height:350px;margin-bottom:1rem">
+        <canvas id="tresoChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Chart: Categories de depenses -->
+    <div class="section">
+      <div class="section-title">Repartition des depenses par categorie</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;align-items:start">
+        <div style="position:relative;height:320px">
+          <canvas id="chargesChart"></canvas>
+        </div>
+        <div id="tresoChargesDetail">
+          <p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+  </div>
+  <!-- end page-tresorerie -->
+
+
   </div><!-- end app-main -->
   </div><!-- end app-layout -->
 
@@ -1090,6 +1154,50 @@
     </div>
   </div>
 
+  <!-- Modal Detail Mois Tresorerie -->
+  <div class="modal-overlay" id="tresoMoisDetailModalOverlay">
+    <div class="modal" style="max-width:750px">
+      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
+        <h2 id="tresoMoisDetailTitle">Detail du mois</h2>
+        <button onclick="closeTresoMoisDetailModal()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--text)">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:1rem" id="tresoMoisDetailBody">
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeTresoMoisDetailModal()">Fermer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Factures Impayees -->
+  <div class="modal-overlay" id="facturesImpayeesModalOverlay">
+    <div class="modal">
+      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
+        <h2>Factures a encaisser</h2>
+        <span id="facturesImpayeesModalTotal" style="font-size:0.85rem;font-weight:600;color:var(--primary)"></span>
+      </div>
+      <div class="modal-body" style="padding:0">
+        <table style="width:100%;font-size:0.85rem">
+          <thead>
+            <tr>
+              <th style="text-align:left;padding:0.5rem 1rem">Client</th>
+              <th style="text-align:left;padding:0.5rem 1rem">Mission</th>
+              <th style="text-align:center;padding:0.5rem 1rem">Type</th>
+              <th style="text-align:right;padding:0.5rem 1rem">Montant</th>
+              <th style="text-align:right;padding:0.5rem 1rem">Emission</th>
+              <th style="text-align:right;padding:0.5rem 1rem">Echeance (J+45)</th>
+              <th style="text-align:center;padding:0.5rem 1rem">Statut</th>
+            </tr>
+          </thead>
+          <tbody id="facturesImpayeesModalBody"></tbody>
+        </table>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeFacturesImpayeesModal()">Fermer</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     // --- Dark mode ---
     function initTheme() {
@@ -1126,20 +1234,24 @@
     // --- Navigation ---
     let currentPage = 'dashboard';
 
+    const PAGE_NAMES = { dashboard: 'Dashboard', facturation: 'Facturation', tresorerie: 'Tresorerie' };
+
     function navigateTo(page) {
       currentPage = page;
       document.querySelectorAll('.app-page').forEach(p => p.classList.remove('active'));
       document.getElementById('page-' + page).classList.add('active');
       document.querySelectorAll('.sidebar-link').forEach(l => l.classList.toggle('active', l.dataset.page === page));
-      document.getElementById('topbarPageName').textContent = page === 'dashboard' ? 'Dashboard' : 'Facturation';
+      document.getElementById('topbarPageName').textContent = PAGE_NAMES[page] || page;
       document.getElementById('btnObjectifs').style.display = page === 'dashboard' ? '' : 'none';
 
       if (page === 'facturation' && !factData) refreshFactData();
+      if (page === 'tresorerie' && !tresoData) refreshTresoData();
     }
 
     function refreshCurrentPage() {
       if (currentPage === 'dashboard') refreshData();
       else if (currentPage === 'facturation') refreshFactData();
+      else if (currentPage === 'tresorerie') refreshTresoData();
     }
 
     const MONTHS_FR = [
@@ -1723,6 +1835,28 @@
       return patternCanvas;
     }
 
+    function createStripePatternColor(color) {
+      const patternCanvas = document.createElement('canvas');
+      patternCanvas.width = 10;
+      patternCanvas.height = 10;
+      const pctx = patternCanvas.getContext('2d');
+      pctx.strokeStyle = color;
+      pctx.lineWidth = 2;
+      pctx.beginPath();
+      pctx.moveTo(0, 10);
+      pctx.lineTo(10, 0);
+      pctx.stroke();
+      pctx.beginPath();
+      pctx.moveTo(-2, 2);
+      pctx.lineTo(2, -2);
+      pctx.stroke();
+      pctx.beginPath();
+      pctx.moveTo(8, 12);
+      pctx.lineTo(12, 8);
+      pctx.stroke();
+      return patternCanvas;
+    }
+
     // --- Modal ---
     function openObjectivesModal() {
       const year = CURRENT_YEAR;
@@ -2203,6 +2337,418 @@
           '<p style="color:var(--danger);font-size:0.85rem;padding:1rem">Erreur de chargement de la facturation.</p>';
       }
     }
+
+    // --- Tresorerie ---
+    let tresoData = null;
+    let tresoChart = null;
+    let chargesChart = null;
+
+    async function refreshTresoData() {
+      const errorBanner = document.getElementById('tresoErrorBanner');
+      errorBanner.style.display = 'none';
+      try {
+        const res = await fetch('/api/tresorerie');
+        if (!res.ok) throw new Error('Erreur chargement tresorerie');
+        tresoData = await res.json();
+        renderTresoKpis();
+        renderTresoChart();
+        renderChargesChart();
+        renderChargesDetail();
+      } catch (err) {
+        console.error('Erreur tresorerie:', err);
+        errorBanner.textContent = err.message;
+        errorBanner.style.display = 'block';
+      }
+    }
+
+    function renderTresoKpis() {
+      if (!tresoData) return;
+
+      // Solde bancaire
+      const solde = tresoData.soldeActuel;
+      const soldeEl = document.getElementById('tresoKpiTreso');
+      soldeEl.textContent = solde != null ? formatEuro(solde) : 'N/A';
+      soldeEl.style.color = (solde != null && solde < 0) ? 'var(--danger)' : '';
+      document.getElementById('tresoKpiTresoSub').textContent = 'Compte Qonto';
+
+      // A encaisser
+      const aEncaisser = tresoData.totalAEncaisser || 0;
+      const envoyeTotal = tresoData.totalEnvoye || 0;
+      const prevTotal = tresoData.totalPrevisionnel || 0;
+      document.getElementById('tresoKpiAEncaisser').textContent = formatEuro(aEncaisser);
+      document.getElementById('tresoKpiAEncaisserSub').textContent = formatEuro(envoyeTotal) + ' envoye + ' + formatEuro(prevTotal) + ' prev.';
+
+      // Charges mois courant
+      const charges = tresoData.chargesMoisCourant || 0;
+      const moyenne = tresoData.chargesMoyennes || 0;
+      document.getElementById('tresoKpiCharges').textContent = formatEuro(charges);
+      document.getElementById('tresoKpiChargesSub').textContent = 'Moy. 3 mois : ' + formatEuro(moyenne);
+
+      // Pipeline pondere
+      document.getElementById('tresoKpiPipeline').textContent = formatEuro(tresoData.pipelinePondere || 0);
+      const nbDeals = tresoData.pipelineDetail ? tresoData.pipelineDetail.length : 0;
+      document.getElementById('tresoKpiPipelineSub').textContent = nbDeals + ' deal' + (nbDeals > 1 ? 's' : '') + ' HubSpot';
+    }
+
+    function openFacturesImpayeesModal() {
+      if (!tresoData || !tresoData.facturesImpayees) return;
+      const factures = tresoData.facturesImpayees;
+      const envoyees = factures.filter(f => !f.previsionnel);
+      const previsionnelles = factures.filter(f => f.previsionnel);
+      const totalEnv = envoyees.reduce((s, f) => s + (f.montant || 0), 0);
+      const totalPrev = previsionnelles.reduce((s, f) => s + (f.montant || 0), 0);
+      document.getElementById('facturesImpayeesModalTotal').textContent = 'Total : ' + formatEuro(totalEnv + totalPrev);
+      const tbody = document.getElementById('facturesImpayeesModalBody');
+
+      function renderRow(f) {
+        const emission = f.dateEmission ? new Date(f.dateEmission).toLocaleDateString('fr-FR') : '-';
+        const echeance = f.dateEcheance ? new Date(f.dateEcheance).toLocaleDateString('fr-FR') : '-';
+        const statusLabels = { late: 'En retard', upcoming: 'A venir', previsionnel: 'Previsionnel' };
+        const statusColors = { late: 'var(--danger)', upcoming: 'var(--warning, #f59e0b)', previsionnel: '#888' };
+        const statusLabel = statusLabels[f.status] || f.status || '-';
+        const statusColor = statusColors[f.status] || '';
+        const rowOpacity = f.previsionnel ? 'opacity:0.65;' : '';
+        return '<tr style="' + rowOpacity + '">' +
+          '<td style="padding:0.5rem 1rem">' + (f.client || '-') + '</td>' +
+          '<td style="padding:0.5rem 1rem">' + (f.mission || '-') + '</td>' +
+          '<td style="text-align:center;padding:0.5rem 1rem">' + (f.type || '-') + '</td>' +
+          '<td style="text-align:right;padding:0.5rem 1rem;font-weight:600">' + formatEuro(f.montant || 0) + '</td>' +
+          '<td style="text-align:right;padding:0.5rem 1rem">' + emission + (f.previsionnel ? ' (est.)' : '') + '</td>' +
+          '<td style="text-align:right;padding:0.5rem 1rem">' + echeance + '</td>' +
+          '<td style="text-align:center;padding:0.5rem 1rem;color:' + statusColor + ';font-weight:600">' + statusLabel + '</td>' +
+          '</tr>';
+      }
+
+      let html = '';
+      if (envoyees.length > 0) {
+        html += '<tr><td colspan="7" style="padding:0.6rem 1rem;font-weight:700;background:var(--bg-secondary, #f5f5f5);border-bottom:2px solid var(--primary)">Factures envoyees — ' + formatEuro(totalEnv) + '</td></tr>';
+        html += envoyees.map(renderRow).join('');
+      }
+      if (previsionnelles.length > 0) {
+        html += '<tr><td colspan="7" style="padding:0.6rem 1rem;font-weight:700;background:var(--bg-secondary, #f5f5f5);border-bottom:2px solid #888">Factures previsionnelles — ' + formatEuro(totalPrev) + '</td></tr>';
+        html += previsionnelles.map(renderRow).join('');
+      }
+      if (factures.length === 0) {
+        html = '<tr><td colspan="7" style="padding:1rem;text-align:center;color:#888">Aucune facture en attente</td></tr>';
+      }
+      tbody.innerHTML = html;
+      document.getElementById('facturesImpayeesModalOverlay').classList.add('active');
+    }
+
+    function closeFacturesImpayeesModal() {
+      document.getElementById('facturesImpayeesModalOverlay').classList.remove('active');
+    }
+
+    document.getElementById('facturesImpayeesModalOverlay').addEventListener('click', function(e) {
+      if (e.target === this) closeFacturesImpayeesModal();
+    });
+
+    function renderTresoChart() {
+      if (!tresoData || !tresoData.previsionnel) return;
+      const prev = tresoData.previsionnel;
+
+      const labels = prev.map(m => {
+        const date = new Date(m.annee, m.mois - 1);
+        return date.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
+      });
+
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+
+      if (tresoChart) tresoChart.destroy();
+      tresoChart = new Chart(document.getElementById('tresoChart'), {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [
+            {
+              label: 'Tresorerie previsionnelle',
+              data: prev.map(m => m.soldeFin),
+              backgroundColor: isDark ? 'rgba(52,211,153,0.7)' : 'rgba(15,123,108,0.6)',
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          onClick: (evt, elements) => {
+            if (elements.length > 0) {
+              const idx = elements[0].index;
+              openTresoMoisDetailModal(idx);
+            }
+          },
+          plugins: {
+            datalabels: { display: false },
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => formatEuro(ctx.raw),
+                afterLabel: () => 'Cliquez pour voir le detail',
+              },
+            },
+          },
+          scales: {
+            y: {
+              ticks: {
+                callback: v => formatEuro(v),
+                color: isDark ? '#999' : '#787774',
+              },
+              grid: { color: isDark ? '#2e2e2e' : '#e9e9e7' },
+            },
+            x: {
+              ticks: { color: isDark ? '#999' : '#787774' },
+              grid: { display: false },
+            },
+          },
+          onHover: (evt, elements) => {
+            evt.native.target.style.cursor = elements.length > 0 ? 'pointer' : 'default';
+          },
+        },
+      });
+    }
+
+    function openTresoMoisDetailModal(monthIndex) {
+      if (!tresoData || !tresoData.previsionnel) return;
+      const mois = tresoData.previsionnel[monthIndex];
+      if (!mois) return;
+
+      const dateLabel = new Date(mois.annee, mois.mois - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+      document.getElementById('tresoMoisDetailTitle').textContent = dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1);
+
+      const mKey = mois.annee + '-' + String(mois.mois).padStart(2, '0');
+
+      // Factures du mois
+      const factures = (tresoData.facturesImpayees || []).filter(f => {
+        if (!f.dateEcheance) return false;
+        const d = new Date(f.dateEcheance);
+        return (d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')) === mKey;
+      });
+      const facturesEnvoyees = factures.filter(f => f.status === 'upcoming');
+      const facturesPrev = factures.filter(f => f.status === 'previsionnel');
+      const facturesRetard = factures.filter(f => f.status === 'late');
+
+      // Transactions Qonto du mois
+      const chargesDetail = (tresoData.chargesDetailParMois || {})[mKey] || {};
+      const creditsDetail = (tresoData.creditsDetailParMois || {})[mKey] || [];
+
+      const encEnvoye = mois.encaissementsEnvoye || 0;
+      const encPrev = mois.encaissementsPrev || 0;
+      const encRetard = mois.encaissementsRetard || 0;
+      const encQonto = mois.encaissements || 0;
+      const charges = mois.decaissements || 0;
+      const totalEnc = encQonto + encEnvoye + encPrev + encRetard;
+
+      // --- Soldes ---
+      let html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.8rem;margin-bottom:1.2rem">';
+      html += '<div style="background:var(--bg-secondary,#f5f5f5);border-radius:8px;padding:0.8rem 1rem">';
+      html += '<div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:0.2rem">Solde debut de mois</div>';
+      html += '<div style="font-size:1.1rem;font-weight:700">' + formatEuro(mois.soldeDebut) + '</div></div>';
+      html += '<div style="background:var(--bg-secondary,#f5f5f5);border-radius:8px;padding:0.8rem 1rem">';
+      html += '<div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:0.2rem">Solde fin de mois</div>';
+      html += '<div style="font-size:1.1rem;font-weight:700">' + formatEuro(mois.soldeFin) + '</div></div>';
+      html += '</div>';
+
+      // --- Helper : section accordeon ---
+      let accordionId = 0;
+      function accordion(label, montant, color, icon, detailHtml) {
+        const id = 'treso-acc-' + (accordionId++);
+        const hasDetail = detailHtml && detailHtml.length > 0;
+        const cursor = hasDetail ? 'cursor:pointer;' : '';
+        const chevron = hasDetail ? '<span class="treso-chevron" style="margin-left:auto;font-size:0.7rem;transition:transform 0.2s;color:var(--text-secondary)">&#9654;</span>' : '';
+        let s = '<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:0.5rem;overflow:hidden">';
+        s += '<div onclick="' + (hasDetail ? 'toggleTresoAccordion(\'' + id + '\',this)' : '') + '" style="display:flex;align-items:center;padding:0.6rem 0.8rem;gap:0.5rem;' + cursor + 'user-select:none">';
+        s += '<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:' + color + ';flex-shrink:0"></span>';
+        s += '<span style="font-size:0.85rem;font-weight:600">' + icon + ' ' + label + '</span>';
+        s += '<span style="font-size:0.85rem;font-weight:700;margin-left:auto;color:' + color + '">' + formatEuro(montant) + '</span>';
+        s += chevron;
+        s += '</div>';
+        if (hasDetail) {
+          s += '<div id="' + id + '" style="display:none;border-top:1px solid var(--border);padding:0.4rem 0;max-height:250px;overflow-y:auto">';
+          s += detailHtml;
+          s += '</div>';
+        }
+        s += '</div>';
+        return s;
+      }
+
+      function txTable(items) {
+        if (!items || items.length === 0) return '';
+        let t = '<table style="width:100%;border-collapse:collapse;font-size:0.8rem">';
+        for (const tx of items) {
+          const d = tx.date ? new Date(tx.date).toLocaleDateString('fr-FR') : '';
+          t += '<tr style="border-bottom:1px solid var(--border)">';
+          t += '<td style="padding:0.3rem 0.8rem;color:var(--text-secondary);white-space:nowrap;width:70px">' + d + '</td>';
+          t += '<td style="padding:0.3rem 0.5rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px">' + (tx.label || '-') + '</td>';
+          t += '<td style="padding:0.3rem 0.8rem;text-align:right;font-weight:600;white-space:nowrap">' + formatEuro(tx.amount || tx.montant || 0) + '</td>';
+          t += '</tr>';
+        }
+        t += '</table>';
+        return t;
+      }
+
+      function factureTable(items) {
+        if (!items || items.length === 0) return '';
+        let t = '<table style="width:100%;border-collapse:collapse;font-size:0.8rem">';
+        for (const f of items) {
+          t += '<tr style="border-bottom:1px solid var(--border)">';
+          t += '<td style="padding:0.3rem 0.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px">' + (f.client || '-') + '</td>';
+          t += '<td style="padding:0.3rem 0.5rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px">' + (f.mission || '-') + '</td>';
+          t += '<td style="padding:0.3rem 0.8rem;text-align:right;font-weight:600;white-space:nowrap">' + formatEuro(f.montant || 0) + '</td>';
+          t += '</tr>';
+        }
+        t += '</table>';
+        return t;
+      }
+
+      // --- ENCAISSEMENTS ---
+      html += '<div style="font-weight:700;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-secondary);margin-bottom:0.4rem">Encaissements</div>';
+
+      if (encQonto > 0) {
+        html += accordion('Encaissements Qonto', encQonto, 'rgba(15,123,108,0.7)', '&#9679;', txTable(creditsDetail));
+      }
+      if (encEnvoye > 0) {
+        html += accordion('Factures envoyees', encEnvoye, 'rgba(15,123,108,0.4)', '&#9675;', factureTable(facturesEnvoyees));
+      }
+      if (encPrev > 0) {
+        html += accordion('Factures previsionnelles', encPrev, 'rgba(105,64,165,0.6)', '&#9675;', factureTable(facturesPrev));
+      }
+      if (encRetard > 0) {
+        html += accordion('En retard', encRetard, 'rgba(224,62,62,0.7)', '&#9679;', factureTable(facturesRetard));
+      }
+
+      // Total encaissements
+      html += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0.8rem;font-weight:700;font-size:0.85rem;margin-bottom:1rem">';
+      html += '<span>Total encaissements</span>';
+      html += '<span style="color:var(--success, #0f7b6c)">' + formatEuro(totalEnc) + '</span></div>';
+
+      // --- CHARGES ---
+      html += '<div style="font-weight:700;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-secondary);margin-bottom:0.4rem">Charges</div>';
+
+      const categories = Object.keys(chargesDetail).sort((a, b) => {
+        const totalA = chargesDetail[a].reduce((s, t) => s + t.amount, 0);
+        const totalB = chargesDetail[b].reduce((s, t) => s + t.amount, 0);
+        return totalB - totalA;
+      });
+
+      if (categories.length > 0) {
+        for (const cat of categories) {
+          const txs = chargesDetail[cat];
+          const catTotal = txs.reduce((s, t) => s + t.amount, 0);
+          html += accordion(cat, catTotal, 'rgba(217,115,13,0.7)', '&#9679;', txTable(txs));
+        }
+      } else {
+        html += accordion('Charges (estimation)', charges, 'rgba(217,115,13,0.7)', '&#9679;', '');
+      }
+
+      // Total charges
+      html += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0.8rem;font-weight:700;font-size:0.85rem;margin-bottom:1rem">';
+      html += '<span>Total charges</span>';
+      html += '<span style="color:var(--warning, #d9730d)">-' + formatEuro(charges) + '</span></div>';
+
+      // --- VARIATION ---
+      const variation = totalEnc - charges;
+      const varColor = variation >= 0 ? 'var(--success, #0f7b6c)' : 'var(--danger, #e03e3e)';
+      html += '<div style="display:flex;justify-content:space-between;padding:0.6rem 0.8rem;font-weight:700;font-size:0.95rem;border-top:2px solid var(--text);margin-top:0.5rem">';
+      html += '<span>Variation du mois</span>';
+      html += '<span style="color:' + varColor + '">' + (variation >= 0 ? '+' : '') + formatEuro(variation) + '</span></div>';
+
+      document.getElementById('tresoMoisDetailBody').innerHTML = html;
+      document.getElementById('tresoMoisDetailModalOverlay').classList.add('active');
+    }
+
+    function toggleTresoAccordion(id, headerEl) {
+      const content = document.getElementById(id);
+      if (!content) return;
+      const isOpen = content.style.display !== 'none';
+      content.style.display = isOpen ? 'none' : 'block';
+      const chevron = headerEl.querySelector('.treso-chevron');
+      if (chevron) chevron.style.transform = isOpen ? '' : 'rotate(90deg)';
+    }
+
+    function closeTresoMoisDetailModal() {
+      document.getElementById('tresoMoisDetailModalOverlay').classList.remove('active');
+    }
+
+    document.getElementById('tresoMoisDetailModalOverlay').addEventListener('click', function(e) {
+      if (e.target === this) closeTresoMoisDetailModal();
+    });
+
+    function renderChargesChart() {
+      if (!tresoData || !tresoData.ventilationCharges) return;
+      const charges = tresoData.ventilationCharges.slice(0, 10); // Top 10
+
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const colors = [
+        isDark ? 'rgba(74,159,238,0.8)' : 'rgba(35,131,226,0.7)',
+        isDark ? 'rgba(167,139,250,0.8)' : 'rgba(105,64,165,0.7)',
+        isDark ? 'rgba(251,191,36,0.8)' : 'rgba(217,115,13,0.7)',
+        isDark ? 'rgba(52,211,153,0.8)' : 'rgba(15,123,108,0.7)',
+        isDark ? 'rgba(248,113,113,0.7)' : 'rgba(224,62,62,0.6)',
+        isDark ? 'rgba(150,150,150,0.6)' : 'rgba(120,119,116,0.5)',
+        isDark ? 'rgba(236,72,153,0.7)' : 'rgba(193,28,97,0.7)',
+        isDark ? 'rgba(245,158,11,0.7)' : 'rgba(180,83,9,0.7)',
+        isDark ? 'rgba(99,102,241,0.7)' : 'rgba(67,56,202,0.7)',
+        isDark ? 'rgba(20,184,166,0.7)' : 'rgba(13,148,136,0.7)',
+      ];
+
+      if (chargesChart) chargesChart.destroy();
+      chargesChart = new Chart(document.getElementById('chargesChart'), {
+        type: 'doughnut',
+        data: {
+          labels: charges.map(c => c.categorie),
+          datasets: [{
+            data: charges.map(c => c.montant),
+            backgroundColor: colors.slice(0, charges.length),
+            borderWidth: 0,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            datalabels: { display: false },
+            legend: {
+              position: 'right',
+              labels: { color: isDark ? '#ccc' : '#37352f', font: { size: 11 } },
+            },
+            tooltip: {
+              callbacks: { label: ctx => ctx.label + ': ' + formatEuro(ctx.raw) },
+            },
+          },
+        },
+      });
+    }
+
+    function renderChargesDetail() {
+      if (!tresoData || !tresoData.ventilationCharges) return;
+      const charges = tresoData.ventilationCharges;
+      const total = charges.reduce((s, c) => s + c.montant, 0);
+
+      let html = `<table style="width:100%;border-collapse:collapse;font-size:0.85rem">
+        <thead><tr style="border-bottom:1px solid var(--border)">
+          <th style="text-align:left;padding:0.6rem 1rem;color:var(--text-secondary)">Categorie</th>
+          <th style="text-align:right;padding:0.6rem 1rem;color:var(--text-secondary)">Montant</th>
+          <th style="text-align:right;padding:0.6rem 1rem;color:var(--text-secondary)">%</th>
+        </tr></thead><tbody>`;
+
+      for (const item of charges) {
+        const pct = total > 0 ? ((item.montant / total) * 100).toFixed(1) : '0.0';
+        html += `<tr style="border-bottom:1px solid var(--border)">
+          <td style="text-align:left;padding:0.5rem 1rem">${item.categorie}</td>
+          <td style="text-align:right;padding:0.5rem 1rem;font-weight:600">${formatEuro(item.montant)}</td>
+          <td style="text-align:right;padding:0.5rem 1rem;color:var(--text-secondary)">${pct}%</td>
+        </tr>`;
+      }
+
+      html += `<tr style="border-top:2px solid var(--text);font-weight:700">
+        <td style="text-align:left;padding:0.6rem 1rem">Total</td>
+        <td style="text-align:right;padding:0.6rem 1rem">${formatEuro(total)}</td>
+        <td style="text-align:right;padding:0.6rem 1rem">100%</td>
+      </tr></tbody></table>`;
+
+      document.getElementById('tresoChargesDetail').innerHTML = html;
+    }
+
+
   </script>
 
 </body>
