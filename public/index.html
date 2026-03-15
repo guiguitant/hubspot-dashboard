@@ -3,15 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Dashboard Commercial</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
+  <title>Releaf Pilot</title>
+  <link rel="icon" href="/logo-releaf.svg">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
-      --primary: #2383e2;
-      --primary-bg: rgba(35,131,226,0.08);
+      --primary: #003D2E;
+      --primary-hover: #00523E;
+      --primary-bg: rgba(0,61,46,0.08);
       --success: #0f7b6c;
       --success-bg: rgba(15,123,108,0.08);
       --danger: #e03e3e;
@@ -29,11 +30,18 @@
       --border: #e9e9e7;
       --hover: #f7f7f5;
       --radius: 4px;
+      --sidebar-bg: #003D2E;
+      --sidebar-text: rgba(255,255,255,0.85);
+      --sidebar-text-secondary: rgba(255,255,255,0.55);
+      --sidebar-hover: rgba(255,255,255,0.1);
+      --sidebar-active-bg: rgba(255,255,255,0.18);
+      --sidebar-border: rgba(255,255,255,0.1);
     }
 
     [data-theme="dark"] {
-      --primary: #4a9fee;
-      --primary-bg: rgba(74,159,238,0.12);
+      --primary: #34d399;
+      --primary-hover: #2fc08a;
+      --primary-bg: rgba(52,211,153,0.1);
       --success: #34d399;
       --success-bg: rgba(52,211,153,0.1);
       --danger: #f87171;
@@ -50,6 +58,12 @@
       --text-light: #5a5a5a;
       --border: #2e2e2e;
       --hover: #2a2a2a;
+      --sidebar-bg: #002A1F;
+      --sidebar-text: rgba(255,255,255,0.85);
+      --sidebar-text-secondary: rgba(255,255,255,0.5);
+      --sidebar-hover: rgba(255,255,255,0.08);
+      --sidebar-active-bg: rgba(52,211,153,0.2);
+      --sidebar-border: rgba(255,255,255,0.08);
     }
 
     [data-theme="dark"] .kanban-card {
@@ -125,7 +139,7 @@
       font-weight: 500;
     }
 
-    .btn-filled:hover { background: #1b6ec2; color: white; }
+    .btn-filled:hover { background: var(--primary-hover); color: white; }
 
     .notion-select {
       padding: 0.3rem 0.5rem;
@@ -214,7 +228,7 @@
     .kpi-clickable.kpi-active {
       outline: 2.5px solid var(--primary);
       outline-offset: -2.5px;
-      box-shadow: 0 0 0 4px rgba(37,99,235,0.12);
+      box-shadow: 0 0 0 4px rgba(0,61,46,0.12);
     }
 
     .kpi-positive { color: var(--success) !important; }
@@ -388,7 +402,7 @@
     .kanban-card.selected {
       border-left: 3px solid var(--primary);
       background: var(--primary-bg);
-      border-color: rgba(35,131,226,0.3);
+      border-color: rgba(0,61,46,0.3);
     }
 
     .kanban-card-name {
@@ -425,7 +439,7 @@
     .forecast-bar {
       display: none;
       background: var(--primary-bg);
-      border: 1px solid rgba(35,131,226,0.15);
+      border: 1px solid rgba(0,61,46,0.15);
       border-radius: var(--radius);
       padding: 0.6rem 1rem;
       margin-bottom: 1rem;
@@ -515,7 +529,7 @@
 
     .modal-field input:focus {
       border-color: var(--primary);
-      box-shadow: 0 0 0 2px rgba(35,131,226,0.15);
+      box-shadow: 0 0 0 2px rgba(0,61,46,0.15);
     }
 
     .modal-footer {
@@ -679,8 +693,8 @@
     .sidebar {
       width: 220px;
       min-width: 220px;
-      background: var(--bg-secondary);
-      border-right: 1px solid var(--border);
+      background: var(--sidebar-bg);
+      border-right: none;
       padding: 1rem 0.5rem;
       display: flex;
       flex-direction: column;
@@ -693,9 +707,9 @@
     }
 
     .sidebar-brand {
-      font-size: 0.85rem;
+      font-size: 0.9rem;
       font-weight: 700;
-      color: var(--text);
+      color: #ffffff;
       padding: 0.5rem 0.75rem 1rem;
       display: flex;
       align-items: center;
@@ -715,7 +729,7 @@
       padding: 0.45rem 0.75rem;
       border-radius: var(--radius);
       font-size: 0.82rem;
-      color: var(--text-secondary);
+      color: var(--sidebar-text-secondary);
       cursor: pointer;
       border: none;
       background: none;
@@ -725,15 +739,15 @@
       transition: background 0.12s, color 0.12s;
     }
 
-    .sidebar-link:hover { background: var(--hover); color: var(--text); }
-    .sidebar-link.active { background: var(--primary-bg); color: var(--primary); font-weight: 500; }
+    .sidebar-link:hover { background: var(--sidebar-hover); color: var(--sidebar-text); }
+    .sidebar-link.active { background: var(--sidebar-active-bg); color: #ffffff; font-weight: 500; }
 
     .sidebar-link svg { flex-shrink: 0; }
 
     .sidebar-section-label {
       font-size: 0.68rem;
       font-weight: 600;
-      color: var(--text-light);
+      color: var(--sidebar-text-secondary);
       text-transform: uppercase;
       letter-spacing: 0.05em;
       padding: 1rem 0.75rem 0.3rem;
@@ -825,13 +839,17 @@
   <div class="app-layout">
     <nav class="sidebar">
       <div class="sidebar-brand">
-        <span style="font-size:1.2rem">&#128200;</span> Commercial
+        <img src="/logo-releaf.svg" alt="Releaf" style="height:80px"> Pilot
       </div>
       <div class="sidebar-section-label">Navigation</div>
       <div class="sidebar-nav">
-        <button class="sidebar-link active" onclick="navigateTo('dashboard')" data-page="dashboard">
+        <button class="sidebar-link active" onclick="navigateTo('cockpit')" data-page="cockpit">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M8 4v4l3 2"/><path d="M4.5 8H2M14 8h-2.5M8 2v1.5M8 12.5V14"/></svg>
+          Cockpit
+        </button>
+        <button class="sidebar-link" onclick="navigateTo('dashboard')" data-page="dashboard">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
-          Dashboard
+          Commercial
         </button>
         <button class="sidebar-link" onclick="navigateTo('facturation')" data-page="facturation">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 1h8a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z"/><path d="M6 5h4M6 8h4M6 11h2"/></svg>
@@ -840,7 +858,7 @@
         <button class="sidebar-link" onclick="navigateTo('tresorerie');toggleTresoSubnav(true)" data-page="tresorerie">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 13V5l4-3 3 2 4-3 3 3v10H1z"/><path d="M1 9l4-2 3 2 4-3 3 2"/></svg>
           Tresorerie
-          <span id="tresoChevron" style="margin-left:auto;font-size:0.6rem;transition:transform 0.2s;color:var(--text-light)">&#9654;</span>
+          <span id="tresoChevron" style="margin-left:auto;font-size:0.6rem;transition:transform 0.2s;color:var(--sidebar-text-secondary)">&#9654;</span>
         </button>
         <div id="tresoSubnav" style="display:none;overflow:hidden">
           <button class="sidebar-link" onclick="navigateToMasseSalariale()" data-page="masse-salariale" style="padding-left:2.2rem;font-size:0.78rem">
@@ -848,11 +866,15 @@
             Masse salariale
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-left:auto;opacity:0.5"><rect x="3" y="7" width="10" height="8" rx="1"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/></svg>
           </button>
+          <button class="sidebar-link" onclick="navigateTo('scenarios')" data-page="scenarios" style="padding-left:2.2rem;font-size:0.78rem">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12M2 8h8M2 13h10"/><path d="M12 6l3 3-3 3"/></svg>
+            Scenarios
+          </button>
         </div>
       </div>
       <div style="flex:1"></div>
       <div style="padding:0.5rem 0.75rem;display:flex;align-items:center;gap:0.5rem">
-        <button class="btn" id="themeToggle" onclick="toggleTheme()" title="Mode sombre" style="padding:0.4rem">
+        <button class="btn" id="themeToggle" onclick="toggleTheme()" title="Mode sombre" style="padding:0.4rem;color:var(--sidebar-text-secondary)">
           <svg id="themeIcon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1a7 7 0 1 0 0 14A5 5 0 0 1 8 1z"/></svg>
         </button>
       </div>
@@ -863,9 +885,9 @@
   <!-- Topbar -->
   <div class="topbar">
     <div class="topbar-left">
-      <span>Commercial</span>
+      <span>Releaf Pilot</span>
       <span class="breadcrumb-sep">/</span>
-      <span style="color:var(--text)" id="topbarPageName">Dashboard</span>
+      <span style="color:var(--text)" id="topbarPageName">Cockpit</span>
     </div>
     <div class="topbar-right">
       <button class="btn" onclick="openObjectivesModal()" id="btnObjectifs">
@@ -880,12 +902,82 @@
     </div>
   </div>
 
+  <!-- PAGE: Cockpit -->
+  <div class="app-page active" id="page-cockpit">
+  <div class="page">
+    <div class="page-icon">&#127919;</div>
+    <h1 class="page-title">Cockpit</h1>
+    <p class="page-desc">Vue synthetique : tresorerie, commercial, facturation, masse salariale.</p>
+
+    <div class="error-banner" id="cockpitErrorBanner"></div>
+
+    <!-- Rangee 1 : 4 KPIs cles -->
+    <div class="kpi-row">
+      <div class="kpi-block">
+        <div class="kpi-label">Solde bancaire</div>
+        <div class="kpi-value" id="ckSolde">--</div>
+        <div class="kpi-sub" id="ckSoldeSub">Compte Qonto</div>
+      </div>
+      <div class="kpi-block">
+        <div class="kpi-label">Runway</div>
+        <div class="kpi-value" id="ckRunway">--</div>
+        <div class="kpi-sub" id="ckRunwaySub">mois de tresorerie</div>
+      </div>
+      <div class="kpi-block">
+        <div class="kpi-label">CA YTD</div>
+        <div class="kpi-value" id="ckCaYtd">--</div>
+        <div class="kpi-sub" id="ckCaYtdSub"></div>
+      </div>
+      <div class="kpi-block">
+        <div class="kpi-label">Pipeline pondere</div>
+        <div class="kpi-value" id="ckPipeline">--</div>
+        <div class="kpi-sub" id="ckPipelineSub"></div>
+      </div>
+    </div>
+
+    <!-- Rangee 2 : Alertes -->
+    <div id="cockpitAlerts" style="display:flex;flex-direction:column;gap:0.5rem;margin-bottom:2rem"></div>
+
+    <!-- Rangee 3 : 2 mini-graphiques -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-bottom:2.5rem">
+      <div class="section" style="margin-bottom:0">
+        <div class="section-title">Tresorerie 12 mois</div>
+        <div class="chart-wrap"><div class="chart-container" style="height:220px"><canvas id="ckTresoChart"></canvas></div></div>
+      </div>
+      <div class="section" style="margin-bottom:0">
+        <div class="section-title">CA mensuel 2026</div>
+        <div class="chart-wrap"><div class="chart-container" style="height:220px"><canvas id="ckCaChart"></canvas></div></div>
+      </div>
+    </div>
+
+    <!-- Rangee 4 : 3 blocs resume -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1.5rem">
+      <!-- Facturation -->
+      <div style="border:1px solid var(--border);border-radius:var(--radius);padding:1rem 1.2rem">
+        <div style="font-weight:600;font-size:0.95rem;margin-bottom:0.75rem;color:var(--text)">Facturation</div>
+        <div id="ckFacturation" style="font-size:0.85rem;color:var(--text-secondary);line-height:1.8">Chargement...</div>
+      </div>
+      <!-- Pipeline -->
+      <div style="border:1px solid var(--border);border-radius:var(--radius);padding:1rem 1.2rem">
+        <div style="font-weight:600;font-size:0.95rem;margin-bottom:0.75rem;color:var(--text)">Pipeline</div>
+        <div id="ckPipelineDetail" style="font-size:0.85rem;color:var(--text-secondary);line-height:1.8">Chargement...</div>
+      </div>
+      <!-- Masse salariale -->
+      <div style="border:1px solid var(--border);border-radius:var(--radius);padding:1rem 1.2rem">
+        <div style="font-weight:600;font-size:0.95rem;margin-bottom:0.75rem;color:var(--text)">Masse salariale</div>
+        <div id="ckMasse" style="font-size:0.85rem;color:var(--text-secondary);line-height:1.8">Chargement...</div>
+      </div>
+    </div>
+  </div>
+  </div>
+  <!-- end page-cockpit -->
+
   <!-- PAGE: Dashboard -->
-  <div class="app-page active" id="page-dashboard">
+  <div class="app-page" id="page-dashboard">
   <div class="page">
 
     <div class="page-icon">&#128200;</div>
-    <h1 class="page-title">Dashboard Commercial</h1>
+    <h1 class="page-title">Commercial</h1>
     <p class="page-desc">Suivi du chiffre d'affaires et performance de l'equipe commerciale.</p>
 
     <div class="error-banner" id="errorBanner"></div>
@@ -1144,6 +1236,41 @@
   </div>
   <!-- end page-masse-salariale -->
 
+  <!-- PAGE: Scenarios -->
+  <div class="app-page" id="page-scenarios">
+  <div class="page">
+    <div class="page-icon">&#128202;</div>
+    <h1 class="page-title">Scenarios financiers</h1>
+    <p class="page-desc">Comparez differents scenarios de tresorerie : embauches, deals, charges, subventions.</p>
+
+    <div class="section">
+      <div class="section-title" style="display:flex;align-items:center;gap:0.5rem">
+        Mes scenarios
+        <button class="btn" onclick="openScenarioCreateModal()" style="font-size:0.8rem;padding:0.25rem 0.6rem;border-radius:var(--radius);color:var(--primary);font-weight:600">+ Creer un scenario</button>
+      </div>
+      <div id="scenariosListSection">
+        <p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Comparaison des projections</div>
+      <div style="position:relative;height:400px;margin-bottom:1rem">
+        <canvas id="scenariosChart"></canvas>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Detail mensuel</div>
+      <div id="scenariosDetailTable" style="overflow-x:auto">
+        <p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Selectionnez des scenarios pour voir le comparatif.</p>
+      </div>
+    </div>
+
+  </div>
+  </div>
+  <!-- end page-scenarios -->
+
 
   </div><!-- end app-main -->
   </div><!-- end app-layout -->
@@ -1346,6 +1473,194 @@
     </div>
   </div>
 
+  <!-- Modal Creer/Editer Scenario -->
+  <div class="modal-overlay" id="scenarioModalOverlay">
+    <div class="modal" style="max-width:700px;max-height:90vh;overflow-y:auto">
+      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
+        <h2 id="scenarioModalTitle">Creer un scenario</h2>
+        <button onclick="closeScenarioModal()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--text)">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:1rem">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:1rem">
+          <div>
+            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Nom du scenario</label>
+            <input type="text" id="scenarioNom" placeholder="Ex: Optimiste" style="width:100%;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.85rem;font-family:inherit;background:var(--bg);color:var(--text)">
+          </div>
+          <div>
+            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Description</label>
+            <input type="text" id="scenarioDesc" placeholder="Ex: Scenario avec 2 embauches" style="width:100%;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.85rem;font-family:inherit;background:var(--bg);color:var(--text)">
+          </div>
+        </div>
+        <input type="hidden" id="scenarioEditId" value="">
+
+        <!-- Accordeons overrides -->
+        <div id="scenarioOverridesSection" style="display:none">
+
+          <!-- Masse salariale -->
+          <div style="border:1px solid var(--border);border-radius:var(--radius);margin-bottom:0.5rem">
+            <button onclick="toggleAccordion('accSalaire')" style="width:100%;text-align:left;padding:0.6rem 0.8rem;background:var(--hover);border:none;cursor:pointer;font-family:inherit;font-size:0.85rem;font-weight:600;color:var(--text);border-radius:var(--radius);display:flex;align-items:center;gap:0.5rem">
+              <span id="accSalaireChevron" style="font-size:0.6rem;transition:transform 0.2s">&#9654;</span>
+              Masse salariale
+              <span id="accSalaireCount" style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)"></span>
+            </button>
+            <div id="accSalaire" style="display:none;padding:0.8rem">
+              <div style="display:grid;grid-template-columns:auto 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Action</label>
+                  <select id="ovSalAction" style="padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                    <option value="add">Ajouter</option>
+                    <option value="remove">Retirer</option>
+                    <option value="modify">Modifier</option>
+                  </select>
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Nom</label>
+                  <input type="text" id="ovSalNom" placeholder="Nom" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Poste</label>
+                  <input type="text" id="ovSalPoste" placeholder="Poste" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Type</label>
+                  <select id="ovSalType" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                    <option value="salarie">Salarie</option>
+                    <option value="dirigeant">Dirigeant</option>
+                    <option value="alternant">Alternant</option>
+                    <option value="stagiaire">Stagiaire</option>
+                  </select>
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Net mensuel</label>
+                  <input type="number" id="ovSalNet" placeholder="2500" min="0" step="100" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Charges</label>
+                  <input type="number" id="ovSalCharges" placeholder="2000" min="0" step="100" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Date entree</label>
+                  <input type="date" id="ovSalEntree" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Date sortie</label>
+                  <input type="date" id="ovSalSortie" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+              </div>
+              <button class="btn" onclick="addOverrideSalaire()" style="font-size:0.8rem;padding:0.3rem 0.8rem;color:var(--primary);font-weight:600">+ Ajouter</button>
+              <div id="ovSalaireList" style="margin-top:0.5rem"></div>
+            </div>
+          </div>
+
+          <!-- Pipeline -->
+          <div style="border:1px solid var(--border);border-radius:var(--radius);margin-bottom:0.5rem">
+            <button onclick="toggleAccordion('accPipeline')" style="width:100%;text-align:left;padding:0.6rem 0.8rem;background:var(--hover);border:none;cursor:pointer;font-family:inherit;font-size:0.85rem;font-weight:600;color:var(--text);border-radius:var(--radius);display:flex;align-items:center;gap:0.5rem">
+              <span id="accPipelineChevron" style="font-size:0.6rem;transition:transform 0.2s">&#9654;</span>
+              Pipeline
+              <span id="accPipelineCount" style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)"></span>
+            </button>
+            <div id="accPipeline" style="display:none;padding:0.8rem">
+              <div style="margin-bottom:0.5rem">
+                <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Facteur pipeline global (1 = reel, 0 = aucun pipeline, 1.3 = +30%)</label>
+                <div style="display:flex;gap:0.5rem;align-items:center">
+                  <input type="number" id="ovPipelineFactor" placeholder="1.0" step="0.1" min="0" style="width:100px;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                  <button class="btn" onclick="addOverridePipelineFactor()" style="font-size:0.8rem;padding:0.3rem 0.8rem;color:var(--primary);font-weight:600">Appliquer</button>
+                </div>
+              </div>
+              <hr style="border:none;border-top:1px solid var(--border);margin:0.5rem 0">
+              <p style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:0.3rem">Ou ajouter un deal fictif :</p>
+              <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Nom du deal</label>
+                  <input type="text" id="ovDealNom" placeholder="Client X" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Montant</label>
+                  <input type="number" id="ovDealMontant" placeholder="50000" min="0" step="1000" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Probabilite %</label>
+                  <input type="number" id="ovDealProba" placeholder="100" min="0" max="100" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Mois (YYYY-MM)</label>
+                  <input type="month" id="ovDealMois" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+              </div>
+              <button class="btn" onclick="addOverrideDeal()" style="font-size:0.8rem;padding:0.3rem 0.8rem;color:var(--primary);font-weight:600">+ Ajouter deal</button>
+              <div id="ovPipelineList" style="margin-top:0.5rem"></div>
+            </div>
+          </div>
+
+          <!-- Charges fixes -->
+          <div style="border:1px solid var(--border);border-radius:var(--radius);margin-bottom:0.5rem">
+            <button onclick="toggleAccordion('accCharges')" style="width:100%;text-align:left;padding:0.6rem 0.8rem;background:var(--hover);border:none;cursor:pointer;font-family:inherit;font-size:0.85rem;font-weight:600;color:var(--text);border-radius:var(--radius);display:flex;align-items:center;gap:0.5rem">
+              <span id="accChargesChevron" style="font-size:0.6rem;transition:transform 0.2s">&#9654;</span>
+              Charges fixes
+              <span id="accChargesCount" style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)"></span>
+            </button>
+            <div id="accCharges" style="display:none;padding:0.8rem">
+              <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Libelle</label>
+                  <input type="text" id="ovChargeLib" placeholder="Loyer bureau" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Montant mensuel</label>
+                  <input type="number" id="ovChargeMontant" placeholder="1500" min="0" step="100" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Mois debut</label>
+                  <input type="month" id="ovChargeDebut" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Mois fin</label>
+                  <input type="month" id="ovChargeFin" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+              </div>
+              <button class="btn" onclick="addOverrideCharge()" style="font-size:0.8rem;padding:0.3rem 0.8rem;color:var(--primary);font-weight:600">+ Ajouter</button>
+              <div id="ovChargesList" style="margin-top:0.5rem"></div>
+            </div>
+          </div>
+
+          <!-- Revenus exceptionnels -->
+          <div style="border:1px solid var(--border);border-radius:var(--radius);margin-bottom:0.5rem">
+            <button onclick="toggleAccordion('accRevenus')" style="width:100%;text-align:left;padding:0.6rem 0.8rem;background:var(--hover);border:none;cursor:pointer;font-family:inherit;font-size:0.85rem;font-weight:600;color:var(--text);border-radius:var(--radius);display:flex;align-items:center;gap:0.5rem">
+              <span id="accRevenusChevron" style="font-size:0.6rem;transition:transform 0.2s">&#9654;</span>
+              Revenus exceptionnels
+              <span id="accRevenusCount" style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)"></span>
+            </button>
+            <div id="accRevenus" style="display:none;padding:0.8rem">
+              <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Libelle</label>
+                  <input type="text" id="ovRevLib" placeholder="Subvention BPI" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Montant</label>
+                  <input type="number" id="ovRevMontant" placeholder="30000" min="0" step="1000" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Mois (YYYY-MM)</label>
+                  <input type="month" id="ovRevMois" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+              </div>
+              <button class="btn" onclick="addOverrideRevenu()" style="font-size:0.8rem;padding:0.3rem 0.8rem;color:var(--primary);font-weight:600">+ Ajouter</button>
+              <div id="ovRevenusList" style="margin-top:0.5rem"></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeScenarioModal()">Annuler</button>
+        <button class="btn btn-filled" id="scenarioSubmitBtn" onclick="submitScenario()">Creer</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     // --- Dark mode ---
     function initTheme() {
@@ -1380,9 +1695,9 @@
     initTheme();
 
     // --- Navigation ---
-    let currentPage = 'dashboard';
+    let currentPage = 'cockpit';
 
-    const PAGE_NAMES = { dashboard: 'Dashboard', facturation: 'Facturation', tresorerie: 'Tresorerie', 'masse-salariale': 'Masse salariale' };
+    const PAGE_NAMES = { cockpit: 'Cockpit', dashboard: 'Commercial', facturation: 'Facturation', tresorerie: 'Tresorerie', 'masse-salariale': 'Masse salariale', scenarios: 'Scenarios' };
 
     function navigateTo(page) {
       currentPage = page;
@@ -1390,20 +1705,23 @@
       document.getElementById('page-' + page).classList.add('active');
       document.querySelectorAll('.sidebar-link').forEach(l => l.classList.toggle('active', l.dataset.page === page));
       document.getElementById('topbarPageName').textContent = PAGE_NAMES[page] || page;
-      document.getElementById('btnObjectifs').style.display = page === 'dashboard' ? '' : 'none';
+      document.getElementById('btnObjectifs').style.display = (page === 'dashboard' || page === 'cockpit') ? '' : 'none';
 
       // Ouvrir le sous-menu tresorerie si on navigue vers une sous-page
-      if (page === 'tresorerie' || page === 'masse-salariale') {
+      if (page === 'tresorerie' || page === 'masse-salariale' || page === 'scenarios') {
         toggleTresoSubnav(true);
         // Marquer aussi tresorerie comme parent actif quand on est sur une sous-page
-        if (page === 'masse-salariale') {
+        if (page === 'masse-salariale' || page === 'scenarios') {
           document.querySelector('[data-page="tresorerie"]').classList.add('active');
         }
       }
 
+      if (page === 'cockpit') refreshCockpit();
+      if (page === 'dashboard' && !dashboardData) { refreshData(); refreshReconData(); }
       if (page === 'facturation' && !factData) refreshFactData();
       if (page === 'tresorerie' && !tresoData) refreshTresoData();
       if (page === 'masse-salariale') refreshMasseSalarialePage();
+      if (page === 'scenarios') refreshScenariosPage();
     }
 
     // --- Auth masse salariale ---
@@ -1465,10 +1783,12 @@
     }
 
     function refreshCurrentPage() {
-      if (currentPage === 'dashboard') refreshData();
+      if (currentPage === 'cockpit') refreshCockpit();
+      else if (currentPage === 'dashboard') refreshData();
       else if (currentPage === 'facturation') refreshFactData();
       else if (currentPage === 'tresorerie') refreshTresoData();
       else if (currentPage === 'masse-salariale') refreshMasseSalarialePage();
+      else if (currentPage === 'scenarios') refreshScenariosPage();
     }
 
     const MONTHS_FR = [
@@ -2262,10 +2582,8 @@
       }
     }
 
-    refreshData();
-    refreshReconData();
-    refreshTimer = setInterval(refreshData, 5 * 60 * 1000);
-    setInterval(refreshReconData, 5 * 60 * 1000);
+    refreshCockpit();
+    refreshTimer = setInterval(function() { if (currentPage === 'cockpit') refreshCockpit(); else if (currentPage === 'dashboard') { refreshData(); refreshReconData(); } }, 5 * 60 * 1000);
 
     // --- Facturation ---
     let factData = null;
@@ -3372,6 +3690,705 @@
       document.getElementById('tresoChargesDetail').innerHTML = html;
     }
 
+
+    // =============================================
+    // --- SCENARIOS ---
+    // =============================================
+
+    let scenariosData = [];
+    let selectedScenarios = new Set();
+    let scenariosChart = null;
+    let currentScenarioOverrides = []; // overrides en mémoire pour la modale en cours
+
+    const SCENARIO_COLORS = [
+      'rgba(59,130,246,1)', 'rgba(234,88,12,1)', 'rgba(139,92,246,1)',
+      'rgba(16,185,129,1)', 'rgba(236,72,153,1)', 'rgba(245,158,11,1)',
+    ];
+
+    async function refreshScenariosPage() {
+      try {
+        const res = await fetch('/api/scenarios');
+        scenariosData = await res.json();
+        renderScenariosList();
+        await renderScenariosComparison();
+      } catch {
+        document.getElementById('scenariosListSection').innerHTML = '<p style="color:var(--danger);font-size:0.85rem;padding:1rem">Erreur chargement</p>';
+      }
+    }
+
+    function renderScenariosList() {
+      const container = document.getElementById('scenariosListSection');
+      if (scenariosData.length === 0) {
+        container.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:0.5rem">Aucun scenario. Cliquez sur "+ Creer un scenario" pour commencer.</p>';
+        return;
+      }
+      let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:0.75rem">';
+      for (const s of scenariosData) {
+        const checked = selectedScenarios.has(s.id) ? 'checked' : '';
+        const date = new Date(s.created_at).toLocaleDateString('fr-FR');
+        html += '<div style="border:1px solid var(--border);border-radius:var(--radius);padding:0.75rem;background:var(--bg);display:flex;flex-direction:column;gap:0.3rem">';
+        html += '<div style="display:flex;align-items:center;gap:0.5rem">';
+        html += '<input type="checkbox" ' + checked + ' onchange="toggleScenarioSelection(\'' + s.id + '\')" style="cursor:pointer">';
+        html += '<span style="font-weight:600;font-size:0.9rem">' + (s.nom || 'Sans nom') + '</span>';
+        html += '<span style="margin-left:auto;display:flex;gap:0.3rem">';
+        html += '<button onclick="editScenario(\'' + s.id + '\')" style="background:none;border:none;cursor:pointer;padding:0.2rem;color:var(--text-light)" title="Modifier"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11.5 1.5l3 3L5 14H2v-3L11.5 1.5z"/></svg></button>';
+        html += '<button onclick="deleteScenario(\'' + s.id + '\')" style="background:none;border:none;cursor:pointer;padding:0.2rem;color:var(--text-light)" title="Supprimer"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4h12M5 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1M6 7v5M10 7v5"/><path d="M3 4l1 10a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-10"/></svg></button>';
+        html += '</span>';
+        html += '</div>';
+        if (s.description) html += '<p style="font-size:0.8rem;color:var(--text-secondary);margin:0">' + s.description + '</p>';
+        html += '<p style="font-size:0.7rem;color:var(--text-light);margin:0">Cree le ' + date + '</p>';
+        html += '</div>';
+      }
+      html += '</div>';
+      container.innerHTML = html;
+    }
+
+    async function toggleScenarioSelection(id) {
+      if (selectedScenarios.has(id)) {
+        selectedScenarios.delete(id);
+      } else {
+        selectedScenarios.add(id);
+      }
+      renderScenariosList();
+      await renderScenariosComparison();
+    }
+
+    async function renderScenariosComparison() {
+      const detailContainer = document.getElementById('scenariosDetailTable');
+
+      if (selectedScenarios.size === 0) {
+        if (scenariosChart) { scenariosChart.destroy(); scenariosChart = null; }
+        detailContainer.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Selectionnez des scenarios pour voir le comparatif.</p>';
+        return;
+      }
+
+      // Fetch baseline + selected scenarios projections
+      const fetches = [
+        fetch('/api/scenarios/baseline/projection').then(r => r.json()),
+        ...Array.from(selectedScenarios).map(id =>
+          fetch('/api/scenarios/' + id + '/projection').then(r => r.json())
+        ),
+      ];
+
+      try {
+        const results = await Promise.all(fetches);
+        const baseline = results[0];
+        const scenarios = results.slice(1);
+
+        // --- Chart ---
+        const labels = baseline.previsionnel.map(m => {
+          const date = new Date(m.annee, m.mois - 1);
+          return date.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
+        });
+
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+
+        const SCENARIO_BAR_COLORS = [
+          isDark ? 'rgba(59,130,246,0.6)' : 'rgba(59,130,246,0.5)',
+          isDark ? 'rgba(234,88,12,0.6)' : 'rgba(234,88,12,0.5)',
+          isDark ? 'rgba(139,92,246,0.6)' : 'rgba(139,92,246,0.5)',
+          isDark ? 'rgba(16,185,129,0.6)' : 'rgba(16,185,129,0.5)',
+          isDark ? 'rgba(236,72,153,0.6)' : 'rgba(236,72,153,0.5)',
+          isDark ? 'rgba(245,158,11,0.6)' : 'rgba(245,158,11,0.5)',
+        ];
+
+        const datasets = [
+          {
+            label: 'Baseline',
+            data: baseline.previsionnel.map(m => m.soldeFin),
+            backgroundColor: isDark ? 'rgba(150,150,150,0.45)' : 'rgba(150,150,150,0.35)',
+            hoverBackgroundColor: isDark ? 'rgba(150,150,150,0.7)' : 'rgba(150,150,150,0.55)',
+            borderRadius: 4,
+            borderSkipped: false,
+          },
+        ];
+
+        scenarios.forEach((sc, i) => {
+          const bgColor = SCENARIO_BAR_COLORS[i % SCENARIO_BAR_COLORS.length];
+          const hoverColor = bgColor.replace(/[\d.]+\)$/, '0.85)');
+          datasets.push({
+            label: sc.nom,
+            data: sc.previsionnel.map(m => m.soldeFin),
+            backgroundColor: bgColor,
+            hoverBackgroundColor: hoverColor,
+            borderRadius: 4,
+            borderSkipped: false,
+          });
+        });
+
+        if (scenariosChart) scenariosChart.destroy();
+        scenariosChart = new Chart(document.getElementById('scenariosChart'), {
+          type: 'bar',
+          data: { labels, datasets },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 600, easing: 'easeOutQuart' },
+            plugins: {
+              legend: {
+                display: true,
+                position: 'top',
+                labels: { color: isDark ? '#ccc' : '#555', font: { size: 12 } },
+              },
+              tooltip: {
+                backgroundColor: isDark ? '#333' : '#fff',
+                titleColor: isDark ? '#eee' : '#37352f',
+                bodyColor: isDark ? '#ccc' : '#555',
+                borderColor: isDark ? '#555' : '#e9e9e7',
+                borderWidth: 1,
+                cornerRadius: 8,
+                padding: 10,
+                callbacks: {
+                  label: (ctx) => ctx.dataset.label + ' : ' + formatEuro(ctx.raw),
+                },
+              },
+            },
+            scales: {
+              x: {
+                grid: { color: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' },
+                ticks: { color: isDark ? '#aaa' : '#888', font: { size: 11 } },
+              },
+              y: {
+                grid: { color: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' },
+                ticks: {
+                  color: isDark ? '#aaa' : '#888',
+                  font: { size: 11 },
+                  callback: (v) => Math.abs(v) >= 1000 ? Math.round(v / 1000) + 'k' : v + ' EUR',
+                },
+              },
+            },
+          },
+        });
+
+        // --- Detail table ---
+        let html = '<table style="width:100%;border-collapse:collapse;font-size:0.82rem">';
+        html += '<thead><tr style="border-bottom:2px solid var(--border)">';
+        html += '<th style="text-align:left;padding:0.5rem 0.8rem;color:var(--text-secondary)">Mois</th>';
+        html += '<th style="text-align:right;padding:0.5rem 0.8rem;color:var(--text-secondary)">Baseline</th>';
+        scenarios.forEach((sc) => {
+          html += '<th style="text-align:right;padding:0.5rem 0.8rem;color:var(--text-secondary)">' + sc.nom + '</th>';
+        });
+        html += '</tr></thead><tbody>';
+
+        for (let i = 0; i < baseline.previsionnel.length; i++) {
+          const bm = baseline.previsionnel[i];
+          const label = labels[i];
+          const bVal = bm.soldeFin;
+          html += '<tr style="border-bottom:1px solid var(--border)">';
+          html += '<td style="padding:0.4rem 0.8rem;font-weight:500">' + label + '</td>';
+          html += '<td style="text-align:right;padding:0.4rem 0.8rem">' + formatEuro(bVal) + '</td>';
+          scenarios.forEach((sc, si) => {
+            const sVal = sc.previsionnel[i] ? sc.previsionnel[i].soldeFin : 0;
+            const delta = sVal - bVal;
+            const color = delta > 0 ? 'var(--success, #0f7b6c)' : delta < 0 ? 'var(--danger)' : '';
+            const deltaStr = delta !== 0 ? ' <span style="font-size:0.75rem;color:' + color + '">(' + (delta > 0 ? '+' : '') + formatEuro(delta) + ')</span>' : '';
+            html += '<td style="text-align:right;padding:0.4rem 0.8rem">' + formatEuro(sVal) + deltaStr + '</td>';
+          });
+          html += '</tr>';
+        }
+        html += '</tbody></table>';
+        detailContainer.innerHTML = html;
+
+      } catch (err) {
+        detailContainer.innerHTML = '<p style="color:var(--danger);font-size:0.85rem;padding:1rem">Erreur chargement projections</p>';
+      }
+    }
+
+    // --- Modal scenario ---
+
+    function openScenarioCreateModal() {
+      document.getElementById('scenarioEditId').value = '';
+      document.getElementById('scenarioNom').value = '';
+      document.getElementById('scenarioDesc').value = '';
+      document.getElementById('scenarioModalTitle').textContent = 'Creer un scenario';
+      document.getElementById('scenarioSubmitBtn').textContent = 'Creer';
+      document.getElementById('scenarioOverridesSection').style.display = 'none';
+      currentScenarioOverrides = [];
+      document.getElementById('scenarioModalOverlay').classList.add('active');
+      setTimeout(() => document.getElementById('scenarioNom').focus(), 100);
+    }
+
+    async function editScenario(id) {
+      try {
+        const res = await fetch('/api/scenarios/' + id);
+        const scenario = await res.json();
+        document.getElementById('scenarioEditId').value = scenario.id;
+        document.getElementById('scenarioNom').value = scenario.nom || '';
+        document.getElementById('scenarioDesc').value = scenario.description || '';
+        document.getElementById('scenarioModalTitle').textContent = 'Modifier : ' + scenario.nom;
+        document.getElementById('scenarioSubmitBtn').textContent = 'Enregistrer';
+        document.getElementById('scenarioOverridesSection').style.display = 'block';
+        currentScenarioOverrides = scenario.overrides || [];
+        renderAllOverrideLists();
+        document.getElementById('scenarioModalOverlay').classList.add('active');
+      } catch {
+        alert('Erreur chargement scenario');
+      }
+    }
+
+    function closeScenarioModal() {
+      document.getElementById('scenarioModalOverlay').classList.remove('active');
+    }
+
+    document.getElementById('scenarioModalOverlay').addEventListener('click', function(e) {
+      if (e.target === this) closeScenarioModal();
+    });
+
+    async function submitScenario() {
+      const id = document.getElementById('scenarioEditId').value;
+      const nom = document.getElementById('scenarioNom').value.trim();
+      const description = document.getElementById('scenarioDesc').value.trim();
+      if (!nom) return alert('Nom requis');
+
+      try {
+        if (id) {
+          // Update
+          await fetch('/api/scenarios/' + id, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nom, description }),
+          });
+        } else {
+          // Create
+          const res = await fetch('/api/scenarios', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nom, description }),
+          });
+          const created = await res.json();
+          // Ouvrir directement en mode edition pour ajouter les overrides
+          closeScenarioModal();
+          await refreshScenariosPage();
+          editScenario(created.id);
+          return;
+        }
+        closeScenarioModal();
+        await refreshScenariosPage();
+      } catch {
+        alert('Erreur sauvegarde scenario');
+      }
+    }
+
+    async function deleteScenario(id) {
+      if (!confirm('Supprimer ce scenario et tous ses overrides ?')) return;
+      try {
+        await fetch('/api/scenarios/' + id, { method: 'DELETE' });
+        selectedScenarios.delete(id);
+        await refreshScenariosPage();
+      } catch {
+        alert('Erreur suppression');
+      }
+    }
+
+    // --- Accordion toggle ---
+    function toggleAccordion(id) {
+      const el = document.getElementById(id);
+      const chevron = document.getElementById(id + 'Chevron');
+      const isOpen = el.style.display !== 'none';
+      el.style.display = isOpen ? 'none' : 'block';
+      if (chevron) chevron.style.transform = isOpen ? '' : 'rotate(90deg)';
+    }
+
+    // --- Override helpers ---
+
+    function renderAllOverrideLists() {
+      const salaires = currentScenarioOverrides.filter(o => o.type === 'salaire');
+      const pipelines = currentScenarioOverrides.filter(o => o.type === 'pipeline');
+      const charges = currentScenarioOverrides.filter(o => o.type === 'charges_fixes');
+      const revenus = currentScenarioOverrides.filter(o => o.type === 'revenu_exceptionnel');
+
+      document.getElementById('accSalaireCount').textContent = salaires.length > 0 ? salaires.length + ' override(s)' : '';
+      document.getElementById('accPipelineCount').textContent = pipelines.length > 0 ? pipelines.length + ' override(s)' : '';
+      document.getElementById('accChargesCount').textContent = charges.length > 0 ? charges.length + ' override(s)' : '';
+      document.getElementById('accRevenusCount').textContent = revenus.length > 0 ? revenus.length + ' override(s)' : '';
+
+      renderOverrideList('ovSalaireList', salaires, o => {
+        const d = o.data;
+        const actionLabels = { add: 'Ajouter', remove: 'Retirer', modify: 'Modifier' };
+        return (actionLabels[d.action] || d.action) + ' : ' + (d.nom || d.salarie_id || '-') + (d.net_mensuel ? ' (' + formatEuro(d.net_mensuel) + ' net)' : '');
+      });
+      renderOverrideList('ovPipelineList', pipelines, o => {
+        const d = o.data;
+        if (d.mode === 'factor') return 'Facteur pipeline : x' + d.facteur;
+        return 'Deal : ' + (d.nom || '-') + ' ' + formatEuro(d.montant || 0) + ' (' + (d.probabilite || 100) + '%) en ' + (d.mois || '-');
+      });
+      renderOverrideList('ovChargesList', charges, o => {
+        const d = o.data;
+        return (d.libelle || '-') + ' : ' + formatEuro(d.montant_mensuel || 0) + '/mois de ' + (d.mois_debut || '?') + ' a ' + (d.mois_fin || '?');
+      });
+      renderOverrideList('ovRevenusList', revenus, o => {
+        const d = o.data;
+        return (d.libelle || '-') + ' : ' + formatEuro(d.montant || 0) + ' en ' + (d.mois || '-');
+      });
+    }
+
+    function renderOverrideList(containerId, overrides, formatter) {
+      const container = document.getElementById(containerId);
+      if (overrides.length === 0) {
+        container.innerHTML = '';
+        return;
+      }
+      let html = '';
+      for (const o of overrides) {
+        html += '<div style="display:flex;align-items:center;gap:0.5rem;padding:0.3rem 0;border-bottom:1px solid var(--border);font-size:0.8rem">';
+        html += '<span style="flex:1">' + formatter(o) + '</span>';
+        html += '<button onclick="deleteOverride(\'' + o.id + '\')" style="background:none;border:none;cursor:pointer;color:var(--danger);font-size:0.9rem;padding:0.1rem 0.3rem" title="Supprimer">&times;</button>';
+        html += '</div>';
+      }
+      container.innerHTML = html;
+    }
+
+    async function deleteOverride(oid) {
+      const scenarioId = document.getElementById('scenarioEditId').value;
+      if (!scenarioId) return;
+      try {
+        await fetch('/api/scenarios/' + scenarioId + '/overrides/' + oid, { method: 'DELETE' });
+        currentScenarioOverrides = currentScenarioOverrides.filter(o => o.id !== oid);
+        renderAllOverrideLists();
+      } catch {
+        alert('Erreur suppression override');
+      }
+    }
+
+    async function addOverrideToServer(type, data) {
+      const scenarioId = document.getElementById('scenarioEditId').value;
+      if (!scenarioId) return alert('Sauvegardez d\'abord le scenario');
+      try {
+        const res = await fetch('/api/scenarios/' + scenarioId + '/overrides', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type, data }),
+        });
+        const override = await res.json();
+        if (override.error) return alert(override.error);
+        currentScenarioOverrides.push(override);
+        renderAllOverrideLists();
+      } catch {
+        alert('Erreur ajout override');
+      }
+    }
+
+    function addOverrideSalaire() {
+      const action = document.getElementById('ovSalAction').value;
+      const data = {
+        action,
+        nom: document.getElementById('ovSalNom').value.trim(),
+        poste: document.getElementById('ovSalPoste').value.trim(),
+        type: document.getElementById('ovSalType').value,
+        net_mensuel: parseFloat(document.getElementById('ovSalNet').value) || 0,
+        charges_mensuelles: parseFloat(document.getElementById('ovSalCharges').value) || 0,
+        date_entree: document.getElementById('ovSalEntree').value || null,
+        date_sortie: document.getElementById('ovSalSortie').value || null,
+      };
+      if (action === 'add' && !data.nom) return alert('Nom requis');
+      addOverrideToServer('salaire', data);
+      // Reset fields
+      document.getElementById('ovSalNom').value = '';
+      document.getElementById('ovSalPoste').value = '';
+      document.getElementById('ovSalNet').value = '';
+      document.getElementById('ovSalCharges').value = '';
+      document.getElementById('ovSalEntree').value = '';
+      document.getElementById('ovSalSortie').value = '';
+    }
+
+    function addOverridePipelineFactor() {
+      const facteur = parseFloat(document.getElementById('ovPipelineFactor').value);
+      if (isNaN(facteur) || facteur < 0) return alert('Facteur invalide');
+      addOverrideToServer('pipeline', { mode: 'factor', facteur });
+      document.getElementById('ovPipelineFactor').value = '';
+    }
+
+    function addOverrideDeal() {
+      const nom = document.getElementById('ovDealNom').value.trim();
+      const montant = parseFloat(document.getElementById('ovDealMontant').value);
+      const probabilite = parseFloat(document.getElementById('ovDealProba').value) || 100;
+      const mois = document.getElementById('ovDealMois').value;
+      if (!nom) return alert('Nom du deal requis');
+      if (!montant || montant <= 0) return alert('Montant invalide');
+      if (!mois) return alert('Mois requis');
+      addOverrideToServer('pipeline', { mode: 'deal', nom, montant, probabilite, mois });
+      document.getElementById('ovDealNom').value = '';
+      document.getElementById('ovDealMontant').value = '';
+      document.getElementById('ovDealProba').value = '';
+      document.getElementById('ovDealMois').value = '';
+    }
+
+    function addOverrideCharge() {
+      const libelle = document.getElementById('ovChargeLib').value.trim();
+      const montant_mensuel = parseFloat(document.getElementById('ovChargeMontant').value);
+      const mois_debut = document.getElementById('ovChargeDebut').value;
+      const mois_fin = document.getElementById('ovChargeFin').value;
+      if (!libelle) return alert('Libelle requis');
+      if (!montant_mensuel || montant_mensuel <= 0) return alert('Montant invalide');
+      if (!mois_debut || !mois_fin) return alert('Mois debut et fin requis');
+      addOverrideToServer('charges_fixes', { libelle, montant_mensuel, mois_debut, mois_fin });
+      document.getElementById('ovChargeLib').value = '';
+      document.getElementById('ovChargeMontant').value = '';
+      document.getElementById('ovChargeDebut').value = '';
+      document.getElementById('ovChargeFin').value = '';
+    }
+
+    function addOverrideRevenu() {
+      const libelle = document.getElementById('ovRevLib').value.trim();
+      const montant = parseFloat(document.getElementById('ovRevMontant').value);
+      const mois = document.getElementById('ovRevMois').value;
+      if (!libelle) return alert('Libelle requis');
+      if (!montant || montant <= 0) return alert('Montant invalide');
+      if (!mois) return alert('Mois requis');
+      addOverrideToServer('revenu_exceptionnel', { libelle, montant, mois });
+      document.getElementById('ovRevLib').value = '';
+      document.getElementById('ovRevMontant').value = '';
+      document.getElementById('ovRevMois').value = '';
+    }
+
+
+    // --- COCKPIT ---
+    let ckTresoChart = null;
+    let ckCaChart = null;
+    let ckDashData = null;
+    let ckTresoData = null;
+    let ckFactDataCache = null;
+
+    async function refreshCockpit() {
+      const errorBanner = document.getElementById('cockpitErrorBanner');
+      errorBanner.style.display = 'none';
+      try {
+        const [dashRes, tresoRes, factRes] = await Promise.all([
+          fetch('/api/dashboard'),
+          fetch('/api/tresorerie'),
+          fetch('/api/facturation'),
+        ]);
+        if (!dashRes.ok) throw new Error('Erreur dashboard');
+        if (!tresoRes.ok) throw new Error('Erreur tresorerie');
+        ckDashData = await dashRes.json();
+        ckTresoData = await tresoRes.json();
+        ckFactDataCache = factRes.ok ? await factRes.json() : null;
+
+        renderCockpitKpis();
+        renderCockpitAlerts();
+        renderCockpitCharts();
+        renderCockpitSummary();
+
+        const now = new Date();
+        document.getElementById('lastSync').textContent =
+          now.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+      } catch (err) {
+        console.error('Erreur cockpit:', err);
+        errorBanner.textContent = err.message;
+        errorBanner.style.display = 'block';
+      }
+    }
+
+    function renderCockpitKpis() {
+      if (!ckTresoData || !ckDashData) return;
+
+      // Solde bancaire
+      const solde = ckTresoData.soldeActuel;
+      const soldeEl = document.getElementById('ckSolde');
+      soldeEl.textContent = solde != null ? formatEuro(solde) : 'N/A';
+      soldeEl.style.color = (solde != null && solde < 0) ? 'var(--danger)' : '';
+
+      // Runway
+      const chargesMoy = ckTresoData.chargesMoyennes || 0;
+      const runway = chargesMoy > 0 ? (solde || 0) / chargesMoy : null;
+      const runwayEl = document.getElementById('ckRunway');
+      if (runway !== null) {
+        runwayEl.textContent = runway.toFixed(1) + ' mois';
+        runwayEl.style.color = runway < 6 ? 'var(--danger)' : runway < 9 ? 'var(--warning)' : '';
+      } else {
+        runwayEl.textContent = 'N/A';
+      }
+      document.getElementById('ckRunwaySub').textContent = chargesMoy > 0 ? 'Charges moy. ' + formatEuro(chargesMoy) + '/mois' : '';
+
+      // CA YTD
+      const currentMonth = new Date().getMonth();
+      const data2026 = ckDashData.yearlyData[CURRENT_YEAR] || [];
+      const caYTD = data2026.slice(0, currentMonth + 1).reduce((s, m) => s + m.total, 0);
+      document.getElementById('ckCaYtd').textContent = formatEuro(caYTD);
+      const objectives = getObjectives(CURRENT_YEAR);
+      const objYTD = objectives.slice(0, currentMonth + 1).reduce((s, v) => s + v, 0);
+      if (objYTD > 0) {
+        const pct = Math.round((caYTD / objYTD) * 100);
+        document.getElementById('ckCaYtdSub').innerHTML = pct + '% de l\'objectif YTD';
+      } else {
+        document.getElementById('ckCaYtdSub').textContent = 'Cumul ' + MONTHS_FR[currentMonth];
+      }
+
+      // Pipeline pondere
+      document.getElementById('ckPipeline').textContent = formatEuro(ckTresoData.pipelinePondere || 0);
+      const nbDeals = ckTresoData.pipelineDetail ? ckTresoData.pipelineDetail.length : 0;
+      document.getElementById('ckPipelineSub').textContent = nbDeals + ' deal' + (nbDeals > 1 ? 's' : '') + ' en cours';
+    }
+
+    function renderCockpitAlerts() {
+      const container = document.getElementById('cockpitAlerts');
+      let html = '';
+
+      // Factures en retard
+      if (ckTresoData && ckTresoData.facturesImpayees) {
+        const late = ckTresoData.facturesImpayees.filter(f => f.status === 'late');
+        if (late.length > 0) {
+          const total = late.reduce((s, f) => s + (f.montant || 0), 0);
+          html += '<div style="padding:0.6rem 1rem;border-radius:var(--radius);background:var(--danger-bg);color:var(--danger);font-size:0.85rem;font-weight:500">&#128308; ' + late.length + ' facture' + (late.length > 1 ? 's' : '') + ' en retard — ' + formatEuro(total) + '</div>';
+        }
+      }
+
+      // Runway < 6 mois
+      if (ckTresoData && ckTresoData.soldeActuel != null && ckTresoData.chargesMoyennes > 0) {
+        const runway = ckTresoData.soldeActuel / ckTresoData.chargesMoyennes;
+        if (runway < 6) {
+          html += '<div style="padding:0.6rem 1rem;border-radius:var(--radius);background:var(--warning-bg);color:var(--warning);font-size:0.85rem;font-weight:500">&#128992; Runway < 6 mois (' + runway.toFixed(1) + ' mois) — tresorerie basse</div>';
+        }
+      }
+
+      // CA en avance vs objectif
+      if (ckDashData) {
+        const currentMonth = new Date().getMonth();
+        const data2026 = ckDashData.yearlyData[CURRENT_YEAR] || [];
+        const caYTD = data2026.slice(0, currentMonth + 1).reduce((s, m) => s + m.total, 0);
+        const objectives = getObjectives(CURRENT_YEAR);
+        const objYTD = objectives.slice(0, currentMonth + 1).reduce((s, v) => s + v, 0);
+        if (objYTD > 0) {
+          const avance = ((caYTD / objYTD) - 1) * 100;
+          if (avance > 10) {
+            html += '<div style="padding:0.6rem 1rem;border-radius:var(--radius);background:var(--success-bg);color:var(--success);font-size:0.85rem;font-weight:500">&#128994; CA en avance de +' + Math.round(avance) + '% vs objectif YTD</div>';
+          }
+        }
+      }
+
+      container.innerHTML = html;
+    }
+
+    function renderCockpitCharts() {
+      // Mini treso chart
+      if (ckTresoData && ckTresoData.previsionnel) {
+        const prev = ckTresoData.previsionnel;
+        const labels = prev.map(m => {
+          const date = new Date(m.annee, m.mois - 1);
+          return date.toLocaleDateString('fr-FR', { month: 'short' });
+        });
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        const barColors = prev.map(m => m.soldeFin >= 0
+          ? (isDark ? 'rgba(52,211,153,0.6)' : 'rgba(15,123,108,0.5)')
+          : (isDark ? 'rgba(248,113,113,0.6)' : 'rgba(224,62,62,0.5)')
+        );
+        if (ckTresoChart) ckTresoChart.destroy();
+        ckTresoChart = new Chart(document.getElementById('ckTresoChart'), {
+          type: 'bar',
+          data: { labels, datasets: [{ data: prev.map(m => m.soldeFin), backgroundColor: barColors, borderRadius: 4, borderSkipped: false, barPercentage: 0.7 }] },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            animation: { duration: 400 },
+            plugins: { legend: { display: false }, datalabels: { display: false }, tooltip: { callbacks: { label: ctx => formatEuro(ctx.parsed.y) } } },
+            scales: {
+              x: { grid: { display: false }, ticks: { font: { size: 10 }, color: isDark ? '#999' : '#787774' } },
+              y: { grid: { color: isDark ? '#333' : '#eee' }, ticks: { font: { size: 10 }, color: isDark ? '#999' : '#787774', callback: v => formatEuro(v) } },
+            },
+          },
+        });
+      }
+
+      // Mini CA chart
+      if (ckDashData) {
+        const data2026 = ckDashData.yearlyData[CURRENT_YEAR] || Array.from({length:12}, () => ({total:0}));
+        const labels = MONTHS_FR.map(m => m.substring(0, 3));
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        const objectives = getObjectives(CURRENT_YEAR);
+        if (ckCaChart) ckCaChart.destroy();
+        ckCaChart = new Chart(document.getElementById('ckCaChart'), {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [
+              { label: 'CA 2026', data: data2026.map(m => m.total), backgroundColor: isDark ? 'rgba(52,211,153,0.6)' : 'rgba(0,61,46,0.6)', borderRadius: 4, borderSkipped: false, barPercentage: 0.6 },
+              { label: 'Objectif', data: objectives, type: 'line', borderColor: isDark ? 'rgba(251,191,36,0.7)' : 'rgba(217,115,13,0.6)', borderWidth: 2, pointRadius: 0, borderDash: [4, 3], fill: false },
+            ],
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            animation: { duration: 400 },
+            plugins: { legend: { display: false }, datalabels: { display: false }, tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + formatEuro(ctx.parsed.y) } } },
+            scales: {
+              x: { grid: { display: false }, ticks: { font: { size: 10 }, color: isDark ? '#999' : '#787774' } },
+              y: { grid: { color: isDark ? '#333' : '#eee' }, ticks: { font: { size: 10 }, color: isDark ? '#999' : '#787774', callback: v => formatEuro(v) } },
+            },
+          },
+        });
+      }
+    }
+
+    function renderCockpitSummary() {
+      // Facturation bloc
+      const factEl = document.getElementById('ckFacturation');
+      if (ckTresoData) {
+        const aEncaisser = ckTresoData.totalAEncaisser || 0;
+        const envoye = ckTresoData.totalEnvoye || 0;
+        const prev = ckTresoData.totalPrevisionnel || 0;
+        const nbLate = ckTresoData.facturesImpayees ? ckTresoData.facturesImpayees.filter(f => f.status === 'late').length : 0;
+        factEl.innerHTML =
+          '<div style="display:flex;justify-content:space-between"><span>A encaisser</span><strong>' + formatEuro(aEncaisser) + '</strong></div>' +
+          '<div style="display:flex;justify-content:space-between"><span>Dont envoye</span><span>' + formatEuro(envoye) + '</span></div>' +
+          '<div style="display:flex;justify-content:space-between"><span>Dont previsionnel</span><span>' + formatEuro(prev) + '</span></div>' +
+          '<div style="display:flex;justify-content:space-between"><span>Factures en retard</span><strong style="color:' + (nbLate > 0 ? 'var(--danger)' : 'var(--success)') + '">' + nbLate + '</strong></div>';
+      } else {
+        factEl.textContent = 'Donnees indisponibles';
+      }
+
+      // Pipeline bloc
+      const pipeEl = document.getElementById('ckPipelineDetail');
+      if (ckDashData && ckDashData.pipelineDeals) {
+        let pipeTotal = 0, pipeWeighted = 0;
+        const stageCount = {};
+        const allDeals = [];
+        for (const [stage, deals] of Object.entries(ckDashData.pipelineDeals)) {
+          stageCount[stage] = deals.length;
+          for (const d of deals) {
+            pipeTotal += d.amount;
+            pipeWeighted += d.amount * (d.probability / 100);
+            allDeals.push(d);
+          }
+        }
+        // Top 3
+        allDeals.sort((a, b) => (b.amount * b.probability / 100) - (a.amount * a.probability / 100));
+        const top3 = allDeals.slice(0, 3);
+        let html = '';
+        for (const d of top3) {
+          html += '<div style="display:flex;justify-content:space-between;gap:0.3rem"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:55%">' + d.name + '</span><span style="white-space:nowrap">' + formatEuro(d.amount) + ' <span style="opacity:0.6">(' + d.probability + '%)</span></span></div>';
+        }
+        // Deals par etape
+        const stages = Object.entries(stageCount).map(([s, n]) => n + ' ' + s).join(', ');
+        html += '<div style="margin-top:0.3rem;padding-top:0.3rem;border-top:1px solid var(--border);display:flex;justify-content:space-between"><span>Brut / Pondere</span><span>' + formatEuro(pipeTotal) + ' / ' + formatEuro(pipeWeighted) + '</span></div>';
+        html += '<div style="font-size:0.8rem;color:var(--text-light);margin-top:0.2rem">' + stages + '</div>';
+        pipeEl.innerHTML = html;
+      } else {
+        pipeEl.textContent = 'Donnees indisponibles';
+      }
+
+      // Masse salariale bloc
+      const masseEl = document.getElementById('ckMasse');
+      if (ckTresoData && ckTresoData.previsionnel) {
+        const prev = ckTresoData.previsionnel;
+        const currentMonth = new Date().getMonth();
+        const currentYear = new Date().getFullYear();
+        // Find current month in previsionnel
+        const moisCourant = prev.find(m => m.mois === currentMonth + 1 && m.annee === currentYear);
+        const masseCourante = moisCourant ? (moisCourant.masseSalariale || 0) : 0;
+        // Previous month
+        const moisPrec = prev.find(m => (currentMonth === 0 ? (m.mois === 12 && m.annee === currentYear - 1) : (m.mois === currentMonth && m.annee === currentYear)));
+        const massePrec = moisPrec ? (moisPrec.masseSalariale || 0) : 0;
+        const evolution = massePrec > 0 ? ((masseCourante - massePrec) / massePrec * 100) : 0;
+
+        // Count active employees from previsionnel detail
+        const nbSalaries = moisCourant && moisCourant.masseSalarialeDetail ? moisCourant.masseSalarialeDetail.length : '-';
+
+        masseEl.innerHTML =
+          '<div style="display:flex;justify-content:space-between"><span>Cout mensuel</span><strong style="color:var(--warning)">' + formatEuro(masseCourante) + '</strong></div>' +
+          '<div style="display:flex;justify-content:space-between"><span>Salaries actifs</span><strong>' + nbSalaries + '</strong></div>' +
+          '<div style="display:flex;justify-content:space-between"><span>Evol. M vs M-1</span><span style="color:' + (evolution > 0 ? 'var(--danger)' : evolution < 0 ? 'var(--success)' : '') + '">' + (evolution !== 0 ? (evolution > 0 ? '+' : '') + evolution.toFixed(1) + '%' : '-') + '</span></div>';
+      } else {
+        masseEl.textContent = 'Donnees indisponibles';
+      }
+    }
 
   </script>
 
