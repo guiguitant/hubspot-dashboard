@@ -4162,6 +4162,7 @@
         if (!tresoRes.ok) throw new Error('Erreur tresorerie');
         ckDashData = await dashRes.json();
         ckTresoData = await tresoRes.json();
+        tresoData = ckTresoData; // alimente la variable globale pour les modales
         ckFactDataCache = factRes.ok ? await factRes.json() : null;
 
         renderCockpitKpis();
@@ -4229,7 +4230,7 @@
         const late = ckTresoData.facturesImpayees.filter(f => f.status === 'late');
         if (late.length > 0) {
           const total = late.reduce((s, f) => s + (f.montant || 0), 0);
-          html += '<div style="padding:0.6rem 1rem;border-radius:var(--radius);background:var(--danger-bg);color:var(--danger);font-size:0.85rem;font-weight:500">&#128308; ' + late.length + ' facture' + (late.length > 1 ? 's' : '') + ' en retard — ' + formatEuro(total) + '</div>';
+          html += '<div onclick="openFacturesImpayeesModal()" style="padding:0.6rem 1rem;border-radius:var(--radius);background:var(--danger-bg);color:var(--danger);font-size:0.85rem;font-weight:500;cursor:pointer;transition:opacity 0.15s" onmouseover="this.style.opacity=\'0.8\'" onmouseout="this.style.opacity=\'1\'">&#128308; ' + late.length + ' facture' + (late.length > 1 ? 's' : '') + ' en retard — ' + formatEuro(total) + ' <span style="opacity:0.6;font-size:0.8rem">→ voir detail</span></div>';
         }
       }
 
