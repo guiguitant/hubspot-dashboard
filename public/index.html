@@ -2971,6 +2971,34 @@
       document.getElementById('facturesImpayeesModalOverlay').classList.add('active');
     }
 
+    function openFacturesEnRetardModal() {
+      if (!tresoData || !tresoData.facturesImpayees) return;
+      const late = tresoData.facturesImpayees.filter(f => f.status === 'late');
+      const total = late.reduce((s, f) => s + (f.montant || 0), 0);
+      document.getElementById('facturesImpayeesModalTotal').textContent = late.length + ' facture' + (late.length > 1 ? 's' : '') + ' en retard — ' + formatEuro(total);
+      const tbody = document.getElementById('facturesImpayeesModalBody');
+
+      let html = '';
+      for (const f of late) {
+        const emission = f.dateEmission ? new Date(f.dateEmission).toLocaleDateString('fr-FR') : '-';
+        const echeance = f.dateEcheance ? new Date(f.dateEcheance).toLocaleDateString('fr-FR') : '-';
+        html += '<tr>' +
+          '<td style="padding:0.5rem 1rem">' + (f.client || '-') + '</td>' +
+          '<td style="padding:0.5rem 1rem">' + (f.mission || '-') + '</td>' +
+          '<td style="text-align:center;padding:0.5rem 1rem">' + (f.type || '-') + '</td>' +
+          '<td style="text-align:right;padding:0.5rem 1rem;font-weight:600">' + formatEuro(f.montant || 0) + '</td>' +
+          '<td style="text-align:right;padding:0.5rem 1rem">' + emission + '</td>' +
+          '<td style="text-align:right;padding:0.5rem 1rem">' + echeance + '</td>' +
+          '<td style="text-align:center;padding:0.5rem 1rem;color:var(--danger);font-weight:600">En retard</td>' +
+          '</tr>';
+      }
+      if (late.length === 0) {
+        html = '<tr><td colspan="7" style="padding:1rem;text-align:center;color:#888">Aucune facture en retard</td></tr>';
+      }
+      tbody.innerHTML = html;
+      document.getElementById('facturesImpayeesModalOverlay').classList.add('active');
+    }
+
     function closeFacturesImpayeesModal() {
       document.getElementById('facturesImpayeesModalOverlay').classList.remove('active');
     }
@@ -4230,7 +4258,7 @@
         const late = ckTresoData.facturesImpayees.filter(f => f.status === 'late');
         if (late.length > 0) {
           const total = late.reduce((s, f) => s + (f.montant || 0), 0);
-          html += '<div onclick="openFacturesImpayeesModal()" style="padding:0.6rem 1rem;border-radius:var(--radius);background:var(--danger-bg);color:var(--danger);font-size:0.85rem;font-weight:500;cursor:pointer;transition:opacity 0.15s" onmouseover="this.style.opacity=\'0.8\'" onmouseout="this.style.opacity=\'1\'">&#128308; ' + late.length + ' facture' + (late.length > 1 ? 's' : '') + ' en retard — ' + formatEuro(total) + ' <span style="opacity:0.6;font-size:0.8rem">→ voir detail</span></div>';
+          html += '<div onclick="openFacturesEnRetardModal()" style="padding:0.6rem 1rem;border-radius:var(--radius);background:var(--danger-bg);color:var(--danger);font-size:0.85rem;font-weight:500;cursor:pointer;transition:opacity 0.15s" onmouseover="this.style.opacity=\'0.8\'" onmouseout="this.style.opacity=\'1\'">&#128308; ' + late.length + ' facture' + (late.length > 1 ? 's' : '') + ' en retard — ' + formatEuro(total) + ' <span style="opacity:0.6;font-size:0.8rem">→ voir detail</span></div>';
         }
       }
 
