@@ -2454,22 +2454,41 @@
 
       const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
 
+      const barColors = prev.map(m => m.soldeFin >= 0
+        ? (isDark ? 'rgba(52,211,153,0.6)' : 'rgba(15,123,108,0.5)')
+        : (isDark ? 'rgba(248,113,113,0.6)' : 'rgba(224,62,62,0.5)')
+      );
+      const barHoverColors = prev.map(m => m.soldeFin >= 0
+        ? (isDark ? 'rgba(52,211,153,0.85)' : 'rgba(15,123,108,0.75)')
+        : (isDark ? 'rgba(248,113,113,0.85)' : 'rgba(224,62,62,0.75)')
+      );
+
       if (tresoChart) tresoChart.destroy();
       tresoChart = new Chart(document.getElementById('tresoChart'), {
         type: 'bar',
+        plugins: [ChartDataLabels],
         data: {
           labels,
           datasets: [
             {
               label: 'Tresorerie previsionnelle',
               data: prev.map(m => m.soldeFin),
-              backgroundColor: isDark ? 'rgba(52,211,153,0.7)' : 'rgba(15,123,108,0.6)',
+              backgroundColor: barColors,
+              hoverBackgroundColor: barHoverColors,
+              borderRadius: { topLeft: 6, topRight: 6, bottomLeft: 6, bottomRight: 6 },
+              borderSkipped: false,
+              barPercentage: 0.7,
+              categoryPercentage: 0.75,
             },
           ],
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          animation: {
+            duration: 600,
+            easing: 'easeOutQuart',
+          },
           onClick: (evt, elements) => {
             if (elements.length > 0) {
               const idx = elements[0].index;
@@ -2477,11 +2496,29 @@
             }
           },
           plugins: {
-            datalabels: { display: false },
+            datalabels: {
+              anchor: (ctx) => ctx.dataset.data[ctx.dataIndex] >= 0 ? 'end' : 'start',
+              align: (ctx) => ctx.dataset.data[ctx.dataIndex] >= 0 ? 'top' : 'bottom',
+              color: isDark ? '#f59e0b' : '#d9730d',
+              font: { size: 10.5, weight: '600' },
+              formatter: (value) => {
+                if (Math.abs(value) >= 1000) return Math.round(value / 1000) + 'k';
+                return formatEuro(value);
+              },
+              padding: { top: 4, bottom: 4 },
+            },
             legend: { display: false },
             tooltip: {
+              backgroundColor: isDark ? '#333' : '#fff',
+              titleColor: isDark ? '#eee' : '#37352f',
+              bodyColor: isDark ? '#ccc' : '#555',
+              borderColor: isDark ? '#555' : '#e9e9e7',
+              borderWidth: 1,
+              cornerRadius: 8,
+              padding: 10,
+              displayColors: false,
               callbacks: {
-                label: (ctx) => formatEuro(ctx.raw),
+                label: (ctx) => 'Solde : ' + formatEuro(ctx.raw),
                 afterLabel: () => 'Cliquez pour voir le detail',
               },
             },
@@ -2492,11 +2529,13 @@
                 callback: v => formatEuro(v),
                 color: isDark ? '#999' : '#787774',
               },
-              grid: { color: isDark ? '#2e2e2e' : '#e9e9e7' },
+              grid: { color: isDark ? 'rgba(46,46,46,0.5)' : 'rgba(233,233,231,0.7)', drawBorder: false },
+              border: { display: false },
             },
             x: {
               ticks: { color: isDark ? '#999' : '#787774' },
               grid: { display: false },
+              border: { display: false },
             },
           },
           onHover: (evt, elements) => {
