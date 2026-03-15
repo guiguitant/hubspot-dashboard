@@ -7,6 +7,8 @@
   <link rel="icon" href="/logo-releaf.svg">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
@@ -855,6 +857,10 @@
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 1h8a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z"/><path d="M6 5h4M6 8h4M6 11h2"/></svg>
           Facturation
         </button>
+        <button class="sidebar-link" onclick="navigateTo('frais-km')" data-page="frais-km">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 11l3-3 2 2 4-4 2 2 3-3"/><path d="M12 5h3v3"/><path d="M1 14h14"/></svg>
+          Frais KM
+        </button>
         <button class="sidebar-link" onclick="navigateTo('tresorerie');toggleTresoSubnav(true)" data-page="tresorerie">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 13V5l4-3 3 2 4-3 3 3v10H1z"/><path d="M1 9l4-2 3 2 4-3 3 2"/></svg>
           Tresorerie
@@ -1271,6 +1277,59 @@
   </div>
   <!-- end page-scenarios -->
 
+  <div class="app-page" id="page-frais-km">
+  <div class="page">
+    <div class="page-icon">&#128663;</div>
+    <h1 class="page-title">Frais KM</h1>
+    <p class="page-desc">Calculateur de frais kilometriques — bareme 0,665 €/km, aller-retour depuis Lambersart.</p>
+
+    <div class="kpi-row" id="fraisKmKpis">
+      <div class="kpi-block">
+        <div class="kpi-label">Clients avec adresse</div>
+        <div class="kpi-value" id="fkKpiClients">--</div>
+      </div>
+      <div class="kpi-block">
+        <div class="kpi-label">Distance moy. AR</div>
+        <div class="kpi-value" id="fkKpiDistMoy">--</div>
+        <div class="kpi-sub">km</div>
+      </div>
+      <div class="kpi-block">
+        <div class="kpi-label">Montant moy. AR</div>
+        <div class="kpi-value" id="fkKpiMontantMoy">--</div>
+        <div class="kpi-sub">€</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Generateur d'itineraires</div>
+      <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem">
+        <label style="font-size:0.85rem;color:var(--text-secondary)">Montant cible (€)</label>
+        <input type="number" id="fkMontantInput" placeholder="498" style="padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.9rem;width:120px;background:var(--bg);color:var(--text)">
+        <label style="font-size:0.85rem;color:var(--text-secondary)">Du</label>
+        <input type="date" id="fkDateDebut" style="padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.9rem;background:var(--bg);color:var(--text)">
+        <label style="font-size:0.85rem;color:var(--text-secondary)">au</label>
+        <input type="date" id="fkDateFin" style="padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.9rem;background:var(--bg);color:var(--text)">
+        <button class="btn-filled btn" onclick="generateFraisKm()" id="fkBtnGenerate">Generer</button>
+      </div>
+      <div id="fkResultats"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title" style="display:flex;align-items:center;gap:0.75rem">
+        Clients Pennylane
+        <button class="btn" onclick="syncFraisKmClients()" id="fkBtnSync" style="font-size:0.78rem;padding:0.2rem 0.6rem">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 8a6 6 0 0 1 10.3-4.1M14 8a6 6 0 0 1-10.3 4.1"/><path d="M14 2v4h-4M2 14v-4h4"/></svg>
+          Sync Pennylane
+        </button>
+      </div>
+      <div id="fkClientsTable">
+        <p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p>
+      </div>
+    </div>
+
+  </div>
+  </div>
+  <!-- end page-frais-km -->
 
   </div><!-- end app-main -->
   </div><!-- end app-layout -->
@@ -1697,7 +1756,7 @@
     // --- Navigation ---
     let currentPage = 'cockpit';
 
-    const PAGE_NAMES = { cockpit: 'Cockpit', dashboard: 'Commercial', facturation: 'Facturation', tresorerie: 'Tresorerie', 'masse-salariale': 'Masse salariale', scenarios: 'Scenarios' };
+    const PAGE_NAMES = { cockpit: 'Cockpit', dashboard: 'Commercial', facturation: 'Facturation', 'frais-km': 'Frais KM', tresorerie: 'Tresorerie', 'masse-salariale': 'Masse salariale', scenarios: 'Scenarios' };
 
     function navigateTo(page) {
       currentPage = page;
@@ -1722,6 +1781,7 @@
       if (page === 'tresorerie' && !tresoData) refreshTresoData();
       if (page === 'masse-salariale') refreshMasseSalarialePage();
       if (page === 'scenarios') refreshScenariosPage();
+      if (page === 'frais-km' && !fraisKmData) refreshFraisKmClients();
     }
 
     // --- Auth masse salariale ---
@@ -1789,6 +1849,7 @@
       else if (currentPage === 'tresorerie') refreshTresoData();
       else if (currentPage === 'masse-salariale') refreshMasseSalarialePage();
       else if (currentPage === 'scenarios') refreshScenariosPage();
+      else if (currentPage === 'frais-km') refreshFraisKmClients();
     }
 
     const MONTHS_FR = [
@@ -4417,6 +4478,200 @@
       } else {
         masseEl.textContent = 'Donnees indisponibles';
       }
+    }
+
+    // --- Frais KM ---
+    let fraisKmData = null;
+
+    async function syncFraisKmClients() {
+      const btn = document.getElementById('fkBtnSync');
+      btn.disabled = true;
+      btn.textContent = 'Sync en cours...';
+      document.getElementById('fkClientsTable').innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Synchronisation Pennylane + geocodage en cours... (1-2 min)</p>';
+      try {
+        const res = await fetch('/api/frais-km/sync', { method: 'POST' });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || 'Erreur serveur');
+        }
+        const result = await res.json();
+        alert(result.message);
+        fraisKmData = null;
+        await refreshFraisKmClients();
+      } catch (err) {
+        document.getElementById('fkClientsTable').innerHTML = '<p style="color:var(--danger);font-size:0.85rem;padding:1rem">Erreur sync : ' + err.message + '</p>';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Sync Pennylane';
+      }
+    }
+
+    async function refreshFraisKmClients() {
+      document.getElementById('fkClientsTable').innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p>';
+      try {
+        const res = await fetch('/api/frais-km/clients');
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || 'Erreur serveur');
+        }
+        fraisKmData = await res.json();
+        renderFraisKmClients(fraisKmData);
+      } catch (err) {
+        document.getElementById('fkClientsTable').innerHTML = '<p style="color:var(--danger);font-size:0.85rem;padding:1rem">Erreur : ' + err.message + '</p>';
+      }
+    }
+
+    function renderFraisKmClients(data) {
+      // KPIs
+      const nbClients = data.length;
+      const distMoy = nbClients > 0 ? (data.reduce((s, c) => s + c.distanceKmAR, 0) / nbClients).toFixed(1) : '--';
+      const montantMoy = nbClients > 0 ? (data.reduce((s, c) => s + c.montantAR, 0) / nbClients).toFixed(2) : '--';
+      document.getElementById('fkKpiClients').textContent = nbClients;
+      document.getElementById('fkKpiDistMoy').textContent = distMoy;
+      document.getElementById('fkKpiMontantMoy').textContent = montantMoy;
+
+      // Table
+      if (nbClients === 0) {
+        document.getElementById('fkClientsTable').innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Aucun client avec adresse geocodable.</p>';
+        return;
+      }
+      let html = '<table class="data-table"><thead><tr><th>Client</th><th>Adresse</th><th style="text-align:right">Distance AR (km)</th><th style="text-align:right">Montant AR (€)</th></tr></thead><tbody>';
+      data.forEach(c => {
+        html += '<tr><td>' + c.name + '</td><td style="font-size:0.8rem;color:var(--text-secondary)">' + c.address + '</td><td style="text-align:right">' + c.distanceKmAR.toFixed(1) + '</td><td style="text-align:right">' + c.montantAR.toFixed(2) + '</td></tr>';
+      });
+      html += '</tbody></table>';
+      document.getElementById('fkClientsTable').innerHTML = html;
+    }
+
+    async function generateFraisKm() {
+      const montant = parseFloat(document.getElementById('fkMontantInput').value);
+      const dateDebut = document.getElementById('fkDateDebut').value;
+      const dateFin = document.getElementById('fkDateFin').value;
+      if (!montant || montant <= 0) {
+        alert('Veuillez saisir un montant valide');
+        return;
+      }
+      if (!dateDebut || !dateFin) {
+        alert('Veuillez saisir une periode (date debut et fin)');
+        return;
+      }
+      if (dateDebut > dateFin) {
+        alert('La date de debut doit etre avant la date de fin');
+        return;
+      }
+      const btn = document.getElementById('fkBtnGenerate');
+      btn.disabled = true;
+      btn.textContent = 'Calcul...';
+      document.getElementById('fkResultats').innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem">Generation des itineraires...</p>';
+
+      try {
+        const res = await fetch('/api/frais-km/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ montant, dateDebut, dateFin }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || 'Erreur serveur');
+        }
+        const { itineraires } = await res.json();
+        console.log('Frais KM itineraires:', JSON.stringify(itineraires[0]?.trips?.slice(0,2)));
+        renderFraisKmResults(itineraires, montant);
+      } catch (err) {
+        document.getElementById('fkResultats').innerHTML = '<p style="color:var(--danger);font-size:0.85rem">Erreur : ' + err.message + '</p>';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Generer';
+      }
+    }
+
+    function renderFraisKmResults(itineraires, montant) {
+      if (!itineraires || itineraires.length === 0) {
+        document.getElementById('fkResultats').innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem">Aucun itineraire trouve pour ce montant.</p>';
+        return;
+      }
+      let html = '<div style="display:flex;flex-direction:column;gap:0.5rem">';
+      itineraires.forEach((it, idx) => {
+        const ecartPct = ((it.totalMontant - montant) / montant * 100).toFixed(1);
+        const ecartColor = Math.abs(ecartPct) <= 2 ? 'var(--success)' : Math.abs(ecartPct) <= 5 ? 'var(--warning)' : 'var(--danger)';
+        const detailId = 'fkDetail' + idx;
+        html += '<div style="border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-secondary)">';
+        html += '<div onclick="document.getElementById(\'' + detailId + '\').style.display=document.getElementById(\'' + detailId + '\').style.display===\'none\'?\'block\':\'none\';this.querySelector(\'.fk-chevron\').style.transform=document.getElementById(\'' + detailId + '\').style.display===\'none\'?\'\':\' rotate(90deg)\'" style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem 1rem;cursor:pointer;user-select:none">';
+        html += '<div style="display:flex;align-items:center;gap:0.5rem"><span class="fk-chevron" style="font-size:0.6rem;transition:transform 0.2s;color:var(--text-secondary)">&#9654;</span><strong style="font-size:0.9rem">Option ' + (idx + 1) + '</strong><span style="font-size:0.8rem;color:var(--text-secondary)">' + it.trips.length + ' trajets</span></div>';
+        html += '<div style="display:flex;gap:1rem;font-size:0.85rem;align-items:center">';
+        html += '<span>' + it.totalKm.toFixed(1) + ' km</span>';
+        html += '<strong>' + it.totalMontant.toFixed(2) + ' €</strong>';
+        html += '<span style="color:' + ecartColor + '">' + (ecartPct > 0 ? '+' : '') + ecartPct + '%</span>';
+        html += '<button class="btn-filled btn" onclick="event.stopPropagation();exportFraisKmPdf(' + idx + ')" style="font-size:0.75rem;padding:0.25rem 0.6rem;margin-left:0.5rem"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" style="vertical-align:-2px"><path d="M4 14h8M8 2v9M5 8l3 3 3-3"/></svg> PDF</button>';
+        html += '</div></div>';
+        html += '<div id="' + detailId + '" style="display:none;padding:0 1rem 0.75rem">';
+        html += '<table class="data-table" style="font-size:0.8rem"><thead><tr><th>Date</th><th>Client</th><th>Adresse</th><th style="text-align:right">Dist. AR</th><th style="text-align:right">Montant</th></tr></thead><tbody>';
+        it.trips.forEach(trip => {
+          const dateFr = trip.date ? new Date(trip.date + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }) : '';
+          html += '<tr><td style="white-space:nowrap">' + dateFr + '</td><td>' + trip.clientName + '</td><td style="color:var(--text-secondary)">' + trip.address + '</td><td style="text-align:right">' + trip.distanceKmAR.toFixed(1) + ' km</td><td style="text-align:right">' + trip.montant.toFixed(2) + ' €</td></tr>';
+        });
+        html += '</tbody></table>';
+        html += '</div></div>';
+      });
+      html += '</div>';
+      // Stocker les données pour l'export PDF
+      window._fkItineraires = itineraires;
+      window._fkMontant = montant;
+      document.getElementById('fkResultats').innerHTML = html;
+    }
+
+    function exportFraisKmPdf(idx) {
+      const it = window._fkItineraires[idx];
+      const montant = window._fkMontant;
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+
+      // Titre
+      doc.setFontSize(16);
+      doc.setTextColor(0, 61, 46);
+      doc.text('Frais Kilometriques', 14, 20);
+
+      // Sous-titre
+      doc.setFontSize(10);
+      doc.setTextColor(100);
+      const dateDebut = document.getElementById('fkDateDebut').value;
+      const dateFin = document.getElementById('fkDateFin').value;
+      const debutFr = new Date(dateDebut + 'T12:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+      const finFr = new Date(dateFin + 'T12:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+      doc.text('Periode : ' + debutFr + ' au ' + finFr, 14, 28);
+      doc.text('Origine : 2 rue de la Carnoy, 59130 Lambersart', 14, 34);
+      doc.text('Bareme : 0,665 EUR/km', 14, 40);
+
+      // Tableau
+      const rows = it.trips.map(trip => {
+        const dateFr = trip.date ? new Date(trip.date + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }) : '';
+        return [dateFr, trip.clientName, trip.address, trip.distanceKmAR.toFixed(1) + ' km', trip.montant.toFixed(2) + ' EUR'];
+      });
+
+      // Ligne total
+      rows.push(['', '', 'TOTAL', it.totalKm.toFixed(1) + ' km', it.totalMontant.toFixed(2) + ' EUR']);
+
+      doc.autoTable({
+        startY: 46,
+        head: [['Date', 'Client', 'Adresse', 'Dist. AR', 'Montant']],
+        body: rows,
+        styles: { fontSize: 8, cellPadding: 2 },
+        headStyles: { fillColor: [0, 61, 46], textColor: 255 },
+        columnStyles: {
+          3: { halign: 'right' },
+          4: { halign: 'right' },
+        },
+        didParseCell: function(data) {
+          // Mettre la ligne TOTAL en gras
+          if (data.section === 'body' && data.row.index === rows.length - 1) {
+            data.cell.styles.fontStyle = 'bold';
+            data.cell.styles.fillColor = [240, 240, 240];
+          }
+        }
+      });
+
+      const fileName = 'frais-km_' + dateDebut + '_' + dateFin + '_option' + (idx + 1) + '.pdf';
+      doc.save(fileName);
     }
 
   </script>

@@ -819,6 +819,280 @@ async function pennylaneFetchAll(endpoint, params = {}, maxPages = 200) {
   return allItems;
 }
 
+// --- Frais KM ---
+const OPENROUTESERVICE_API_KEY = process.env.OPENROUTESERVICE_API_KEY;
+const ORIGIN_ADDRESS = '2 rue de la Carnoy, 59130 Lambersart';
+const KM_RATE = 0.665;
+
+function geocodeAddress(address) {
+  return new Promise((resolve, reject) => {
+    const params = new URLSearchParams({
+      api_key: OPENROUTESERVICE_API_KEY,
+      text: address,
+      'boundary.country': 'FR',
+      size: '1',
+    });
+    const options = {
+      hostname: 'api.openrouteservice.org',
+      path: '/geocode/search?' + params.toString(),
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+    };
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => (data += chunk));
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          if (json.features && json.features.length > 0) {
+            const coords = json.features[0].geometry.coordinates; // [lon, lat]
+            resolve(coords);
+          } else {
+            resolve(null);
+          }
+        } catch (e) {
+          resolve(null);
+        }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.end();
+  });
+}
+
+function orsMatrixRequest(body) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    const options = {
+      hostname: 'api.openrouteservice.org',
+      path: '/v2/matrix/driving-car',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': OPENROUTESERVICE_API_KEY,
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    };
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => (data += chunk));
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            resolve(json);
+          } else {
+            reject(new Error(`ORS Matrix ${res.statusCode}: ${JSON.stringify(json).substring(0, 300)}`));
+          }
+        } catch (e) {
+          reject(new Error('ORS Matrix: réponse invalide'));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
+// GET /api/frais-km/clients — lecture rapide depuis Supabase
+app.get('/api/frais-km/clients', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('clients_km').select('*').order('distance_km_ar', { ascending: false });
+    if (error) throw new Error(error.message);
+    const results = (data || []).map(c => ({
+      id: c.pennylane_id,
+      name: c.name,
+      address: c.address,
+      distanceKmAR: c.distance_km_ar,
+      montantAR: c.montant_ar,
+    }));
+    res.json(results);
+  } catch (err) {
+    console.error('Erreur frais-km/clients:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/frais-km/sync — sync Pennylane → géocodage → distances → Supabase
+app.post('/api/frais-km/sync', async (req, res) => {
+  try {
+    if (!OPENROUTESERVICE_API_KEY) {
+      return res.status(500).json({ error: 'OPENROUTESERVICE_API_KEY non configurée' });
+    }
+
+    // 1. Fetch clients from Pennylane
+    const customers = await pennylaneFetchAll('/customers', {});
+    const clientsWithAddress = customers
+      .map(c => {
+        const ba = c.billing_address || {};
+        const addr = [ba.address, ba.postal_code, ba.city].filter(Boolean).join(', ');
+        if (!addr || addr.length < 5) return null;
+        return { id: c.id, name: c.name || (c.first_name + ' ' + c.last_name), address: addr };
+      })
+      .filter(Boolean);
+
+    if (clientsWithAddress.length === 0) {
+      return res.json({ synced: 0, message: 'Aucun client avec adresse' });
+    }
+
+    // 2. Geocode origin
+    const originCoords = await geocodeAddress(ORIGIN_ADDRESS);
+    if (!originCoords) {
+      return res.status(500).json({ error: 'Impossible de géocoder l\'adresse d\'origine' });
+    }
+
+    // 3. Geocode all clients (with rate limit delay)
+    const geocodedClients = [];
+    for (const client of clientsWithAddress) {
+      await new Promise(r => setTimeout(r, 200));
+      const coords = await geocodeAddress(client.address);
+      if (coords) {
+        geocodedClients.push({ ...client, coords });
+      }
+    }
+
+    if (geocodedClients.length === 0) {
+      return res.json({ synced: 0, message: 'Aucune adresse géocodable' });
+    }
+
+    // 4. Matrix distances par batch
+    const BATCH_SIZE = 50;
+    const results = [];
+
+    for (let i = 0; i < geocodedClients.length; i += BATCH_SIZE) {
+      const batch = geocodedClients.slice(i, i + BATCH_SIZE);
+      const locations = [originCoords, ...batch.map(c => c.coords)];
+
+      const matrix = await orsMatrixRequest({
+        locations,
+        metrics: ['distance'],
+        sources: [0],
+        destinations: Array.from({ length: batch.length }, (_, j) => j + 1),
+      });
+
+      if (matrix.distances && matrix.distances[0]) {
+        batch.forEach((client, j) => {
+          const distanceMeters = matrix.distances[0][j];
+          const distanceKmAR = Math.round((distanceMeters / 1000) * 2 * 10) / 10;
+          const montantAR = Math.round(distanceKmAR * KM_RATE * 100) / 100;
+          results.push({
+            pennylane_id: client.id,
+            name: client.name,
+            address: client.address,
+            lon: client.coords[0],
+            lat: client.coords[1],
+            distance_km_ar: distanceKmAR,
+            montant_ar: montantAR,
+            updated_at: new Date().toISOString(),
+          });
+        });
+      }
+
+      if (i + BATCH_SIZE < geocodedClients.length) {
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+
+    // 5. Upsert dans Supabase
+    const { error } = await supabase.from('clients_km').upsert(results, { onConflict: 'pennylane_id' });
+    if (error) throw new Error(error.message);
+
+    res.json({ synced: results.length, message: `${results.length} clients synchronisés` });
+  } catch (err) {
+    console.error('Erreur frais-km/sync:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/frais-km/generate
+app.post('/api/frais-km/generate', async (req, res) => {
+  try {
+    const { montant, dateDebut, dateFin } = req.body;
+    if (!montant || montant <= 0) {
+      return res.status(400).json({ error: 'Montant invalide' });
+    }
+    if (!dateDebut || !dateFin) {
+      return res.status(400).json({ error: 'Période requise (dateDebut, dateFin)' });
+    }
+
+    // Lire les clients depuis Supabase
+    const { data: dbClients, error } = await supabase.from('clients_km').select('*');
+    if (error) throw new Error(error.message);
+
+    const clients = (dbClients || []).filter(c => c.montant_ar > 0).map(c => ({
+      name: c.name,
+      address: c.address,
+      distanceKmAR: c.distance_km_ar,
+      montantAR: c.montant_ar,
+    }));
+    if (clients.length === 0) {
+      return res.status(400).json({ error: 'Aucun client avec distance valide' });
+    }
+
+    // Calculer les jours ouvrés dans la période
+    const joursOuvres = [];
+    const d = new Date(dateDebut);
+    const fin = new Date(dateFin);
+    while (d <= fin) {
+      const day = d.getDay();
+      if (day !== 0 && day !== 6) { // Lundi-Vendredi
+        joursOuvres.push(new Date(d).toISOString().split('T')[0]);
+      }
+      d.setDate(d.getDate() + 1);
+    }
+
+    const kmCible = montant / KM_RATE;
+    const tolerance = 0.05; // ±5%
+
+    const tentatives = [];
+    for (let t = 0; t < 20; t++) {
+      const shuffled = [...clients].sort(() => Math.random() - 0.5);
+      const trips = [];
+      let totalKm = 0;
+      // Copie des jours dispo, mélangés
+      const joursDispos = [...joursOuvres].sort(() => Math.random() - 0.5);
+      let jourIdx = 0;
+
+      for (const client of shuffled) {
+        if (totalKm + client.distanceKmAR > kmCible * (1 + tolerance)) continue;
+        if (jourIdx >= joursDispos.length) break; // plus de jours disponibles
+        trips.push({
+          date: joursDispos[jourIdx],
+          clientName: client.name,
+          address: client.address,
+          distanceKmAR: client.distanceKmAR,
+          montant: client.montantAR,
+        });
+        jourIdx++;
+        totalKm += client.distanceKmAR;
+        if (totalKm >= kmCible * (1 - tolerance)) break;
+      }
+
+      if (trips.length > 0) {
+        // Trier les trajets par date
+        trips.sort((a, b) => a.date.localeCompare(b.date));
+        const totalMontant = Math.round(totalKm * KM_RATE * 100) / 100;
+        tentatives.push({
+          trips,
+          totalKm: Math.round(totalKm * 10) / 10,
+          totalMontant,
+          ecart: Math.abs(totalMontant - montant),
+        });
+      }
+    }
+
+    // Sort by closest to target, take top 5
+    tentatives.sort((a, b) => a.ecart - b.ecart);
+    const itineraires = tentatives.slice(0, 5).map(({ ecart, ...rest }) => rest);
+
+    res.json({ itineraires });
+  } catch (err) {
+    console.error('Erreur frais-km/generate:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Extract customer name from invoice label (format: "Facture CLIENT_NAME - INVOICE_NUMBER (label généré)")
 function extractCustomerFromLabel(label) {
   if (!label) return '';
@@ -1405,242 +1679,462 @@ app.delete('/api/salaries/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
+// --- Fonction réutilisable : buildPrevisionnel() ---
+// Extrait la logique de projection pour réutiliser dans les scénarios
+function masseSalarialeMois(annee, mois, salaries) {
+  const mDate = new Date(annee, mois - 1, 15);
+  let total = 0;
+  const detail = [];
+  for (const s of salaries) {
+    const entree = new Date(s.date_entree);
+    const sortie = s.date_sortie ? new Date(s.date_sortie) : null;
+    if (entree > mDate) continue;
+    if (sortie && sortie < new Date(annee, mois - 1, 1)) continue;
+    const cout = s.net_mensuel + s.charges_mensuelles;
+    total += cout;
+    detail.push({ nom: s.nom, poste: s.poste, type: s.type, net: s.net_mensuel, charges: s.charges_mensuelles, cout: Math.round(cout) });
+  }
+  return { total: Math.round(total), detail };
+}
+
+async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, salaries, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals }) {
+  // --- A encaisser depuis Notion (factures envoyées + prévisionnelles) ---
+  const facturesAEncaisser = [];
+  const now = new Date();
+
+  for (const m of notionMissions) {
+    if (m.ca <= 0) continue;
+    const status = (m.facturation || '').toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    if (status.includes('solde paye')) continue;
+
+    function echeanceJ45(dateStr) {
+      if (!dateStr) return null;
+      const d = new Date(dateStr);
+      d.setDate(d.getDate() + 45);
+      return d.toISOString().split('T')[0];
+    }
+
+    // --- ACOMPTE ---
+    if (m.montantAcompte > 0) {
+      if (status.includes('acompte envoye')) {
+        const dateEmission = m.dateFactureAcompte;
+        const dateEcheance = echeanceJ45(dateEmission);
+        const isLate = dateEcheance && new Date(dateEcheance) < now;
+        facturesAEncaisser.push({
+          client: m.client || m.nom, mission: m.nom, type: 'Acompte',
+          montant: m.montantAcompte, dateEmission, dateEcheance,
+          status: isLate ? 'late' : 'upcoming', previsionnel: false,
+        });
+      } else if (status.includes('acompte a envoyer') || status === 'non defini') {
+        const dateEmission = m.dateFactureAcompte;
+        const dateEcheance = echeanceJ45(dateEmission);
+        facturesAEncaisser.push({
+          client: m.client || m.nom, mission: m.nom, type: 'Acompte',
+          montant: m.montantAcompte, dateEmission, dateEcheance,
+          status: 'previsionnel', previsionnel: true,
+        });
+      }
+    }
+
+    // --- SOLDE ---
+    const montantSolde = m.ca - m.montantAcompte;
+    if (montantSolde > 0) {
+      if (status.includes('solde envoye')) {
+        const dateEmission = m.dateFactureFinale;
+        const dateEcheance = echeanceJ45(dateEmission);
+        const isLate = dateEcheance && new Date(dateEcheance) < now;
+        facturesAEncaisser.push({
+          client: m.client || m.nom, mission: m.nom, type: 'Solde',
+          montant: montantSolde, dateEmission, dateEcheance,
+          status: isLate ? 'late' : 'upcoming', previsionnel: false,
+        });
+      } else if (status.includes('acompte paye') || status.includes('solde a envoyer')
+                 || status.includes('acompte a envoyer') || status === 'non defini') {
+        const dateEmission = m.dateFactureFinale;
+        const dateEcheance = echeanceJ45(dateEmission);
+        facturesAEncaisser.push({
+          client: m.client || m.nom, mission: m.nom, type: 'Solde',
+          montant: montantSolde, dateEmission, dateEcheance,
+          status: 'previsionnel', previsionnel: true,
+        });
+      }
+    }
+  }
+
+  facturesAEncaisser.sort((a, b) => {
+    if (a.previsionnel !== b.previsionnel) return a.previsionnel ? 1 : -1;
+    return new Date(a.dateEcheance || '2099-12-31') - new Date(b.dateEcheance || '2099-12-31');
+  });
+
+  const totalEnvoye = facturesAEncaisser.filter(f => !f.previsionnel).reduce((s, f) => s + f.montant, 0);
+  const totalPrevisionnel = facturesAEncaisser.filter(f => f.previsionnel).reduce((s, f) => s + f.montant, 0);
+  const totalAEncaisserNotion = totalEnvoye + totalPrevisionnel;
+
+  // Calcul du pipeline pondéré HubSpot
+  const factor = pipelineFactor != null ? pipelineFactor : 1;
+  let pipelinePondere = 0;
+  const pipelineDetail = [];
+  for (const stage of KANBAN_STAGES) {
+    const deals = pipelineDeals[stage.label] || [];
+    for (const deal of deals) {
+      const weighted = deal.amount * (deal.probability / 100) * factor;
+      pipelinePondere += weighted;
+      pipelineDetail.push({
+        name: deal.name, amount: deal.amount,
+        probability: deal.probability, weighted: Math.round(weighted), stage: stage.label,
+      });
+    }
+  }
+
+  // Intégrer les factures à encaisser dans le prévisionnel
+  const now2 = new Date();
+  const moisCourantKey = `${now2.getFullYear()}-${String(now2.getMonth() + 1).padStart(2, '0')}`;
+
+  const encaissementsParMoisFactures = {};
+  const encaissementsEnvoye = {};
+  const encaissementsPrev = {};
+  const encaissementsRetard = {};
+  for (const f of facturesAEncaisser) {
+    if (!f.dateEcheance) continue;
+    const d = new Date(f.dateEcheance);
+    let mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const isRetard = mKey < moisCourantKey;
+    if (isRetard) mKey = moisCourantKey;
+    encaissementsParMoisFactures[mKey] = (encaissementsParMoisFactures[mKey] || 0) + f.montant;
+
+    if (f.status === 'late' || isRetard) {
+      encaissementsRetard[mKey] = (encaissementsRetard[mKey] || 0) + f.montant;
+    } else if (f.previsionnel) {
+      encaissementsPrev[mKey] = (encaissementsPrev[mKey] || 0) + f.montant;
+    } else {
+      encaissementsEnvoye[mKey] = (encaissementsEnvoye[mKey] || 0) + f.montant;
+    }
+  }
+
+  // --- Revenus exceptionnels ---
+  const revenusParMois = {};
+  const revenusDetailParMois = {};
+  for (const r of revenus) {
+    revenusParMois[r.mois] = (revenusParMois[r.mois] || 0) + r.montant;
+    if (!revenusDetailParMois[r.mois]) revenusDetailParMois[r.mois] = [];
+    revenusDetailParMois[r.mois].push(r);
+  }
+
+  // --- Charges fixes extras (scénarios) ---
+  const chargesFixesParMois = {};
+  if (chargesFixesExtras && chargesFixesExtras.length > 0) {
+    for (const cf of chargesFixesExtras) {
+      const debut = cf.mois_debut;
+      const fin = cf.mois_fin;
+      // Itérer sur les mois du prévisionnel et ajouter si dans la plage
+      for (const mois of qontoData.previsionnel) {
+        const mKey = `${mois.annee}-${String(mois.mois).padStart(2, '0')}`;
+        if (mKey >= debut && mKey <= fin) {
+          chargesFixesParMois[mKey] = (chargesFixesParMois[mKey] || 0) + cf.montant_mensuel;
+        }
+      }
+    }
+  }
+
+  // --- Deals fictifs (scénarios) ---
+  const fictionalEncaissements = {};
+  if (fictionalDeals && fictionalDeals.length > 0) {
+    for (const fd of fictionalDeals) {
+      const mKey = fd.mois;
+      const montant = fd.montant * ((fd.probabilite || 100) / 100);
+      fictionalEncaissements[mKey] = (fictionalEncaissements[mKey] || 0) + montant;
+    }
+  }
+
+  const previsionnelFinal = qontoData.previsionnel.map((mois) => {
+    const mKey = `${mois.annee}-${String(mois.mois).padStart(2, '0')}`;
+    const factEnvoye = Math.round(encaissementsEnvoye[mKey] || 0);
+    const factPrev = Math.round(encaissementsPrev[mKey] || 0);
+    const factRetard = Math.round(encaissementsRetard[mKey] || 0);
+    const encaissementsFactures = factEnvoye + factPrev + factRetard;
+    const revExc = Math.round(revenusParMois[mKey] || 0);
+    const masse = masseSalarialeMois(mois.annee, mois.mois, salaries);
+    const chargesFixesExtra = Math.round(chargesFixesParMois[mKey] || 0);
+    const fictionalEnc = Math.round(fictionalEncaissements[mKey] || 0);
+    return {
+      ...mois,
+      encaissementsFactures,
+      encaissementsEnvoye: factEnvoye,
+      encaissementsPrev: factPrev,
+      encaissementsRetard: factRetard,
+      revenusExceptionnels: revExc,
+      revenusExceptionnelsDetail: revenusDetailParMois[mKey] || [],
+      masseSalariale: masse.total,
+      masseSalarialeDetail: masse.detail,
+      chargesFixesExtra,
+      fictionalEncaissements: fictionalEnc,
+      decaissements: mois.decaissements + chargesFixesExtra,
+      encaissementsTotal: mois.encaissements + encaissementsFactures + revExc + fictionalEnc,
+    };
+  });
+
+  // Recalculer les soldes
+  let soldeCumul = qontoData.soldeActuel || 0;
+  for (const mois of previsionnelFinal) {
+    const encTotal = mois.encaissements + (mois.encaissementsFactures || 0) + (mois.revenusExceptionnels || 0) + (mois.fictionalEncaissements || 0);
+    const variation = encTotal - mois.decaissements;
+    mois.soldeDebut = Math.round(soldeCumul);
+    soldeCumul += variation;
+    mois.soldeFin = Math.round(soldeCumul);
+  }
+
+  return {
+    previsionnel: previsionnelFinal,
+    facturesAEncaisser,
+    totalEnvoye,
+    totalPrevisionnel,
+    totalAEncaisserNotion,
+    pipelinePondere,
+    pipelineDetail,
+  };
+}
+
 app.get('/api/tresorerie', async (req, res) => {
   try {
-    // Fetch Qonto data + HubSpot pipeline + Notion missions in parallel
     const [qontoData, pipelineDeals, notionMissions] = await Promise.all([
       buildTresorerieFromQonto(),
       fetchOpenDeals(),
       fetchAllNotionMissions(),
     ]);
 
-    // --- A encaisser depuis Notion (factures envoyées + prévisionnelles) ---
-    const facturesAEncaisser = [];
-    const now = new Date();
-
-    for (const m of notionMissions) {
-      if (m.ca <= 0) continue;
-      const status = (m.facturation || '').toLowerCase()
-        .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-
-      // Skip missions entièrement payées
-      if (status.includes('solde paye')) continue;
-
-      // Helper: calculer échéance J+45
-      function echeanceJ45(dateStr) {
-        if (!dateStr) return null;
-        const d = new Date(dateStr);
-        d.setDate(d.getDate() + 45);
-        return d.toISOString().split('T')[0];
-      }
-
-      // --- ACOMPTE ---
-      if (m.montantAcompte > 0) {
-        if (status.includes('acompte envoye')) {
-          const dateEmission = m.dateFactureAcompte;
-          const dateEcheance = echeanceJ45(dateEmission);
-          const isLate = dateEcheance && new Date(dateEcheance) < now;
-          facturesAEncaisser.push({
-            client: m.client || m.nom,
-            mission: m.nom,
-            type: 'Acompte',
-            montant: m.montantAcompte,
-            dateEmission,
-            dateEcheance,
-            status: isLate ? 'late' : 'upcoming',
-            previsionnel: false,
-          });
-        } else if (status.includes('acompte a envoyer') || status === 'non defini') {
-          const dateEmission = m.dateFactureAcompte;
-          const dateEcheance = echeanceJ45(dateEmission);
-          facturesAEncaisser.push({
-            client: m.client || m.nom,
-            mission: m.nom,
-            type: 'Acompte',
-            montant: m.montantAcompte,
-            dateEmission,
-            dateEcheance,
-            status: 'previsionnel',
-            previsionnel: true,
-          });
-        }
-      }
-
-      // --- SOLDE ---
-      const montantSolde = m.ca - m.montantAcompte;
-      if (montantSolde > 0) {
-        if (status.includes('solde envoye')) {
-          const dateEmission = m.dateFactureFinale;
-          const dateEcheance = echeanceJ45(dateEmission);
-          const isLate = dateEcheance && new Date(dateEcheance) < now;
-          facturesAEncaisser.push({
-            client: m.client || m.nom,
-            mission: m.nom,
-            type: 'Solde',
-            montant: montantSolde,
-            dateEmission,
-            dateEcheance,
-            status: isLate ? 'late' : 'upcoming',
-            previsionnel: false,
-          });
-        } else if (status.includes('acompte paye') || status.includes('solde a envoyer')
-                   || status.includes('acompte a envoyer') || status === 'non defini') {
-          const dateEmission = m.dateFactureFinale;
-          const dateEcheance = echeanceJ45(dateEmission);
-          facturesAEncaisser.push({
-            client: m.client || m.nom,
-            mission: m.nom,
-            type: 'Solde',
-            montant: montantSolde,
-            dateEmission,
-            dateEcheance,
-            status: 'previsionnel',
-            previsionnel: true,
-          });
-        }
-      }
-    }
-
-    // Tri : envoyées d'abord (par échéance), puis prévisionnelles (par échéance)
-    facturesAEncaisser.sort((a, b) => {
-      if (a.previsionnel !== b.previsionnel) return a.previsionnel ? 1 : -1;
-      return new Date(a.dateEcheance || '2099-12-31') - new Date(b.dateEcheance || '2099-12-31');
-    });
-
-    const totalEnvoye = facturesAEncaisser.filter(f => !f.previsionnel).reduce((s, f) => s + f.montant, 0);
-    const totalPrevisionnel = facturesAEncaisser.filter(f => f.previsionnel).reduce((s, f) => s + f.montant, 0);
-    const totalAEncaisserNotion = totalEnvoye + totalPrevisionnel;
-
-    // Calcul du pipeline pondéré HubSpot
-    let pipelinePondere = 0;
-    const pipelineDetail = [];
-    for (const stage of KANBAN_STAGES) {
-      const deals = pipelineDeals[stage.label] || [];
-      for (const deal of deals) {
-        const weighted = deal.amount * (deal.probability / 100);
-        pipelinePondere += weighted;
-        pipelineDetail.push({
-          name: deal.name,
-          amount: deal.amount,
-          probability: deal.probability,
-          weighted: Math.round(weighted),
-          stage: stage.label,
-        });
-      }
-    }
-
-    // Intégrer les factures à encaisser (envoyées + prévisionnelles) dans le prévisionnel
-    // Chaque facture est placée dans le mois de son échéance estimée
-    // Les factures sans date sont réparties sur le mois suivant
-    const now2 = new Date();
-    const moisCourantKey = `${now2.getFullYear()}-${String(now2.getMonth() + 1).padStart(2, '0')}`;
-    const moisSuivant = new Date(now2.getFullYear(), now2.getMonth() + 1, 1);
-    const moisSuivantKey = `${moisSuivant.getFullYear()}-${String(moisSuivant.getMonth() + 1).padStart(2, '0')}`;
-
-    const encaissementsParMoisFactures = {};
-    const encaissementsEnvoye = {};
-    const encaissementsPrev = {};
-    const encaissementsRetard = {};
-    for (const f of facturesAEncaisser) {
-      if (!f.dateEcheance) continue;
-      const d = new Date(f.dateEcheance);
-      let mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      const isRetard = mKey < moisCourantKey;
-      if (isRetard) mKey = moisCourantKey;
-      encaissementsParMoisFactures[mKey] = (encaissementsParMoisFactures[mKey] || 0) + f.montant;
-
-      if (f.status === 'late' || isRetard) {
-        encaissementsRetard[mKey] = (encaissementsRetard[mKey] || 0) + f.montant;
-      } else if (f.previsionnel) {
-        encaissementsPrev[mKey] = (encaissementsPrev[mKey] || 0) + f.montant;
-      } else {
-        encaissementsEnvoye[mKey] = (encaissementsEnvoye[mKey] || 0) + f.montant;
-      }
-    }
-
-    // --- Revenus exceptionnels ---
     const { data: revenusExceptionnels } = await supabase.from('revenus_exceptionnels').select('*');
     const revenus = revenusExceptionnels || [];
-    const revenusParMois = {};
-    const revenusDetailParMois = {};
-    for (const r of revenus) {
-      revenusParMois[r.mois] = (revenusParMois[r.mois] || 0) + r.montant;
-      if (!revenusDetailParMois[r.mois]) revenusDetailParMois[r.mois] = [];
-      revenusDetailParMois[r.mois].push(r);
-    }
-
-    // --- Masse salariale depuis Supabase ---
     const { data: salariesList } = await supabase.from('salaries').select('*');
     const allSalaries = salariesList || [];
 
-    // Calculer la masse salariale par mois du prévisionnel
-    function masseSalarialeMois(annee, mois, salaries) {
-      const mDate = new Date(annee, mois - 1, 15); // milieu du mois
-      let total = 0;
-      const detail = [];
-      for (const s of salaries) {
-        const entree = new Date(s.date_entree);
-        const sortie = s.date_sortie ? new Date(s.date_sortie) : null;
-        if (entree > mDate) continue;
-        if (sortie && sortie < new Date(annee, mois - 1, 1)) continue;
-        const cout = s.net_mensuel + s.charges_mensuelles;
-        total += cout;
-        detail.push({ nom: s.nom, poste: s.poste, type: s.type, net: s.net_mensuel, charges: s.charges_mensuelles, cout: Math.round(cout) });
-      }
-      return { total: Math.round(total), detail };
-    }
-
-    const previsionnelFinal = qontoData.previsionnel.map((mois) => {
-      const mKey = `${mois.annee}-${String(mois.mois).padStart(2, '0')}`;
-      const factEnvoye = Math.round(encaissementsEnvoye[mKey] || 0);
-      const factPrev = Math.round(encaissementsPrev[mKey] || 0);
-      const factRetard = Math.round(encaissementsRetard[mKey] || 0);
-      const encaissementsFactures = factEnvoye + factPrev + factRetard;
-      const revExc = Math.round(revenusParMois[mKey] || 0);
-      const masse = masseSalarialeMois(mois.annee, mois.mois, allSalaries);
-      return {
-        ...mois,
-        encaissementsFactures,
-        encaissementsEnvoye: factEnvoye,
-        encaissementsPrev: factPrev,
-        encaissementsRetard: factRetard,
-        revenusExceptionnels: revExc,
-        revenusExceptionnelsDetail: revenusDetailParMois[mKey] || [],
-        masseSalariale: masse.total,
-        masseSalarialeDetail: masse.detail,
-        encaissementsTotal: mois.encaissements + encaissementsFactures + revExc,
-      };
+    const result = await buildPrevisionnel({
+      qontoData, pipelineDeals, notionMissions,
+      salaries: allSalaries, revenus,
+      chargesFixesExtras: [], pipelineFactor: 1, fictionalDeals: [],
     });
-
-    // Recalculer les soldes avec les encaissements factures + revenus exceptionnels
-    let soldeCumul = qontoData.soldeActuel || 0;
-    for (const mois of previsionnelFinal) {
-      const encTotal = mois.encaissements + (mois.encaissementsFactures || 0) + (mois.revenusExceptionnels || 0);
-      const variation = encTotal - mois.decaissements;
-      mois.soldeDebut = Math.round(soldeCumul);
-      soldeCumul += variation;
-      mois.soldeFin = Math.round(soldeCumul);
-    }
 
     res.json({
       source: 'qonto',
       soldeActuel: qontoData.soldeActuel,
-      totalAEncaisser: Math.round(totalAEncaisserNotion),
-      totalEnvoye: Math.round(totalEnvoye),
-      totalPrevisionnel: Math.round(totalPrevisionnel),
+      totalAEncaisser: Math.round(result.totalAEncaisserNotion),
+      totalEnvoye: Math.round(result.totalEnvoye),
+      totalPrevisionnel: Math.round(result.totalPrevisionnel),
       chargesMoisCourant: qontoData.chargesMoisCourant,
       chargesMoyennes: qontoData.chargesMoyennes,
-      facturesImpayees: facturesAEncaisser,
+      facturesImpayees: result.facturesAEncaisser,
       ventilationCharges: qontoData.ventilationCharges,
       chargesDetailParMois: qontoData.chargesDetailParMois,
       creditsDetailParMois: qontoData.creditsDetailParMois,
-      previsionnel: previsionnelFinal,
-      pipelinePondere: Math.round(pipelinePondere),
-      pipelineDetail,
+      previsionnel: result.previsionnel,
+      pipelinePondere: Math.round(result.pipelinePondere),
+      pipelineDetail: result.pipelineDetail,
       fetchedAt: new Date().toISOString(),
     });
   } catch (err) {
     console.error('Erreur trésorerie:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Scenarios CRUD ---
+
+app.get('/api/scenarios', async (req, res) => {
+  const { data, error } = await supabase.from('scenarios').select('*').order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.post('/api/scenarios', async (req, res) => {
+  const { nom, description } = req.body;
+  if (!nom || !nom.trim()) return res.status(400).json({ error: 'Nom requis' });
+  const { data, error } = await supabase.from('scenarios')
+    .insert({ nom: nom.trim(), description: description || null })
+    .select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.get('/api/scenarios/:id', async (req, res) => {
+  const { data: scenario, error } = await supabase.from('scenarios').select('*').eq('id', req.params.id).single();
+  if (error) return res.status(404).json({ error: 'Scenario non trouve' });
+  const { data: overrides } = await supabase.from('scenario_overrides').select('*').eq('scenario_id', req.params.id).order('created_at');
+  res.json({ ...scenario, overrides: overrides || [] });
+});
+
+app.put('/api/scenarios/:id', async (req, res) => {
+  const { nom, description } = req.body;
+  const { data, error } = await supabase.from('scenarios')
+    .update({ nom, description, updated_at: new Date().toISOString() })
+    .eq('id', req.params.id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.delete('/api/scenarios/:id', async (req, res) => {
+  const { error, count } = await supabase.from('scenarios').delete({ count: 'exact' }).eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  if (count === 0) return res.status(404).json({ error: 'Scenario non trouve' });
+  res.json({ ok: true });
+});
+
+app.post('/api/scenarios/:id/overrides', async (req, res) => {
+  const { type, data: overrideData } = req.body;
+  const validTypes = ['salaire', 'pipeline', 'charges_fixes', 'revenu_exceptionnel'];
+  if (!validTypes.includes(type)) return res.status(400).json({ error: 'Type invalide: ' + validTypes.join(', ') });
+  if (!overrideData || typeof overrideData !== 'object') return res.status(400).json({ error: 'Data requis (objet JSON)' });
+  // Vérifier que le scenario existe
+  const { data: scenario } = await supabase.from('scenarios').select('id').eq('id', req.params.id).single();
+  if (!scenario) return res.status(404).json({ error: 'Scenario non trouve' });
+  const { data, error } = await supabase.from('scenario_overrides')
+    .insert({ scenario_id: req.params.id, type, data: overrideData })
+    .select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.put('/api/scenarios/:id/overrides/:oid', async (req, res) => {
+  const { type, data: overrideData } = req.body;
+  const update = {};
+  if (type) update.type = type;
+  if (overrideData) update.data = overrideData;
+  const { data, error } = await supabase.from('scenario_overrides')
+    .update(update).eq('id', req.params.oid).eq('scenario_id', req.params.id)
+    .select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.delete('/api/scenarios/:id/overrides/:oid', async (req, res) => {
+  const { error, count } = await supabase.from('scenario_overrides')
+    .delete({ count: 'exact' }).eq('id', req.params.oid).eq('scenario_id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  if (count === 0) return res.status(404).json({ error: 'Override non trouve' });
+  res.json({ ok: true });
+});
+
+// --- Projections ---
+
+async function fetchBaseData() {
+  const [qontoData, pipelineDeals, notionMissions] = await Promise.all([
+    buildTresorerieFromQonto(),
+    fetchOpenDeals(),
+    fetchAllNotionMissions(),
+  ]);
+  const { data: revenusExceptionnels } = await supabase.from('revenus_exceptionnels').select('*');
+  const { data: salariesList } = await supabase.from('salaries').select('*');
+  return {
+    qontoData, pipelineDeals, notionMissions,
+    revenus: revenusExceptionnels || [],
+    salaries: salariesList || [],
+  };
+}
+
+function applyOverrides(baseData, overrides) {
+  let salaries = [...baseData.salaries];
+  let revenus = [...baseData.revenus];
+  let chargesFixesExtras = [];
+  let pipelineFactor = 1;
+  let fictionalDeals = [];
+
+  for (const ov of overrides) {
+    const d = ov.data;
+    switch (ov.type) {
+      case 'salaire':
+        if (d.action === 'add') {
+          salaries.push({
+            id: 'fictional-' + ov.id,
+            nom: d.nom || 'Nouveau',
+            poste: d.poste || null,
+            type: d.type || 'salarie',
+            net_mensuel: d.net_mensuel || 0,
+            charges_mensuelles: d.charges_mensuelles || 0,
+            date_entree: d.date_entree || new Date().toISOString().split('T')[0],
+            date_sortie: d.date_sortie || null,
+          });
+        } else if (d.action === 'remove' && d.salarie_id) {
+          salaries = salaries.filter(s => s.id !== d.salarie_id);
+        } else if (d.action === 'modify' && d.salarie_id) {
+          salaries = salaries.map(s => {
+            if (s.id !== d.salarie_id) return s;
+            return { ...s, ...d, id: s.id };
+          });
+        }
+        break;
+      case 'pipeline':
+        if (d.mode === 'factor' && d.facteur != null) {
+          pipelineFactor = d.facteur;
+        } else if (d.mode === 'deal') {
+          fictionalDeals.push({
+            nom: d.nom || 'Deal fictif',
+            montant: d.montant || 0,
+            probabilite: d.probabilite != null ? d.probabilite : 100,
+            mois: d.mois,
+          });
+        }
+        break;
+      case 'charges_fixes':
+        chargesFixesExtras.push({
+          libelle: d.libelle,
+          montant_mensuel: d.montant_mensuel || 0,
+          mois_debut: d.mois_debut,
+          mois_fin: d.mois_fin,
+        });
+        break;
+      case 'revenu_exceptionnel':
+        revenus.push({
+          id: 'fictional-' + ov.id,
+          libelle: d.libelle,
+          montant: d.montant || 0,
+          mois: d.mois,
+        });
+        break;
+    }
+  }
+
+  return { salaries, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals };
+}
+
+app.get('/api/scenarios/baseline/projection', async (req, res) => {
+  try {
+    const base = await fetchBaseData();
+    const result = await buildPrevisionnel({
+      qontoData: base.qontoData, pipelineDeals: base.pipelineDeals,
+      notionMissions: base.notionMissions, salaries: base.salaries,
+      revenus: base.revenus, chargesFixesExtras: [], pipelineFactor: 1, fictionalDeals: [],
+    });
+    res.json({ nom: 'Baseline', previsionnel: result.previsionnel });
+  } catch (err) {
+    console.error('Erreur baseline projection:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/scenarios/:id/projection', async (req, res) => {
+  try {
+    // Vérifier que l'id n'est pas "baseline"
+    if (req.params.id === 'baseline') return res.redirect('/api/scenarios/baseline/projection');
+
+    const { data: scenario, error } = await supabase.from('scenarios').select('*').eq('id', req.params.id).single();
+    if (error || !scenario) return res.status(404).json({ error: 'Scenario non trouve' });
+
+    const { data: overrides } = await supabase.from('scenario_overrides').select('*').eq('scenario_id', req.params.id).order('created_at');
+
+    const base = await fetchBaseData();
+    const applied = applyOverrides(base, overrides || []);
+
+    const result = await buildPrevisionnel({
+      qontoData: base.qontoData, pipelineDeals: base.pipelineDeals,
+      notionMissions: base.notionMissions,
+      salaries: applied.salaries, revenus: applied.revenus,
+      chargesFixesExtras: applied.chargesFixesExtras,
+      pipelineFactor: applied.pipelineFactor,
+      fictionalDeals: applied.fictionalDeals,
+    });
+    res.json({ nom: scenario.nom, previsionnel: result.previsionnel });
+  } catch (err) {
+    console.error('Erreur scenario projection:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1782,5 +2276,5 @@ app.get('/api/qonto', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Dashboard commercial démarré sur http://localhost:${PORT}`);
+  console.log(`Releaf Pilot démarré sur http://localhost:${PORT}`);
 });
