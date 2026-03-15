@@ -2,6 +2,14 @@ require('dotenv').config();
 const express = require('express');
 const https = require('https');
 const path = require('path');
+const fs = require('fs');
+const { createClient } = require('@supabase/supabase-js');
+
+// --- Supabase ---
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_ANON_KEY
+);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -21,6 +29,7 @@ const IS_PAT = HUBSPOT_API_KEY.startsWith('pat-');
 
 console.log(`API HubSpot: https://${HUBSPOT_HOST} | Auth: ${IS_PAT ? 'Bearer token' : 'API key (hapikey)'}`);
 
+app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // --- HubSpot API helpers ---
@@ -1287,6 +1296,107 @@ function parsePlanTresorerie(csvText) {
   };
 }
 
+// --- Auth masse salariale ---
+const MASSE_SALARIALE_PASSWORD = process.env.MASSE_SALARIALE_PASSWORD || 'admin';
+
+app.post('/api/auth-masse-salariale', (req, res) => {
+  const { password } = req.body;
+  if (password === MASSE_SALARIALE_PASSWORD) {
+    return res.json({ ok: true });
+  }
+  res.status(401).json({ error: 'Mot de passe incorrect' });
+});
+
+// --- Revenus exceptionnels (Supabase) ---
+
+app.get('/api/revenus-exceptionnels', async (req, res) => {
+  const { data, error } = await supabase.from('revenus_exceptionnels').select('*').order('mois');
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.post('/api/revenus-exceptionnels', async (req, res) => {
+  const { libelle, montant, mois } = req.body;
+  if (!libelle || typeof libelle !== 'string' || !libelle.trim()) {
+    return res.status(400).json({ error: 'Libelle requis' });
+  }
+  if (!montant || typeof montant !== 'number' || montant <= 0) {
+    return res.status(400).json({ error: 'Montant doit etre > 0' });
+  }
+  if (!mois || !/^\d{4}-\d{2}$/.test(mois)) {
+    return res.status(400).json({ error: 'Mois au format YYYY-MM requis' });
+  }
+  const { data, error } = await supabase.from('revenus_exceptionnels')
+    .insert({ libelle: libelle.trim(), montant, mois })
+    .select()
+    .single();
+  if (error) return res.status(500).json({ error: error.message });
+  tresorerieCacheTime = 0;
+  res.json(data);
+});
+
+app.delete('/api/revenus-exceptionnels/:id', async (req, res) => {
+  const { error, count } = await supabase.from('revenus_exceptionnels')
+    .delete({ count: 'exact' })
+    .eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  if (count === 0) return res.status(404).json({ error: 'Revenu non trouve' });
+  tresorerieCacheTime = 0;
+  res.json({ ok: true });
+});
+
+// --- Salariés (Supabase) ---
+
+app.get('/api/salaries', async (req, res) => {
+  const { data, error } = await supabase.from('salaries').select('*').order('nom');
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.post('/api/salaries', async (req, res) => {
+  const { nom, poste, type, net_mensuel, charges_mensuelles, date_entree, date_sortie } = req.body;
+  if (!nom || !nom.trim()) return res.status(400).json({ error: 'Nom requis' });
+  if (!['salarie', 'dirigeant', 'stagiaire', 'alternant'].includes(type)) {
+    return res.status(400).json({ error: 'Type invalide' });
+  }
+  if (typeof net_mensuel !== 'number' || net_mensuel < 0) {
+    return res.status(400).json({ error: 'Net mensuel invalide' });
+  }
+  if (typeof charges_mensuelles !== 'number' || charges_mensuelles < 0) {
+    return res.status(400).json({ error: 'Charges mensuelles invalides' });
+  }
+  if (!date_entree) return res.status(400).json({ error: 'Date entree requise' });
+  const { data, error } = await supabase.from('salaries')
+    .insert({ nom: nom.trim(), poste: poste || null, type, net_mensuel, charges_mensuelles, date_entree, date_sortie: date_sortie || null })
+    .select()
+    .single();
+  if (error) return res.status(500).json({ error: error.message });
+  tresorerieCacheTime = 0;
+  res.json(data);
+});
+
+app.put('/api/salaries/:id', async (req, res) => {
+  const { nom, poste, type, net_mensuel, charges_mensuelles, date_entree, date_sortie } = req.body;
+  const { data, error } = await supabase.from('salaries')
+    .update({ nom, poste, type, net_mensuel, charges_mensuelles, date_entree, date_sortie })
+    .eq('id', req.params.id)
+    .select()
+    .single();
+  if (error) return res.status(500).json({ error: error.message });
+  tresorerieCacheTime = 0;
+  res.json(data);
+});
+
+app.delete('/api/salaries/:id', async (req, res) => {
+  const { error, count } = await supabase.from('salaries')
+    .delete({ count: 'exact' })
+    .eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  if (count === 0) return res.status(404).json({ error: 'Salarie non trouve' });
+  tresorerieCacheTime = 0;
+  res.json({ ok: true });
+});
+
 app.get('/api/tresorerie', async (req, res) => {
   try {
     // Fetch Qonto data + HubSpot pipeline + Notion missions in parallel
@@ -1440,26 +1550,64 @@ app.get('/api/tresorerie', async (req, res) => {
       }
     }
 
+    // --- Revenus exceptionnels ---
+    const { data: revenusExceptionnels } = await supabase.from('revenus_exceptionnels').select('*');
+    const revenus = revenusExceptionnels || [];
+    const revenusParMois = {};
+    const revenusDetailParMois = {};
+    for (const r of revenus) {
+      revenusParMois[r.mois] = (revenusParMois[r.mois] || 0) + r.montant;
+      if (!revenusDetailParMois[r.mois]) revenusDetailParMois[r.mois] = [];
+      revenusDetailParMois[r.mois].push(r);
+    }
+
+    // --- Masse salariale depuis Supabase ---
+    const { data: salariesList } = await supabase.from('salaries').select('*');
+    const allSalaries = salariesList || [];
+
+    // Calculer la masse salariale par mois du prévisionnel
+    function masseSalarialeMois(annee, mois, salaries) {
+      const mDate = new Date(annee, mois - 1, 15); // milieu du mois
+      let total = 0;
+      const detail = [];
+      for (const s of salaries) {
+        const entree = new Date(s.date_entree);
+        const sortie = s.date_sortie ? new Date(s.date_sortie) : null;
+        if (entree > mDate) continue;
+        if (sortie && sortie < new Date(annee, mois - 1, 1)) continue;
+        const cout = s.net_mensuel + s.charges_mensuelles;
+        total += cout;
+        detail.push({ nom: s.nom, poste: s.poste, type: s.type, net: s.net_mensuel, charges: s.charges_mensuelles, cout: Math.round(cout) });
+      }
+      return { total: Math.round(total), detail };
+    }
+
     const previsionnelFinal = qontoData.previsionnel.map((mois) => {
       const mKey = `${mois.annee}-${String(mois.mois).padStart(2, '0')}`;
       const factEnvoye = Math.round(encaissementsEnvoye[mKey] || 0);
       const factPrev = Math.round(encaissementsPrev[mKey] || 0);
       const factRetard = Math.round(encaissementsRetard[mKey] || 0);
       const encaissementsFactures = factEnvoye + factPrev + factRetard;
+      const revExc = Math.round(revenusParMois[mKey] || 0);
+      const masse = masseSalarialeMois(mois.annee, mois.mois, allSalaries);
       return {
         ...mois,
         encaissementsFactures,
         encaissementsEnvoye: factEnvoye,
         encaissementsPrev: factPrev,
         encaissementsRetard: factRetard,
-        encaissementsTotal: mois.encaissements + encaissementsFactures,
+        revenusExceptionnels: revExc,
+        revenusExceptionnelsDetail: revenusDetailParMois[mKey] || [],
+        masseSalariale: masse.total,
+        masseSalarialeDetail: masse.detail,
+        encaissementsTotal: mois.encaissements + encaissementsFactures + revExc,
       };
     });
 
-    // Recalculer les soldes avec les encaissements factures
+    // Recalculer les soldes avec les encaissements factures + revenus exceptionnels
     let soldeCumul = qontoData.soldeActuel || 0;
     for (const mois of previsionnelFinal) {
-      const encTotal = mois.encaissements + (mois.encaissementsFactures || 0);
+      const encTotal = mois.encaissements + (mois.encaissementsFactures || 0) + (mois.revenusExceptionnels || 0);
       const variation = encTotal - mois.decaissements;
       mois.soldeDebut = Math.round(soldeCumul);
       soldeCumul += variation;

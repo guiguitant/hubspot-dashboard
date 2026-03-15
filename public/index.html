@@ -837,10 +837,18 @@
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 1h8a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z"/><path d="M6 5h4M6 8h4M6 11h2"/></svg>
           Facturation
         </button>
-        <button class="sidebar-link" onclick="navigateTo('tresorerie')" data-page="tresorerie">
+        <button class="sidebar-link" onclick="navigateTo('tresorerie');toggleTresoSubnav(true)" data-page="tresorerie">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 13V5l4-3 3 2 4-3 3 3v10H1z"/><path d="M1 9l4-2 3 2 4-3 3 2"/></svg>
           Tresorerie
+          <span id="tresoChevron" style="margin-left:auto;font-size:0.6rem;transition:transform 0.2s;color:var(--text-light)">&#9654;</span>
         </button>
+        <div id="tresoSubnav" style="display:none;overflow:hidden">
+          <button class="sidebar-link" onclick="navigateToMasseSalariale()" data-page="masse-salariale" style="padding-left:2.2rem;font-size:0.78rem">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="5" r="3"/><path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6"/></svg>
+            Masse salariale
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-left:auto;opacity:0.5"><rect x="3" y="7" width="10" height="8" rx="1"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/></svg>
+          </button>
+        </div>
       </div>
       <div style="flex:1"></div>
       <div style="padding:0.5rem 0.75rem;display:flex;align-items:center;gap:0.5rem">
@@ -1082,7 +1090,10 @@
 
     <!-- Chart: Projection tresorerie -->
     <div class="section">
-      <div class="section-title">Projection de tresorerie (12 mois)</div>
+      <div class="section-title" style="display:flex;align-items:center;gap:0.5rem">
+        Projection de tresorerie (12 mois)
+        <button class="btn" onclick="openRevenusModal()" title="Ajouter un revenu exceptionnel" style="font-size:0.8rem;padding:0.25rem 0.6rem;border-radius:var(--radius);color:var(--primary);font-weight:600">+ Ajouter</button>
+      </div>
       <div style="position:relative;height:350px;margin-bottom:1rem">
         <canvas id="tresoChart"></canvas>
       </div>
@@ -1104,6 +1115,34 @@
   </div>
   </div>
   <!-- end page-tresorerie -->
+
+  <!-- PAGE: Masse salariale -->
+  <div class="app-page" id="page-masse-salariale">
+  <div class="page">
+    <div class="page-icon">&#128101;</div>
+    <h1 class="page-title">Masse salariale</h1>
+    <p class="page-desc">Gestion des salaries et projection du cout salarial.</p>
+
+    <div class="section">
+      <div class="section-title" style="display:flex;align-items:center;gap:0.5rem">
+        Equipe
+        <button class="btn" onclick="openSalariesModal()" style="font-size:0.8rem;padding:0.25rem 0.6rem;border-radius:var(--radius);color:var(--primary);font-weight:600">+ Ajouter</button>
+      </div>
+      <div id="salariesTableSection">
+        <p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Projection mensuelle (12 mois)</div>
+      <div id="masseSalarialeSection">
+        <p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p>
+      </div>
+    </div>
+
+  </div>
+  </div>
+  <!-- end page-masse-salariale -->
 
 
   </div><!-- end app-main -->
@@ -1198,6 +1237,115 @@
     </div>
   </div>
 
+  <!-- Modal Revenus Exceptionnels -->
+  <div class="modal-overlay" id="revenusModalOverlay">
+    <div class="modal" style="max-width:550px">
+      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
+        <h2>Revenus exceptionnels</h2>
+        <button onclick="closeRevenusModal()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--text)">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:1rem">
+        <div style="display:grid;grid-template-columns:1fr auto auto;gap:0.5rem;align-items:end;margin-bottom:1rem">
+          <div>
+            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Libelle</label>
+            <input type="text" id="revenuLibelle" placeholder="Ex: Subvention BPI" style="width:100%;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.85rem;font-family:inherit;background:var(--bg);color:var(--text)">
+          </div>
+          <div>
+            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Montant (EUR)</label>
+            <input type="number" id="revenuMontant" placeholder="15000" min="1" step="100" style="width:100px;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.85rem;font-family:inherit;background:var(--bg);color:var(--text)">
+          </div>
+          <div>
+            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Mois</label>
+            <select id="revenuMois" style="padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.85rem;font-family:inherit;background:var(--bg);color:var(--text)"></select>
+          </div>
+        </div>
+        <button class="btn btn-filled" onclick="addRevenu()" style="margin-bottom:1rem;width:100%">Ajouter</button>
+        <div id="revenusListe" style="max-height:250px;overflow-y:auto"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeRevenusModal()">Fermer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Salaries -->
+  <div class="modal-overlay" id="salariesModalOverlay">
+    <div class="modal" style="max-width:700px">
+      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
+        <h2>Gestion des salaries</h2>
+        <button onclick="closeSalariesModal()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--text)">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:1rem">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:0.5rem">
+          <div>
+            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Nom</label>
+            <input type="text" id="salNom" placeholder="Ex: Jean Dupont" style="width:100%;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.85rem;font-family:inherit;background:var(--bg);color:var(--text)">
+          </div>
+          <div>
+            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Poste</label>
+            <input type="text" id="salPoste" placeholder="Ex: Developpeur" style="width:100%;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.85rem;font-family:inherit;background:var(--bg);color:var(--text)">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem">
+          <div>
+            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Type</label>
+            <select id="salType" style="width:100%;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.85rem;font-family:inherit;background:var(--bg);color:var(--text)">
+              <option value="salarie">Salarie</option>
+              <option value="dirigeant">Dirigeant</option>
+              <option value="alternant">Alternant</option>
+              <option value="stagiaire">Stagiaire</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Net mensuel (EUR)</label>
+            <input type="number" id="salNet" placeholder="2500" min="0" step="100" style="width:100%;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.85rem;font-family:inherit;background:var(--bg);color:var(--text)">
+          </div>
+          <div>
+            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Charges mensuelles (EUR)</label>
+            <input type="number" id="salCharges" placeholder="2000" min="0" step="100" style="width:100%;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.85rem;font-family:inherit;background:var(--bg);color:var(--text)">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:0.5rem">
+          <div>
+            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Date entree</label>
+            <input type="date" id="salEntree" style="width:100%;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.85rem;font-family:inherit;background:var(--bg);color:var(--text)">
+          </div>
+          <div>
+            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Date sortie</label>
+            <input type="date" id="salSortie" style="width:100%;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.85rem;font-family:inherit;background:var(--bg);color:var(--text)">
+          </div>
+        </div>
+        <input type="hidden" id="salEditId" value="">
+        <button class="btn btn-filled" id="salSubmitBtn" onclick="submitSalarie()" style="margin-bottom:1rem;width:100%">Ajouter</button>
+        <div id="salariesListe" style="max-height:300px;overflow-y:auto"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeSalariesModal()">Fermer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Mot de passe Masse salariale -->
+  <div class="modal-overlay" id="masseSalarialeAuthOverlay">
+    <div class="modal" style="max-width:360px">
+      <div class="modal-header">
+        <h2 style="display:flex;align-items:center;gap:0.5rem">
+          <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="7" width="10" height="8" rx="1"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/></svg>
+          Acces protege
+        </h2>
+      </div>
+      <div class="modal-body" style="padding:1rem">
+        <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:0.75rem">Entrez le mot de passe pour acceder a la masse salariale.</p>
+        <input type="password" id="masseSalarialePassword" placeholder="Mot de passe" style="width:100%;padding:0.5rem 0.75rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.9rem;font-family:inherit;background:var(--bg);color:var(--text)" onkeydown="if(event.key==='Enter')submitMasseSalarialeAuth()">
+        <p id="masseSalarialeAuthError" style="color:var(--danger);font-size:0.8rem;margin-top:0.4rem;display:none"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeMasseSalarialeAuth()">Annuler</button>
+        <button class="btn btn-filled" onclick="submitMasseSalarialeAuth()">Deverrouiller</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     // --- Dark mode ---
     function initTheme() {
@@ -1234,7 +1382,7 @@
     // --- Navigation ---
     let currentPage = 'dashboard';
 
-    const PAGE_NAMES = { dashboard: 'Dashboard', facturation: 'Facturation', tresorerie: 'Tresorerie' };
+    const PAGE_NAMES = { dashboard: 'Dashboard', facturation: 'Facturation', tresorerie: 'Tresorerie', 'masse-salariale': 'Masse salariale' };
 
     function navigateTo(page) {
       currentPage = page;
@@ -1244,14 +1392,83 @@
       document.getElementById('topbarPageName').textContent = PAGE_NAMES[page] || page;
       document.getElementById('btnObjectifs').style.display = page === 'dashboard' ? '' : 'none';
 
+      // Ouvrir le sous-menu tresorerie si on navigue vers une sous-page
+      if (page === 'tresorerie' || page === 'masse-salariale') {
+        toggleTresoSubnav(true);
+        // Marquer aussi tresorerie comme parent actif quand on est sur une sous-page
+        if (page === 'masse-salariale') {
+          document.querySelector('[data-page="tresorerie"]').classList.add('active');
+        }
+      }
+
       if (page === 'facturation' && !factData) refreshFactData();
       if (page === 'tresorerie' && !tresoData) refreshTresoData();
+      if (page === 'masse-salariale') refreshMasseSalarialePage();
+    }
+
+    // --- Auth masse salariale ---
+    function navigateToMasseSalariale() {
+      if (sessionStorage.getItem('masseSalarialeAuth') === 'ok') {
+        navigateTo('masse-salariale');
+        return;
+      }
+      // Ouvrir le sous-menu trésorerie pour le contexte visuel
+      toggleTresoSubnav(true);
+      openMasseSalarialeAuth();
+    }
+
+    function openMasseSalarialeAuth() {
+      document.getElementById('masseSalarialePassword').value = '';
+      document.getElementById('masseSalarialeAuthError').style.display = 'none';
+      document.getElementById('masseSalarialeAuthOverlay').classList.add('active');
+      setTimeout(() => document.getElementById('masseSalarialePassword').focus(), 100);
+    }
+
+    function closeMasseSalarialeAuth() {
+      document.getElementById('masseSalarialeAuthOverlay').classList.remove('active');
+    }
+
+    document.getElementById('masseSalarialeAuthOverlay').addEventListener('click', function(e) {
+      if (e.target === this) closeMasseSalarialeAuth();
+    });
+
+    async function submitMasseSalarialeAuth() {
+      const password = document.getElementById('masseSalarialePassword').value;
+      const errorEl = document.getElementById('masseSalarialeAuthError');
+      try {
+        const res = await fetch('/api/auth-masse-salariale', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password }),
+        });
+        if (!res.ok) {
+          errorEl.textContent = 'Mot de passe incorrect';
+          errorEl.style.display = 'block';
+          return;
+        }
+        sessionStorage.setItem('masseSalarialeAuth', 'ok');
+        closeMasseSalarialeAuth();
+        navigateTo('masse-salariale');
+      } catch {
+        errorEl.textContent = 'Erreur de connexion';
+        errorEl.style.display = 'block';
+      }
+    }
+
+    function toggleTresoSubnav(forceOpen) {
+      const subnav = document.getElementById('tresoSubnav');
+      const chevron = document.getElementById('tresoChevron');
+      const isOpen = subnav.style.display !== 'none';
+      const shouldOpen = forceOpen !== undefined ? forceOpen : !isOpen;
+      subnav.style.display = shouldOpen ? 'block' : 'none';
+      chevron.style.transform = shouldOpen ? 'rotate(90deg)' : '';
     }
 
     function refreshCurrentPage() {
       if (currentPage === 'dashboard') refreshData();
       else if (currentPage === 'facturation') refreshFactData();
       else if (currentPage === 'tresorerie') refreshTresoData();
+      else if (currentPage === 'masse-salariale') refreshMasseSalarialePage();
     }
 
     const MONTHS_FR = [
@@ -2354,6 +2571,7 @@
         renderTresoChart();
         renderChargesChart();
         renderChargesDetail();
+        renderMasseSalariale();
       } catch (err) {
         console.error('Erreur tresorerie:', err);
         errorBanner.textContent = err.message;
@@ -2654,13 +2872,48 @@
         html += accordion('En retard', encRetard, 'rgba(224,62,62,0.7)', '&#9679;', factureTable(facturesRetard));
       }
 
+      // --- REVENUS EXCEPTIONNELS ---
+      const revExc = mois.revenusExceptionnels || 0;
+      const revDetail = mois.revenusExceptionnelsDetail || [];
+      if (revExc > 0) {
+        let revHtml = '<table style="width:100%;border-collapse:collapse;font-size:0.8rem">';
+        for (const r of revDetail) {
+          revHtml += '<tr style="border-bottom:1px solid var(--border)">';
+          revHtml += '<td style="padding:0.3rem 0.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px">' + r.libelle + '</td>';
+          revHtml += '<td style="padding:0.3rem 0.8rem;text-align:right;font-weight:600;white-space:nowrap">' + formatEuro(r.montant) + '</td>';
+          revHtml += '</tr>';
+        }
+        revHtml += '</table>';
+        html += accordion('Revenus exceptionnels', revExc, 'rgba(105,64,165,0.7)', '&#9733;', revHtml);
+      }
+
+      const totalEncAvecRev = totalEnc + revExc;
+
       // Total encaissements
       html += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0.8rem;font-weight:700;font-size:0.85rem;margin-bottom:1rem">';
       html += '<span>Total encaissements</span>';
-      html += '<span style="color:var(--success, #0f7b6c)">' + formatEuro(totalEnc) + '</span></div>';
+      html += '<span style="color:var(--success, #0f7b6c)">' + formatEuro(totalEncAvecRev) + '</span></div>';
 
       // --- CHARGES ---
       html += '<div style="font-weight:700;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-secondary);margin-bottom:0.4rem">Charges</div>';
+
+      // Masse salariale
+      const masseTotal = mois.masseSalariale || 0;
+      const masseDetail = mois.masseSalarialeDetail || [];
+      if (masseTotal > 0) {
+        let masseHtml = '<table style="width:100%;border-collapse:collapse;font-size:0.8rem">';
+        for (const s of masseDetail) {
+          const typeLabels = { salarie: 'Sal.', dirigeant: 'Dir.', alternant: 'Alt.', stagiaire: 'Stag.' };
+          masseHtml += '<tr style="border-bottom:1px solid var(--border)">';
+          masseHtml += '<td style="padding:0.3rem 0.8rem">' + s.nom + '</td>';
+          masseHtml += '<td style="padding:0.3rem 0.5rem;color:var(--text-secondary);font-size:0.75rem">' + (typeLabels[s.type] || s.type) + '</td>';
+          masseHtml += '<td style="padding:0.3rem 0.5rem;text-align:right;color:var(--text-secondary);font-size:0.75rem">' + formatEuro(s.net) + ' + ' + formatEuro(s.charges) + '</td>';
+          masseHtml += '<td style="padding:0.3rem 0.8rem;text-align:right;font-weight:600">' + formatEuro(s.cout) + '</td>';
+          masseHtml += '</tr>';
+        }
+        masseHtml += '</table>';
+        html += accordion('Masse salariale', masseTotal, 'rgba(224,62,62,0.6)', '&#9679;', masseHtml);
+      }
 
       const categories = Object.keys(chargesDetail).sort((a, b) => {
         const totalA = chargesDetail[a].reduce((s, t) => s + t.amount, 0);
@@ -2684,7 +2937,7 @@
       html += '<span style="color:var(--warning, #d9730d)">-' + formatEuro(charges) + '</span></div>';
 
       // --- VARIATION ---
-      const variation = totalEnc - charges;
+      const variation = totalEncAvecRev - charges;
       const varColor = variation >= 0 ? 'var(--success, #0f7b6c)' : 'var(--danger, #e03e3e)';
       html += '<div style="display:flex;justify-content:space-between;padding:0.6rem 0.8rem;font-weight:700;font-size:0.95rem;border-top:2px solid var(--text);margin-top:0.5rem">';
       html += '<span>Variation du mois</span>';
@@ -2710,6 +2963,338 @@
     document.getElementById('tresoMoisDetailModalOverlay').addEventListener('click', function(e) {
       if (e.target === this) closeTresoMoisDetailModal();
     });
+
+    // --- Revenus exceptionnels ---
+    function openRevenusModal() {
+      // Populate mois select with 12 months from previsionnel
+      const select = document.getElementById('revenuMois');
+      select.innerHTML = '';
+      if (tresoData && tresoData.previsionnel) {
+        for (const m of tresoData.previsionnel) {
+          const mKey = m.annee + '-' + String(m.mois).padStart(2, '0');
+          const dateLabel = new Date(m.annee, m.mois - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+          const opt = document.createElement('option');
+          opt.value = mKey;
+          opt.textContent = dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1);
+          select.appendChild(opt);
+        }
+      }
+      refreshRevenusListe();
+      document.getElementById('revenusModalOverlay').classList.add('active');
+    }
+
+    function closeRevenusModal() {
+      document.getElementById('revenusModalOverlay').classList.remove('active');
+    }
+
+    document.getElementById('revenusModalOverlay').addEventListener('click', function(e) {
+      if (e.target === this) closeRevenusModal();
+    });
+
+    async function addRevenu() {
+      const libelle = document.getElementById('revenuLibelle').value.trim();
+      const montant = parseFloat(document.getElementById('revenuMontant').value);
+      const mois = document.getElementById('revenuMois').value;
+      if (!libelle) return alert('Libelle requis');
+      if (!montant || montant <= 0) return alert('Montant doit etre > 0');
+      if (!mois) return alert('Selectionnez un mois');
+      try {
+        const res = await fetch('/api/revenus-exceptionnels', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ libelle, montant, mois }),
+        });
+        if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
+        document.getElementById('revenuLibelle').value = '';
+        document.getElementById('revenuMontant').value = '';
+        await refreshRevenusListe();
+        // Invalidate tresorerie cache and refresh chart
+        tresoData = null;
+        await refreshTresoData();
+      } catch (err) {
+        alert('Erreur: ' + err.message);
+      }
+    }
+
+    async function deleteRevenu(id) {
+      try {
+        const res = await fetch('/api/revenus-exceptionnels/' + id, { method: 'DELETE' });
+        if (!res.ok) throw new Error('Erreur suppression');
+        await refreshRevenusListe();
+        tresoData = null;
+        await refreshTresoData();
+      } catch (err) {
+        alert('Erreur: ' + err.message);
+      }
+    }
+
+    async function refreshRevenusListe() {
+      const container = document.getElementById('revenusListe');
+      try {
+        const res = await fetch('/api/revenus-exceptionnels');
+        const revenus = await res.json();
+        if (revenus.length === 0) {
+          container.innerHTML = '<p style="color:var(--text-secondary);font-size:0.8rem;text-align:center;padding:0.5rem">Aucun revenu exceptionnel</p>';
+          return;
+        }
+        let html = '<table style="width:100%;border-collapse:collapse;font-size:0.8rem">';
+        html += '<thead><tr style="border-bottom:2px solid var(--border)">';
+        html += '<th style="text-align:left;padding:0.4rem 0.5rem">Libelle</th>';
+        html += '<th style="text-align:right;padding:0.4rem 0.5rem">Montant</th>';
+        html += '<th style="text-align:center;padding:0.4rem 0.5rem">Mois</th>';
+        html += '<th style="width:30px"></th>';
+        html += '</tr></thead><tbody>';
+        for (const r of revenus) {
+          const [y, m] = r.mois.split('-');
+          const dateLabel = new Date(parseInt(y), parseInt(m) - 1).toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
+          html += '<tr style="border-bottom:1px solid var(--border)">';
+          html += '<td style="padding:0.4rem 0.5rem">' + r.libelle + '</td>';
+          html += '<td style="text-align:right;padding:0.4rem 0.5rem;font-weight:600;color:var(--success)">' + formatEuro(r.montant) + '</td>';
+          html += '<td style="text-align:center;padding:0.4rem 0.5rem">' + dateLabel + '</td>';
+          html += '<td style="text-align:center;padding:0.4rem 0.2rem"><button onclick="deleteRevenu(\'' + r.id + '\')" style="background:none;border:none;cursor:pointer;padding:0.3rem;border-radius:4px;transition:all 0.15s;color:var(--text-light)" title="Supprimer" onmouseover="this.style.color=\'var(--danger)\';this.style.background=\'var(--danger-bg)\'" onmouseout="this.style.color=\'var(--text-light)\';this.style.background=\'none\'"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4h12M5 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1M6 7v5M10 7v5"/><path d="M3 4l1 10a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-10"/></svg></button></td>';
+          html += '</tr>';
+        }
+        html += '</tbody></table>';
+        container.innerHTML = html;
+      } catch {
+        container.innerHTML = '<p style="color:var(--danger);font-size:0.8rem">Erreur chargement</p>';
+      }
+    }
+
+    // --- Salaries ---
+    function openSalariesModal() {
+      resetSalForm();
+      refreshSalariesListe();
+      document.getElementById('salariesModalOverlay').classList.add('active');
+    }
+
+    function closeSalariesModal() {
+      resetSalForm();
+      document.getElementById('salariesModalOverlay').classList.remove('active');
+    }
+
+    document.getElementById('salariesModalOverlay').addEventListener('click', function(e) {
+      if (e.target === this) closeSalariesModal();
+    });
+
+    function resetSalForm() {
+      document.getElementById('salEditId').value = '';
+      document.getElementById('salNom').value = '';
+      document.getElementById('salPoste').value = '';
+      document.getElementById('salType').value = 'salarie';
+      document.getElementById('salNet').value = '';
+      document.getElementById('salCharges').value = '';
+      document.getElementById('salEntree').value = '';
+      document.getElementById('salSortie').value = '';
+      document.getElementById('salSubmitBtn').textContent = 'Ajouter';
+    }
+
+    function editSalarie(id, nom, poste, type, net, charges, entree, sortie) {
+      document.getElementById('salEditId').value = id;
+      document.getElementById('salNom').value = nom;
+      document.getElementById('salPoste').value = poste || '';
+      document.getElementById('salType').value = type;
+      document.getElementById('salNet').value = net;
+      document.getElementById('salCharges').value = charges;
+      document.getElementById('salEntree').value = entree;
+      document.getElementById('salSortie').value = sortie || '';
+      document.getElementById('salSubmitBtn').textContent = 'Modifier';
+      document.getElementById('salNom').focus();
+    }
+
+    async function submitSalarie() {
+      const editId = document.getElementById('salEditId').value;
+      const nom = document.getElementById('salNom').value.trim();
+      const poste = document.getElementById('salPoste').value.trim();
+      const type = document.getElementById('salType').value;
+      const net_mensuel = parseFloat(document.getElementById('salNet').value);
+      const charges_mensuelles = parseFloat(document.getElementById('salCharges').value) || 0;
+      const date_entree = document.getElementById('salEntree').value;
+      const date_sortie = document.getElementById('salSortie').value || null;
+      if (!nom) return alert('Nom requis');
+      if (isNaN(net_mensuel) || net_mensuel < 0) return alert('Net mensuel invalide');
+      if (charges_mensuelles < 0) return alert('Charges mensuelles invalides');
+      if (!date_entree) return alert('Date entree requise');
+      try {
+        const url = editId ? '/api/salaries/' + editId : '/api/salaries';
+        const method = editId ? 'PUT' : 'POST';
+        const res = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nom, poste, type, net_mensuel, charges_mensuelles, date_entree, date_sortie }),
+        });
+        if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
+        resetSalForm();
+        await refreshSalariesListe();
+        tresoData = null;
+        if (currentPage === 'masse-salariale') await refreshMasseSalarialePage();
+        else await refreshTresoData();
+      } catch (err) {
+        alert('Erreur: ' + err.message);
+      }
+    }
+
+    async function deleteSalarie(id) {
+      if (!confirm('Supprimer ce salarie ?')) return;
+      try {
+        const res = await fetch('/api/salaries/' + id, { method: 'DELETE' });
+        if (!res.ok) throw new Error('Erreur suppression');
+        await refreshSalariesListe();
+        tresoData = null;
+        if (currentPage === 'masse-salariale') await refreshMasseSalarialePage();
+        else await refreshTresoData();
+      } catch (err) {
+        alert('Erreur: ' + err.message);
+      }
+    }
+
+    async function refreshSalariesListe() {
+      const container = document.getElementById('salariesListe');
+      try {
+        const res = await fetch('/api/salaries');
+        const salaries = await res.json();
+        if (salaries.length === 0) {
+          container.innerHTML = '<p style="color:var(--text-secondary);font-size:0.8rem;text-align:center;padding:0.5rem">Aucun salarie enregistre</p>';
+          return;
+        }
+        const typeLabels = { salarie: 'Salarie', dirigeant: 'Dirigeant', alternant: 'Alternant', stagiaire: 'Stagiaire' };
+        let html = '<table style="width:100%;border-collapse:collapse;font-size:0.8rem">';
+        html += '<thead><tr style="border-bottom:2px solid var(--border)">';
+        html += '<th style="text-align:left;padding:0.4rem 0.4rem">Nom</th>';
+        html += '<th style="text-align:left;padding:0.4rem 0.4rem">Poste</th>';
+        html += '<th style="text-align:center;padding:0.4rem 0.4rem">Type</th>';
+        html += '<th style="text-align:right;padding:0.4rem 0.4rem">Net</th>';
+        html += '<th style="text-align:right;padding:0.4rem 0.4rem">Charges</th>';
+        html += '<th style="text-align:right;padding:0.4rem 0.4rem">Cout total</th>';
+        html += '<th style="text-align:center;padding:0.4rem 0.4rem">Entree</th>';
+        html += '<th style="width:55px"></th>';
+        html += '</tr></thead><tbody>';
+        for (const s of salaries) {
+          const cout = Math.round(s.net_mensuel + s.charges_mensuelles);
+          const entree = new Date(s.date_entree).toLocaleDateString('fr-FR');
+          const escNom = (s.nom || '').replace(/'/g, "\\'");
+          const escPoste = (s.poste || '').replace(/'/g, "\\'");
+          html += '<tr style="border-bottom:1px solid var(--border)">';
+          html += '<td style="padding:0.4rem">' + s.nom + '</td>';
+          html += '<td style="padding:0.4rem;color:var(--text-secondary)">' + (s.poste || '-') + '</td>';
+          html += '<td style="text-align:center;padding:0.4rem"><span style="font-size:0.7rem;padding:0.15rem 0.4rem;border-radius:3px;background:var(--primary-bg);color:var(--primary)">' + typeLabels[s.type] + '</span></td>';
+          html += '<td style="text-align:right;padding:0.4rem">' + formatEuro(s.net_mensuel) + '</td>';
+          html += '<td style="text-align:right;padding:0.4rem">' + formatEuro(s.charges_mensuelles) + '</td>';
+          html += '<td style="text-align:right;padding:0.4rem;font-weight:600;color:var(--warning)">' + formatEuro(cout) + '</td>';
+          html += '<td style="text-align:center;padding:0.4rem">' + entree + '</td>';
+          html += '<td style="text-align:center;padding:0.4rem 0.2rem;white-space:nowrap">';
+          html += '<button onclick="editSalarie(\'' + s.id + "','" + escNom + "','" + escPoste + "','" + s.type + "'," + s.net_mensuel + ',' + s.charges_mensuelles + ",'" + s.date_entree + "','" + (s.date_sortie || '') + '\')" style="background:none;border:none;cursor:pointer;padding:0.3rem;border-radius:4px;transition:all 0.15s;color:var(--text-light)" title="Modifier" onmouseover="this.style.color=\'var(--primary)\';this.style.background=\'var(--primary-bg)\'" onmouseout="this.style.color=\'var(--text-light)\';this.style.background=\'none\'"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11.5 1.5l3 3L5 14H2v-3L11.5 1.5z"/></svg></button>';
+          html += '<button onclick="deleteSalarie(\'' + s.id + '\')" style="background:none;border:none;cursor:pointer;padding:0.3rem;border-radius:4px;transition:all 0.15s;color:var(--text-light)" title="Supprimer" onmouseover="this.style.color=\'var(--danger)\';this.style.background=\'var(--danger-bg)\'" onmouseout="this.style.color=\'var(--text-light)\';this.style.background=\'none\'"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4h12M5 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1M6 7v5M10 7v5"/><path d="M3 4l1 10a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-10"/></svg></button>';
+          html += '</td>';
+          html += '</tr>';
+        }
+        html += '</tbody></table>';
+        container.innerHTML = html;
+      } catch {
+        container.innerHTML = '<p style="color:var(--danger);font-size:0.8rem">Erreur chargement</p>';
+      }
+    }
+
+    async function refreshMasseSalarialePage() {
+      await renderSalariesTable();
+      if (!tresoData) await refreshTresoData();
+      renderMasseSalariale();
+    }
+
+    async function renderSalariesTable() {
+      const container = document.getElementById('salariesTableSection');
+      if (!container) return;
+      try {
+        const res = await fetch('/api/salaries');
+        const salaries = await res.json();
+        if (salaries.length === 0) {
+          container.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:0.5rem">Aucun salarie. Cliquez sur "+ Ajouter" pour commencer.</p>';
+          return;
+        }
+        const typeLabels = { salarie: 'Salarie', dirigeant: 'Dirigeant', alternant: 'Alternant', stagiaire: 'Stagiaire' };
+        const typeColors = { salarie: 'var(--primary)', dirigeant: 'var(--purple)', alternant: 'var(--warning)', stagiaire: 'var(--text-secondary)' };
+        const typeBgs = { salarie: 'var(--primary-bg)', dirigeant: 'var(--purple-bg)', alternant: 'var(--warning-bg)', stagiaire: 'var(--hover)' };
+        let html = '<table style="width:100%;border-collapse:collapse;font-size:0.85rem">';
+        html += '<thead><tr style="border-bottom:2px solid var(--border)">';
+        html += '<th style="text-align:left;padding:0.6rem 0.8rem">Nom</th>';
+        html += '<th style="text-align:left;padding:0.6rem 0.5rem">Poste</th>';
+        html += '<th style="text-align:center;padding:0.6rem 0.5rem">Type</th>';
+        html += '<th style="text-align:right;padding:0.6rem 0.5rem">Net mensuel</th>';
+        html += '<th style="text-align:right;padding:0.6rem 0.5rem">Charges</th>';
+        html += '<th style="text-align:right;padding:0.6rem 0.5rem">Cout total</th>';
+        html += '<th style="text-align:center;padding:0.6rem 0.5rem">Entree</th>';
+        html += '<th style="text-align:center;padding:0.6rem 0.5rem">Sortie</th>';
+        html += '<th style="width:60px"></th>';
+        html += '</tr></thead><tbody>';
+        let totalNet = 0, totalCharges = 0, totalCout = 0;
+        for (const s of salaries) {
+          const cout = Math.round(s.net_mensuel + s.charges_mensuelles);
+          const entree = new Date(s.date_entree).toLocaleDateString('fr-FR');
+          const sortie = s.date_sortie ? new Date(s.date_sortie).toLocaleDateString('fr-FR') : '-';
+          const isActif = !s.date_sortie || new Date(s.date_sortie) >= new Date();
+          totalNet += isActif ? s.net_mensuel : 0;
+          totalCharges += isActif ? s.charges_mensuelles : 0;
+          totalCout += isActif ? cout : 0;
+          const escNom = (s.nom || '').replace(/'/g, "\\'");
+          const escPoste = (s.poste || '').replace(/'/g, "\\'");
+          html += '<tr style="border-bottom:1px solid var(--border);' + (isActif ? '' : 'opacity:0.5;') + '">';
+          html += '<td style="padding:0.5rem 0.8rem;font-weight:600">' + s.nom + '</td>';
+          html += '<td style="padding:0.5rem;color:var(--text-secondary)">' + (s.poste || '-') + '</td>';
+          html += '<td style="text-align:center;padding:0.5rem"><span style="font-size:0.75rem;padding:0.2rem 0.5rem;border-radius:3px;background:' + (typeBgs[s.type] || 'var(--hover)') + ';color:' + (typeColors[s.type] || 'var(--text)') + ';font-weight:500">' + typeLabels[s.type] + '</span></td>';
+          html += '<td style="text-align:right;padding:0.5rem">' + formatEuro(s.net_mensuel) + '</td>';
+          html += '<td style="text-align:right;padding:0.5rem">' + formatEuro(s.charges_mensuelles) + '</td>';
+          html += '<td style="text-align:right;padding:0.5rem;font-weight:600;color:var(--warning)">' + formatEuro(cout) + '</td>';
+          html += '<td style="text-align:center;padding:0.5rem">' + entree + '</td>';
+          html += '<td style="text-align:center;padding:0.5rem">' + sortie + '</td>';
+          html += '<td style="text-align:center;padding:0.5rem 0.3rem;white-space:nowrap">';
+          html += '<button onclick="openSalariesModal();editSalarie(\'' + s.id + "','" + escNom + "','" + escPoste + "','" + s.type + "'," + s.net_mensuel + ',' + s.charges_mensuelles + ",'" + s.date_entree + "','" + (s.date_sortie || '') + '\')" style="background:none;border:none;cursor:pointer;padding:0.3rem;border-radius:4px;transition:all 0.15s;color:var(--text-light)" title="Modifier" onmouseover="this.style.color=\'var(--primary)\';this.style.background=\'var(--primary-bg)\'" onmouseout="this.style.color=\'var(--text-light)\';this.style.background=\'none\'"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11.5 1.5l3 3L5 14H2v-3L11.5 1.5z"/></svg></button>';
+          html += '<button onclick="deleteSalarie(\'' + s.id + '\')" style="background:none;border:none;cursor:pointer;padding:0.3rem;border-radius:4px;transition:all 0.15s;color:var(--text-light)" title="Supprimer" onmouseover="this.style.color=\'var(--danger)\';this.style.background=\'var(--danger-bg)\'" onmouseout="this.style.color=\'var(--text-light)\';this.style.background=\'none\'"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4h12M5 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1M6 7v5M10 7v5"/><path d="M3 4l1 10a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-10"/></svg></button>';
+          html += '</td>';
+          html += '</tr>';
+        }
+        html += '<tr style="border-top:2px solid var(--text)">';
+        html += '<td colspan="3" style="padding:0.6rem 0.8rem;font-weight:700">Total (actifs)</td>';
+        html += '<td style="text-align:right;padding:0.6rem 0.5rem;font-weight:700">' + formatEuro(totalNet) + '</td>';
+        html += '<td style="text-align:right;padding:0.6rem 0.5rem;font-weight:700">' + formatEuro(totalCharges) + '</td>';
+        html += '<td style="text-align:right;padding:0.6rem 0.5rem;font-weight:700;color:var(--warning)">' + formatEuro(totalCout) + '</td>';
+        html += '<td colspan="3"></td>';
+        html += '</tr>';
+        html += '</tbody></table>';
+        container.innerHTML = html;
+      } catch {
+        container.innerHTML = '<p style="color:var(--danger);font-size:0.85rem">Erreur chargement</p>';
+      }
+    }
+
+    function renderMasseSalariale() {
+      if (!tresoData || !tresoData.previsionnel) return;
+      const container = document.getElementById('masseSalarialeSection');
+      if (!container) return;
+      const prev = tresoData.previsionnel;
+      const hasMasse = prev.some(m => m.masseSalariale > 0);
+      if (!hasMasse) {
+        container.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:0.5rem">Aucun salarie enregistre. Cliquez sur "+ Ajouter" pour commencer.</p>';
+        return;
+      }
+      let html = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:0.85rem">';
+      html += '<thead><tr style="border-bottom:2px solid var(--border)">';
+      for (const m of prev) {
+        const label = new Date(m.annee, m.mois - 1).toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
+        html += '<th style="text-align:center;padding:0.5rem;font-weight:600;white-space:nowrap">' + label + '</th>';
+      }
+      html += '</tr></thead><tbody><tr>';
+      for (const m of prev) {
+        const val = m.masseSalariale || 0;
+        html += '<td style="text-align:center;padding:0.5rem;font-weight:600;color:var(--warning)">' + (val > 0 ? formatEuro(val) : '-') + '</td>';
+      }
+      html += '</tr></tbody></table></div>';
+
+      // Total annuel
+      const totalAnnuel = prev.reduce((s, m) => s + (m.masseSalariale || 0), 0);
+      html += '<div style="text-align:right;padding:0.5rem 0.8rem;font-weight:700;font-size:0.9rem;color:var(--text-secondary)">Total 12 mois : <span style="color:var(--warning)">' + formatEuro(totalAnnuel) + '</span></div>';
+
+      container.innerHTML = html;
+    }
 
     function renderChargesChart() {
       if (!tresoData || !tresoData.ventilationCharges) return;
