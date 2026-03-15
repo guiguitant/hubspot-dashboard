@@ -76,6 +76,13 @@
       background: var(--card);
     }
 
+    @keyframes ck-spin {
+      to { transform: rotate(360deg); }
+    }
+    .ck-spinner {
+      animation: ck-spin 1s linear infinite;
+    }
+
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
@@ -910,6 +917,45 @@
 
   <!-- PAGE: Cockpit -->
   <div class="app-page active" id="page-cockpit">
+
+  <!-- Loading overlay -->
+  <div id="cockpitLoader" style="position:absolute;inset:0;background:var(--bg);z-index:40;display:flex;align-items:center;justify-content:center">
+    <div style="text-align:center">
+      <div style="font-size:2rem;margin-bottom:1.5rem">&#127919;</div>
+      <h2 style="font-size:1.1rem;font-weight:600;margin-bottom:1.5rem;color:var(--text)">Chargement du Cockpit</h2>
+      <div style="display:flex;flex-direction:column;gap:0.75rem;min-width:280px">
+        <div class="ck-loader-item" id="ckLoaderHubspot" style="display:flex;align-items:center;gap:0.75rem;padding:0.5rem 0.75rem;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg-secondary)">
+          <span class="ck-loader-icon" style="width:20px;text-align:center">
+            <svg class="ck-spinner" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--text-secondary)" stroke-width="2"><circle cx="8" cy="8" r="6" stroke-dasharray="30" stroke-dashoffset="10" stroke-linecap="round"/></svg>
+          </span>
+          <span style="font-size:0.85rem;color:var(--text)">HubSpot</span>
+          <span style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)" class="ck-loader-status">Connexion...</span>
+        </div>
+        <div class="ck-loader-item" id="ckLoaderNotion" style="display:flex;align-items:center;gap:0.75rem;padding:0.5rem 0.75rem;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg-secondary)">
+          <span class="ck-loader-icon" style="width:20px;text-align:center">
+            <svg class="ck-spinner" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--text-secondary)" stroke-width="2"><circle cx="8" cy="8" r="6" stroke-dasharray="30" stroke-dashoffset="10" stroke-linecap="round"/></svg>
+          </span>
+          <span style="font-size:0.85rem;color:var(--text)">Notion</span>
+          <span style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)" class="ck-loader-status">Connexion...</span>
+        </div>
+        <div class="ck-loader-item" id="ckLoaderPennylane" style="display:flex;align-items:center;gap:0.75rem;padding:0.5rem 0.75rem;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg-secondary)">
+          <span class="ck-loader-icon" style="width:20px;text-align:center">
+            <svg class="ck-spinner" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--text-secondary)" stroke-width="2"><circle cx="8" cy="8" r="6" stroke-dasharray="30" stroke-dashoffset="10" stroke-linecap="round"/></svg>
+          </span>
+          <span style="font-size:0.85rem;color:var(--text)">Pennylane</span>
+          <span style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)" class="ck-loader-status">Connexion...</span>
+        </div>
+        <div class="ck-loader-item" id="ckLoaderQonto" style="display:flex;align-items:center;gap:0.75rem;padding:0.5rem 0.75rem;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg-secondary)">
+          <span class="ck-loader-icon" style="width:20px;text-align:center">
+            <svg class="ck-spinner" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--text-secondary)" stroke-width="2"><circle cx="8" cy="8" r="6" stroke-dasharray="30" stroke-dashoffset="10" stroke-linecap="round"/></svg>
+          </span>
+          <span style="font-size:0.85rem;color:var(--text)">Qonto</span>
+          <span style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)" class="ck-loader-status">Connexion...</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="page">
     <div class="page-icon">&#127919;</div>
     <h1 class="page-title">Cockpit</h1>
@@ -1776,9 +1822,9 @@
       }
 
       if (page === 'cockpit') refreshCockpit();
-      if (page === 'dashboard' && !dashboardData) { refreshData(); refreshReconData(); }
-      if (page === 'facturation' && !factData) refreshFactData();
-      if (page === 'tresorerie' && !tresoData) refreshTresoData();
+      if (page === 'dashboard') { if (dashboardData) render(); else { refreshData(); refreshReconData(); } }
+      if (page === 'facturation') { if (factData) { renderFactAlerts(); renderFactKpis(); renderFactTable(); } else refreshFactData(); }
+      if (page === 'tresorerie') { if (tresoData) { renderTresoKpis(); renderTresoChart(); renderChargesChart(); renderChargesDetail(); renderMasseSalariale(); } else refreshTresoData(); }
       if (page === 'masse-salariale') refreshMasseSalarialePage();
       if (page === 'scenarios') refreshScenariosPage();
       if (page === 'frais-km' && !fraisKmData) refreshFraisKmClients();
@@ -4238,21 +4284,57 @@
     let ckTresoData = null;
     let ckFactDataCache = null;
 
+    function ckLoaderUpdate(id, status, ok) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const iconEl = el.querySelector('.ck-loader-icon');
+      const statusEl = el.querySelector('.ck-loader-status');
+      if (ok === true) {
+        iconEl.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--success)" stroke-width="2"><path d="M3 8.5l3 3 7-7"/></svg>';
+        statusEl.textContent = status;
+        statusEl.style.color = 'var(--success)';
+        el.style.borderColor = 'var(--success)';
+      } else if (ok === false) {
+        iconEl.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--danger)" stroke-width="2"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
+        statusEl.textContent = status;
+        statusEl.style.color = 'var(--danger)';
+        el.style.borderColor = 'var(--danger)';
+      } else {
+        statusEl.textContent = status;
+      }
+    }
+
     async function refreshCockpit() {
       const errorBanner = document.getElementById('cockpitErrorBanner');
       errorBanner.style.display = 'none';
+      const loader = document.getElementById('cockpitLoader');
+      const isFirstLoad = loader && loader.style.display !== 'none';
+
       try {
-        const [dashRes, tresoRes, factRes] = await Promise.all([
-          fetch('/api/dashboard'),
-          fetch('/api/tresorerie'),
-          fetch('/api/facturation'),
-        ]);
-        if (!dashRes.ok) throw new Error('Erreur dashboard');
-        if (!tresoRes.ok) throw new Error('Erreur tresorerie');
+        // HubSpot (dashboard)
+        if (isFirstLoad) ckLoaderUpdate('ckLoaderHubspot', 'Chargement...', null);
+        const dashRes = await fetch('/api/dashboard');
+        if (!dashRes.ok) throw new Error('Erreur HubSpot');
         ckDashData = await dashRes.json();
-        ckTresoData = await tresoRes.json();
-        tresoData = ckTresoData; // alimente la variable globale pour les modales
+        dashboardData = ckDashData;
+        if (isFirstLoad) ckLoaderUpdate('ckLoaderHubspot', 'Connecte', true);
+
+        // Notion + Pennylane (facturation)
+        if (isFirstLoad) ckLoaderUpdate('ckLoaderNotion', 'Chargement...', null);
+        if (isFirstLoad) ckLoaderUpdate('ckLoaderPennylane', 'Chargement...', null);
+        const factRes = await fetch('/api/facturation');
         ckFactDataCache = factRes.ok ? await factRes.json() : null;
+        factData = ckFactDataCache;
+        if (isFirstLoad) ckLoaderUpdate('ckLoaderNotion', 'Connecte', true);
+        if (isFirstLoad) ckLoaderUpdate('ckLoaderPennylane', 'Connecte', true);
+
+        // Qonto (tresorerie)
+        if (isFirstLoad) ckLoaderUpdate('ckLoaderQonto', 'Chargement...', null);
+        const tresoRes = await fetch('/api/tresorerie');
+        if (!tresoRes.ok) throw new Error('Erreur Qonto');
+        ckTresoData = await tresoRes.json();
+        tresoData = ckTresoData;
+        if (isFirstLoad) ckLoaderUpdate('ckLoaderQonto', 'Connecte', true);
 
         renderCockpitKpis();
         renderCockpitAlerts();
@@ -4262,8 +4344,30 @@
         const now = new Date();
         document.getElementById('lastSync').textContent =
           now.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+
+        // Masquer le loader avec une petite transition
+        if (isFirstLoad) {
+          setTimeout(() => {
+            loader.style.opacity = '0';
+            loader.style.transition = 'opacity 0.4s';
+            setTimeout(() => { loader.style.display = 'none'; }, 400);
+          }, 500);
+        }
       } catch (err) {
         console.error('Erreur cockpit:', err);
+        if (isFirstLoad) {
+          if (err.message.includes('HubSpot')) ckLoaderUpdate('ckLoaderHubspot', 'Erreur', false);
+          else if (err.message.includes('Qonto')) ckLoaderUpdate('ckLoaderQonto', 'Erreur', false);
+          else {
+            ckLoaderUpdate('ckLoaderNotion', 'Erreur', false);
+            ckLoaderUpdate('ckLoaderPennylane', 'Erreur', false);
+          }
+          setTimeout(() => {
+            loader.style.opacity = '0';
+            loader.style.transition = 'opacity 0.4s';
+            setTimeout(() => { loader.style.display = 'none'; }, 400);
+          }, 2000);
+        }
         errorBanner.textContent = err.message;
         errorBanner.style.display = 'block';
       }
