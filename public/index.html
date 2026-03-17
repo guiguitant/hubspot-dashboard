@@ -829,8 +829,8 @@
       display: flex;
       align-items: center;
       gap: 0.5rem;
-      padding: 0.45rem 0.75rem;
-      border-radius: var(--radius);
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
       font-size: 0.82rem;
       color: var(--sidebar-text-secondary);
       cursor: pointer;
@@ -839,13 +839,67 @@
       font-family: inherit;
       width: 100%;
       text-align: left;
-      transition: background 0.12s, color 0.12s;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
     }
 
-    .sidebar-link:hover { background: var(--sidebar-hover); color: var(--sidebar-text); }
-    .sidebar-link.active { background: var(--sidebar-active-bg); color: #ffffff; font-weight: 500; }
+    .sidebar-link:hover {
+      background: var(--sidebar-hover);
+      color: var(--sidebar-text);
+      transform: translateX(2px);
+    }
 
-    .sidebar-link svg { flex-shrink: 0; }
+    .sidebar-link.active {
+      background: var(--sidebar-active-bg);
+      color: #ffffff;
+      font-weight: 500;
+      box-shadow: inset 3px 0 0 var(--success);
+    }
+
+    .sidebar-link svg {
+      flex-shrink: 0;
+      transition: transform 0.2s;
+    }
+
+    .sidebar-link:hover svg {
+      transform: scale(1.1);
+    }
+
+    .sidebar-subnav {
+      overflow: hidden;
+      max-height: 0;
+      transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s;
+      opacity: 0;
+      margin-left: 1rem;
+      border-left: 2px solid var(--sidebar-border);
+      padding-left: 0.25rem;
+    }
+
+    .sidebar-subnav.open {
+      max-height: 200px;
+      opacity: 1;
+    }
+
+    .sidebar-subnav .sidebar-link {
+      padding: 0.35rem 0.6rem;
+      font-size: 0.78rem;
+      border-radius: 4px;
+    }
+
+    .sidebar-group {
+      border-radius: 8px;
+      padding: 2px;
+      margin-bottom: 2px;
+      transition: background 0.3s;
+    }
+
+    .sidebar-group.group-active {
+      background: rgba(255,255,255,0.06);
+    }
+
+    [data-theme="dark"] .sidebar-group.group-active {
+      background: rgba(52,211,153,0.06);
+    }
 
     .sidebar-section-label {
       font-size: 0.68rem;
@@ -955,16 +1009,18 @@
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M8 4v4l3 2"/><path d="M4.5 8H2M14 8h-2.5M8 2v1.5M8 12.5V14"/></svg>
           Cockpit
         </button>
-        <button class="sidebar-link" onclick="navigateTo('dashboard');toggleComSubnav(true)" data-page="dashboard">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
-          Commercial
-          <span id="comChevron" style="margin-left:auto;font-size:0.6rem;transition:transform 0.2s;color:var(--sidebar-text-secondary)">&#9654;</span>
-        </button>
-        <div id="comSubnav" style="display:none;overflow:hidden">
-          <button class="sidebar-link" onclick="navigateTo('analyse-clients')" data-page="analyse-clients" style="padding-left:2.2rem;font-size:0.78rem">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="5" r="3"/><path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6"/></svg>
-            Analyse clients
+        <div class="sidebar-group" id="comGroup">
+          <button class="sidebar-link" onclick="navigateTo('dashboard');toggleComSubnav(true)" data-page="dashboard">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
+            Commercial
+            <span id="comChevron" style="margin-left:auto;font-size:0.6rem;transition:transform 0.2s;color:var(--sidebar-text-secondary)">&#9654;</span>
           </button>
+          <div id="comSubnav" class="sidebar-subnav">
+            <button class="sidebar-link" onclick="navigateTo('analyse-clients')" data-page="analyse-clients">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="5" r="3"/><path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6"/></svg>
+              Analyse clients
+            </button>
+          </div>
         </div>
         <button class="sidebar-link" onclick="navigateTo('facturation')" data-page="facturation">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 1h8a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z"/><path d="M6 5h4M6 8h4M6 11h2"/></svg>
@@ -974,21 +1030,23 @@
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 11l3-3 2 2 4-4 2 2 3-3"/><path d="M12 5h3v3"/><path d="M1 14h14"/></svg>
           Frais KM
         </button>
-        <button class="sidebar-link" onclick="navigateTo('tresorerie');toggleTresoSubnav(true)" data-page="tresorerie">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 13V5l4-3 3 2 4-3 3 3v10H1z"/><path d="M1 9l4-2 3 2 4-3 3 2"/></svg>
-          Tresorerie
-          <span id="tresoChevron" style="margin-left:auto;font-size:0.6rem;transition:transform 0.2s;color:var(--sidebar-text-secondary)">&#9654;</span>
-        </button>
-        <div id="tresoSubnav" style="display:none;overflow:hidden">
-          <button class="sidebar-link" onclick="navigateToMasseSalariale()" data-page="masse-salariale" style="padding-left:2.2rem;font-size:0.78rem">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="5" r="3"/><path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6"/></svg>
-            Masse salariale
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-left:auto;opacity:0.5"><rect x="3" y="7" width="10" height="8" rx="1"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/></svg>
+        <div class="sidebar-group" id="tresoGroup">
+          <button class="sidebar-link" onclick="navigateTo('tresorerie');toggleTresoSubnav(true)" data-page="tresorerie">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 13V5l4-3 3 2 4-3 3 3v10H1z"/><path d="M1 9l4-2 3 2 4-3 3 2"/></svg>
+            Tresorerie
+            <span id="tresoChevron" style="margin-left:auto;font-size:0.6rem;transition:transform 0.2s;color:var(--sidebar-text-secondary)">&#9654;</span>
           </button>
-          <button class="sidebar-link" onclick="navigateTo('scenarios')" data-page="scenarios" style="padding-left:2.2rem;font-size:0.78rem">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12M2 8h8M2 13h10"/><path d="M12 6l3 3-3 3"/></svg>
-            Scenarios
-          </button>
+          <div id="tresoSubnav" class="sidebar-subnav">
+            <button class="sidebar-link" onclick="navigateToMasseSalariale()" data-page="masse-salariale">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="5" r="3"/><path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6"/></svg>
+              Masse salariale
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-left:auto;opacity:0.5"><rect x="3" y="7" width="10" height="8" rx="1"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/></svg>
+            </button>
+            <button class="sidebar-link" onclick="navigateTo('scenarios')" data-page="scenarios">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12M2 8h8M2 13h10"/><path d="M12 6l3 3-3 3"/></svg>
+              Scenarios
+            </button>
+          </div>
         </div>
       </div>
       <div style="flex:1"></div>
@@ -1959,21 +2017,22 @@
       document.getElementById('topbarPageName').textContent = PAGE_NAMES[page] || page;
       document.getElementById('btnObjectifs').style.display = (page === 'dashboard' || page === 'cockpit') ? '' : 'none';
 
-      // Ouvrir le sous-menu commercial si on navigue vers une sous-page
-      if (page === 'dashboard' || page === 'analyse-clients') {
-        toggleComSubnav(true);
-        if (page === 'analyse-clients') {
-          document.querySelector('[data-page="dashboard"]').classList.add('active');
-        }
+      // Gestion des groupes : ouvrir/fermer + fond englobant
+      const isComPage = (page === 'dashboard' || page === 'analyse-clients');
+      const isTresoPage = (page === 'tresorerie' || page === 'masse-salariale' || page === 'scenarios');
+
+      // Commercial
+      toggleComSubnav(isComPage);
+      document.getElementById('comGroup').classList.toggle('group-active', isComPage);
+      if (page === 'analyse-clients') {
+        document.querySelector('[data-page="dashboard"]').classList.add('active');
       }
 
-      // Ouvrir le sous-menu tresorerie si on navigue vers une sous-page
-      if (page === 'tresorerie' || page === 'masse-salariale' || page === 'scenarios') {
-        toggleTresoSubnav(true);
-        // Marquer aussi tresorerie comme parent actif quand on est sur une sous-page
-        if (page === 'masse-salariale' || page === 'scenarios') {
-          document.querySelector('[data-page="tresorerie"]').classList.add('active');
-        }
+      // Trésorerie
+      toggleTresoSubnav(isTresoPage);
+      document.getElementById('tresoGroup').classList.toggle('group-active', isTresoPage);
+      if (page === 'masse-salariale' || page === 'scenarios') {
+        document.querySelector('[data-page="tresorerie"]').classList.add('active');
       }
 
       if (page === 'cockpit') refreshCockpit();
@@ -2038,18 +2097,18 @@
     function toggleComSubnav(forceOpen) {
       const subnav = document.getElementById('comSubnav');
       const chevron = document.getElementById('comChevron');
-      const isOpen = subnav.style.display !== 'none';
+      const isOpen = subnav.classList.contains('open');
       const shouldOpen = forceOpen !== undefined ? forceOpen : !isOpen;
-      subnav.style.display = shouldOpen ? 'block' : 'none';
+      subnav.classList.toggle('open', shouldOpen);
       chevron.style.transform = shouldOpen ? 'rotate(90deg)' : '';
     }
 
     function toggleTresoSubnav(forceOpen) {
       const subnav = document.getElementById('tresoSubnav');
       const chevron = document.getElementById('tresoChevron');
-      const isOpen = subnav.style.display !== 'none';
+      const isOpen = subnav.classList.contains('open');
       const shouldOpen = forceOpen !== undefined ? forceOpen : !isOpen;
-      subnav.style.display = shouldOpen ? 'block' : 'none';
+      subnav.classList.toggle('open', shouldOpen);
       chevron.style.transform = shouldOpen ? 'rotate(90deg)' : '';
     }
 
