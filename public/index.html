@@ -3093,15 +3093,11 @@
     function renderFactKpis() {
       if (!factData) return;
       const lines = getFilteredInvoices();
-      const allLines = buildInvoiceLines(factData.missions);
 
-      // CA 2026 = somme des factures avec date d'émission en 2026
-      const allLines2026 = allLines.filter(l => {
-        if (!l.date) return false;
-        return new Date(l.date).getFullYear() === 2026;
-      });
-      const ca2026 = allLines2026.reduce((s, l) => s + l.montant, 0);
-      const nbFactures2026 = allLines2026.length;
+      // CA total (sur la période filtrée)
+      const caTotal = lines.reduce((s, l) => s + l.montant, 0);
+      const nbFactures = lines.length;
+      const periodLabel = factPeriodStart ? 'CA periode' : 'CA total';
 
       // Montant à facturer (à envoyer + en attente) - suit les filtres
       const nonFacture = lines.filter(l => l.status === 'A envoyer' || l.status === 'En attente');
@@ -3113,21 +3109,24 @@
       const envoyes = lines.filter(l => l.status === 'Envoye');
       const montantEnvoye = envoyes.reduce((s, l) => s + l.montant, 0);
 
-      document.getElementById('factKpiCA').textContent = formatEuro(ca2026);
-      document.getElementById('factKpiCASub').textContent = nbFactures2026 + ' factures';
+      document.getElementById('factKpiCA').textContent = formatEuro(caTotal);
+      document.getElementById('factKpiCASub').textContent = nbFactures + ' factures';
+      document.querySelector('#factKpiBlockCA .kpi-label').textContent = periodLabel;
       document.getElementById('factKpiMontant').textContent = formatEuro(montantAFacturer);
       document.getElementById('factKpiMontantSub').textContent = aEnvoyer.length + ' a envoyer, ' + enAttente.length + ' en attente';
       document.getElementById('factKpiEnvoye').textContent = formatEuro(montantEnvoye);
       document.getElementById('factKpiEnvoyeSub').textContent = envoyes.length + ' facture' + (envoyes.length > 1 ? 's' : '');
-      // Impayés 2025 : factures envoyées en 2025 pas encore payées
-      const impayes2025 = allLines.filter(l => {
+      // Impayés anciens : factures envoyées avant l'année en cours pas encore payées
+      const currentYear = new Date().getFullYear();
+      const impayesAnciens = lines.filter(l => {
         if (l.status !== 'Envoye') return false;
         if (!l.date) return false;
-        return new Date(l.date).getFullYear() === 2025;
+        return new Date(l.date).getFullYear() < currentYear;
       });
-      const montantImpayes2025 = impayes2025.reduce((s, l) => s + l.montant, 0);
-      document.getElementById('factKpiImpaye2025').textContent = formatEuro(montantImpayes2025);
-      document.getElementById('factKpiImpaye2025Sub').textContent = impayes2025.length + ' facture' + (impayes2025.length > 1 ? 's' : '');
+      const montantImpayesAnciens = impayesAnciens.reduce((s, l) => s + l.montant, 0);
+      document.getElementById('factKpiImpaye2025').textContent = formatEuro(montantImpayesAnciens);
+      document.getElementById('factKpiImpaye2025Sub').textContent = impayesAnciens.length + ' facture' + (impayesAnciens.length > 1 ? 's' : '');
+      document.querySelector('#factKpiBlockImpaye .kpi-label').textContent = 'Impayes < ' + currentYear;
     }
 
     function getInvoiceYear(l) {
@@ -3623,9 +3622,11 @@
         if (!items || items.length === 0) return '';
         let t = '<table style="width:100%;border-collapse:collapse;font-size:0.8rem">';
         for (const f of items) {
+          const typeColor = f.type === 'Acompte' ? 'var(--warning)' : 'var(--primary)';
           t += '<tr style="border-bottom:1px solid var(--border)">';
           t += '<td style="padding:0.3rem 0.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px">' + (f.client || '-') + '</td>';
           t += '<td style="padding:0.3rem 0.5rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px">' + (f.mission || '-') + '</td>';
+          t += '<td style="padding:0.3rem 0.5rem;font-size:0.72rem;font-weight:600;color:' + typeColor + '">' + (f.type || '-') + '</td>';
           t += '<td style="padding:0.3rem 0.8rem;text-align:right;font-weight:600;white-space:nowrap">' + formatEuro(f.montant || 0) + '</td>';
           t += '</tr>';
         }

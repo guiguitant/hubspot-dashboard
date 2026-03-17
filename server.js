@@ -683,15 +683,8 @@ app.get('/api/reconciliation', async (req, res) => {
 app.get('/api/facturation', async (req, res) => {
   try {
     const allMissions = await fetchAllNotionMissions();
-    // Toutes les missions non soldées + les missions de l'année en cours soldées
-    const FACT_YEAR = new Date().getFullYear();
-    const missions = allMissions.filter(m => {
-      const norm = (m.facturation || '').toLowerCase()
-        .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-      const isSolde = norm.includes('solde paye');
-      if (!isSolde) return true;
-      return m.anneeFinal === String(FACT_YEAR);
-    });
+    // Toutes les missions (sans filtre d'année)
+    const missions = allMissions;
 
     const result = missions.map(m => {
       // Calcul du reste à facturer basé sur le statut de facturation
@@ -725,7 +718,7 @@ app.get('/api/facturation', async (req, res) => {
     });
 
     res.json({
-      year: FACT_YEAR,
+      year: new Date().getFullYear(),
       missions: result,
       fetchedAt: new Date().toISOString(),
     });
@@ -1899,7 +1892,7 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
           status: isLate ? 'late' : 'upcoming', previsionnel: false,
         });
       } else if (status.includes('acompte paye') || status.includes('solde a envoyer')
-                 || status.includes('acompte a envoyer') || status === 'non defini') {
+                 || status.includes('acompte envoye') || status.includes('acompte a envoyer') || status === 'non defini') {
         const dateEmission = m.dateFactureFinale;
         const dateEcheance = echeanceJ45(dateEmission);
         facturesAEncaisser.push({
