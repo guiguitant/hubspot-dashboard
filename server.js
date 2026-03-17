@@ -895,6 +895,17 @@ function orsMatrixRequest(body) {
   });
 }
 
+// GET /api/analyse-clients — données enrichies pour analyse
+app.get('/api/analyse-clients', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('clients_km').select('*');
+    if (error) throw new Error(error.message);
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/frais-km/clients — lecture rapide depuis Supabase
 app.get('/api/frais-km/clients', async (req, res) => {
   try {
@@ -914,6 +925,71 @@ app.get('/api/frais-km/clients', async (req, res) => {
   }
 });
 
+// Lookup entreprise par SIRET via API gouv
+function lookupEntreprise(siret) {
+  return new Promise((resolve) => {
+    if (!siret || siret.length < 9) return resolve(null);
+    const siren = siret.replace(/\s/g, '').substring(0, 9);
+    const options = {
+      hostname: 'recherche-entreprises.api.gouv.fr',
+      path: '/search?q=' + encodeURIComponent(siren) + '&per_page=1',
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+    };
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => (data += chunk));
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          if (json.results && json.results.length > 0) {
+            const r = json.results[0];
+            const sectionLabels = {
+              'A':'Agriculture','B':'Industries extractives','C':'Industrie manufacturiere','D':'Electricite, gaz','E':'Eau, dechets',
+              'F':'Construction','G':'Commerce','H':'Transport, entreposage','I':'Hebergement, restauration','J':'Information, communication',
+              'K':'Finance, assurance','L':'Immobilier','M':'Activites scientifiques, techniques','N':'Services administratifs',
+              'O':'Administration publique','P':'Enseignement','Q':'Sante, action sociale','R':'Arts, spectacles','S':'Autres services',
+              'T':'Activites menageres','U':'Organisations extraterritoriales',
+            };
+            const section = r.section_activite_principale || '';
+            resolve({
+              code_naf: r.activite_principale || '',
+              secteur: sectionLabels[section] || section,
+            });
+          } else {
+            resolve(null);
+          }
+        } catch (e) { resolve(null); }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.end();
+  });
+}
+
+// Département → Région
+const DEPT_REGION = {
+  '01':'Auvergne-Rhône-Alpes','03':'Auvergne-Rhône-Alpes','07':'Auvergne-Rhône-Alpes','15':'Auvergne-Rhône-Alpes','26':'Auvergne-Rhône-Alpes','38':'Auvergne-Rhône-Alpes','42':'Auvergne-Rhône-Alpes','43':'Auvergne-Rhône-Alpes','63':'Auvergne-Rhône-Alpes','69':'Auvergne-Rhône-Alpes','73':'Auvergne-Rhône-Alpes','74':'Auvergne-Rhône-Alpes',
+  '21':'Bourgogne-Franche-Comté','25':'Bourgogne-Franche-Comté','39':'Bourgogne-Franche-Comté','58':'Bourgogne-Franche-Comté','70':'Bourgogne-Franche-Comté','71':'Bourgogne-Franche-Comté','89':'Bourgogne-Franche-Comté','90':'Bourgogne-Franche-Comté',
+  '22':'Bretagne','29':'Bretagne','35':'Bretagne','56':'Bretagne',
+  '18':'Centre-Val de Loire','28':'Centre-Val de Loire','36':'Centre-Val de Loire','37':'Centre-Val de Loire','41':'Centre-Val de Loire','45':'Centre-Val de Loire',
+  '2A':'Corse','2B':'Corse','20':'Corse',
+  '08':'Grand Est','10':'Grand Est','51':'Grand Est','52':'Grand Est','54':'Grand Est','55':'Grand Est','57':'Grand Est','67':'Grand Est','68':'Grand Est','88':'Grand Est',
+  '59':'Hauts-de-France','60':'Hauts-de-France','62':'Hauts-de-France','80':'Hauts-de-France','02':'Hauts-de-France',
+  '75':'Île-de-France','77':'Île-de-France','78':'Île-de-France','91':'Île-de-France','92':'Île-de-France','93':'Île-de-France','94':'Île-de-France','95':'Île-de-France',
+  '14':'Normandie','27':'Normandie','50':'Normandie','61':'Normandie','76':'Normandie',
+  '16':'Nouvelle-Aquitaine','17':'Nouvelle-Aquitaine','19':'Nouvelle-Aquitaine','23':'Nouvelle-Aquitaine','24':'Nouvelle-Aquitaine','33':'Nouvelle-Aquitaine','40':'Nouvelle-Aquitaine','47':'Nouvelle-Aquitaine','64':'Nouvelle-Aquitaine','79':'Nouvelle-Aquitaine','86':'Nouvelle-Aquitaine','87':'Nouvelle-Aquitaine',
+  '09':'Occitanie','11':'Occitanie','12':'Occitanie','30':'Occitanie','31':'Occitanie','32':'Occitanie','34':'Occitanie','46':'Occitanie','48':'Occitanie','65':'Occitanie','66':'Occitanie','81':'Occitanie','82':'Occitanie',
+  '44':'Pays de la Loire','49':'Pays de la Loire','53':'Pays de la Loire','72':'Pays de la Loire','85':'Pays de la Loire',
+  '04':'Provence-Alpes-Côte d\'Azur','05':'Provence-Alpes-Côte d\'Azur','06':'Provence-Alpes-Côte d\'Azur','13':'Provence-Alpes-Côte d\'Azur','83':'Provence-Alpes-Côte d\'Azur','84':'Provence-Alpes-Côte d\'Azur',
+};
+
+function getDeptRegion(postalCode) {
+  if (!postalCode) return { departement: '', region: '' };
+  const dept = postalCode.substring(0, 2);
+  return { departement: dept, region: DEPT_REGION[dept] || '' };
+}
+
 // POST /api/frais-km/sync — sync Pennylane → géocodage → distances → Supabase
 app.post('/api/frais-km/sync', async (req, res) => {
   try {
@@ -928,7 +1004,13 @@ app.post('/api/frais-km/sync', async (req, res) => {
         const ba = c.billing_address || {};
         const addr = [ba.address, ba.postal_code, ba.city].filter(Boolean).join(', ');
         if (!addr || addr.length < 5) return null;
-        return { id: c.id, name: c.name || (c.first_name + ' ' + c.last_name), address: addr };
+        return {
+          id: c.id,
+          name: c.name || (c.first_name + ' ' + c.last_name),
+          address: addr,
+          siret: c.reg_no || '',
+          postalCode: ba.postal_code || '',
+        };
       })
       .filter(Boolean);
 
@@ -994,7 +1076,32 @@ app.post('/api/frais-km/sync', async (req, res) => {
       }
     }
 
-    // 5. Upsert dans Supabase
+    // 5. Enrichir avec SIRET → secteur d'activité + département/région
+    const clientMap = {};
+    clientsWithAddress.forEach(c => { clientMap[c.id] = c; });
+
+    for (const r of results) {
+      const orig = clientMap[r.pennylane_id];
+      if (orig) {
+        // Département / Région depuis le code postal
+        const { departement, region } = getDeptRegion(orig.postalCode);
+        r.departement = departement;
+        r.region = region;
+        r.siret = orig.siret;
+
+        // Lookup secteur via API entreprises
+        if (orig.siret && orig.siret.length >= 9) {
+          await new Promise(resolve => setTimeout(resolve, 200)); // rate limit
+          const info = await lookupEntreprise(orig.siret);
+          if (info) {
+            r.code_naf = info.code_naf;
+            r.secteur = info.secteur;
+          }
+        }
+      }
+    }
+
+    // 6. Upsert dans Supabase
     const { error } = await supabase.from('clients_km').upsert(results, { onConflict: 'pennylane_id' });
     if (error) throw new Error(error.message);
 
@@ -1089,6 +1196,47 @@ app.post('/api/frais-km/generate', async (req, res) => {
     res.json({ itineraires });
   } catch (err) {
     console.error('Erreur frais-km/generate:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Facture overrides ---
+app.get('/api/facture-overrides', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('facture_overrides').select('*');
+    if (error) throw new Error(error.message);
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/facture-overrides', async (req, res) => {
+  try {
+    const { mission, type, status, comment } = req.body;
+    if (!mission || !type) return res.status(400).json({ error: 'mission et type requis' });
+    const row = { mission, type, updated_at: new Date().toISOString() };
+    if (status !== undefined) row.status = status;
+    if (comment !== undefined) row.comment = comment;
+    const { error } = await supabase.from('facture_overrides').upsert(
+      row,
+      { onConflict: 'mission,type' }
+    );
+    if (error) throw new Error(error.message);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/facture-overrides', async (req, res) => {
+  try {
+    const { mission, type } = req.body;
+    if (!mission || !type) return res.status(400).json({ error: 'mission et type requis' });
+    const { error } = await supabase.from('facture_overrides').delete().eq('mission', mission).eq('type', type);
+    if (error) throw new Error(error.message);
+    res.json({ ok: true });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

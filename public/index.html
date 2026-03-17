@@ -900,6 +900,11 @@
     .fact-status.yellow { background: var(--warning-bg); color: var(--warning); }
     .fact-status.red { background: var(--danger-bg); color: var(--danger); }
     .fact-status:not(.green):not(.yellow):not(.red) { background: var(--hover); color: var(--text-light); }
+    .fact-status-select { cursor: pointer; border-radius: 3px; font-weight: 600; border: 1px solid transparent; }
+    .fact-status-select.green { background: var(--success-bg); color: var(--success); }
+    .fact-status-select.yellow { background: var(--warning-bg); color: var(--warning); }
+    .fact-status-select.red { background: var(--danger-bg); color: var(--danger); }
+    .fact-status-select:not(.green):not(.yellow):not(.red) { background: var(--hover); color: var(--text-light); }
 
     .fact-alert {
       display: flex;
@@ -950,10 +955,17 @@
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M8 4v4l3 2"/><path d="M4.5 8H2M14 8h-2.5M8 2v1.5M8 12.5V14"/></svg>
           Cockpit
         </button>
-        <button class="sidebar-link" onclick="navigateTo('dashboard')" data-page="dashboard">
+        <button class="sidebar-link" onclick="navigateTo('dashboard');toggleComSubnav(true)" data-page="dashboard">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
           Commercial
+          <span id="comChevron" style="margin-left:auto;font-size:0.6rem;transition:transform 0.2s;color:var(--sidebar-text-secondary)">&#9654;</span>
         </button>
+        <div id="comSubnav" style="display:none;overflow:hidden">
+          <button class="sidebar-link" onclick="navigateTo('analyse-clients')" data-page="analyse-clients" style="padding-left:2.2rem;font-size:0.78rem">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="5" r="3"/><path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6"/></svg>
+            Analyse clients
+          </button>
+        </div>
         <button class="sidebar-link" onclick="navigateTo('facturation')" data-page="facturation">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 1h8a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z"/><path d="M6 5h4M6 8h4M6 11h2"/></svg>
           Facturation
@@ -1234,23 +1246,26 @@
     <div class="section">
       <div class="section-title">Factures</div>
       <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.75rem;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:0.4rem;flex:1;max-width:280px">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--text-secondary)" stroke-width="1.5" style="flex-shrink:0"><circle cx="6.5" cy="6.5" r="5"/><path d="M10.5 10.5L14.5 14.5"/></svg>
+          <input type="text" id="factSearchInput" oninput="renderFactTable()" placeholder="Rechercher mission, client..." style="width:100%;padding:0.35rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.82rem;background:var(--bg);color:var(--text);outline:none">
+        </div>
         <div style="display:flex;align-items:center;gap:0.4rem">
-          <span style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em">Mois</span>
-          <select class="notion-select" id="factMonthSelect" onchange="setFactMonth(this.value)">
-            <option value="all">Tous les mois</option>
-            <option value="1">Janvier</option>
-            <option value="2">Fevrier</option>
-            <option value="3">Mars</option>
-            <option value="4">Avril</option>
-            <option value="5">Mai</option>
-            <option value="6">Juin</option>
-            <option value="7">Juillet</option>
-            <option value="8">Aout</option>
-            <option value="9">Septembre</option>
-            <option value="10">Octobre</option>
-            <option value="11">Novembre</option>
-            <option value="12">Decembre</option>
+          <span style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em">Periode</span>
+          <select class="notion-select" id="factPeriodSelect" onchange="setFactPeriod(this.value)">
+            <option value="all">Toutes</option>
+            <option value="m">Mensuel</option>
+            <option value="q">Trimestriel</option>
+            <option value="y">Annuel</option>
+            <option value="custom">Personnalise</option>
           </select>
+          <select class="notion-select" id="factPeriodDetail" onchange="setFactPeriodDetail(this.value)" style="display:none"></select>
+          <div id="factPeriodCustom" style="display:none;align-items:center;gap:0.3rem">
+            <input type="date" id="factDateDebut" style="padding:0.3rem 0.5rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+            <span style="font-size:0.75rem;color:var(--text-secondary)">au</span>
+            <input type="date" id="factDateFin" style="padding:0.3rem 0.5rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+            <button class="btn" onclick="applyFactCustomPeriod()" style="font-size:0.75rem;padding:0.2rem 0.5rem">OK</button>
+          </div>
         </div>
         <div style="display:flex;align-items:center;gap:0.4rem">
           <span style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em">Statut</span>
@@ -1272,6 +1287,63 @@
   </div>
   </div>
   <!-- end page-facturation -->
+
+  <div class="app-page" id="page-analyse-clients">
+  <div class="page">
+    <div class="page-icon">&#128200;</div>
+    <h1 class="page-title">Analyse clients</h1>
+    <p class="page-desc">Repartition du CA par client, secteur d'activite et zone geographique.</p>
+
+    <div class="kpi-row" id="acKpis">
+      <div class="kpi-block">
+        <div class="kpi-label">Clients actifs</div>
+        <div class="kpi-value" id="acKpiNb">--</div>
+      </div>
+      <div class="kpi-block">
+        <div class="kpi-label">CA moyen / client</div>
+        <div class="kpi-value" id="acKpiCaMoy">--</div>
+      </div>
+      <div class="kpi-block">
+        <div class="kpi-label">Top client</div>
+        <div class="kpi-value" id="acKpiTop" style="font-size:0.95rem">--</div>
+        <div class="kpi-sub" id="acKpiTopSub"></div>
+      </div>
+    </div>
+
+    <div id="acAlerts" style="display:flex;flex-direction:column;gap:0.5rem;margin-bottom:1rem"></div>
+
+    <div class="section">
+      <div class="section-title">CA par client</div>
+      <div id="acChartClient" style="position:relative;height:350px;margin-bottom:1rem">
+        <canvas id="acChartClientCanvas"></canvas>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+      <div class="section">
+        <div class="section-title">CA par secteur d'activite</div>
+        <div id="acChartSecteur" style="position:relative;height:300px">
+          <canvas id="acChartSecteurCanvas"></canvas>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-title">CA par region</div>
+        <div id="acChartRegion" style="position:relative;height:300px">
+          <canvas id="acChartRegionCanvas"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Detail par client</div>
+      <div id="acTableClients">
+        <p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p>
+      </div>
+    </div>
+
+  </div>
+  </div>
+  <!-- end page-analyse-clients -->
 
   <!-- PAGE: Tresorerie -->
   <div class="app-page" id="page-tresorerie">
@@ -1877,7 +1949,7 @@
     // --- Navigation ---
     let currentPage = 'cockpit';
 
-    const PAGE_NAMES = { cockpit: 'Cockpit', dashboard: 'Commercial', facturation: 'Facturation', 'frais-km': 'Frais KM', tresorerie: 'Tresorerie', 'masse-salariale': 'Masse salariale', scenarios: 'Scenarios' };
+    const PAGE_NAMES = { cockpit: 'Cockpit', dashboard: 'Commercial', 'analyse-clients': 'Analyse clients', facturation: 'Facturation', 'frais-km': 'Frais KM', tresorerie: 'Tresorerie', 'masse-salariale': 'Masse salariale', scenarios: 'Scenarios' };
 
     function navigateTo(page) {
       currentPage = page;
@@ -1886,6 +1958,14 @@
       document.querySelectorAll('.sidebar-link').forEach(l => l.classList.toggle('active', l.dataset.page === page));
       document.getElementById('topbarPageName').textContent = PAGE_NAMES[page] || page;
       document.getElementById('btnObjectifs').style.display = (page === 'dashboard' || page === 'cockpit') ? '' : 'none';
+
+      // Ouvrir le sous-menu commercial si on navigue vers une sous-page
+      if (page === 'dashboard' || page === 'analyse-clients') {
+        toggleComSubnav(true);
+        if (page === 'analyse-clients') {
+          document.querySelector('[data-page="dashboard"]').classList.add('active');
+        }
+      }
 
       // Ouvrir le sous-menu tresorerie si on navigue vers une sous-page
       if (page === 'tresorerie' || page === 'masse-salariale' || page === 'scenarios') {
@@ -1898,11 +1978,12 @@
 
       if (page === 'cockpit') refreshCockpit();
       if (page === 'dashboard') { if (dashboardData) render(); else { refreshData(); refreshReconData(); } }
-      if (page === 'facturation') { if (factData) { renderFactAlerts(); renderFactKpis(); renderFactTable(); } else refreshFactData(); }
+      if (page === 'facturation') { if (factData) { loadFactOverrides().then(() => { renderFactAlerts(); renderFactKpis(); renderFactTable(); }); } else refreshFactData(); }
       if (page === 'tresorerie') { if (tresoData) { renderTresoKpis(); renderTresoChart(); renderChargesChart(); renderChargesDetail(); renderMasseSalariale(); } else refreshTresoData(); }
       if (page === 'masse-salariale') refreshMasseSalarialePage();
       if (page === 'scenarios') refreshScenariosPage();
       if (page === 'frais-km' && !fraisKmData) refreshFraisKmClients();
+      if (page === 'analyse-clients' && !analyseClientsData) refreshAnalyseClients();
     }
 
     // --- Auth masse salariale ---
@@ -1954,6 +2035,15 @@
       }
     }
 
+    function toggleComSubnav(forceOpen) {
+      const subnav = document.getElementById('comSubnav');
+      const chevron = document.getElementById('comChevron');
+      const isOpen = subnav.style.display !== 'none';
+      const shouldOpen = forceOpen !== undefined ? forceOpen : !isOpen;
+      subnav.style.display = shouldOpen ? 'block' : 'none';
+      chevron.style.transform = shouldOpen ? 'rotate(90deg)' : '';
+    }
+
     function toggleTresoSubnav(forceOpen) {
       const subnav = document.getElementById('tresoSubnav');
       const chevron = document.getElementById('tresoChevron');
@@ -1971,6 +2061,7 @@
       else if (currentPage === 'masse-salariale') refreshMasseSalarialePage();
       else if (currentPage === 'scenarios') refreshScenariosPage();
       else if (currentPage === 'frais-km') refreshFraisKmClients();
+      else if (currentPage === 'analyse-clients') { analyseClientsData = null; refreshAnalyseClients(); }
     }
 
     const MONTHS_FR = [
@@ -2770,8 +2861,11 @@
     // --- Facturation ---
     let factData = null;
     let factFilter = 'all';
-    let factMonth = 'all';
+    let factPeriodType = 'all'; // 'all', 'm', 'q', 'y', 'custom'
+    let factPeriodStart = null; // Date object
+    let factPeriodEnd = null;   // Date object
     let factKpiFilter = null; // active KPI filter: 'ca2026', 'aFacturer', 'envoye', 'impaye2025'
+    let factOverrides = {}; // { "mission||type": "status" }
 
     function normFact(s) {
       return (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -2806,13 +2900,18 @@
         else if (nf.includes('acompte envoye')) acompteStatus = 'Envoye';
         else acompteStatus = 'Paye';
 
+        // Check for override
+        const acompteOv = factOverrides[m.nom + '||Acompte'];
         lines.push({
           mission: m.nom,
           client: m.client,
           type: 'Acompte',
           montant: m.montantAcompte,
           date: m.dateFactureAcompte,
-          status: acompteStatus,
+          status: (acompteOv && acompteOv.status) || acompteStatus,
+          originalStatus: acompteStatus,
+          overridden: !!acompteOv,
+          comment: (acompteOv && acompteOv.comment) || '',
           retard: m.jrsAcompteRetard,
         });
 
@@ -2823,13 +2922,17 @@
         else if (nf.includes('solde envoye')) soldeStatus = 'Envoye';
         else soldeStatus = 'Paye';
 
+        const soldeOv = factOverrides[m.nom + '||Solde'];
         lines.push({
           mission: m.nom,
           client: m.client,
           type: 'Solde',
           montant: m.montantFinal,
           date: m.dateFactureFinale,
-          status: soldeStatus,
+          status: (soldeOv && soldeOv.status) || soldeStatus,
+          originalStatus: soldeStatus,
+          overridden: !!soldeOv,
+          comment: (soldeOv && soldeOv.comment) || '',
           retard: m.jrsSoldeRetard,
         });
       }
@@ -2846,16 +2949,26 @@
         return lines;
       }
 
-      // Month filter
-      if (factMonth !== 'all') {
-        const m = parseInt(factMonth);
-        lines = lines.filter(l => dateMonth(l.date) === m);
+      // Period filter
+      if (factPeriodStart && factPeriodEnd) {
+        lines = lines.filter(l => {
+          if (!l.date) return false;
+          const d = new Date(l.date);
+          return d >= factPeriodStart && d <= factPeriodEnd;
+        });
       }
 
       // Status filter
       if (factFilter !== 'all') {
         const f = normFact(factFilter);
         lines = lines.filter(l => normFact(l.status) === f);
+      }
+
+      // Search filter
+      const searchVal = (document.getElementById('factSearchInput') || {}).value || '';
+      if (searchVal.trim()) {
+        const q = normFact(searchVal.trim());
+        lines = lines.filter(l => normFact(l.mission).includes(q) || normFact(l.client).includes(q));
       }
 
       return lines;
@@ -2895,12 +3008,86 @@
       renderFactTable();
     }
 
-    function setFactMonth(month) {
-      factMonth = month;
+    function setFactPeriod(type) {
+      factPeriodType = type;
       factKpiFilter = null;
       document.querySelectorAll('#factKpis .kpi-clickable').forEach(el => el.classList.remove('kpi-active'));
-      renderFactKpis();
-      renderFactTable();
+      const detailSel = document.getElementById('factPeriodDetail');
+      const customDiv = document.getElementById('factPeriodCustom');
+      const year = new Date().getFullYear();
+
+      if (type === 'all') {
+        detailSel.style.display = 'none';
+        customDiv.style.display = 'none';
+        factPeriodStart = null;
+        factPeriodEnd = null;
+        renderFactKpis(); renderFactTable();
+      } else if (type === 'm') {
+        customDiv.style.display = 'none';
+        detailSel.style.display = '';
+        let html = '';
+        MONTHS_FR.forEach((m, i) => {
+          html += '<option value="' + i + '">' + m + ' ' + year + '</option>';
+        });
+        detailSel.innerHTML = html;
+        detailSel.value = new Date().getMonth();
+        setFactPeriodDetail(detailSel.value);
+      } else if (type === 'q') {
+        customDiv.style.display = 'none';
+        detailSel.style.display = '';
+        const currentQ = Math.floor(new Date().getMonth() / 3);
+        let html = '';
+        for (let q = 0; q < 4; q++) {
+          html += '<option value="' + q + '">T' + (q + 1) + ' ' + year + '</option>';
+        }
+        detailSel.innerHTML = html;
+        detailSel.value = currentQ;
+        setFactPeriodDetail(detailSel.value);
+      } else if (type === 'y') {
+        customDiv.style.display = 'none';
+        detailSel.style.display = '';
+        let html = '';
+        for (let y = year; y >= year - 2; y--) {
+          html += '<option value="' + y + '">' + y + '</option>';
+        }
+        detailSel.innerHTML = html;
+        detailSel.value = year;
+        setFactPeriodDetail(detailSel.value);
+      } else if (type === 'custom') {
+        detailSel.style.display = 'none';
+        customDiv.style.display = 'flex';
+        factPeriodStart = null;
+        factPeriodEnd = null;
+      }
+    }
+
+    function setFactPeriodDetail(val) {
+      const year = new Date().getFullYear();
+      const v = parseInt(val);
+      if (factPeriodType === 'm') {
+        factPeriodStart = new Date(year, v, 1);
+        factPeriodEnd = new Date(year, v + 1, 0, 23, 59, 59);
+      } else if (factPeriodType === 'q') {
+        factPeriodStart = new Date(year, v * 3, 1);
+        factPeriodEnd = new Date(year, v * 3 + 3, 0, 23, 59, 59);
+      } else if (factPeriodType === 'y') {
+        factPeriodStart = new Date(v, 0, 1);
+        factPeriodEnd = new Date(v, 11, 31, 23, 59, 59);
+      }
+      factKpiFilter = null;
+      document.querySelectorAll('#factKpis .kpi-clickable').forEach(el => el.classList.remove('kpi-active'));
+      renderFactKpis(); renderFactTable();
+    }
+
+    function applyFactCustomPeriod() {
+      const d1 = document.getElementById('factDateDebut').value;
+      const d2 = document.getElementById('factDateFin').value;
+      if (!d1 || !d2) return alert('Saisissez les deux dates');
+      factPeriodStart = new Date(d1 + 'T00:00:00');
+      factPeriodEnd = new Date(d2 + 'T23:59:59');
+      factKpiFilter = null;
+      document.querySelectorAll('#factKpis .kpi-clickable').forEach(el => el.classList.remove('kpi-active'));
+      renderFactKpis(); renderFactTable();
     }
 
     function renderFactKpis() {
@@ -2989,7 +3176,7 @@
       const total = lines.reduce((s, l) => s + l.montant, 0);
 
       let html = '<table class="recon-table"><thead><tr>';
-      html += '<th>Mission</th><th>Client</th><th>Type</th><th>Montant</th><th>Date</th><th>Statut</th>';
+      html += '<th>Mission</th><th>Client</th><th>Type</th><th>Montant</th><th>Date</th><th>Statut</th><th>Commentaire</th>';
       html += '</tr></thead><tbody>';
 
       for (const l of lines) {
@@ -3013,7 +3200,17 @@
         html += '<td>' + typeTag + '</td>';
         html += '<td style="font-weight:600">' + formatEuro(l.montant) + '</td>';
         html += '<td style="font-size:0.75rem">' + dateCell + '</td>';
-        html += '<td><span class="fact-status ' + invoiceStatusClass(l.status) + '">' + statusLabel + '</span></td>';
+        const statuses = ['A envoyer', 'En attente', 'Envoye', 'Paye'];
+        let selectHtml = '<select class="notion-select fact-status-select ' + invoiceStatusClass(l.status) + '"';
+        selectHtml += ' data-mission="' + l.mission.replace(/"/g, '&quot;') + '" data-type="' + l.type + '"';
+        selectHtml += ' style="font-size:0.72rem;padding:0.15rem 0.3rem;' + (l.overridden ? 'border:2px solid var(--warning);' : '') + '">';
+        statuses.forEach(s => {
+          const label = s === 'Envoye' ? 'Envoy\u00e9' : s === 'Paye' ? 'Pay\u00e9' : s === 'En attente' ? 'En attente' : '\u00c0 envoyer';
+          selectHtml += '<option value="' + s + '"' + (l.status === s ? ' selected' : '') + '>' + label + '</option>';
+        });
+        selectHtml += '</select>';
+        html += '<td>' + selectHtml + '</td>';
+        html += '<td><input type="text" class="fact-comment-input" data-mission="' + l.mission.replace(/"/g, '&quot;') + '" data-type="' + l.type + '" value="' + (l.comment || '').replace(/"/g, '&quot;') + '" placeholder="..." style="width:100%;min-width:80px;padding:0.2rem 0.4rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.72rem;background:var(--bg);color:var(--text)"></td>';
         html += '</tr>';
       }
 
@@ -3024,7 +3221,7 @@
           html += '<tr style="background:var(--bg-secondary);font-size:0.78rem">';
           html += '<td colspan="3" style="color:var(--text-secondary)">Sous-total ' + y + ' (' + byYear[y].count + ' factures)</td>';
           html += '<td style="font-weight:600">' + formatEuro(byYear[y].total) + '</td>';
-          html += '<td colspan="2"></td>';
+          html += '<td colspan="3"></td>';
           html += '</tr>';
         }
       }
@@ -3033,16 +3230,68 @@
       html += '<tr style="background:var(--bg-secondary);font-weight:700">';
       html += '<td colspan="3">Total (' + lines.length + ' factures)</td>';
       html += '<td>' + formatEuro(total) + '</td>';
-      html += '<td colspan="2"></td>';
+      html += '<td colspan="3"></td>';
       html += '</tr>';
 
       html += '</tbody></table>';
       document.getElementById('factContent').innerHTML = html;
+
+      // Bind change events on status selects
+      document.querySelectorAll('.fact-status-select').forEach(sel => {
+        sel.addEventListener('change', function() {
+          const mission = this.getAttribute('data-mission');
+          const type = this.getAttribute('data-type');
+          setFactOverride(mission, type, this.value, undefined);
+        });
+      });
+
+      // Bind blur events on comment inputs (save when user leaves the field)
+      document.querySelectorAll('.fact-comment-input').forEach(input => {
+        input.addEventListener('blur', function() {
+          const mission = this.getAttribute('data-mission');
+          const type = this.getAttribute('data-type');
+          setFactOverride(mission, type, undefined, this.value);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter') this.blur();
+        });
+      });
+    }
+
+    async function loadFactOverrides() {
+      try {
+        const res = await fetch('/api/facture-overrides');
+        if (res.ok) {
+          const data = await res.json();
+          factOverrides = {};
+          data.forEach(o => { factOverrides[o.mission + '||' + o.type] = { status: o.status, comment: o.comment || '' }; });
+        }
+      } catch (e) { console.warn('Overrides non chargés:', e); }
+    }
+
+    async function setFactOverride(mission, type, status, comment) {
+      const key = mission + '||' + type;
+      const existing = factOverrides[key] || {};
+      const newStatus = status !== undefined ? status : (existing.status || '');
+      const newComment = comment !== undefined ? comment : (existing.comment || '');
+      try {
+        await fetch('/api/facture-overrides', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mission, type, status: newStatus, comment: newComment }),
+        });
+        factOverrides[key] = { status: newStatus, comment: newComment };
+        renderFactKpis();
+        renderFactTable();
+      } catch (e) { console.error('Erreur override:', e); }
     }
 
     async function refreshFactData() {
       try {
-        const res = await fetch('/api/facturation');
+        const [res, _] = await Promise.all([
+          fetch('/api/facturation'),
+          loadFactOverrides(),
+        ]);
         if (!res.ok) throw new Error('Erreur chargement facturation');
         factData = await res.json();
         renderFactAlerts();
@@ -4394,9 +4643,9 @@
         dashboardData = ckDashData;
         if (isFirstLoad) ckOrbitDotUpdate('ckDotHubspot', 'done');
 
-        // Notion + Pennylane (facturation)
+        // Notion + Pennylane (facturation) + overrides
         if (isFirstLoad) { ckOrbitDotUpdate('ckDotNotion', 'loading'); ckOrbitDotUpdate('ckDotPennylane', 'loading'); ckOrbitLabel('Synchronisation Notion & Pennylane...'); }
-        const factRes = await fetch('/api/facturation');
+        const [factRes] = await Promise.all([fetch('/api/facturation'), loadFactOverrides()]);
         ckFactDataCache = factRes.ok ? await factRes.json() : null;
         factData = ckFactDataCache;
         if (isFirstLoad) { ckOrbitDotUpdate('ckDotNotion', 'done'); ckOrbitDotUpdate('ckDotPennylane', 'done'); }
@@ -4532,12 +4781,22 @@
       const container = document.getElementById('cockpitAlerts');
       let html = '';
 
-      // Factures en retard
+      // Factures en retard (Pennylane via tresorerie)
       if (ckTresoData && ckTresoData.facturesImpayees) {
         const late = ckTresoData.facturesImpayees.filter(f => f.status === 'late');
         if (late.length > 0) {
           const total = late.reduce((s, f) => s + (f.montant || 0), 0);
           html += '<div onclick="openFacturesEnRetardModal()" style="padding:0.6rem 1rem;border-radius:var(--radius);background:var(--danger-bg);color:var(--danger);font-size:0.85rem;font-weight:500;cursor:pointer;transition:opacity 0.15s" onmouseover="this.style.opacity=\'0.8\'" onmouseout="this.style.opacity=\'1\'">&#128308; ' + late.length + ' facture' + (late.length > 1 ? 's' : '') + ' en retard — ' + formatEuro(total) + ' <span style="opacity:0.6;font-size:0.8rem">→ voir detail</span></div>';
+        }
+      }
+
+      // Factures Notion avec statut overridé "Envoye" (en attente de paiement)
+      if (factData) {
+        const allLines = buildInvoiceLines(factData.missions);
+        const envoyees = allLines.filter(l => l.status === 'Envoye' && l.overridden);
+        if (envoyees.length > 0) {
+          const total = envoyees.reduce((s, l) => s + l.montant, 0);
+          html += '<div onclick="navigateTo(\'facturation\')" style="padding:0.6rem 1rem;border-radius:var(--radius);background:var(--warning-bg);color:var(--warning);font-size:0.85rem;font-weight:500;cursor:pointer;transition:opacity 0.15s" onmouseover="this.style.opacity=\'0.8\'" onmouseout="this.style.opacity=\'1\'">&#128992; ' + envoyees.length + ' facture' + (envoyees.length > 1 ? 's' : '') + ' en attente de paiement (corrige manuellement) — ' + formatEuro(total) + ' <span style="opacity:0.6;font-size:0.8rem">→ voir facturation</span></div>';
         }
       }
 
@@ -4696,6 +4955,221 @@
       } else {
         masseEl.textContent = 'Donnees indisponibles';
       }
+    }
+
+    // --- Analyse clients ---
+    let analyseClientsData = null;
+    let acChartClient = null;
+    let acChartSecteur = null;
+    let acChartRegion = null;
+
+    async function refreshAnalyseClients() {
+      document.getElementById('acTableClients').innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p>';
+      try {
+        // Fetch client data from Supabase + facturation data
+        const [clientsRes, factRes] = await Promise.all([
+          fetch('/api/analyse-clients'),
+          factData ? Promise.resolve({ ok: true, json: () => Promise.resolve(factData) }) : fetch('/api/facturation'),
+        ]);
+        if (!clientsRes.ok) throw new Error('Erreur chargement clients');
+        const clients = await clientsRes.json();
+        if (!factData) {
+          const fRes = await factRes;
+          if (fRes.json) factData = await fRes.json();
+        }
+
+        // Build CA per client from facturation
+        const caByClient = {};
+        if (factData && factData.missions) {
+          for (const m of factData.missions) {
+            const client = m.client || 'Inconnu';
+            if (!caByClient[client]) caByClient[client] = 0;
+            caByClient[client] += m.ca || 0;
+          }
+        }
+
+        // Merge client enrichment data with fuzzy name matching
+        function normName(s) {
+          return (s || '').toLowerCase()
+            .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+            .replace(/\b(sas|sarl|sa|sasu|eurl|sci|asso|association|groupe|group|france|fr)\b/gi, '')
+            .replace(/[^a-z0-9]/g, '');
+        }
+
+        function findBestMatch(name, clientsList) {
+          const norm = normName(name);
+          if (!norm) return null;
+          // Exact normalized match
+          let best = clientsList.find(c => normName(c.name) === norm);
+          if (best) return best;
+          // Containment match
+          best = clientsList.find(c => {
+            const cn = normName(c.name);
+            return cn && (cn.includes(norm) || norm.includes(cn));
+          });
+          return best || null;
+        }
+
+        const merged = Object.entries(caByClient)
+          .map(([name, ca]) => {
+            const info = findBestMatch(name, clients) || {};
+            return {
+              name,
+              ca,
+              secteur: info.secteur || 'Non renseigne',
+              region: info.region || 'Non renseigne',
+              departement: info.departement || '',
+              address: info.address || '',
+            };
+          })
+          .sort((a, b) => b.ca - a.ca);
+
+        analyseClientsData = merged;
+        renderAnalyseClients(merged);
+      } catch (err) {
+        document.getElementById('acTableClients').innerHTML = '<p style="color:var(--danger);font-size:0.85rem;padding:1rem">Erreur : ' + err.message + '</p>';
+      }
+    }
+
+    function renderAnalyseClients(data) {
+      const totalCA = data.reduce((s, c) => s + c.ca, 0);
+      const nbClients = data.filter(c => c.ca > 0).length;
+
+      // KPIs
+      document.getElementById('acKpiNb').textContent = nbClients;
+      document.getElementById('acKpiCaMoy').textContent = nbClients > 0 ? formatEuro(totalCA / nbClients) : '--';
+      if (data.length > 0) {
+        document.getElementById('acKpiTop').textContent = data[0].name;
+        const pct = totalCA > 0 ? (data[0].ca / totalCA * 100).toFixed(1) : 0;
+        document.getElementById('acKpiTopSub').textContent = formatEuro(data[0].ca) + ' (' + pct + '%)';
+      }
+
+      // Alertes concentration
+      let alertsHtml = '';
+      data.forEach(c => {
+        const pct = totalCA > 0 ? (c.ca / totalCA * 100) : 0;
+        if (pct > 30) {
+          alertsHtml += '<div style="padding:0.5rem 1rem;border-radius:var(--radius);background:var(--warning-bg);color:var(--warning);font-size:0.85rem;font-weight:500">&#128992; Concentration client : ' + c.name + ' represente ' + pct.toFixed(1) + '% du CA</div>';
+        }
+      });
+      // Concentration secteur
+      const bySecteur = {};
+      data.forEach(c => {
+        if (!bySecteur[c.secteur]) bySecteur[c.secteur] = 0;
+        bySecteur[c.secteur] += c.ca;
+      });
+      Object.entries(bySecteur).forEach(([s, ca]) => {
+        const pct = totalCA > 0 ? (ca / totalCA * 100) : 0;
+        if (pct > 50 && s !== 'Non renseigne') {
+          alertsHtml += '<div style="padding:0.5rem 1rem;border-radius:var(--radius);background:var(--warning-bg);color:var(--warning);font-size:0.85rem;font-weight:500">&#128992; Concentration secteur : ' + s + ' represente ' + pct.toFixed(1) + '% du CA</div>';
+        }
+      });
+      document.getElementById('acAlerts').innerHTML = alertsHtml;
+
+      // Chart CA par client (barres horizontales)
+      const clientsWithCA = data.filter(c => c.ca > 0).slice(0, 15);
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      if (acChartClient) acChartClient.destroy();
+      acChartClient = new Chart(document.getElementById('acChartClientCanvas'), {
+        type: 'bar',
+        data: {
+          labels: clientsWithCA.map(c => c.name.length > 25 ? c.name.substring(0, 25) + '...' : c.name),
+          datasets: [{
+            data: clientsWithCA.map(c => c.ca),
+            backgroundColor: isDark ? 'rgba(52,211,153,0.5)' : 'rgba(0,61,46,0.6)',
+            borderRadius: 4,
+            barPercentage: 0.7,
+          }]
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            datalabels: {
+              anchor: 'end', align: 'right', font: { size: 10 },
+              color: isDark ? '#ccc' : '#666',
+              formatter: (v) => formatEuro(v) + ' (' + (totalCA > 0 ? (v / totalCA * 100).toFixed(0) : 0) + '%)',
+            },
+          },
+          scales: {
+            x: { display: false },
+            y: { grid: { display: false }, ticks: { font: { size: 11 }, color: isDark ? '#999' : '#666' } },
+          },
+        },
+        plugins: [ChartDataLabels],
+      });
+
+      // Chart secteur (doughnut)
+      const secteurEntries = Object.entries(bySecteur).filter(([s]) => s !== 'Non renseigne').sort((a, b) => b[1] - a[1]);
+      const nonRenseigne = bySecteur['Non renseigne'] || 0;
+      if (nonRenseigne > 0) secteurEntries.push(['Non renseigne', nonRenseigne]);
+      const secteurColors = ['#003D2E','#0f7b6c','#34d399','#6ee7b7','#a7f3d0','#d1fae5','#6940a5','#d9730d','#e03e3e','#787774'];
+      if (acChartSecteur) acChartSecteur.destroy();
+      acChartSecteur = new Chart(document.getElementById('acChartSecteurCanvas'), {
+        type: 'doughnut',
+        data: {
+          labels: secteurEntries.map(([s]) => s.length > 30 ? s.substring(0, 30) + '...' : s),
+          datasets: [{
+            data: secteurEntries.map(([, ca]) => ca),
+            backgroundColor: secteurColors.slice(0, secteurEntries.length),
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'right', labels: { font: { size: 10 }, boxWidth: 12, padding: 8, color: isDark ? '#999' : '#666' } },
+            datalabels: { display: false },
+            tooltip: { callbacks: { label: ctx => ctx.label + ': ' + formatEuro(ctx.parsed) + ' (' + (totalCA > 0 ? (ctx.parsed / totalCA * 100).toFixed(1) : 0) + '%)' } },
+          },
+        },
+      });
+
+      // Chart region (doughnut)
+      const byRegion = {};
+      data.forEach(c => {
+        if (!byRegion[c.region]) byRegion[c.region] = 0;
+        byRegion[c.region] += c.ca;
+      });
+      const regionEntries = Object.entries(byRegion).filter(([r]) => r !== 'Non renseigne').sort((a, b) => b[1] - a[1]);
+      const nonRegion = byRegion['Non renseigne'] || 0;
+      if (nonRegion > 0) regionEntries.push(['Non renseigne', nonRegion]);
+      const regionColors = ['#003D2E','#0f7b6c','#34d399','#6ee7b7','#2E1A47','#6940a5','#d9730d','#e03e3e','#787774','#a7f3d0'];
+      if (acChartRegion) acChartRegion.destroy();
+      acChartRegion = new Chart(document.getElementById('acChartRegionCanvas'), {
+        type: 'doughnut',
+        data: {
+          labels: regionEntries.map(([r]) => r),
+          datasets: [{
+            data: regionEntries.map(([, ca]) => ca),
+            backgroundColor: regionColors.slice(0, regionEntries.length),
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'right', labels: { font: { size: 10 }, boxWidth: 12, padding: 8, color: isDark ? '#999' : '#666' } },
+            datalabels: { display: false },
+            tooltip: { callbacks: { label: ctx => ctx.label + ': ' + formatEuro(ctx.parsed) + ' (' + (totalCA > 0 ? (ctx.parsed / totalCA * 100).toFixed(1) : 0) + '%)' } },
+          },
+        },
+      });
+
+      // Table detail
+      let html = '<table class="data-table"><thead><tr><th>Client</th><th>Secteur</th><th>Region</th><th style="text-align:right">CA</th><th style="text-align:right">% CA</th></tr></thead><tbody>';
+      data.filter(c => c.ca > 0).forEach(c => {
+        const pct = totalCA > 0 ? (c.ca / totalCA * 100).toFixed(1) : '0';
+        const pctColor = pct > 30 ? 'var(--danger)' : pct > 15 ? 'var(--warning)' : '';
+        html += '<tr>';
+        html += '<td>' + c.name + '</td>';
+        html += '<td style="font-size:0.8rem;color:var(--text-secondary)">' + c.secteur + '</td>';
+        html += '<td style="font-size:0.8rem;color:var(--text-secondary)">' + c.region + '</td>';
+        html += '<td style="text-align:right;font-weight:600">' + formatEuro(c.ca) + '</td>';
+        html += '<td style="text-align:right;font-weight:600;color:' + pctColor + '">' + pct + '%</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      document.getElementById('acTableClients').innerHTML = html;
     }
 
     // --- Frais KM ---
