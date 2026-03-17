@@ -2416,6 +2416,162 @@ app.get('/api/qonto', async (req, res) => {
   }
 });
 
+// --- Prospection IMAP ---
+const GMAIL_USER = process.env.GMAIL_USER;
+const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
+const Imap = require('imap');
+const { simpleParser } = require('mailparser');
+
+function createImapConnection() {
+  return new Imap({
+    user: GMAIL_USER,
+    password: GMAIL_APP_PASSWORD,
+    host: 'imap.gmail.com',
+    port: 993,
+    tls: true,
+    tlsOptions: { rejectUnauthorized: false },
+  });
+}
+
+function classifyEmail(subject, bodyPreview) {
+  const text = ((subject || '') + ' ' + (bodyPreview || '')).toLowerCase();
+  const autoReplyPatterns = ['automatic reply', 'out of office', 'absence', 'auto-reply', 'auto reply', 'delivery failure', 'undeliverable', 'mail delivery', 'mailer-daemon', 'reponse automatique'];
+  const notInterestedPatterns = ['pas interesse', 'ne me contactez plus', 'desabonnement', 'stop', 'remove me', 'unsubscribe', 'not interested', 'no thank', 'ne nous interesse', 'ne m\'interesse', 'ne pas me recontacter', 'ne souhaitons pas', 'ne souhaite pas'];
+  const interestedPatterns = ['interesse', 'interested', 'en savoir plus', 'disponible', 'rdv', 'rendez-vous', 'meeting', 'call', 'planifier', 'volontiers', "let's discuss", 'happy to', 'would love', 'avec plaisir', 'pourquoi pas', 'dites-moi', 'convenons', 'discuter', 'echanger'];
+
+  for (const p of autoReplyPatterns) { if (text.includes(p)) return 'auto_reply'; }
+  for (const p of notInterestedPatterns) { if (text.includes(p)) return 'pas_interesse'; }
+  for (const p of interestedPatterns) { if (text.includes(p)) return 'interesse'; }
+  return 'a_qualifier';
+}
+
+// POST /api/prospection/sync — sync IMAP replies into Supabase
+app.post('/api/prospection/sync', async (req, res) => {
+  try {
+    if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
+      return res.status(500).json({ error: 'GMAIL_USER ou GMAIL_APP_PASSWORD non configuré' });
+    }
+
+    // Load existing message_ids from Supabase
+    const { data: existing, error: fetchErr } = await supabase.from('prospect_emails').select('message_id, manual_override');
+    if (fetchErr) throw new Error(fetchErr.message);
+    const existingMap = {};
+    (existing || []).forEach(e => { existingMap[e.message_id] = e; });
+
+    // Connect to IMAP
+    const imap = createImapConnection();
+
+    const emails = await new Promise((resolve, reject) => {
+      const results = [];
+
+      imap.once('ready', () => {
+        imap.openBox('INBOX', true, (err, box) => {
+          if (err) { imap.end(); return reject(err); }
+
+          // Search for replies (have In-Reply-To header)
+          imap.search([['HEADER', 'IN-REPLY-TO', '']], (err, uids) => {
+            if (err) { imap.end(); return reject(err); }
+            if (!uids || uids.length === 0) { imap.end(); return resolve([]); }
+
+            const f = imap.fetch(uids, { bodies: '', struct: true });
+
+            f.on('message', (msg) => {
+              let rawBuffer = Buffer.alloc(0);
+              msg.on('body', (stream) => {
+                const chunks = [];
+                stream.on('data', (chunk) => chunks.push(chunk));
+                stream.on('end', () => { rawBuffer = Buffer.concat(chunks); });
+              });
+              msg.once('end', () => { results.push(rawBuffer); });
+            });
+
+            f.once('error', (err) => { imap.end(); reject(err); });
+            f.once('end', () => { imap.end(); resolve(results); });
+          });
+        });
+      });
+
+      imap.once('error', reject);
+      imap.connect();
+    });
+
+    // Parse and upsert
+    let synced = 0;
+    for (const raw of emails) {
+      try {
+        const parsed = await simpleParser(raw);
+        const messageId = parsed.messageId || '';
+        if (!messageId) continue;
+
+        const fromAddr = parsed.from && parsed.from.value && parsed.from.value[0] ? parsed.from.value[0] : {};
+        const fromEmail = fromAddr.address || '';
+        const fromName = fromAddr.name || '';
+        const subject = parsed.subject || '';
+        const date = parsed.date || new Date();
+        const bodyText = parsed.text || '';
+        const bodyPreview = bodyText.substring(0, 500).replace(/\r?\n/g, ' ').trim();
+
+        // Skip if already exists with manual override
+        if (existingMap[messageId] && existingMap[messageId].manual_override) continue;
+
+        const category = classifyEmail(subject, bodyPreview);
+
+        const { error: upsertErr } = await supabase.from('prospect_emails').upsert({
+          message_id: messageId,
+          from_email: fromEmail,
+          from_name: fromName,
+          subject,
+          date: date.toISOString(),
+          body_preview: bodyPreview,
+          category,
+          manual_override: false,
+        }, { onConflict: 'message_id' });
+
+        if (!upsertErr) synced++;
+      } catch (parseErr) {
+        console.warn('Erreur parsing email:', parseErr.message);
+      }
+    }
+
+    // Get total count
+    const { count } = await supabase.from('prospect_emails').select('*', { count: 'exact', head: true });
+
+    res.json({ synced, total: count || 0 });
+  } catch (err) {
+    console.error('Erreur prospection/sync:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/prospection/prospects — list all prospects
+app.get('/api/prospection/prospects', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('prospect_emails').select('*').order('date', { ascending: false });
+    if (error) throw new Error(error.message);
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/prospection/qualify — requalify a prospect
+app.post('/api/prospection/qualify', async (req, res) => {
+  try {
+    const { id, category } = req.body;
+    if (!id || !category) return res.status(400).json({ error: 'id et category requis' });
+    const validCategories = ['interesse', 'pas_interesse', 'auto_reply', 'a_qualifier'];
+    if (!validCategories.includes(category)) return res.status(400).json({ error: 'Categorie invalide' });
+
+    const { error } = await supabase.from('prospect_emails')
+      .update({ category, manual_override: true })
+      .eq('id', id);
+    if (error) throw new Error(error.message);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Releaf Pilot démarré sur http://localhost:${PORT}`);
 });

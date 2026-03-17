@@ -993,6 +993,7 @@
       .sidebar { display: none; }
       .app-main { margin-left: 0; }
     }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
@@ -1019,6 +1020,10 @@
             <button class="sidebar-link" onclick="navigateTo('analyse-clients')" data-page="analyse-clients">
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="5" r="3"/><path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6"/></svg>
               Analyse clients
+            </button>
+            <button class="sidebar-link" onclick="navigateTo('prospection')" data-page="prospection">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12M2 6h10M2 9h8M2 12h6"/><path d="M13 8l2 2-2 2"/></svg>
+              Prospection
             </button>
           </div>
         </div>
@@ -1402,6 +1407,78 @@
   </div>
   </div>
   <!-- end page-analyse-clients -->
+
+  <!-- PAGE: Prospection -->
+  <div class="app-page" id="page-prospection">
+  <div class="page">
+    <div class="page-icon">&#128233;</div>
+    <h1 class="page-title">Prospection</h1>
+    <p class="page-desc">Analyse des reponses aux campagnes de prospection email (Emelia).</p>
+
+    <div class="kpi-row" id="prospKpis">
+      <div class="kpi-block">
+        <div class="kpi-label">Total reponses</div>
+        <div class="kpi-value" id="prospKpiTotal">--</div>
+      </div>
+      <div class="kpi-block" style="border-left:3px solid #22c55e">
+        <div class="kpi-label">Interesses</div>
+        <div class="kpi-value" id="prospKpiInteresse" style="color:#22c55e">--</div>
+      </div>
+      <div class="kpi-block" style="border-left:3px solid #ef4444">
+        <div class="kpi-label">Pas interesses</div>
+        <div class="kpi-value" id="prospKpiPasInteresse" style="color:#ef4444">--</div>
+      </div>
+      <div class="kpi-block" style="border-left:3px solid #eab308">
+        <div class="kpi-label">A qualifier</div>
+        <div class="kpi-value" id="prospKpiAQualifier" style="color:#eab308">--</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Emails de prospection</div>
+      <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.75rem;flex-wrap:wrap">
+        <button class="btn" onclick="syncProspection()" id="prospSyncBtn" style="font-size:0.8rem;padding:0.35rem 0.8rem;display:flex;align-items:center;gap:0.4rem">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 8a6 6 0 0 1 10.47-4"/><path d="M14 8a6 6 0 0 1-10.47 4"/><path d="M12.47 1v3h-3"/><path d="M3.53 15v-3h3"/></svg>
+          Sync emails
+        </button>
+        <div style="display:flex;align-items:center;gap:0.4rem">
+          <span style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em">Periode</span>
+          <select class="notion-select" id="prospPeriodSelect" onchange="setProspPeriod(this.value)">
+            <option value="all">Toutes</option>
+            <option value="m">Mensuel</option>
+            <option value="q">Trimestriel</option>
+            <option value="y">Annuel</option>
+            <option value="custom">Personnalise</option>
+          </select>
+          <select class="notion-select" id="prospPeriodDetail" onchange="setProspPeriodDetail(this.value)" style="display:none"></select>
+          <div id="prospPeriodCustom" style="display:none;align-items:center;gap:0.3rem">
+            <input type="date" id="prospDateDebut" style="padding:0.3rem 0.5rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+            <span style="font-size:0.75rem;color:var(--text-secondary)">au</span>
+            <input type="date" id="prospDateFin" style="padding:0.3rem 0.5rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+            <button class="btn" onclick="applyProspCustomPeriod()" style="font-size:0.75rem;padding:0.2rem 0.5rem">OK</button>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.4rem">
+          <span style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em">Categorie</span>
+          <select class="notion-select" id="prospCatSelect" onchange="renderProspection()">
+            <option value="all">Tous</option>
+            <option value="interesse">Interesses</option>
+            <option value="a_qualifier">A qualifier</option>
+            <option value="pas_interesse">Pas interesses</option>
+            <option value="auto_reply">Auto-replies</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-wrapper">
+        <div id="prospContent">
+          <p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Cliquez sur "Sync emails" pour recuperer les reponses.</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+  </div>
+  <!-- end page-prospection -->
 
   <!-- PAGE: Tresorerie -->
   <div class="app-page" id="page-tresorerie">
@@ -2007,7 +2084,7 @@
     // --- Navigation ---
     let currentPage = 'cockpit';
 
-    const PAGE_NAMES = { cockpit: 'Cockpit', dashboard: 'Commercial', 'analyse-clients': 'Analyse clients', facturation: 'Facturation', 'frais-km': 'Frais KM', tresorerie: 'Tresorerie', 'masse-salariale': 'Masse salariale', scenarios: 'Scenarios' };
+    const PAGE_NAMES = { cockpit: 'Cockpit', dashboard: 'Commercial', 'analyse-clients': 'Analyse clients', prospection: 'Prospection', facturation: 'Facturation', 'frais-km': 'Frais KM', tresorerie: 'Tresorerie', 'masse-salariale': 'Masse salariale', scenarios: 'Scenarios' };
 
     function navigateTo(page) {
       currentPage = page;
@@ -2018,13 +2095,13 @@
       document.getElementById('btnObjectifs').style.display = (page === 'dashboard' || page === 'cockpit') ? '' : 'none';
 
       // Gestion des groupes : ouvrir/fermer + fond englobant
-      const isComPage = (page === 'dashboard' || page === 'analyse-clients');
+      const isComPage = (page === 'dashboard' || page === 'analyse-clients' || page === 'prospection');
       const isTresoPage = (page === 'tresorerie' || page === 'masse-salariale' || page === 'scenarios');
 
       // Commercial
       toggleComSubnav(isComPage);
       document.getElementById('comGroup').classList.toggle('group-active', isComPage);
-      if (page === 'analyse-clients') {
+      if (page === 'analyse-clients' || page === 'prospection') {
         document.querySelector('[data-page="dashboard"]').classList.add('active');
       }
 
@@ -2043,6 +2120,7 @@
       if (page === 'scenarios') refreshScenariosPage();
       if (page === 'frais-km' && !fraisKmData) refreshFraisKmClients();
       if (page === 'analyse-clients' && !analyseClientsData) refreshAnalyseClients();
+      if (page === 'prospection' && !prospData) refreshProspection();
     }
 
     // --- Auth masse salariale ---
@@ -2121,6 +2199,7 @@
       else if (currentPage === 'scenarios') refreshScenariosPage();
       else if (currentPage === 'frais-km') refreshFraisKmClients();
       else if (currentPage === 'analyse-clients') { analyseClientsData = null; refreshAnalyseClients(); }
+      else if (currentPage === 'prospection') { prospData = null; refreshProspection(); }
     }
 
     const MONTHS_FR = [
@@ -5424,6 +5503,209 @@
 
       const fileName = 'frais-km_' + dateDebut + '_' + dateFin + '_option' + (idx + 1) + '.pdf';
       doc.save(fileName);
+    }
+
+    // --- Prospection ---
+    let prospData = null;
+    let prospPeriodType = 'all';
+    let prospPeriodStart = null;
+    let prospPeriodEnd = null;
+
+    const PROSP_CAT_LABELS = { interesse: 'Interesse', pas_interesse: 'Pas interesse', auto_reply: 'Auto-reply', a_qualifier: 'A qualifier' };
+    const PROSP_CAT_COLORS = { interesse: '#22c55e', pas_interesse: '#ef4444', auto_reply: '#94a3b8', a_qualifier: '#eab308' };
+
+    async function refreshProspection() {
+      try {
+        const res = await fetch('/api/prospection/prospects');
+        if (!res.ok) throw new Error('Erreur ' + res.status);
+        prospData = await res.json();
+        renderProspection();
+      } catch (err) {
+        document.getElementById('prospContent').innerHTML = '<p style="color:#ef4444;padding:1rem">' + err.message + '</p>';
+      }
+    }
+
+    async function syncProspection() {
+      const btn = document.getElementById('prospSyncBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" style="animation:spin 1s linear infinite"><path d="M2 8a6 6 0 0 1 10.47-4"/><path d="M14 8a6 6 0 0 1-10.47 4"/><path d="M12.47 1v3h-3"/><path d="M3.53 15v-3h3"/></svg> Sync en cours...';
+      try {
+        const res = await fetch('/api/prospection/sync', { method: 'POST' });
+        if (!res.ok) throw new Error('Erreur ' + res.status);
+        const result = await res.json();
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 8a6 6 0 0 1 10.47-4"/><path d="M14 8a6 6 0 0 1-10.47 4"/><path d="M12.47 1v3h-3"/><path d="M3.53 15v-3h3"/></svg> Sync emails';
+        btn.disabled = false;
+        await refreshProspection();
+      } catch (err) {
+        btn.innerHTML = 'Erreur sync';
+        btn.disabled = false;
+        alert('Erreur sync: ' + err.message);
+      }
+    }
+
+    async function qualifyProspect(id, category) {
+      try {
+        const res = await fetch('/api/prospection/qualify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, category }),
+        });
+        if (!res.ok) throw new Error('Erreur ' + res.status);
+        // Update local data
+        if (prospData) {
+          const item = prospData.find(p => p.id === id);
+          if (item) { item.category = category; item.manual_override = true; }
+          renderProspection();
+        }
+      } catch (err) {
+        alert('Erreur qualification: ' + err.message);
+      }
+    }
+
+    function getFilteredProspects() {
+      if (!prospData) return [];
+      let list = [...prospData];
+
+      // Period filter
+      if (prospPeriodStart && prospPeriodEnd) {
+        list = list.filter(p => {
+          if (!p.date) return false;
+          const d = new Date(p.date);
+          return d >= prospPeriodStart && d <= prospPeriodEnd;
+        });
+      }
+
+      // Category filter
+      const catFilter = (document.getElementById('prospCatSelect') || {}).value || 'all';
+      if (catFilter !== 'all') {
+        list = list.filter(p => p.category === catFilter);
+      }
+
+      return list;
+    }
+
+    function renderProspection() {
+      const filtered = getFilteredProspects();
+      const all = prospData || [];
+
+      // KPIs based on filtered data
+      const total = filtered.length;
+      const interesse = filtered.filter(p => p.category === 'interesse').length;
+      const pasInteresse = filtered.filter(p => p.category === 'pas_interesse').length;
+      const aQualifier = filtered.filter(p => p.category === 'a_qualifier').length;
+
+      document.getElementById('prospKpiTotal').textContent = total;
+      document.getElementById('prospKpiInteresse').textContent = interesse;
+      document.getElementById('prospKpiPasInteresse').textContent = pasInteresse;
+      document.getElementById('prospKpiAQualifier').textContent = aQualifier;
+
+      // Table
+      if (filtered.length === 0) {
+        document.getElementById('prospContent').innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Aucun email trouve.</p>';
+        return;
+      }
+
+      let html = '<table class="data-table"><thead><tr>';
+      html += '<th>Date</th><th>Nom</th><th>Email</th><th>Sujet</th><th>Extrait</th><th>Categorie</th>';
+      html += '</tr></thead><tbody>';
+
+      for (const p of filtered) {
+        const date = p.date ? new Date(p.date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '-';
+        const catColor = PROSP_CAT_COLORS[p.category] || '#94a3b8';
+        const preview = (p.body_preview || '').substring(0, 100) + ((p.body_preview || '').length > 100 ? '...' : '');
+
+        html += '<tr>';
+        html += '<td style="white-space:nowrap;font-size:0.8rem">' + date + '</td>';
+        html += '<td style="font-size:0.8rem;font-weight:500">' + escapeHtml(p.from_name || '-') + '</td>';
+        html += '<td style="font-size:0.78rem;color:var(--text-secondary)">' + escapeHtml(p.from_email || '-') + '</td>';
+        html += '<td style="font-size:0.8rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escapeHtml(p.subject || '') + '">' + escapeHtml(p.subject || '-') + '</td>';
+        html += '<td style="font-size:0.75rem;color:var(--text-secondary);max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escapeHtml(preview) + '">' + escapeHtml(preview || '-') + '</td>';
+        html += '<td><select class="notion-select" style="font-size:0.75rem;border-color:' + catColor + ';color:' + catColor + '" onchange="qualifyProspect(' + p.id + ', this.value)">';
+        for (const [key, label] of Object.entries(PROSP_CAT_LABELS)) {
+          html += '<option value="' + key + '"' + (p.category === key ? ' selected' : '') + '>' + label + '</option>';
+        }
+        html += '</select></td>';
+        html += '</tr>';
+      }
+
+      html += '</tbody></table>';
+      document.getElementById('prospContent').innerHTML = html;
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    function setProspPeriod(type) {
+      prospPeriodType = type;
+      const detailSel = document.getElementById('prospPeriodDetail');
+      const customDiv = document.getElementById('prospPeriodCustom');
+      const year = new Date().getFullYear();
+
+      if (type === 'all') {
+        detailSel.style.display = 'none';
+        customDiv.style.display = 'none';
+        prospPeriodStart = null;
+        prospPeriodEnd = null;
+        renderProspection();
+      } else if (type === 'm') {
+        customDiv.style.display = 'none';
+        detailSel.style.display = '';
+        let html = '';
+        MONTHS_FR.forEach((m, i) => { html += '<option value="' + i + '">' + m + ' ' + year + '</option>'; });
+        detailSel.innerHTML = html;
+        detailSel.value = new Date().getMonth();
+        setProspPeriodDetail(detailSel.value);
+      } else if (type === 'q') {
+        customDiv.style.display = 'none';
+        detailSel.style.display = '';
+        const currentQ = Math.floor(new Date().getMonth() / 3);
+        let html = '';
+        for (let q = 0; q < 4; q++) { html += '<option value="' + q + '">T' + (q + 1) + ' ' + year + '</option>'; }
+        detailSel.innerHTML = html;
+        detailSel.value = currentQ;
+        setProspPeriodDetail(detailSel.value);
+      } else if (type === 'y') {
+        customDiv.style.display = 'none';
+        detailSel.style.display = '';
+        let html = '';
+        for (let y = year; y >= year - 2; y--) { html += '<option value="' + y + '">' + y + '</option>'; }
+        detailSel.innerHTML = html;
+        detailSel.value = year;
+        setProspPeriodDetail(detailSel.value);
+      } else if (type === 'custom') {
+        detailSel.style.display = 'none';
+        customDiv.style.display = 'flex';
+        prospPeriodStart = null;
+        prospPeriodEnd = null;
+      }
+    }
+
+    function setProspPeriodDetail(val) {
+      const year = new Date().getFullYear();
+      const v = parseInt(val);
+      if (prospPeriodType === 'm') {
+        prospPeriodStart = new Date(year, v, 1);
+        prospPeriodEnd = new Date(year, v + 1, 0, 23, 59, 59);
+      } else if (prospPeriodType === 'q') {
+        prospPeriodStart = new Date(year, v * 3, 1);
+        prospPeriodEnd = new Date(year, v * 3 + 3, 0, 23, 59, 59);
+      } else if (prospPeriodType === 'y') {
+        prospPeriodStart = new Date(v, 0, 1);
+        prospPeriodEnd = new Date(v, 11, 31, 23, 59, 59);
+      }
+      renderProspection();
+    }
+
+    function applyProspCustomPeriod() {
+      const d1 = document.getElementById('prospDateDebut').value;
+      const d2 = document.getElementById('prospDateFin').value;
+      if (!d1 || !d2) return alert('Saisissez les deux dates');
+      prospPeriodStart = new Date(d1 + 'T00:00:00');
+      prospPeriodEnd = new Date(d2 + 'T23:59:59');
+      renderProspection();
     }
 
   </script>
