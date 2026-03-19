@@ -369,6 +369,9 @@
     /* --- Sections --- */
     .section {
       margin-bottom: 2.5rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.2rem;
     }
 
     .section-title {
@@ -1080,13 +1083,13 @@
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12M2 8h8M2 13h10"/><path d="M12 6l3 3-3 3"/></svg>
               Scenarios
             </button>
-            <button class="sidebar-link" onclick="navigateTo('analytics')" data-page="analytics" style="padding-left:2.2rem;font-size:0.78rem">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 12l4-4 3 3 4-5 3 2"/><path d="M1 15h14"/></svg>
-              Analytics
-            </button>
           </div>
         </div>
       </div>
+      <button class="sidebar-link" onclick="navigateTo('analytics')" data-page="analytics">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 12l4-4 3 3 4-5 3 2"/><path d="M1 15h14"/></svg>
+        Analytics
+      </button>
       <div style="flex:1"></div>
       <div style="padding:0.5rem 0.75rem;display:flex;align-items:center;gap:0.5rem">
         <button class="btn" id="themeToggle" onclick="toggleTheme()" title="Mode sombre" style="padding:0.4rem;color:var(--sidebar-text-secondary)">
@@ -2280,7 +2283,7 @@
 
       // Gestion des groupes : ouvrir/fermer + fond englobant
       const isComPage = (page === 'dashboard' || page === 'analyse-clients' || page === 'prospection');
-      const isTresoPage = (page === 'tresorerie' || page === 'masse-salariale' || page === 'scenarios' || page === 'analytics');
+      const isTresoPage = (page === 'tresorerie' || page === 'masse-salariale' || page === 'scenarios');
 
       // Commercial
       toggleComSubnav(isComPage);
@@ -2292,7 +2295,7 @@
       // Trésorerie
       toggleTresoSubnav(isTresoPage);
       document.getElementById('tresoGroup').classList.toggle('group-active', isTresoPage);
-      if (page === 'masse-salariale' || page === 'scenarios' || page === 'analytics') {
+      if (page === 'masse-salariale' || page === 'scenarios') {
         document.querySelector('[data-page="tresorerie"]').classList.add('active');
       }
 
