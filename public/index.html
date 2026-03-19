@@ -216,6 +216,35 @@
       gap: 0.5rem;
     }
 
+    /* --- Analytics presets --- */
+    .analytics-preset {
+      padding: 0.35rem 0.85rem;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text-secondary);
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .analytics-preset:hover { background: var(--hover); color: var(--text); }
+    .analytics-preset.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .analytics-tabs { display: flex; gap: 0.5rem; margin-bottom: 2rem; }
+    .analytics-tab {
+      padding: 0.6rem 1.6rem;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      background: var(--hover);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .analytics-tab:hover { background: var(--border); color: var(--text); }
+    .analytics-tab.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+    #modalMissions.open { display: flex !important; }
+
     /* --- Notion-style buttons --- */
     .btn {
       display: inline-flex;
@@ -1051,6 +1080,10 @@
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12M2 8h8M2 13h10"/><path d="M12 6l3 3-3 3"/></svg>
               Scenarios
             </button>
+            <button class="sidebar-link" onclick="navigateTo('analytics')" data-page="analytics" style="padding-left:2.2rem;font-size:0.78rem">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 12l4-4 3 3 4-5 3 2"/><path d="M1 15h14"/></svg>
+              Analytics
+            </button>
           </div>
         </div>
       </div>
@@ -1541,6 +1574,157 @@
   </div>
   </div>
   <!-- end page-tresorerie -->
+
+  <!-- PAGE: Analytics -->
+  <div class="app-page" id="page-analytics">
+  <div class="page">
+    <div class="page-icon">&#128200;</div>
+    <h1 class="page-title">Analytics</h1>
+    <p class="page-desc">Analyse du chiffre d'affaires facturé par période.</p>
+
+    <!-- Sélecteur de période -->
+    <div class="section" style="margin-bottom:1.5rem">
+      <div class="section-title">Période d'analyse</div>
+      <div style="display:flex;flex-wrap:wrap;gap:0.5rem;margin-bottom:1rem">
+        <button class="analytics-preset active" onclick="selectPreset('exercice-courant')">Exercice courant</button>
+        <button class="analytics-preset" onclick="selectPreset('exercice-precedent')">Exercice précédent</button>
+        <button class="analytics-preset" onclick="selectPreset('annee-courante')">Année en cours</button>
+        <button class="analytics-preset" onclick="selectPreset('mois-courant')">Mois en cours</button>
+        <button class="analytics-preset" onclick="selectPreset('mois-dernier')">Mois dernier</button>
+        <button class="analytics-preset" onclick="selectPreset('7-jours')">7 derniers jours</button>
+        <button class="analytics-preset" onclick="selectPreset('custom')">Date personnalisée</button>
+      </div>
+      <div id="analyticsCustomDates" style="display:none;align-items:center;gap:0.75rem;flex-wrap:wrap">
+        <label style="font-size:0.85rem;color:var(--text-secondary)">Du</label>
+        <input type="date" id="analyticsStart" style="padding:0.35rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:0.85rem">
+        <label style="font-size:0.85rem;color:var(--text-secondary)">au</label>
+        <input type="date" id="analyticsEnd" style="padding:0.35rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:0.85rem">
+        <button class="btn" onclick="refreshAnalytics()" style="padding:0.35rem 0.8rem;background:var(--primary);color:#fff;border-radius:var(--radius);font-size:0.85rem;font-weight:600">Appliquer</button>
+      </div>
+      <div id="analyticsPeriodLabel" style="font-size:0.85rem;color:var(--text-secondary);margin-top:0.5rem"></div>
+    </div>
+
+    <!-- Onglets -->
+    <div class="analytics-tabs">
+      <button class="analytics-tab active" onclick="switchAnalyticsTab('ca')">Chiffre d'affaires</button>
+      <button class="analytics-tab" onclick="switchAnalyticsTab('charges')">Charges</button>
+    </div>
+
+    <!-- Overlay chargement analytics -->
+    <div id="analyticsLoader" style="display:none;flex-direction:column;align-items:center;justify-content:center;padding:3rem 0;gap:1rem">
+      <div style="width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--primary);border-radius:50%" class="ck-spinner"></div>
+      <div class="ck-shimmer-text">Chargement des données...</div>
+    </div>
+
+    <!-- Onglet CA -->
+    <div id="analytics-tab-ca">
+      <!-- KPI CA -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:2rem">
+        <div class="kpi-block">
+          <div class="kpi-label">CA Facturé</div>
+          <div class="kpi-value" id="analyticsCa">--</div>
+          <div class="kpi-sub" id="analyticsCaSub">sur la période</div>
+        </div>
+        <div class="kpi-block">
+          <div class="kpi-label">Nombre de factures</div>
+          <div class="kpi-value" id="analyticsNbMissions">--</div>
+          <div class="kpi-sub">missions facturées</div>
+        </div>
+        <div class="kpi-block">
+          <div class="kpi-label">Ticket moyen</div>
+          <div class="kpi-value" id="analyticsTicketMoyen">--</div>
+          <div class="kpi-sub">par mission</div>
+        </div>
+      </div>
+
+      <!-- Comparaison CA N vs N-1 -->
+      <div class="section" style="margin-bottom:2rem">
+        <div class="section-title">CA N vs N-1 (par mois)</div>
+        <div style="position:relative;height:300px"><canvas id="chartCaComparaison"></canvas></div>
+      </div>
+
+      <!-- Graphiques CA -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:2.5rem;margin-bottom:2rem">
+        <div class="section" style="margin-bottom:0">
+          <div class="section-title">Subventionné vs Non subventionné</div>
+          <div style="position:relative;height:380px"><canvas id="chartSubventionne"></canvas></div>
+        </div>
+        <div class="section" style="margin-bottom:0">
+          <div class="section-title">Canal d'acquisition</div>
+          <div style="position:relative;height:380px"><canvas id="chartAcquisition"></canvas></div>
+        </div>
+        <div class="section" style="margin-bottom:0">
+          <div class="section-title">Nature de mission</div>
+          <div style="position:relative;height:380px"><canvas id="chartNatureMission"></canvas></div>
+        </div>
+        <div class="section" style="margin-bottom:0">
+          <div class="section-title">Type de CA</div>
+          <div style="position:relative;height:380px"><canvas id="chartTypeCa"></canvas></div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-title">CA par client (k€) (Top 15)</div>
+        <div style="position:relative;height:480px"><canvas id="chartClient"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Onglet Charges -->
+    <div id="analytics-tab-charges" style="display:none">
+      <!-- Toggle prévisionnel -->
+      <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:1.5rem">
+        <input type="checkbox" id="chargesPrevCheckbox" onchange="toggleChargesPrev(this.checked)" style="width:15px;height:15px;cursor:pointer;accent-color:var(--primary)">
+        <label for="chargesPrevCheckbox" style="font-size:0.9rem;cursor:pointer;color:var(--text)">Prévisionnel (données gsheet)</label>
+      </div>
+      <!-- KPI Charges -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:2rem">
+        <div class="kpi-block">
+          <div class="kpi-label">Total charges</div>
+          <div class="kpi-value" id="analyticsChargesTotal">--</div>
+          <div class="kpi-sub" id="analyticsChargesTotalSub">sur la période</div>
+        </div>
+        <!-- KPI split réel/prévisionnel (visible uniquement en mode hybride) -->
+        <div class="kpi-block" id="kpiChargesReel" style="display:none">
+          <div class="kpi-label" style="display:flex;align-items:center;gap:0.4rem">
+            <span style="width:8px;height:8px;border-radius:50%;background:#7A9BBF;display:inline-block"></span>Réel (Qonto)
+          </div>
+          <div class="kpi-value" id="analyticsChargesReelTotal">--</div>
+          <div class="kpi-sub" id="analyticsChargesReelPeriode">--</div>
+        </div>
+        <div class="kpi-block" id="kpiChargesPrev" style="display:none">
+          <div class="kpi-label" style="display:flex;align-items:center;gap:0.4rem">
+            <span style="width:8px;height:8px;border-radius:50%;background:#9ECAB4;display:inline-block"></span>Prévisionnel (GSheet)
+          </div>
+          <div class="kpi-value" id="analyticsChargesPrevTotal">--</div>
+          <div class="kpi-sub" id="analyticsChargesPrevPeriode">--</div>
+        </div>
+        <div class="kpi-block">
+          <div class="kpi-label">Moyenne mensuelle</div>
+          <div class="kpi-value" id="analyticsChargesMoyenne">--</div>
+          <div class="kpi-sub">par mois</div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-title">Charges N vs N-1 (par mois)</div>
+        <div style="position:relative;height:300px"><canvas id="analyticsChargesComparaison"></canvas></div>
+      </div>
+      <div class="section">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+          <div class="section-title" style="margin-bottom:0">Répartition des charges par catégorie</div>
+          <div style="display:flex;gap:0.5rem">
+            <button id="btnAnalyticsChargesCat" onclick="setAnalyticsChargesMode('categories')" style="padding:0.3rem 0.8rem;border-radius:4px;border:1px solid var(--border);background:var(--primary);color:#fff;font-size:0.8rem;cursor:pointer">Catégories</button>
+            <button id="btnAnalyticsChargesSousCat" onclick="setAnalyticsChargesMode('sous-categories')" style="padding:0.3rem 0.8rem;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:0.8rem;cursor:pointer">Sous-catégories</button>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;align-items:start">
+          <div style="position:relative;height:500px"><canvas id="analyticsChargesChart"></canvas></div>
+          <div id="analyticsChargesDetail"><p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+  </div>
+  <!-- end page-analytics -->
 
   <!-- PAGE: Masse salariale -->
   <div class="app-page" id="page-masse-salariale">
@@ -2084,7 +2268,7 @@
     // --- Navigation ---
     let currentPage = 'cockpit';
 
-    const PAGE_NAMES = { cockpit: 'Cockpit', dashboard: 'Commercial', 'analyse-clients': 'Analyse clients', prospection: 'Prospection', facturation: 'Facturation', 'frais-km': 'Frais KM', tresorerie: 'Tresorerie', 'masse-salariale': 'Masse salariale', scenarios: 'Scenarios' };
+    const PAGE_NAMES = { cockpit: 'Cockpit', dashboard: 'Commercial', 'analyse-clients': 'Analyse clients', prospection: 'Prospection', facturation: 'Facturation', 'frais-km': 'Frais KM', tresorerie: 'Tresorerie', 'masse-salariale': 'Masse salariale', scenarios: 'Scenarios', analytics: 'Analytics' };
 
     function navigateTo(page) {
       currentPage = page;
@@ -2096,7 +2280,7 @@
 
       // Gestion des groupes : ouvrir/fermer + fond englobant
       const isComPage = (page === 'dashboard' || page === 'analyse-clients' || page === 'prospection');
-      const isTresoPage = (page === 'tresorerie' || page === 'masse-salariale' || page === 'scenarios');
+      const isTresoPage = (page === 'tresorerie' || page === 'masse-salariale' || page === 'scenarios' || page === 'analytics');
 
       // Commercial
       toggleComSubnav(isComPage);
@@ -2108,7 +2292,7 @@
       // Trésorerie
       toggleTresoSubnav(isTresoPage);
       document.getElementById('tresoGroup').classList.toggle('group-active', isTresoPage);
-      if (page === 'masse-salariale' || page === 'scenarios') {
+      if (page === 'masse-salariale' || page === 'scenarios' || page === 'analytics') {
         document.querySelector('[data-page="tresorerie"]').classList.add('active');
       }
 
@@ -2118,6 +2302,7 @@
       if (page === 'tresorerie') { if (tresoData) { renderTresoKpis(); renderTresoChart(); renderChargesChart(); renderChargesDetail(); renderMasseSalariale(); } else refreshTresoData(); }
       if (page === 'masse-salariale') refreshMasseSalarialePage();
       if (page === 'scenarios') refreshScenariosPage();
+      if (page === 'analytics') initAnalytics();
       if (page === 'frais-km' && !fraisKmData) refreshFraisKmClients();
       if (page === 'analyse-clients' && !analyseClientsData) refreshAnalyseClients();
       if (page === 'prospection' && !prospData) refreshProspection();
@@ -2995,6 +3180,670 @@
 
     refreshCockpit();
     refreshTimer = setInterval(function() { if (currentPage === 'cockpit') refreshCockpit(); else if (currentPage === 'dashboard') { refreshData(); refreshReconData(); } }, 5 * 60 * 1000);
+
+    // --- Analytics ---
+    let analyticsCurrentPreset = 'exercice-courant';
+    let analyticsCurrentStart = null;
+    let analyticsCurrentEnd = null;
+
+    function getPresetRange(preset) {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = now.getMonth();
+      const pad = n => String(n).padStart(2, '0');
+      const lastDayOfMonth = (y, m) => new Date(y, m + 1, 0).getDate();
+      switch (preset) {
+        case 'exercice-courant':   return { start: `${year}-01-01`, end: `${year}-12-31` };
+        case 'exercice-precedent': return { start: `${year-1}-01-01`, end: `${year-1}-12-31` };
+        case 'annee-courante':     return { start: `${year}-01-01`, end: now.toISOString().split('T')[0] };
+        case 'mois-courant':       return { start: `${year}-${pad(month+1)}-01`, end: `${year}-${pad(month+1)}-${lastDayOfMonth(year, month)}` };
+        case 'mois-dernier': {
+          const d = new Date(year, month, 0);
+          return { start: `${d.getFullYear()}-${pad(d.getMonth()+1)}-01`, end: d.toISOString().split('T')[0] };
+        }
+        case '7-jours': {
+          const d7 = new Date(now); d7.setDate(d7.getDate() - 7);
+          return { start: d7.toISOString().split('T')[0], end: now.toISOString().split('T')[0] };
+        }
+        default: return null;
+      }
+    }
+
+    function switchAnalyticsTab(tab) {
+      document.querySelectorAll('.analytics-tab').forEach(b => b.classList.remove('active'));
+      event.target.classList.add('active');
+      document.getElementById('analytics-tab-ca').style.display = tab === 'ca' ? '' : 'none';
+      document.getElementById('analytics-tab-charges').style.display = tab === 'charges' ? '' : 'none';
+      if (tab === 'charges') renderAnalyticsChargesChart();
+    }
+
+    let analyticsChargesMode = 'categories';
+    let analyticsChargesPrev = false;
+
+    function toggleChargesPrev(checked) {
+      analyticsChargesPrev = checked;
+      const sousCatBtn = document.getElementById('btnAnalyticsChargesSousCat');
+      sousCatBtn.disabled = false;
+      sousCatBtn.style.opacity = '';
+      // Masquer les KPI split si on décoche
+      if (!checked) {
+        document.getElementById('kpiChargesReel').style.display = 'none';
+        document.getElementById('kpiChargesPrev').style.display = 'none';
+        const subEl = document.getElementById('analyticsChargesTotalSub');
+        if (subEl) subEl.textContent = 'sur la période';
+      }
+      renderAnalyticsChargesChart();
+    }
+
+    function setAnalyticsChargesMode(mode) {
+      analyticsChargesMode = mode;
+      document.getElementById('btnAnalyticsChargesCat').style.background = mode === 'categories' ? 'var(--primary)' : 'var(--bg)';
+      document.getElementById('btnAnalyticsChargesCat').style.color = mode === 'categories' ? '#fff' : 'var(--text)';
+      document.getElementById('btnAnalyticsChargesSousCat').style.background = mode === 'sous-categories' ? 'var(--primary)' : 'var(--bg)';
+      document.getElementById('btnAnalyticsChargesSousCat').style.color = mode === 'sous-categories' ? '#fff' : 'var(--text)';
+      renderAnalyticsChargesChart();
+    }
+
+    let analyticsChargesData = null;
+
+    function formatPeriodLabel(start, end) {
+      const MOIS_FR = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
+      const fmt = k => { const [y, m] = k.split('-'); return MOIS_FR[parseInt(m) - 1] + ' ' + y; };
+      return fmt(start) + ' – ' + fmt(end);
+    }
+
+    function updateChargesKpis(data) {
+      document.getElementById('analyticsChargesTotal').textContent = formatEuro(data.totalCharges || 0);
+      document.getElementById('analyticsChargesMoyenne').textContent = formatEuro(data.moyenneMensuelle || 0);
+      const hasReal = data.real != null;
+      const hasPrev = data.prev != null;
+      document.getElementById('kpiChargesReel').style.display = hasReal ? '' : 'none';
+      document.getElementById('kpiChargesPrev').style.display = hasPrev ? '' : 'none';
+      if (hasReal) {
+        document.getElementById('analyticsChargesReelTotal').textContent = formatEuro(data.real.total);
+        document.getElementById('analyticsChargesReelPeriode').textContent = formatPeriodLabel(data.real.start, data.real.end);
+      }
+      if (hasPrev) {
+        document.getElementById('analyticsChargesPrevTotal').textContent = formatEuro(data.prev.total);
+        document.getElementById('analyticsChargesPrevPeriode').textContent = formatPeriodLabel(data.prev.start, data.prev.end);
+      }
+      const subEl = document.getElementById('analyticsChargesTotalSub');
+      if (subEl) subEl.textContent = (hasReal || hasPrev) ? 'réel + prévisionnel' : 'sur la période';
+    }
+
+    async function renderAnalyticsChargesChart() {
+      const start = analyticsCurrentStart;
+      const end = analyticsCurrentEnd;
+      if (!start || !end) return;
+
+      const loader = document.getElementById('analyticsLoader');
+      const tabCharges = document.getElementById('analytics-tab-charges');
+      loader.style.display = 'flex';
+      tabCharges.style.visibility = 'hidden';
+
+      try {
+        const endpoint = analyticsChargesPrev
+          ? `/api/charges-hybride?start=${start}&end=${end}`
+          : `/api/charges?start=${start}&end=${end}`;
+        const res = await fetch(endpoint);
+        analyticsChargesData = await res.json();
+        if (!analyticsChargesData.ventilationCharges) return;
+        updateChargesKpis(analyticsChargesData);
+        const source = analyticsChargesMode === 'sous-categories' && analyticsChargesData.ventilationChargesDetail
+          ? analyticsChargesData.ventilationChargesDetail.map(v => ({ label: v.sousCat || v.categorie, montant: v.montant }))
+          : analyticsChargesData.ventilationCharges.map(v => ({ label: v.categorie, montant: v.montant }));
+        renderPieChart('analyticsChargesChart', source.slice(0, 10));
+        renderAnalyticsChargesDetail();
+        renderChargesComparaison(analyticsChargesData.comparaison);
+      } catch(e) {
+        console.error('Erreur chargement charges:', e);
+      } finally {
+        loader.style.display = 'none';
+        tabCharges.style.visibility = '';
+      }
+    }
+
+    let comparaisonChart = null;
+    let chargesComparaisonMois = [];
+
+    function makeHatchPattern(color) {
+      const size = 8;
+      const c = document.createElement('canvas');
+      c.width = size; c.height = size;
+      const ctx = c.getContext('2d');
+      ctx.clearRect(0, 0, size, size);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(0, size); ctx.lineTo(size, 0); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-size, size); ctx.lineTo(size, -size); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, 2 * size); ctx.lineTo(2 * size, 0); ctx.stroke();
+      return ctx.createPattern(c, 'repeat');
+    }
+
+    function renderChargesComparaison(comp) {
+      if (!comp) return;
+      chargesComparaisonMois = comp.mois;
+      if (comparaisonChart) { comparaisonChart.destroy(); comparaisonChart = null; }
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const MOIS_FR = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
+      const labels = comp.mois.map(m => { const [y, mo] = m.split('-'); return MOIS_FR[parseInt(mo) - 1] + ' ' + y; });
+      const anneeN = comp.mois.length ? comp.mois[0].split('-')[0] : 'N';
+      const anneeNm1 = String(parseInt(anneeN) - 1);
+
+      // Hachures pour les mois prévisionnels (après real.end en mode hybride)
+      const realEnd = analyticsChargesPrev && analyticsChargesData?.real ? analyticsChargesData.real.end : null;
+      const nColors = comp.mois.map(k => (realEnd && k > realEnd) ? makeHatchPattern('#7A9BBF') : '#7A9BBF');
+      const nBorders = comp.mois.map(k => (realEnd && k > realEnd) ? '#7A9BBF' : 'transparent');
+
+      comparaisonChart = new Chart(document.getElementById('analyticsChargesComparaison'), {
+        type: 'bar',
+        plugins: [ChartDataLabels],
+        data: {
+          labels,
+          datasets: [
+            { label: anneeN,   data: comp.N.map(v => Math.round(v / 1000)),   backgroundColor: nColors, borderColor: nBorders, borderWidth: 1.5, borderRadius: 4 },
+            { label: anneeNm1, data: comp.Nm1.map(v => Math.round(v / 1000)), backgroundColor: '#C0B8DC', borderRadius: 4 },
+          ],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          onClick: (evt, elements) => {
+            if (!elements.length) return;
+            const { datasetIndex, index } = elements[0];
+            const moisKey = chargesComparaisonMois[index];
+            const [y, mo] = moisKey.split('-');
+            const annee = datasetIndex === 0 ? parseInt(y) : parseInt(y) - 1;
+            const start = `${annee}-${mo}-01`;
+            const lastDay = new Date(annee, parseInt(mo), 0).getDate();
+            const end = `${annee}-${mo}-${String(lastDay).padStart(2, '0')}`;
+            openModalCharges(start, end);
+          },
+          plugins: {
+            datalabels: { display: false },
+            legend: { position: 'top', labels: { color: isDark ? '#ccc' : '#37352f', font: { size: 13, weight: 'bold' } } },
+            tooltip: { callbacks: { label: ctx => `${ctx.dataset.label} : ${ctx.raw} k€` } },
+          },
+          scales: {
+            x: { ticks: { color: isDark ? '#999' : '#787774' }, grid: { display: false } },
+            y: { ticks: { color: isDark ? '#999' : '#787774', callback: v => v + ' k€' }, grid: { color: isDark ? '#2e2e2e' : '#e9e9e7' } },
+          },
+        },
+      });
+      document.getElementById('analyticsChargesComparaison').style.cursor = 'pointer';
+    }
+
+    async function openModalCharges(start, end) {
+      const MOIS_FR = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+      const d = new Date(start);
+      const titre = MOIS_FR[d.getMonth()] + ' ' + d.getFullYear();
+      document.getElementById('modalMissionsTitle').textContent = 'Charges — ' + titre;
+      document.getElementById('modalMissionsBody').innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem">Chargement...</p>';
+      document.getElementById('modalMissions').classList.add('open');
+      try {
+        const res = await fetch(`/api/charges?start=${start}&end=${end}`);
+        const data = await res.json();
+        const charges = data.ventilationCharges || [];
+        if (!charges.length) {
+          document.getElementById('modalMissionsBody').innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem">Aucune charge sur cette période.</p>';
+          return;
+        }
+        const total = charges.reduce((s, c) => s + c.montant, 0);
+        let html = `<table style="width:100%;border-collapse:collapse;font-size:0.85rem">
+          <thead><tr style="border-bottom:1px solid var(--border)">
+            <th style="text-align:left;padding:0.5rem 0.8rem;color:var(--text-secondary)">Catégorie</th>
+            <th style="text-align:right;padding:0.5rem 0.8rem;color:var(--text-secondary)">Montant</th>
+            <th style="text-align:right;padding:0.5rem 0.8rem;color:var(--text-secondary)">%</th>
+          </tr></thead><tbody>`;
+        for (const c of charges) {
+          const pct = total > 0 ? ((c.montant / total) * 100).toFixed(1) : '0.0';
+          html += `<tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:0.45rem 0.8rem;font-weight:500">${c.categorie}</td>
+            <td style="padding:0.45rem 0.8rem;text-align:right;font-weight:600">${formatEuro(c.montant)}</td>
+            <td style="padding:0.45rem 0.8rem;text-align:right;color:var(--text-secondary)">${pct}%</td>
+          </tr>`;
+        }
+        html += `<tr style="border-top:2px solid var(--text);font-weight:700">
+          <td style="padding:0.6rem 0.8rem">Total</td>
+          <td style="padding:0.6rem 0.8rem;text-align:right">${formatEuro(total)}</td>
+          <td style="padding:0.6rem 0.8rem;text-align:right">100%</td>
+        </tr></tbody></table>`;
+        document.getElementById('modalMissionsBody').innerHTML = html;
+      } catch(e) {
+        document.getElementById('modalMissionsBody').innerHTML = '<p style="color:var(--text-secondary)">Erreur de chargement.</p>';
+      }
+    }
+
+    function renderAnalyticsChargesDetail() {
+      const container = document.getElementById('analyticsChargesDetail');
+      if (!analyticsChargesData || !analyticsChargesData.ventilationCharges) return;
+      if (analyticsChargesMode === 'sous-categories' && analyticsChargesData.ventilationChargesDetail) {
+        const detail = analyticsChargesData.ventilationChargesDetail;
+        const total = detail.reduce((s, c) => s + c.montant, 0);
+        let html = `<table style="width:100%;border-collapse:collapse;font-size:0.85rem">
+          <thead><tr style="border-bottom:1px solid var(--border)">
+            <th style="text-align:left;padding:0.6rem 1rem;color:var(--text-secondary)">Catégorie</th>
+            <th style="text-align:left;padding:0.6rem 1rem;color:var(--text-secondary)">Sous-catégorie</th>
+            <th style="text-align:right;padding:0.6rem 1rem;color:var(--text-secondary)">Montant</th>
+            <th style="text-align:right;padding:0.6rem 1rem;color:var(--text-secondary)">%</th>
+          </tr></thead><tbody>`;
+        for (const item of detail) {
+          const pct = total > 0 ? ((item.montant / total) * 100).toFixed(1) : '0.0';
+          html += `<tr style="border-bottom:1px solid var(--border)">
+            <td style="text-align:left;padding:0.5rem 1rem;color:var(--text-secondary)">${item.categorie}</td>
+            <td style="text-align:left;padding:0.5rem 1rem;font-weight:500">${item.sousCat || '—'}</td>
+            <td style="text-align:right;padding:0.5rem 1rem;font-weight:600">${formatEuro(item.montant)}</td>
+            <td style="text-align:right;padding:0.5rem 1rem;color:var(--text-secondary)">${pct}%</td>
+          </tr>`;
+        }
+        html += `<tr style="border-top:2px solid var(--text);font-weight:700">
+          <td colspan="2" style="text-align:left;padding:0.6rem 1rem">Total</td>
+          <td style="text-align:right;padding:0.6rem 1rem">${formatEuro(total)}</td>
+          <td style="text-align:right;padding:0.6rem 1rem">100%</td>
+        </tr></tbody></table>`;
+        container.innerHTML = html;
+      } else {
+        const charges = analyticsChargesData.ventilationCharges;
+        const total = charges.reduce((s, c) => s + c.montant, 0);
+        let html = `<table style="width:100%;border-collapse:collapse;font-size:0.85rem">
+          <thead><tr style="border-bottom:1px solid var(--border)">
+            <th style="text-align:left;padding:0.6rem 1rem;color:var(--text-secondary)">Catégorie</th>
+            <th style="text-align:right;padding:0.6rem 1rem;color:var(--text-secondary)">Montant</th>
+            <th style="text-align:right;padding:0.6rem 1rem;color:var(--text-secondary)">%</th>
+          </tr></thead><tbody>`;
+        for (const item of charges) {
+          const pct = total > 0 ? ((item.montant / total) * 100).toFixed(1) : '0.0';
+          html += `<tr style="border-bottom:1px solid var(--border)">
+            <td style="text-align:left;padding:0.5rem 1rem">${item.categorie}</td>
+            <td style="text-align:right;padding:0.5rem 1rem;font-weight:600">${formatEuro(item.montant)}</td>
+            <td style="text-align:right;padding:0.5rem 1rem;color:var(--text-secondary)">${pct}%</td>
+          </tr>`;
+        }
+        html += `<tr style="border-top:2px solid var(--text);font-weight:700">
+          <td style="text-align:left;padding:0.6rem 1rem">Total</td>
+          <td style="text-align:right;padding:0.6rem 1rem">${formatEuro(total)}</td>
+          <td style="text-align:right;padding:0.6rem 1rem">100%</td>
+        </tr></tbody></table>`;
+        container.innerHTML = html;
+      }
+    }
+
+    function selectPreset(preset) {
+      analyticsCurrentPreset = preset;
+      document.querySelectorAll('.analytics-preset').forEach(b => b.classList.remove('active'));
+      event.target.classList.add('active');
+      const customDates = document.getElementById('analyticsCustomDates');
+      if (preset === 'custom') {
+        customDates.style.display = 'flex';
+      } else {
+        customDates.style.display = 'none';
+        refreshAnalytics();
+      }
+    }
+
+    async function refreshAnalytics() {
+      let start, end;
+      if (analyticsCurrentPreset === 'custom') {
+        start = document.getElementById('analyticsStart').value;
+        end = document.getElementById('analyticsEnd').value;
+        if (!start || !end) return;
+      } else {
+        const range = getPresetRange(analyticsCurrentPreset);
+        start = range.start; end = range.end;
+      }
+      analyticsCurrentStart = start;
+      analyticsCurrentEnd = end;
+
+      // Afficher l'overlay de chargement
+      const loader = document.getElementById('analyticsLoader');
+      const tabCa = document.getElementById('analytics-tab-ca');
+      const tabCharges = document.getElementById('analytics-tab-charges');
+      loader.style.display = 'flex';
+      tabCa.style.visibility = 'hidden';
+      tabCharges.style.visibility = 'hidden';
+
+      try {
+        const fetches = [fetch(`/api/analytics?start=${start}&end=${end}`)];
+        const chargesVisible = tabCharges.style.display !== 'none';
+        if (chargesVisible) {
+          const chargesEndpoint = analyticsChargesPrev
+            ? `/api/charges-hybride?start=${start}&end=${end}`
+            : `/api/charges?start=${start}&end=${end}`;
+          fetches.push(fetch(chargesEndpoint));
+        }
+
+        const results = await Promise.all(fetches);
+        const data = await results[0].json();
+        renderAnalytics(data);
+
+        if (chargesVisible) {
+          analyticsChargesData = await results[1].json();
+          if (!analyticsChargesData.ventilationCharges) return;
+          updateChargesKpis(analyticsChargesData);
+          const source = analyticsChargesMode === 'sous-categories' && analyticsChargesData.ventilationChargesDetail
+            ? analyticsChargesData.ventilationChargesDetail.map(v => ({ label: v.sousCat || v.categorie, montant: v.montant }))
+            : analyticsChargesData.ventilationCharges.map(v => ({ label: v.categorie, montant: v.montant }));
+          renderPieChart('analyticsChargesChart', source.slice(0, 10));
+          renderAnalyticsChargesDetail();
+          renderChargesComparaison(analyticsChargesData.comparaison);
+        }
+      } catch (err) {
+        console.error('Erreur analytics:', err);
+      } finally {
+        loader.style.display = 'none';
+        tabCa.style.visibility = '';
+        tabCharges.style.visibility = '';
+      }
+    }
+
+    // Instances des charts analytics
+    const analyticsCharts = {};
+
+    function destroyAnalyticsChart(id) {
+      if (analyticsCharts[id]) { analyticsCharts[id].destroy(); delete analyticsCharts[id]; }
+    }
+
+    function makePieColors(n) {
+      const palette = [
+        '#C0B8DC', // Lavande clair
+        '#8AB4D8', // Bleu ciel doux
+        '#9ECAB4', // Vert menthe clair
+        '#2E7858', // Vert sapin foncé
+        '#4A9070', // Vert teal moyen
+        '#3A5878', // Bleu ardoise foncé
+        '#D89090', // Rose saumon
+        '#CCB840', // Jaune moutarde
+        '#C86060', // Rouge corail
+      ];
+      return Array.from({ length: n }, (_, i) => palette[i % palette.length]);
+    }
+
+    function renderPieChart(canvasId, items) {
+      destroyAnalyticsChart(canvasId);
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const total = items.reduce((s, i) => s + i.montant, 0);
+      const MIN_PCT = 0.03;
+      const textColor = isDark ? '#cccccc' : '#37352f';
+      const lineColor = isDark ? '#666666' : '#aaaaaa';
+
+      function wrapLabel(text, maxLen) {
+        if (text.length <= maxLen) return [text];
+        const words = text.split(' ');
+        const lines = [];
+        let current = '';
+        for (const word of words) {
+          const candidate = current ? current + ' ' + word : word;
+          if (candidate.length <= maxLen) { current = candidate; }
+          else { if (current) lines.push(current); current = word; }
+        }
+        if (current) lines.push(current);
+        return lines.length ? lines : [text];
+      }
+
+      const outsideLabelsPlugin = {
+        id: 'outsideLabels_' + canvasId,
+        afterDraw(chart) {
+          const { ctx, data } = chart;
+          const meta = chart.getDatasetMeta(0);
+          ctx.save();
+          ctx.font = 'bold 11px sans-serif';
+          const lineH = 13;
+
+          // 1) Collecter toutes les infos de label
+          const labelsLeft = [], labelsRight = [];
+          meta.data.forEach((arc, i) => {
+            const val = data.datasets[0].data[i];
+            if (val / total < MIN_PCT) return;
+            const textLines = wrapLabel(data.labels[i], 12);
+            const pct = (val / total * 100).toFixed(1).replace('.', ',') + '%';
+            const midAngle = (arc.startAngle + arc.endAngle) / 2;
+            const cosA = Math.cos(midAngle);
+            const sinA = Math.sin(midAngle);
+            const anchorX = arc.x + (arc.outerRadius + 5) * cosA;
+            const anchorY = arc.y + (arc.outerRadius + 5) * sinA;
+            const naturalY = arc.y + (arc.outerRadius + 22) * sinA;
+            const h = (textLines.length + 1) * lineH;
+            const entry = { i, textLines, pct, anchorX, anchorY, naturalY, y: naturalY, h, cosA, arc };
+            (cosA >= 0 ? labelsRight : labelsLeft).push(entry);
+          });
+
+          // 2) Anti-overlap : trier par Y puis écarter les labels qui se chevauchent
+          function resolveOverlaps(group) {
+            group.sort((a, b) => a.naturalY - b.naturalY);
+            const gap = 3;
+            for (let pass = 0; pass < 10; pass++) {
+              let moved = false;
+              for (let j = 1; j < group.length; j++) {
+                const prev = group[j - 1], cur = group[j];
+                const overlap = (prev.y + prev.h / 2 + gap) - (cur.y - cur.h / 2);
+                if (overlap > 0) {
+                  prev.y -= overlap / 2;
+                  cur.y  += overlap / 2;
+                  moved = true;
+                }
+              }
+              if (!moved) break;
+            }
+          }
+          resolveOverlaps(labelsLeft);
+          resolveOverlaps(labelsRight);
+
+          // 3) Dessiner
+          function drawGroup(group) {
+            group.forEach(lb => {
+              const hLen = 14;
+              const elbowX = lb.arc.x + (lb.arc.outerRadius + 22) * lb.cosA;
+              const x3 = elbowX + (lb.cosA >= 0 ? hLen : -hLen);
+              // Ligne de liaison (du bord arc -> coude -> horizontal)
+              ctx.beginPath();
+              ctx.moveTo(lb.anchorX, lb.anchorY);
+              ctx.lineTo(elbowX, lb.y);
+              ctx.lineTo(x3, lb.y);
+              ctx.strokeStyle = lineColor;
+              ctx.lineWidth = 1;
+              ctx.stroke();
+              // Texte
+              const startY = lb.y - lb.h / 2;
+              ctx.fillStyle = textColor;
+              ctx.textAlign = lb.cosA >= 0 ? 'left' : 'right';
+              const textX = x3 + (lb.cosA >= 0 ? 3 : -3);
+              ctx.textBaseline = 'top';
+              lb.textLines.forEach((line, li) => ctx.fillText(line, textX, startY + li * lineH));
+              ctx.fillText(lb.pct, textX, startY + lb.textLines.length * lineH);
+            });
+          }
+          drawGroup(labelsLeft);
+          drawGroup(labelsRight);
+          ctx.restore();
+        }
+      };
+
+      analyticsCharts[canvasId] = new Chart(document.getElementById(canvasId), {
+        type: 'doughnut',
+        plugins: [ChartDataLabels, outsideLabelsPlugin],
+        data: {
+          labels: items.map(i => i.label),
+          datasets: [{ data: items.map(i => i.montant), backgroundColor: makePieColors(items.length), borderWidth: 0 }],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          layout: { padding: { top: 40, bottom: 40, left: 130, right: 100 } },
+          plugins: {
+            datalabels: {
+              labels: {
+                inside: {
+                  anchor: 'center',
+                  align: 'center',
+                  display: ctx => ctx.dataset.data[ctx.dataIndex] / total >= MIN_PCT,
+                  color: '#ffffff',
+                  font: { weight: 'bold', size: 13 },
+                  formatter: val => Math.round(val / 1000) + ' k€',
+                  textAlign: 'center',
+                },
+              },
+            },
+            legend: { display: false },
+            tooltip: { callbacks: { label: ctx => `${ctx.label} : ${formatEuro(ctx.raw)}` } },
+          },
+        },
+      });
+    }
+
+    function renderBarChart(canvasId, items) {
+      destroyAnalyticsChart(canvasId);
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      analyticsCharts[canvasId] = new Chart(document.getElementById(canvasId), {
+        type: 'bar',
+        plugins: [ChartDataLabels],
+        data: {
+          labels: items.map(i => i.label),
+          datasets: [{
+            data: items.map(i => Math.round(i.montant / 1000)),
+            backgroundColor: '#7A9BBF',
+            borderRadius: 4,
+          }],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+          layout: { padding: { right: 50 } },
+          plugins: {
+            datalabels: {
+              anchor: 'end',
+              align: 'end',
+              color: isDark ? '#cccccc' : '#37352f',
+              font: { size: 11, weight: 'bold' },
+              formatter: val => val + ' k€',
+            },
+            legend: { display: false },
+            tooltip: { callbacks: { label: ctx => `${ctx.raw} k€` } },
+          },
+          scales: {
+            x: { ticks: { color: isDark ? '#999' : '#787774', callback: v => v + ' k€' }, grid: { color: isDark ? '#2e2e2e' : '#e9e9e7' } },
+            y: { ticks: { color: isDark ? '#ccc' : '#37352f', font: { size: 11 } }, grid: { display: false } },
+          },
+        },
+      });
+    }
+
+    function renderAnalytics(data) {
+      const fmt = d => new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      document.getElementById('analyticsPeriodLabel').textContent = `Du ${fmt(data.start)} au ${fmt(data.end)}`;
+      document.getElementById('analyticsCa').textContent = formatEuro(data.ca);
+      const nbMissions = (data.byClient || []).length;
+      document.getElementById('analyticsNbMissions').textContent = nbMissions;
+      document.getElementById('analyticsTicketMoyen').textContent = nbMissions > 0 ? formatEuro(Math.round(data.ca / nbMissions)) : '—';
+
+      if (data.comparaison) renderCaComparaison(data.comparaison);
+      if (data.bySubventionne) renderPieChart('chartSubventionne', data.bySubventionne);
+      if (data.byAcquisition) renderPieChart('chartAcquisition', data.byAcquisition);
+      if (data.byNatureMission) renderPieChart('chartNatureMission', data.byNatureMission);
+      if (data.byTypeCa) renderPieChart('chartTypeCa', data.byTypeCa);
+      if (data.byClient) renderBarChart('chartClient', data.byClient.slice(0, 15));
+    }
+
+    let caComparaisonChart = null;
+    let caComparaisonMois = [];
+
+    function renderCaComparaison(comp) {
+      if (!comp) return;
+      caComparaisonMois = comp.mois;
+      if (caComparaisonChart) { caComparaisonChart.destroy(); caComparaisonChart = null; }
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const MOIS_FR = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
+      const labels = comp.mois.map(m => { const [y, mo] = m.split('-'); return MOIS_FR[parseInt(mo) - 1] + ' ' + y; });
+      const anneeN = comp.mois.length ? comp.mois[0].split('-')[0] : 'N';
+      const anneeNm1 = String(parseInt(anneeN) - 1);
+      caComparaisonChart = new Chart(document.getElementById('chartCaComparaison'), {
+        type: 'bar',
+        plugins: [ChartDataLabels],
+        data: {
+          labels,
+          datasets: [
+            { label: anneeN,   data: comp.N.map(v => Math.round(v / 1000)),   backgroundColor: '#7A9BBF', borderRadius: 4 },
+            { label: anneeNm1, data: comp.Nm1.map(v => Math.round(v / 1000)), backgroundColor: '#C0B8DC', borderRadius: 4 },
+          ],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          onClick: (evt, elements) => {
+            if (!elements.length) return;
+            const { datasetIndex, index } = elements[0];
+            const moisKey = caComparaisonMois[index];
+            const [y, mo] = moisKey.split('-');
+            const annee = datasetIndex === 0 ? parseInt(y) : parseInt(y) - 1;
+            const start = `${annee}-${mo}-01`;
+            const lastDay = new Date(annee, parseInt(mo), 0).getDate();
+            const end = `${annee}-${mo}-${String(lastDay).padStart(2, '0')}`;
+            openModalMissions(start, end);
+          },
+          plugins: {
+            datalabels: { display: false },
+            legend: { position: 'top', labels: { color: isDark ? '#ccc' : '#37352f', font: { size: 13, weight: 'bold' } } },
+            tooltip: { callbacks: { label: ctx => `${ctx.dataset.label} : ${ctx.raw} k€` } },
+          },
+          scales: {
+            x: { ticks: { color: isDark ? '#999' : '#787774' }, grid: { display: false } },
+            y: { ticks: { color: isDark ? '#999' : '#787774', callback: v => v + ' k€' }, grid: { color: isDark ? '#2e2e2e' : '#e9e9e7' } },
+          },
+        },
+      });
+      document.getElementById('chartCaComparaison').style.cursor = 'pointer';
+    }
+
+    function closeModalMissions() {
+      document.getElementById('modalMissions').classList.remove('open');
+    }
+
+    async function openModalMissions(start, end) {
+      const MOIS_FR = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+      const d = new Date(start);
+      const titre = MOIS_FR[d.getMonth()] + ' ' + d.getFullYear();
+      document.getElementById('modalMissionsTitle').textContent = 'Missions — ' + titre;
+      document.getElementById('modalMissionsBody').innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem">Chargement...</p>';
+      document.getElementById('modalMissions').classList.add('open');
+      try {
+        const res = await fetch(`/api/analytics/missions?start=${start}&end=${end}`);
+        const missions = await res.json();
+        if (!missions.length) {
+          document.getElementById('modalMissionsBody').innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem">Aucune mission sur cette période.</p>';
+          return;
+        }
+        const total = missions.reduce((s, m) => s + m.total, 0);
+        let html = `<table style="width:100%;border-collapse:collapse;font-size:0.85rem">
+          <thead><tr style="border-bottom:1px solid var(--border)">
+            <th style="text-align:left;padding:0.5rem 0.8rem;color:var(--text-secondary)">Client</th>
+            <th style="text-align:left;padding:0.5rem 0.8rem;color:var(--text-secondary)">Mission</th>
+            <th style="text-align:left;padding:0.5rem 0.8rem;color:var(--text-secondary)">Type</th>
+            <th style="text-align:right;padding:0.5rem 0.8rem;color:var(--text-secondary)">Montant</th>
+          </tr></thead><tbody>`;
+        for (const m of missions) {
+          for (const l of m.lignes) {
+            html += `<tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:0.45rem 0.8rem;font-weight:500">${m.client}</td>
+              <td style="padding:0.45rem 0.8rem;color:var(--text-secondary)">${m.mission}</td>
+              <td style="padding:0.45rem 0.8rem;color:var(--text-secondary)">${l.type}</td>
+              <td style="padding:0.45rem 0.8rem;text-align:right;font-weight:600">${formatEuro(l.montant)}</td>
+            </tr>`;
+          }
+        }
+        html += `<tr style="border-top:2px solid var(--text);font-weight:700">
+          <td colspan="3" style="padding:0.6rem 0.8rem">Total</td>
+          <td style="padding:0.6rem 0.8rem;text-align:right">${formatEuro(total)}</td>
+        </tr></tbody></table>`;
+        document.getElementById('modalMissionsBody').innerHTML = html;
+      } catch(e) {
+        document.getElementById('modalMissionsBody').innerHTML = '<p style="color:var(--text-secondary)">Erreur de chargement.</p>';
+      }
+    }
+
+    // Fermer le modal en cliquant sur le fond (defer car le modal est en fin de HTML)
+    document.addEventListener('DOMContentLoaded', () => {
+      const mm = document.getElementById('modalMissions');
+      if (mm) mm.addEventListener('click', function(e) { if (e.target === this) closeModalMissions(); });
+    });
+
+    function initAnalytics() {
+      refreshAnalytics();
+    }
 
     // --- Facturation ---
     let factData = null;
@@ -5709,6 +6558,16 @@
     }
 
   </script>
+
+  <div id="modalMissions" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.45);align-items:center;justify-content:center">
+    <div style="background:var(--bg);border-radius:var(--radius);box-shadow:0 8px 32px rgba(0,0,0,0.25);width:min(680px,95vw);max-height:80vh;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:1.2rem 1.5rem;border-bottom:1px solid var(--border)">
+        <div id="modalMissionsTitle" style="font-weight:700;font-size:1rem;color:var(--text)"></div>
+        <button onclick="closeModalMissions()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--text-secondary);line-height:1">&times;</button>
+      </div>
+      <div id="modalMissionsBody" style="overflow-y:auto;padding:1.2rem 1.5rem"></div>
+    </div>
+  </div>
 
 </body>
 </html>

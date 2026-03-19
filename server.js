@@ -404,7 +404,160 @@ function notionRequest(endpoint, method = 'GET', body = null) {
   });
 }
 
+// --- Google Sheets CSV ---
+const GSHEET_PUBLISHED_ID = '2PACX-1vQVkfg9jVxUTYGkLCs5xgXRuowmXEMZ8h2TT0kDfhbpQQugS1lgB729gbXbWJ5uEBK6CZ3E0DWJ9ijM';
+const CRPREV_GID = '1891894048';
+
+function fetchCSV(url) {
+  return new Promise((resolve, reject) => {
+    const follow = (targetUrl) => {
+      const parsed = new URL(targetUrl);
+      const options = {
+        hostname: parsed.hostname,
+        path: parsed.pathname + parsed.search,
+        method: 'GET',
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+      };
+      const req = https.request(options, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          return follow(res.headers.location);
+        }
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => res.statusCode < 400 ? resolve(data) : reject(new Error(`CSV ${res.statusCode}`)));
+      });
+      req.on('error', reject);
+      req.end();
+    };
+    follow(url);
+  });
+}
+
+function parseCsvCRPrev(text) {
+  const rows = [];
+  let current = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"' && text[i + 1] === '"') { field += '"'; i++; }
+      else if (ch === '"') inQuotes = false;
+      else field += ch;
+    } else {
+      if (ch === '"') inQuotes = true;
+      else if (ch === ',') { current.push(field); field = ''; }
+      else if (ch === '\n' || ch === '\r') {
+        if (ch === '\r' && text[i + 1] === '\n') i++;
+        current.push(field); field = '';
+        rows.push(current); current = [];
+      } else field += ch;
+    }
+  }
+  if (field || current.length) { current.push(field); rows.push(current); }
+  return rows;
+}
+
+let crPrevCache = null;
+let crPrevCacheTime = 0;
+const CRPREV_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+async function fetchAndParseCRPrev() {
+  if (crPrevCache && (Date.now() - crPrevCacheTime) < CRPREV_CACHE_TTL) return crPrevCache;
+
+  const url = `https://docs.google.com/spreadsheets/d/e/${GSHEET_PUBLISHED_ID}/pub?output=csv&gid=${CRPREV_GID}`;
+  const csvText = await fetchCSV(url);
+  const rows = parseCsvCRPrev(csvText);
+
+  console.log('[CRPrev] Lignes parsées:', rows.length);
+  console.log('[CRPrev] 5 premières lignes col0:', rows.slice(0, 5).map(r => JSON.stringify(r[0])));
+
+  // Trouver la ligne contenant les mois (format MM/YYYY)
+  let monthRowIdx = -1;
+  for (let i = 0; i < Math.min(15, rows.length); i++) {
+    const found = rows[i].some(cell => /^\d{2}\/\d{4}$/.test(cell.trim()));
+    console.log(`[CRPrev] Ligne ${i}:`, rows[i].slice(0, 4).map(c => JSON.stringify(c)), '→ mois?', found);
+    if (found) { monthRowIdx = i; break; }
+  }
+  if (monthRowIdx === -1) throw new Error('Structure CR_Prév non reconnue');
+
+  const monthRow = rows[monthRowIdx];
+
+  // Colonnes Budget (colonnes avec format MM/YYYY, les colonnes TVA sont entre elles)
+  const budgetCols = [];
+  for (let c = 0; c < monthRow.length; c++) {
+    const cell = monthRow[c].trim();
+    if (/^\d{2}\/\d{4}$/.test(cell)) {
+      const [mm, yyyy] = cell.split('/');
+      budgetCols.push({ index: c, key: `${yyyy}-${mm}` });
+    }
+  }
+
+  // Lignes à ignorer (totaux, en-têtes, lignes CA)
+  const SKIP_PATTERNS = [
+    /^$/,
+    /^compte de résultat/i,
+    /^total chiffre d'affaires/i,
+    /^total charges/i,
+    /^résultat d'exploitation/i,
+    /^chiffre d'affaires/i,
+    /^enc\./i,                  // Enc. Acompte / Enc. Solde (CA)
+    /^budget$/i,
+    /^tva$/i,
+    /^calcul de/i,
+  ];
+  const shouldSkip = (name) => SKIP_PATTERNS.some(p => p.test(name));
+
+  // categories    : { "Frais de personnel": { "2025-01": 15000, ... } }  — totaux par catégorie mère
+  // subCategories : { "Frais de personnel": { "Salaires nets": { "2025-01": 4810 } } }
+  const categories    = {};
+  const subCategories = {};
+  let currentParent   = null;
+
+  for (let r = monthRowIdx + 2; r < rows.length; r++) {
+    const row = rows[r];
+    const rawName = (row[2] || row[0] || '').trim();
+    if (shouldSkip(rawName)) continue;
+
+    if (rawName.toLowerCase().startsWith('cm.')) {
+      // Catégorie mère — strip le préfixe pour l'affichage
+      currentParent = rawName.slice(3).trim();
+      if (!categories[currentParent])    categories[currentParent]    = {};
+      if (!subCategories[currentParent]) subCategories[currentParent] = {};
+      continue;
+    }
+
+    // Sous-catégorie
+    const catName = rawName;
+    if (!catName) continue;
+    const parent = currentParent || catName; // fallback si pas de parent détecté
+
+    for (const { index, key } of budgetCols) {
+      const raw = (row[index] || '').trim().replace(/[€\s\u00A0]/g, '').replace(',', '.');
+      const val = parseFloat(raw) || 0;
+      if (val !== 0) {
+        if (!categories[parent]) categories[parent] = {};
+        categories[parent][key] = (categories[parent][key] || 0) + val;
+        if (currentParent) {
+          if (!subCategories[parent][catName]) subCategories[parent][catName] = {};
+          subCategories[parent][catName][key] = (subCategories[parent][catName][key] || 0) + val;
+        }
+      }
+    }
+  }
+
+  crPrevCache = { budgetCols, categories, subCategories };
+  crPrevCacheTime = Date.now();
+  return crPrevCache;
+}
+
+let notionMissionsCache = null;
+let notionMissionsCacheTime = 0;
+const NOTION_MISSIONS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 async function fetchAllNotionMissions() {
+  if (notionMissionsCache && (Date.now() - notionMissionsCacheTime) < NOTION_MISSIONS_CACHE_TTL) {
+    return notionMissionsCache;
+  }
+
   const allPages = [];
   let startCursor = undefined;
 
@@ -422,7 +575,7 @@ async function fetchAllNotionMissions() {
     }
   }
 
-  return allPages.map(page => {
+  const result = allPages.map(page => {
     const props = page.properties;
     return {
       id: page.id,
@@ -451,8 +604,20 @@ async function fetchAllNotionMissions() {
         ? props['Nb_jrs_acompte_retard'].formula.number || 0 : 0,
       jrsSoldeRetard: props['Nb_jrs_solde_retard'] && props['Nb_jrs_solde_retard'].formula
         ? props['Nb_jrs_solde_retard'].formula.number || 0 : 0,
+      natureMission: props['Nature_mission'] && props['Nature_mission'].select
+        ? props['Nature_mission'].select.name : 'Non défini',
+      acquisition: props['Acquisition'] && props['Acquisition'].select
+        ? props['Acquisition'].select.name : 'Non défini',
+      typeCa: props['type_ca'] && props['type_ca'].select
+        ? props['type_ca'].select.name : 'Non défini',
+      subventionne: props['CA Subventionné ?'] && props['CA Subventionné ?'].formula
+        ? props['CA Subventionné ?'].formula.string || 'Non' : 'Non',
     };
   });
+
+  notionMissionsCache = result;
+  notionMissionsCacheTime = Date.now();
+  return notionMissionsCache;
 }
 
 // --- Fuzzy string matching ---
@@ -2568,6 +2733,518 @@ app.post('/api/prospection/qualify', async (req, res) => {
     if (error) throw new Error(error.message);
     res.json({ ok: true });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Analytics : CA facturé sur une période ---
+app.get('/api/analytics', async (req, res) => {
+  try {
+    const { start, end } = req.query;
+    if (!start || !end) return res.status(400).json({ error: 'Paramètres start et end requis' });
+
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    endDate.setHours(23, 59, 59, 999);
+
+    const missions = await fetchAllNotionMissions();
+
+    const startNm1 = new Date(startDate); startNm1.setFullYear(startNm1.getFullYear() - 1);
+    const endNm1 = new Date(endDate); endNm1.setFullYear(endNm1.getFullYear() - 1);
+
+    let ca = 0;
+    const bySubventionne = {};
+    const byAcquisition = {};
+    const byNatureMission = {};
+    const byTypeCa = {};
+    const byClient = {};
+    const caParMoisN = {};
+    const caParMoisNm1 = {};
+
+    function addToMois(map, dateStr, montant) {
+      const d = new Date(dateStr);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      map[key] = (map[key] || 0) + montant;
+    }
+
+    for (const m of missions) {
+      let montantPeriode = 0;
+
+      // Acompte N
+      if (m.dateFactureAcompte && m.montantAcompte > 0) {
+        const d = new Date(m.dateFactureAcompte);
+        if (d >= startDate && d <= endDate) { montantPeriode += m.montantAcompte; addToMois(caParMoisN, m.dateFactureAcompte, m.montantAcompte); }
+        if (d >= startNm1 && d <= endNm1) addToMois(caParMoisNm1, m.dateFactureAcompte, m.montantAcompte);
+      }
+
+      // Solde N
+      if (m.dateFactureFinale) {
+        const montantSolde = m.ca - m.montantAcompte;
+        if (montantSolde > 0) {
+          const d = new Date(m.dateFactureFinale);
+          if (d >= startDate && d <= endDate) { montantPeriode += montantSolde; addToMois(caParMoisN, m.dateFactureFinale, montantSolde); }
+          if (d >= startNm1 && d <= endNm1) addToMois(caParMoisNm1, m.dateFactureFinale, montantSolde);
+        }
+      }
+
+      if (montantPeriode > 0) {
+        ca += montantPeriode;
+        const sub = m.subventionne || 'Non';
+        bySubventionne[sub] = (bySubventionne[sub] || 0) + montantPeriode;
+        const acq = m.acquisition || 'Non défini';
+        byAcquisition[acq] = (byAcquisition[acq] || 0) + montantPeriode;
+        const nat = m.natureMission || 'Non défini';
+        byNatureMission[nat] = (byNatureMission[nat] || 0) + montantPeriode;
+        const tc = m.typeCa || 'Non défini';
+        byTypeCa[tc] = (byTypeCa[tc] || 0) + montantPeriode;
+        const client = m.client || 'Sans client';
+        byClient[client] = (byClient[client] || 0) + montantPeriode;
+      }
+    }
+
+    const toArray = obj => Object.entries(obj)
+      .map(([label, montant]) => ({ label, montant: Math.round(montant) }))
+      .sort((a, b) => b.montant - a.montant);
+
+    // Mois couverts par la période N
+    const moisLabels = [];
+    const cur = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+    const last = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+    while (cur <= last) {
+      moisLabels.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`);
+      cur.setMonth(cur.getMonth() + 1);
+    }
+
+    res.json({
+      start, end,
+      ca: Math.round(ca),
+      bySubventionne: toArray(bySubventionne),
+      byAcquisition: toArray(byAcquisition),
+      byNatureMission: toArray(byNatureMission),
+      byTypeCa: toArray(byTypeCa),
+      byClient: toArray(byClient),
+      comparaison: {
+        mois: moisLabels,
+        N: moisLabels.map(m => Math.round(caParMoisN[m] || 0)),
+        Nm1: moisLabels.map(m => {
+          const [y, mo] = m.split('-');
+          return Math.round(caParMoisNm1[`${parseInt(y) - 1}-${mo}`] || 0);
+        }),
+      },
+      fetchedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('Erreur analytics:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/analytics/missions', async (req, res) => {
+  try {
+    const { start, end } = req.query;
+    if (!start || !end) return res.status(400).json({ error: 'Paramètres start et end requis' });
+    const startDate = new Date(start);
+    const endDate = new Date(end); endDate.setHours(23, 59, 59, 999);
+    const missions = await fetchAllNotionMissions();
+    const result = [];
+    for (const m of missions) {
+      const lignes = [];
+      if (m.dateFactureAcompte && m.montantAcompte > 0) {
+        const d = new Date(m.dateFactureAcompte);
+        if (d >= startDate && d <= endDate) lignes.push({ type: 'Acompte', date: m.dateFactureAcompte, montant: m.montantAcompte });
+      }
+      if (m.dateFactureFinale) {
+        const montantSolde = m.ca - m.montantAcompte;
+        if (montantSolde > 0) {
+          const d = new Date(m.dateFactureFinale);
+          if (d >= startDate && d <= endDate) lignes.push({ type: 'Solde', date: m.dateFactureFinale, montant: montantSolde });
+        }
+      }
+      if (lignes.length > 0) {
+        result.push({
+          mission: m.nom || 'Sans nom',
+          client: m.client || 'Sans client',
+          lignes,
+          total: lignes.reduce((s, l) => s + l.montant, 0),
+        });
+      }
+    }
+    result.sort((a, b) => b.total - a.total);
+    res.json(result);
+  } catch (err) {
+    console.error('Erreur /api/analytics/missions:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/charges', async (req, res) => {
+  try {
+    const { start, end } = req.query;
+    if (!start || !end) return res.status(400).json({ error: 'Paramètres start et end requis' });
+
+    const org = await qontoRequest('/v2/organization');
+    const bankAccounts = org.organization.bank_accounts || [];
+    if (bankAccounts.length === 0) return res.status(404).json({ error: 'Aucun compte Qonto' });
+    const mainAccount = bankAccounts.reduce((a, b) => (b.balance_cents > a.balance_cents ? b : a));
+    const iban = mainAccount.iban;
+
+    async function fetchDebitsByRange(ibanVal, fromDate, toDate) {
+      const txs = [];
+      let page = 1;
+      while (true) {
+        const result = await qontoRequest(
+          `/v2/transactions?iban=${ibanVal}&status[]=completed&sort_by=settled_at:desc&per_page=100&current_page=${page}&settled_at_from=${fromDate}&settled_at_to=${toDate}`
+        );
+        const batch = result.transactions || [];
+        txs.push(...batch);
+        if (batch.length < 100) break;
+        page++;
+      }
+      return txs.filter(tx => tx.side === 'debit');
+    }
+
+    function agregParMois(txs) {
+      const map = {};
+      for (const tx of txs) {
+        if (!tx.settled_at) continue;
+        const d = new Date(tx.settled_at);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        map[key] = (map[key] || 0) + tx.amount;
+      }
+      return map;
+    }
+
+    const startD = new Date(start);
+    const endD = new Date(end + 'T23:59:59');
+    const startNm1 = new Date(startD); startNm1.setFullYear(startNm1.getFullYear() - 1);
+    const endNm1 = new Date(endD); endNm1.setFullYear(endNm1.getFullYear() - 1);
+
+    const [txsN, txsNm1] = await Promise.all([
+      fetchDebitsByRange(iban, startD.toISOString(), endD.toISOString()),
+      fetchDebitsByRange(iban, startNm1.toISOString(), endNm1.toISOString()),
+    ]);
+
+    const chargesParCategorie = {};
+    const chargesParSousCategorie = {};
+    for (const tx of txsN) {
+      const cat = (tx.cashflow_category && tx.cashflow_category.name) || tx.category || 'Non catégorisé';
+      const sousCat = (tx.cashflow_subcategory && tx.cashflow_subcategory.name) || null;
+      chargesParCategorie[cat] = (chargesParCategorie[cat] || 0) + tx.amount;
+      const sousCatKey = sousCat ? `${cat} > ${sousCat}` : cat;
+      if (!chargesParSousCategorie[sousCatKey]) chargesParSousCategorie[sousCatKey] = { categorie: cat, sousCat: sousCat || null, montant: 0 };
+      chargesParSousCategorie[sousCatKey].montant += tx.amount;
+    }
+
+    const ventilationCharges = Object.entries(chargesParCategorie)
+      .map(([categorie, montant]) => ({ categorie, montant }))
+      .sort((a, b) => b.montant - a.montant);
+    const ventilationChargesDetail = Object.values(chargesParSousCategorie)
+      .sort((a, b) => b.montant - a.montant);
+
+    const totalCharges = ventilationCharges.reduce((s, c) => s + c.montant, 0);
+    const nbMois = Math.max(1, Math.round((endD - startD) / (1000 * 60 * 60 * 24 * 30.5)));
+    const moyenneMensuelle = totalCharges / nbMois;
+
+    const chargesParMoisN = agregParMois(txsN);
+    const chargesParMoisNm1 = agregParMois(txsNm1);
+
+    // Liste des mois couverts par la période N (labels)
+    const moisLabels = [];
+    const cur = new Date(startD.getFullYear(), startD.getMonth(), 1);
+    const last = new Date(endD.getFullYear(), endD.getMonth(), 1);
+    while (cur <= last) {
+      moisLabels.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`);
+      cur.setMonth(cur.getMonth() + 1);
+    }
+
+    res.json({
+      ventilationCharges, ventilationChargesDetail,
+      totalCharges, moyenneMensuelle,
+      comparaison: {
+        mois: moisLabels,
+        N: moisLabels.map(m => Math.round(chargesParMoisN[m] || 0)),
+        Nm1: moisLabels.map(m => {
+          const [y, mo] = m.split('-');
+          const keyNm1 = `${parseInt(y) - 1}-${mo}`;
+          return Math.round(chargesParMoisNm1[keyNm1] || 0);
+        }),
+      },
+    });
+  } catch (err) {
+    console.error('Erreur /api/charges:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/charges-hybride', async (req, res) => {
+  try {
+    const { start, end } = req.query;
+    if (!start || !end) return res.status(400).json({ error: 'Paramètres start et end requis' });
+
+    const now = new Date();
+    const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const startKey = start.slice(0, 7);
+    const endKey   = end.slice(0, 7);
+
+    // Séparation des périodes
+    const realEndKey   = endKey <= todayKey ? endKey : todayKey;
+    const hasReal      = start <= realEndKey;
+    const nextMonth    = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const nextMonthKey = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}`;
+    const prevStartKey = start > todayKey ? start : nextMonthKey;
+    const hasPrev      = prevStartKey <= end;
+
+    // --- Partie réelle (Qonto) ---
+    let realTotal = 0;
+    let chargesParMoisN    = {};
+    let chargesParMoisNm1  = {};
+    let realVentilation    = [];
+    let realSubVentilation = [];
+
+    // Qonto : on fetch toujours le N-1 sur la totalité de la période (pas seulement la partie réelle)
+    // pour que les barres N-1 s'affichent aussi pour les mois futurs (ex. Avr-Déc 2025 vs Avr-Déc 2026)
+    const fetchDebitsHybride = async (ibanVal, from, to) => {
+      const txs = []; let page = 1;
+      while (true) {
+        const r = await qontoRequest(
+          `/v2/transactions?iban=${ibanVal}&status[]=completed&sort_by=settled_at:desc&per_page=100&current_page=${page}&settled_at_from=${from}&settled_at_to=${to}`
+        );
+        const batch = r.transactions || [];
+        txs.push(...batch);
+        if (batch.length < 100) break;
+        page++;
+      }
+      return txs.filter(t => t.side === 'debit');
+    };
+
+    if (hasReal || hasPrev) {
+      const org = await qontoRequest('/v2/organization');
+      const bankAccounts = org.organization.bank_accounts || [];
+      const mainAccount  = bankAccounts.reduce((a, b) => (b.balance_cents > a.balance_cents ? b : a));
+      const iban = mainAccount.iban;
+
+      // N réel : seulement la période passée
+      // N-1 : toute la période sélectionnée décalée d'un an (pour comparer même les mois futurs)
+      const fullStartD = new Date(startKey + '-01');
+      const fullEndD   = new Date(endKey   + '-28T23:59:59');
+      const nm1StartD  = new Date(fullStartD); nm1StartD.setFullYear(nm1StartD.getFullYear() - 1);
+      const nm1EndD    = new Date(fullEndD);   nm1EndD.setFullYear(nm1EndD.getFullYear() - 1);
+
+      const fetches = [fetchDebitsHybride(iban, nm1StartD.toISOString(), nm1EndD.toISOString())];
+      if (hasReal) {
+        const realStartD = new Date(startKey + '-01');
+        const realEndD   = new Date(realEndKey + '-28T23:59:59');
+        fetches.unshift(fetchDebitsHybride(iban, realStartD.toISOString(), realEndD.toISOString()));
+      }
+
+      const results = await Promise.all(fetches);
+      const txsNm1 = hasReal ? results[1] : results[0];
+      const txsN   = hasReal ? results[0] : [];
+
+      const catMap = {};
+      const subCatMap = {};
+      for (const tx of txsN) {
+        const cat = (tx.cashflow_category && tx.cashflow_category.name) || tx.category || 'Non catégorisé';
+        const sousCat = (tx.cashflow_subcategory && tx.cashflow_subcategory.name) || null;
+        catMap[cat] = (catMap[cat] || 0) + tx.amount;
+        const subKey = sousCat ? `${cat}||${sousCat}` : `${cat}||`;
+        if (!subCatMap[subKey]) subCatMap[subKey] = { categorie: cat, sousCat, montant: 0 };
+        subCatMap[subKey].montant += tx.amount;
+        const d = new Date(tx.settled_at);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        chargesParMoisN[key] = (chargesParMoisN[key] || 0) + tx.amount;
+      }
+      for (const tx of txsNm1) {
+        const d = new Date(tx.settled_at);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        chargesParMoisNm1[key] = (chargesParMoisNm1[key] || 0) + tx.amount;
+      }
+
+      realVentilation = Object.entries(catMap).map(([categorie, montant]) => ({ categorie, montant }));
+      realSubVentilation = Object.values(subCatMap);
+      realTotal = realVentilation.reduce((s, v) => s + v.montant, 0);
+    }
+
+    // --- Partie prévisionnelle (GSheet) ---
+    let prevTotal = 0;
+    let chargesGSheetParMois = {};
+    let prevVentilation = [];
+
+    let prevSubVentilation = [];
+    let chargesGSheetParMoisNm1 = {};
+    if (hasPrev) {
+      const { budgetCols, categories, subCategories } = await fetchAndParseCRPrev();
+      const cols = budgetCols.filter(c => c.key >= prevStartKey && c.key <= end);
+      const catMap = {};
+      for (const [cat, monthMap] of Object.entries(categories)) {
+        for (const col of cols) {
+          const v = monthMap[col.key] || 0;
+          if (v !== 0) {
+            catMap[cat] = (catMap[cat] || 0) + v;
+            chargesGSheetParMois[col.key] = (chargesGSheetParMois[col.key] || 0) + v;
+          }
+        }
+        // GSheet N-1 : pour chaque mois futur, chercher la valeur de l'année précédente dans le GSheet
+        for (const col of cols) {
+          const [y, mo] = col.key.split('-');
+          const nm1Key = `${parseInt(y) - 1}-${mo}`;
+          const v = monthMap[nm1Key] || 0;
+          if (v !== 0) chargesGSheetParMoisNm1[nm1Key] = (chargesGSheetParMoisNm1[nm1Key] || 0) + v;
+        }
+      }
+      prevVentilation = Object.entries(catMap).map(([categorie, montant]) => ({ categorie, montant: Math.round(montant) }));
+      prevTotal = prevVentilation.reduce((s, v) => s + v.montant, 0);
+      // Sous-catégories GSheet
+      for (const [parent, subs] of Object.entries(subCategories)) {
+        for (const [subName, monthMap] of Object.entries(subs)) {
+          const montant = cols.reduce((acc, c) => acc + (monthMap[c.key] || 0), 0);
+          if (montant > 0) prevSubVentilation.push({ categorie: parent, sousCat: subName, montant: Math.round(montant) });
+        }
+      }
+    }
+
+    // --- Ventilation fusionnée (catégories mères) ---
+    const ventMap = {};
+    for (const v of realVentilation) ventMap[v.categorie] = (ventMap[v.categorie] || 0) + v.montant;
+    for (const v of prevVentilation) ventMap[v.categorie] = (ventMap[v.categorie] || 0) + v.montant;
+    const ventilationCharges = Object.entries(ventMap)
+      .map(([categorie, montant]) => ({ categorie, montant: Math.round(montant) }))
+      .sort((a, b) => b.montant - a.montant);
+
+    // --- Ventilation fusionnée (sous-catégories) ---
+    const subMap = {};
+    const makeSubKey = (cat, sub) => `${cat}||${sub || ''}`;
+    for (const v of [...realSubVentilation, ...prevSubVentilation]) {
+      const k = makeSubKey(v.categorie, v.sousCat);
+      if (!subMap[k]) subMap[k] = { categorie: v.categorie, sousCat: v.sousCat, montant: 0 };
+      subMap[k].montant += v.montant;
+    }
+    const ventilationChargesDetail = Object.values(subMap).sort((a, b) => b.montant - a.montant);
+
+    const totalCharges = Math.round(realTotal + prevTotal);
+
+    // --- Mois labels + comparaison (sans Date objects pour éviter les bugs de timezone) ---
+    const moisLabels = [];
+    let [cy, cm] = startKey.split('-').map(Number);
+    const [ey, em] = endKey.split('-').map(Number);
+    while (cy < ey || (cy === ey && cm <= em)) {
+      moisLabels.push(`${cy}-${String(cm).padStart(2, '0')}`);
+      cm++; if (cm > 12) { cm = 1; cy++; }
+    }
+
+    res.json({
+      real: hasReal ? { total: Math.round(realTotal), start: startKey, end: realEndKey.slice(0, 7) } : null,
+      prev: hasPrev ? { total: prevTotal, start: prevStartKey.slice(0, 7), end: endKey } : null,
+      ventilationCharges,
+      ventilationChargesDetail,
+      totalCharges,
+      moyenneMensuelle: moisLabels.length > 0 ? Math.round(totalCharges / moisLabels.length) : 0,
+      comparaison: {
+        mois: moisLabels,
+        N:    moisLabels.map(k => Math.round(chargesParMoisN[k] || chargesGSheetParMois[k] || 0)),
+        Nm1:  moisLabels.map(k => {
+          const [y, mo] = k.split('-');
+          const nm1Key = `${parseInt(y) - 1}-${mo}`;
+          return Math.round(chargesParMoisNm1[nm1Key] || chargesGSheetParMoisNm1[nm1Key] || 0);
+        }),
+      },
+    });
+  } catch (err) {
+    console.error('Erreur /api/charges-hybride:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/debug/previsionnel', async (_req, res) => {
+  crPrevCache = null;
+  try {
+    const url = `https://docs.google.com/spreadsheets/d/e/${GSHEET_PUBLISHED_ID}/pub?output=csv&gid=${CRPREV_GID}`;
+    const csvText = await fetchCSV(url);
+    const rows = parseCsvCRPrev(csvText);
+
+    // Trouver la ligne des mois
+    let monthRowIdx = -1;
+    for (let i = 0; i < Math.min(15, rows.length); i++) {
+      if (rows[i].some(cell => /^\d{2}\/\d{4}$/.test(cell.trim()))) { monthRowIdx = i; break; }
+    }
+
+    // Afficher les 10 lignes autour de monthRowIdx + les premières colonnes
+    const sampleRows = [];
+    const start = Math.max(0, monthRowIdx);
+    for (let r = start; r < Math.min(start + 12, rows.length); r++) {
+      sampleRows.push({
+        rowIndex: r,
+        col0: rows[r][0],
+        col1: rows[r][1],
+        col2: rows[r][2],
+        col3: rows[r][3],
+        col4: rows[r][4],
+        col5: rows[r][5],
+      });
+    }
+
+    const { budgetCols, categories } = await fetchAndParseCRPrev();
+    res.json({ monthRowIdx, budgetCols: budgetCols.slice(0, 5), categories, sampleRows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/previsionnel-charges', async (req, res) => {
+  try {
+    const { start, end } = req.query; // format "YYYY-MM"
+    const { budgetCols, categories, subCategories } = await fetchAndParseCRPrev();
+
+    // Filtrer les colonnes dans la période
+    const cols = budgetCols.filter(c => (!start || c.key >= start) && (!end || c.key <= end));
+
+    if (cols.length === 0) return res.json({
+      ventilationCharges: [], ventilationChargesDetail: [], totalCharges: 0, moyenneMensuelle: 0,
+      comparaison: { mois: [], N: [], Nm1: [] },
+    });
+
+    // Ventilation par catégorie mère sur la période
+    const totals = {};
+    for (const [cat, monthMap] of Object.entries(categories)) {
+      const sum = cols.reduce((acc, c) => acc + (monthMap[c.key] || 0), 0);
+      if (sum > 0) totals[cat] = sum;
+    }
+    const totalCharges = Object.values(totals).reduce((a, b) => a + b, 0);
+    const moyenneMensuelle = cols.length > 0 ? Math.round(totalCharges / cols.length) : 0;
+    const ventilationCharges = Object.entries(totals)
+      .map(([categorie, montant]) => ({ categorie, montant: Math.round(montant), pourcentage: totalCharges > 0 ? Math.round(montant / totalCharges * 100) : 0 }))
+      .sort((a, b) => b.montant - a.montant);
+
+    // Ventilation par sous-catégorie (pour le mode détail)
+    const ventilationChargesDetail = [];
+    for (const [parent, subs] of Object.entries(subCategories)) {
+      for (const [subName, monthMap] of Object.entries(subs)) {
+        const montant = cols.reduce((acc, c) => acc + (monthMap[c.key] || 0), 0);
+        if (montant > 0) ventilationChargesDetail.push({ categorie: parent, sousCat: subName, montant: Math.round(montant) });
+      }
+    }
+    ventilationChargesDetail.sort((a, b) => b.montant - a.montant);
+
+    // Comparaison N vs N-1
+    const moisLabels = cols.map(c => c.key);
+    const N = moisLabels.map(key =>
+      Math.round(Object.values(categories).reduce((acc, monthMap) => acc + (monthMap[key] || 0), 0))
+    );
+    const Nm1 = moisLabels.map(key => {
+      const [y, mo] = key.split('-');
+      const keyNm1 = `${parseInt(y) - 1}-${mo}`;
+      return Math.round(Object.values(categories).reduce((acc, monthMap) => acc + (monthMap[keyNm1] || 0), 0));
+    });
+
+    res.json({
+      ventilationCharges,
+      ventilationChargesDetail,
+      totalCharges: Math.round(totalCharges),
+      moyenneMensuelle,
+      comparaison: { mois: moisLabels, N, Nm1 },
+    });
+  } catch (err) {
+    console.error('Erreur /api/previsionnel-charges:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
