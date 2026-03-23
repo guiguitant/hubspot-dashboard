@@ -1090,6 +1090,10 @@
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 12l4-4 3 3 4-5 3 2"/><path d="M1 15h14"/></svg>
         Analytics
       </button>
+      <button class="sidebar-link" onclick="window.open('/prospector','_blank')" data-page="prospector">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>
+        Prospector
+      </button>
       <div style="flex:1"></div>
       <div style="padding:0.5rem 0.75rem;display:flex;align-items:center;gap:0.5rem">
         <button class="btn" id="themeToggle" onclick="toggleTheme()" title="Mode sombre" style="padding:0.4rem;color:var(--sidebar-text-secondary)">
@@ -2067,8 +2071,11 @@
         </div>
         <input type="hidden" id="scenarioEditId" value="">
 
-        <!-- Accordeons overrides -->
+        <!-- Overrides sections -->
         <div id="scenarioOverridesSection" style="display:none">
+
+          <!-- ========== SECTION CHARGES ========== -->
+          <h3 style="font-size:0.9rem;font-weight:700;margin:0.8rem 0 0.5rem;color:var(--text);border-bottom:2px solid var(--primary);padding-bottom:0.3rem">Charges</h3>
 
           <!-- Masse salariale -->
           <div style="border:1px solid var(--border);border-radius:var(--radius);margin-bottom:0.5rem">
@@ -2078,6 +2085,10 @@
               <span id="accSalaireCount" style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)"></span>
             </button>
             <div id="accSalaire" style="display:none;padding:0.8rem">
+              <!-- Baseline salaries (read-only) -->
+              <div id="baselineSalariesRecap" style="margin-bottom:0.8rem"></div>
+              <hr style="border:none;border-top:1px solid var(--border);margin:0.5rem 0">
+              <p style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:0.3rem;font-weight:600">Ajuster (delta) :</p>
               <div style="display:grid;grid-template-columns:auto 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
                 <div>
                   <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Action</label>
@@ -2128,74 +2139,90 @@
             </div>
           </div>
 
-          <!-- Pipeline -->
-          <div style="border:1px solid var(--border);border-radius:var(--radius);margin-bottom:0.5rem">
-            <button onclick="toggleAccordion('accPipeline')" style="width:100%;text-align:left;padding:0.6rem 0.8rem;background:var(--hover);border:none;cursor:pointer;font-family:inherit;font-size:0.85rem;font-weight:600;color:var(--text);border-radius:var(--radius);display:flex;align-items:center;gap:0.5rem">
-              <span id="accPipelineChevron" style="font-size:0.6rem;transition:transform 0.2s">&#9654;</span>
-              Pipeline
-              <span id="accPipelineCount" style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)"></span>
-            </button>
-            <div id="accPipeline" style="display:none;padding:0.8rem">
-              <div style="margin-bottom:0.5rem">
-                <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Facteur pipeline global (1 = reel, 0 = aucun pipeline, 1.3 = +30%)</label>
-                <div style="display:flex;gap:0.5rem;align-items:center">
-                  <input type="number" id="ovPipelineFactor" placeholder="1.0" step="0.1" min="0" style="width:100px;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
-                  <button class="btn" onclick="addOverridePipelineFactor()" style="font-size:0.8rem;padding:0.3rem 0.8rem;color:var(--primary);font-weight:600">Appliquer</button>
-                </div>
-              </div>
-              <hr style="border:none;border-top:1px solid var(--border);margin:0.5rem 0">
-              <p style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:0.3rem">Ou ajouter un deal fictif :</p>
-              <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
-                <div>
-                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Nom du deal</label>
-                  <input type="text" id="ovDealNom" placeholder="Client X" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
-                </div>
-                <div>
-                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Montant</label>
-                  <input type="number" id="ovDealMontant" placeholder="50000" min="0" step="1000" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
-                </div>
-                <div>
-                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Probabilite %</label>
-                  <input type="number" id="ovDealProba" placeholder="100" min="0" max="100" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
-                </div>
-                <div>
-                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Mois (YYYY-MM)</label>
-                  <input type="month" id="ovDealMois" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
-                </div>
-              </div>
-              <button class="btn" onclick="addOverrideDeal()" style="font-size:0.8rem;padding:0.3rem 0.8rem;color:var(--primary);font-weight:600">+ Ajouter deal</button>
-              <div id="ovPipelineList" style="margin-top:0.5rem"></div>
-            </div>
-          </div>
-
-          <!-- Charges fixes -->
+          <!-- Depenses autres -->
           <div style="border:1px solid var(--border);border-radius:var(--radius);margin-bottom:0.5rem">
             <button onclick="toggleAccordion('accCharges')" style="width:100%;text-align:left;padding:0.6rem 0.8rem;background:var(--hover);border:none;cursor:pointer;font-family:inherit;font-size:0.85rem;font-weight:600;color:var(--text);border-radius:var(--radius);display:flex;align-items:center;gap:0.5rem">
               <span id="accChargesChevron" style="font-size:0.6rem;transition:transform 0.2s">&#9654;</span>
-              Charges fixes
+              Depenses autres
               <span id="accChargesCount" style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)"></span>
             </button>
             <div id="accCharges" style="display:none;padding:0.8rem">
-              <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
-                <div>
-                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Libelle</label>
-                  <input type="text" id="ovChargeLib" placeholder="Loyer bureau" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+              <div style="display:flex;gap:0.5rem;margin-bottom:0.5rem">
+                <label style="font-size:0.8rem;display:flex;align-items:center;gap:0.3rem;cursor:pointer">
+                  <input type="radio" name="chargeMode" value="recurring" checked onchange="toggleChargeMode()"> Recurrente
+                </label>
+                <label style="font-size:0.8rem;display:flex;align-items:center;gap:0.3rem;cursor:pointer">
+                  <input type="radio" name="chargeMode" value="oneshot" onchange="toggleChargeMode()"> Ponctuelle
+                </label>
+              </div>
+              <!-- Recurring fields -->
+              <div id="chargeFieldsRecurring">
+                <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
+                  <div>
+                    <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Libelle</label>
+                    <input type="text" id="ovChargeLib" placeholder="Loyer bureau" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                  </div>
+                  <div>
+                    <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Montant/mois</label>
+                    <input type="number" id="ovChargeMontant" placeholder="1500" min="0" step="100" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                  </div>
+                  <div>
+                    <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Mois debut</label>
+                    <input type="month" id="ovChargeDebut" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                  </div>
+                  <div>
+                    <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Mois fin</label>
+                    <input type="month" id="ovChargeFin" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                  </div>
                 </div>
-                <div>
-                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Montant mensuel</label>
-                  <input type="number" id="ovChargeMontant" placeholder="1500" min="0" step="100" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
-                </div>
-                <div>
-                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Mois debut</label>
-                  <input type="month" id="ovChargeDebut" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
-                </div>
-                <div>
-                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Mois fin</label>
-                  <input type="month" id="ovChargeFin" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+              </div>
+              <!-- One-shot fields -->
+              <div id="chargeFieldsOneshot" style="display:none">
+                <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
+                  <div>
+                    <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Libelle</label>
+                    <input type="text" id="ovChargeLibOneshot" placeholder="Achat materiel" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                  </div>
+                  <div>
+                    <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Montant</label>
+                    <input type="number" id="ovChargeMontantOneshot" placeholder="5000" min="0" step="100" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                  </div>
+                  <div>
+                    <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Mois</label>
+                    <input type="month" id="ovChargeMoisOneshot" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                  </div>
                 </div>
               </div>
               <button class="btn" onclick="addOverrideCharge()" style="font-size:0.8rem;padding:0.3rem 0.8rem;color:var(--primary);font-weight:600">+ Ajouter</button>
               <div id="ovChargesList" style="margin-top:0.5rem"></div>
+            </div>
+          </div>
+
+          <!-- ========== SECTION CHIFFRE D'AFFAIRES ========== -->
+          <h3 style="font-size:0.9rem;font-weight:700;margin:0.8rem 0 0.5rem;color:var(--text);border-bottom:2px solid var(--primary);padding-bottom:0.3rem">Chiffre d'affaires</h3>
+
+          <!-- CA estimatif -->
+          <div style="border:1px solid var(--border);border-radius:var(--radius);margin-bottom:0.5rem">
+            <button onclick="toggleAccordion('accCaEstimatif')" style="width:100%;text-align:left;padding:0.6rem 0.8rem;background:var(--hover);border:none;cursor:pointer;font-family:inherit;font-size:0.85rem;font-weight:600;color:var(--text);border-radius:var(--radius);display:flex;align-items:center;gap:0.5rem">
+              <span id="accCaEstimatifChevron" style="font-size:0.6rem;transition:transform 0.2s">&#9654;</span>
+              CA estimatif
+              <span id="accCaEstimatifCount" style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)"></span>
+            </button>
+            <div id="accCaEstimatif" style="display:none;padding:0.8rem">
+              <p style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:0.5rem">Remplace le CA baseline (Notion + pipeline) par un montant estimatif HT.</p>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Montant annuel HT</label>
+                  <input type="number" id="ovCaMontant" placeholder="500000" min="0" step="1000" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Nombre de mois</label>
+                  <input type="number" id="ovCaNbMois" placeholder="12" min="1" max="24" value="12" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+              </div>
+              <div id="caEstimatifApercu" style="font-size:0.8rem;color:var(--primary);font-weight:600;margin-bottom:0.5rem"></div>
+              <button class="btn" onclick="addOverrideCaEstimatif()" style="font-size:0.8rem;padding:0.3rem 0.8rem;color:var(--primary);font-weight:600">Appliquer</button>
+              <div id="ovCaEstimatifList" style="margin-top:0.5rem"></div>
             </div>
           </div>
 
@@ -5370,6 +5397,7 @@
         document.getElementById('scenarioOverridesSection').style.display = 'block';
         currentScenarioOverrides = scenario.overrides || [];
         renderAllOverrideLists();
+        fetchAndRenderBaselineSalaries();
         document.getElementById('scenarioModalOverlay').classList.add('active');
       } catch {
         alert('Erreur chargement scenario');
@@ -5443,33 +5471,44 @@
 
     function renderAllOverrideLists() {
       const salaires = currentScenarioOverrides.filter(o => o.type === 'salaire');
-      const pipelines = currentScenarioOverrides.filter(o => o.type === 'pipeline');
       const charges = currentScenarioOverrides.filter(o => o.type === 'charges_fixes');
+      const caEstimatifs = currentScenarioOverrides.filter(o => o.type === 'ca_estimatif');
       const revenus = currentScenarioOverrides.filter(o => o.type === 'revenu_exceptionnel');
 
-      document.getElementById('accSalaireCount').textContent = salaires.length > 0 ? salaires.length + ' override(s)' : '';
-      document.getElementById('accPipelineCount').textContent = pipelines.length > 0 ? pipelines.length + ' override(s)' : '';
-      document.getElementById('accChargesCount').textContent = charges.length > 0 ? charges.length + ' override(s)' : '';
-      document.getElementById('accRevenusCount').textContent = revenus.length > 0 ? revenus.length + ' override(s)' : '';
+      document.getElementById('accSalaireCount').textContent = salaires.length > 0 ? salaires.length + ' delta(s)' : '';
+      document.getElementById('accChargesCount').textContent = charges.length > 0 ? charges.length + ' depense(s)' : '';
+      document.getElementById('accCaEstimatifCount').textContent = caEstimatifs.length > 0 ? 'Actif' : '';
+      document.getElementById('accRevenusCount').textContent = revenus.length > 0 ? revenus.length + ' revenu(s)' : '';
 
       renderOverrideList('ovSalaireList', salaires, o => {
         const d = o.data;
         const actionLabels = { add: 'Ajouter', remove: 'Retirer', modify: 'Modifier' };
         return (actionLabels[d.action] || d.action) + ' : ' + (d.nom || d.salarie_id || '-') + (d.net_mensuel ? ' (' + formatEuro(d.net_mensuel) + ' net)' : '');
       });
-      renderOverrideList('ovPipelineList', pipelines, o => {
-        const d = o.data;
-        if (d.mode === 'factor') return 'Facteur pipeline : x' + d.facteur;
-        return 'Deal : ' + (d.nom || '-') + ' ' + formatEuro(d.montant || 0) + ' (' + (d.probabilite || 100) + '%) en ' + (d.mois || '-');
-      });
       renderOverrideList('ovChargesList', charges, o => {
         const d = o.data;
+        if (d.mode === 'oneshot') {
+          return (d.libelle || '-') + ' : ' + formatEuro(d.montant || 0) + ' en ' + (d.mois || '-') + ' (ponctuelle)';
+        }
         return (d.libelle || '-') + ' : ' + formatEuro(d.montant_mensuel || 0) + '/mois de ' + (d.mois_debut || '?') + ' a ' + (d.mois_fin || '?');
+      });
+      renderOverrideList('ovCaEstimatifList', caEstimatifs, o => {
+        const d = o.data;
+        const mensuel = Math.round((d.montant_annuel || 0) / (d.nb_mois || 12));
+        return 'CA estimatif : ' + formatEuro(d.montant_annuel || 0) + '/an sur ' + (d.nb_mois || 12) + ' mois = ' + formatEuro(mensuel) + ' HT/mois';
       });
       renderOverrideList('ovRevenusList', revenus, o => {
         const d = o.data;
         return (d.libelle || '-') + ' : ' + formatEuro(d.montant || 0) + ' en ' + (d.mois || '-');
       });
+
+      // Pre-fill CA estimatif fields if override exists
+      if (caEstimatifs.length > 0) {
+        const d = caEstimatifs[caEstimatifs.length - 1].data;
+        document.getElementById('ovCaMontant').value = d.montant_annuel || '';
+        document.getElementById('ovCaNbMois').value = d.nb_mois || 12;
+        updateCaEstimatifApercu();
+      }
     }
 
     function renderOverrideList(containerId, overrides, formatter) {
@@ -5541,41 +5580,99 @@
       document.getElementById('ovSalSortie').value = '';
     }
 
-    function addOverridePipelineFactor() {
-      const facteur = parseFloat(document.getElementById('ovPipelineFactor').value);
-      if (isNaN(facteur) || facteur < 0) return alert('Facteur invalide');
-      addOverrideToServer('pipeline', { mode: 'factor', facteur });
-      document.getElementById('ovPipelineFactor').value = '';
-    }
-
-    function addOverrideDeal() {
-      const nom = document.getElementById('ovDealNom').value.trim();
-      const montant = parseFloat(document.getElementById('ovDealMontant').value);
-      const probabilite = parseFloat(document.getElementById('ovDealProba').value) || 100;
-      const mois = document.getElementById('ovDealMois').value;
-      if (!nom) return alert('Nom du deal requis');
-      if (!montant || montant <= 0) return alert('Montant invalide');
-      if (!mois) return alert('Mois requis');
-      addOverrideToServer('pipeline', { mode: 'deal', nom, montant, probabilite, mois });
-      document.getElementById('ovDealNom').value = '';
-      document.getElementById('ovDealMontant').value = '';
-      document.getElementById('ovDealProba').value = '';
-      document.getElementById('ovDealMois').value = '';
+    // --- Charge mode toggle (recurring / oneshot) ---
+    function toggleChargeMode() {
+      const mode = document.querySelector('input[name="chargeMode"]:checked').value;
+      document.getElementById('chargeFieldsRecurring').style.display = mode === 'recurring' ? 'block' : 'none';
+      document.getElementById('chargeFieldsOneshot').style.display = mode === 'oneshot' ? 'block' : 'none';
     }
 
     function addOverrideCharge() {
-      const libelle = document.getElementById('ovChargeLib').value.trim();
-      const montant_mensuel = parseFloat(document.getElementById('ovChargeMontant').value);
-      const mois_debut = document.getElementById('ovChargeDebut').value;
-      const mois_fin = document.getElementById('ovChargeFin').value;
-      if (!libelle) return alert('Libelle requis');
-      if (!montant_mensuel || montant_mensuel <= 0) return alert('Montant invalide');
-      if (!mois_debut || !mois_fin) return alert('Mois debut et fin requis');
-      addOverrideToServer('charges_fixes', { libelle, montant_mensuel, mois_debut, mois_fin });
-      document.getElementById('ovChargeLib').value = '';
-      document.getElementById('ovChargeMontant').value = '';
-      document.getElementById('ovChargeDebut').value = '';
-      document.getElementById('ovChargeFin').value = '';
+      const mode = document.querySelector('input[name="chargeMode"]:checked').value;
+      if (mode === 'oneshot') {
+        const libelle = document.getElementById('ovChargeLibOneshot').value.trim();
+        const montant = parseFloat(document.getElementById('ovChargeMontantOneshot').value);
+        const mois = document.getElementById('ovChargeMoisOneshot').value;
+        if (!libelle) return alert('Libelle requis');
+        if (!montant || montant <= 0) return alert('Montant invalide');
+        if (!mois) return alert('Mois requis');
+        addOverrideToServer('charges_fixes', { mode: 'oneshot', libelle, montant, mois });
+        document.getElementById('ovChargeLibOneshot').value = '';
+        document.getElementById('ovChargeMontantOneshot').value = '';
+        document.getElementById('ovChargeMoisOneshot').value = '';
+      } else {
+        const libelle = document.getElementById('ovChargeLib').value.trim();
+        const montant_mensuel = parseFloat(document.getElementById('ovChargeMontant').value);
+        const mois_debut = document.getElementById('ovChargeDebut').value;
+        const mois_fin = document.getElementById('ovChargeFin').value;
+        if (!libelle) return alert('Libelle requis');
+        if (!montant_mensuel || montant_mensuel <= 0) return alert('Montant invalide');
+        if (!mois_debut || !mois_fin) return alert('Mois debut et fin requis');
+        addOverrideToServer('charges_fixes', { libelle, montant_mensuel, mois_debut, mois_fin });
+        document.getElementById('ovChargeLib').value = '';
+        document.getElementById('ovChargeMontant').value = '';
+        document.getElementById('ovChargeDebut').value = '';
+        document.getElementById('ovChargeFin').value = '';
+      }
+    }
+
+    // --- CA estimatif ---
+    function updateCaEstimatifApercu() {
+      const montant = parseFloat(document.getElementById('ovCaMontant').value) || 0;
+      const nbMois = parseInt(document.getElementById('ovCaNbMois').value) || 12;
+      const el = document.getElementById('caEstimatifApercu');
+      if (montant > 0) {
+        el.textContent = '= ' + formatEuro(Math.round(montant / nbMois)) + ' HT/mois';
+      } else {
+        el.textContent = '';
+      }
+    }
+    // Live preview on input
+    document.addEventListener('DOMContentLoaded', () => {
+      const m = document.getElementById('ovCaMontant');
+      const n = document.getElementById('ovCaNbMois');
+      if (m) m.addEventListener('input', updateCaEstimatifApercu);
+      if (n) n.addEventListener('input', updateCaEstimatifApercu);
+    });
+
+    async function addOverrideCaEstimatif() {
+      const montant_annuel = parseFloat(document.getElementById('ovCaMontant').value);
+      const nb_mois = parseInt(document.getElementById('ovCaNbMois').value) || 12;
+      if (!montant_annuel || montant_annuel <= 0) return alert('Montant annuel requis');
+      // Remove existing CA estimatif overrides first (one CA per scenario)
+      const existing = currentScenarioOverrides.filter(o => o.type === 'ca_estimatif');
+      for (const o of existing) {
+        await deleteOverride(o.id);
+      }
+      addOverrideToServer('ca_estimatif', { montant_annuel, nb_mois });
+    }
+
+    // --- Baseline salaries recap ---
+    async function fetchAndRenderBaselineSalaries() {
+      const container = document.getElementById('baselineSalariesRecap');
+      if (!container) return;
+      try {
+        const res = await fetch('/api/scenarios/baseline/salaries');
+        const salaries = await res.json();
+        if (!salaries || salaries.length === 0) {
+          container.innerHTML = '<p style="font-size:0.75rem;color:var(--text-secondary)">Aucun salarie en base.</p>';
+          return;
+        }
+        let totalBaseline = 0;
+        let html = '<p style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:0.3rem;font-weight:600">Baseline actuelle :</p>';
+        html += '<table style="width:100%;font-size:0.75rem;border-collapse:collapse">';
+        html += '<tr style="color:var(--text-secondary)"><th style="text-align:left;padding:0.2rem 0.4rem">Nom</th><th style="text-align:left;padding:0.2rem 0.4rem">Poste</th><th style="text-align:right;padding:0.2rem 0.4rem">Cout total</th></tr>';
+        for (const s of salaries) {
+          const cout = (s.net_mensuel || 0) + (s.charges_mensuelles || 0);
+          totalBaseline += cout;
+          html += '<tr style="border-top:1px solid var(--border)"><td style="padding:0.2rem 0.4rem">' + (s.nom || '-') + '</td><td style="padding:0.2rem 0.4rem">' + (s.poste || '-') + '</td><td style="text-align:right;padding:0.2rem 0.4rem">' + formatEuro(Math.round(cout)) + '</td></tr>';
+        }
+        html += '<tr style="border-top:2px solid var(--text);font-weight:600"><td colspan="2" style="padding:0.2rem 0.4rem">Total baseline</td><td style="text-align:right;padding:0.2rem 0.4rem">' + formatEuro(Math.round(totalBaseline)) + '/mois</td></tr>';
+        html += '</table>';
+        container.innerHTML = html;
+      } catch {
+        container.innerHTML = '<p style="font-size:0.75rem;color:var(--danger)">Erreur chargement salaries</p>';
+      }
     }
 
     function addOverrideRevenu() {

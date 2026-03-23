@@ -2003,7 +2003,7 @@ function masseSalarialeMois(annee, mois, salaries) {
   return { total: Math.round(total), detail };
 }
 
-async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, salaries, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals }) {
+async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, salaries, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals, crPrevData, caEstimatif }) {
   // --- A encaisser depuis Notion (factures envoyées + prévisionnelles) ---
   const facturesAEncaisser = [];
   const now = new Date();
@@ -2154,16 +2154,53 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
     }
   }
 
+  // --- Charges GSheet par mois (pour remplacer la moyenne Qonto sur les mois futurs) ---
+  const chargesGSheetParMois = {};
+  if (crPrevData && crPrevData.categories) {
+    for (const [, moisData] of Object.entries(crPrevData.categories)) {
+      for (const [mKey, val] of Object.entries(moisData)) {
+        chargesGSheetParMois[mKey] = (chargesGSheetParMois[mKey] || 0) + val;
+      }
+    }
+  }
+
+  // --- CA estimatif mensuel HT ---
+  const caMensuelHT = caEstimatif
+    ? Math.round((caEstimatif.montant_annuel || 0) / (caEstimatif.nb_mois || 12))
+    : null;
+
   const previsionnelFinal = qontoData.previsionnel.map((mois) => {
     const mKey = `${mois.annee}-${String(mois.mois).padStart(2, '0')}`;
-    const factEnvoye = Math.round(encaissementsEnvoye[mKey] || 0);
-    const factPrev = Math.round(encaissementsPrev[mKey] || 0);
-    const factRetard = Math.round(encaissementsRetard[mKey] || 0);
-    const encaissementsFactures = factEnvoye + factPrev + factRetard;
+    const isFuture = mKey > moisCourantKey;
+
+    // --- Encaissements ---
+    let encaissementsFactures, factEnvoye, factPrev, factRetard, fictionalEnc;
+    if (caMensuelHT !== null) {
+      // CA estimatif : remplace Notion + pipeline
+      factEnvoye = 0; factPrev = 0; factRetard = 0;
+      encaissementsFactures = 0;
+      fictionalEnc = 0;
+    } else {
+      factEnvoye = Math.round(encaissementsEnvoye[mKey] || 0);
+      factPrev = Math.round(encaissementsPrev[mKey] || 0);
+      factRetard = Math.round(encaissementsRetard[mKey] || 0);
+      encaissementsFactures = factEnvoye + factPrev + factRetard;
+      fictionalEnc = Math.round(fictionalEncaissements[mKey] || 0);
+    }
+
     const revExc = Math.round(revenusParMois[mKey] || 0);
     const masse = masseSalarialeMois(mois.annee, mois.mois, salaries);
     const chargesFixesExtra = Math.round(chargesFixesParMois[mKey] || 0);
-    const fictionalEnc = Math.round(fictionalEncaissements[mKey] || 0);
+
+    // --- Décaissements : GSheet pour mois futurs, Qonto pour mois courant ---
+    let decaissementsBase = mois.decaissements;
+    if (isFuture && chargesGSheetParMois[mKey] != null) {
+      decaissementsBase = Math.round(chargesGSheetParMois[mKey]);
+    }
+
+    // --- Encaissements base ---
+    const encBase = caMensuelHT !== null && isFuture ? caMensuelHT : mois.encaissements;
+
     return {
       ...mois,
       encaissementsFactures,
@@ -2176,8 +2213,9 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
       masseSalarialeDetail: masse.detail,
       chargesFixesExtra,
       fictionalEncaissements: fictionalEnc,
-      decaissements: mois.decaissements + chargesFixesExtra,
-      encaissementsTotal: mois.encaissements + encaissementsFactures + revExc + fictionalEnc,
+      decaissements: decaissementsBase + chargesFixesExtra,
+      encaissements: encBase,
+      encaissementsTotal: encBase + encaissementsFactures + revExc + fictionalEnc,
     };
   });
 
@@ -2215,10 +2253,12 @@ app.get('/api/tresorerie', async (req, res) => {
     const { data: salariesList } = await supabase.from('salaries').select('*');
     const allSalaries = salariesList || [];
 
+    const crPrevData = await fetchAndParseCRPrev();
     const result = await buildPrevisionnel({
       qontoData, pipelineDeals, notionMissions,
       salaries: allSalaries, revenus,
       chargesFixesExtras: [], pipelineFactor: 1, fictionalDeals: [],
+      crPrevData, caEstimatif: null,
     });
 
     res.json({
@@ -2287,7 +2327,7 @@ app.delete('/api/scenarios/:id', async (req, res) => {
 
 app.post('/api/scenarios/:id/overrides', async (req, res) => {
   const { type, data: overrideData } = req.body;
-  const validTypes = ['salaire', 'pipeline', 'charges_fixes', 'revenu_exceptionnel'];
+  const validTypes = ['salaire', 'pipeline', 'charges_fixes', 'revenu_exceptionnel', 'ca_estimatif'];
   if (!validTypes.includes(type)) return res.status(400).json({ error: 'Type invalide: ' + validTypes.join(', ') });
   if (!overrideData || typeof overrideData !== 'object') return res.status(400).json({ error: 'Data requis (objet JSON)' });
   // Vérifier que le scenario existe
@@ -2323,15 +2363,16 @@ app.delete('/api/scenarios/:id/overrides/:oid', async (req, res) => {
 // --- Projections ---
 
 async function fetchBaseData() {
-  const [qontoData, pipelineDeals, notionMissions] = await Promise.all([
+  const [qontoData, pipelineDeals, notionMissions, crPrevData] = await Promise.all([
     buildTresorerieFromQonto(),
     fetchOpenDeals(),
     fetchAllNotionMissions(),
+    fetchAndParseCRPrev(),
   ]);
   const { data: revenusExceptionnels } = await supabase.from('revenus_exceptionnels').select('*');
   const { data: salariesList } = await supabase.from('salaries').select('*');
   return {
-    qontoData, pipelineDeals, notionMissions,
+    qontoData, pipelineDeals, notionMissions, crPrevData,
     revenus: revenusExceptionnels || [],
     salaries: salariesList || [],
   };
@@ -2343,6 +2384,7 @@ function applyOverrides(baseData, overrides) {
   let chargesFixesExtras = [];
   let pipelineFactor = 1;
   let fictionalDeals = [];
+  let caEstimatif = null;
 
   for (const ov of overrides) {
     const d = ov.data;
@@ -2380,13 +2422,15 @@ function applyOverrides(baseData, overrides) {
           });
         }
         break;
+      case 'ca_estimatif':
+        caEstimatif = { montant_annuel: d.montant_annuel || 0, nb_mois: d.nb_mois || 12 };
+        break;
       case 'charges_fixes':
-        chargesFixesExtras.push({
-          libelle: d.libelle,
-          montant_mensuel: d.montant_mensuel || 0,
-          mois_debut: d.mois_debut,
-          mois_fin: d.mois_fin,
-        });
+        if (d.mode === 'oneshot') {
+          chargesFixesExtras.push({ libelle: d.libelle, montant_mensuel: d.montant || 0, mois_debut: d.mois, mois_fin: d.mois });
+        } else {
+          chargesFixesExtras.push({ libelle: d.libelle, montant_mensuel: d.montant_mensuel || 0, mois_debut: d.mois_debut, mois_fin: d.mois_fin });
+        }
         break;
       case 'revenu_exceptionnel':
         revenus.push({
@@ -2399,7 +2443,7 @@ function applyOverrides(baseData, overrides) {
     }
   }
 
-  return { salaries, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals };
+  return { salaries, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals, caEstimatif };
 }
 
 app.get('/api/scenarios/baseline/projection', async (req, res) => {
@@ -2409,10 +2453,22 @@ app.get('/api/scenarios/baseline/projection', async (req, res) => {
       qontoData: base.qontoData, pipelineDeals: base.pipelineDeals,
       notionMissions: base.notionMissions, salaries: base.salaries,
       revenus: base.revenus, chargesFixesExtras: [], pipelineFactor: 1, fictionalDeals: [],
+      crPrevData: base.crPrevData, caEstimatif: null,
     });
     res.json({ nom: 'Baseline', previsionnel: result.previsionnel });
   } catch (err) {
     console.error('Erreur baseline projection:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/scenarios/baseline/salaries', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('salaries').select('*').order('nom');
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+  } catch (err) {
+    console.error('Erreur baseline salaries:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -2437,6 +2493,7 @@ app.get('/api/scenarios/:id/projection', async (req, res) => {
       chargesFixesExtras: applied.chargesFixesExtras,
       pipelineFactor: applied.pipelineFactor,
       fictionalDeals: applied.fictionalDeals,
+      crPrevData: base.crPrevData, caEstimatif: applied.caEstimatif,
     });
     res.json({ nom: scenario.nom, previsionnel: result.previsionnel });
   } catch (err) {
@@ -3245,6 +3302,489 @@ app.get('/api/previsionnel-charges', async (req, res) => {
     });
   } catch (err) {
     console.error('Erreur /api/previsionnel-charges:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// PROSPECTOR — Routes
+// ============================================================
+
+// Serve prospector.html with injected Supabase env vars
+app.get('/prospector', (req, res) => {
+  let html = fs.readFileSync(path.join(__dirname, 'public', 'prospector.html'), 'utf8');
+  html = html.replace('__SUPABASE_URL__', process.env.SUPABASE_URL || '');
+  html = html.replace('__SUPABASE_ANON_KEY__', process.env.SUPABASE_ANON_KEY || '');
+  res.send(html);
+});
+
+// GET /api/prospector/campaigns — List campaigns sorted by priority
+app.get('/api/prospector/campaigns', async (req, res) => {
+  try {
+    let q = supabase.from('campaigns').select('*').order('priority', { ascending: true, nullsFirst: false });
+
+    if (req.query.status) {
+      q = q.eq('status', req.query.status);
+    } else if (req.query.active === 'true') {
+      q = q.in('status', ['À lancer', 'En cours']);
+    }
+
+    const { data: campaigns, error } = await q;
+    if (error) throw error;
+
+    // Attach prospect counts
+    const result = [];
+    for (const c of campaigns) {
+      const { count } = await supabase.from('prospects').select('id', { count: 'exact', head: true }).eq('source_campaign_id', c.id);
+      result.push({ ...c, prospects_count: count || 0 });
+    }
+
+    res.json(result);
+  } catch (err) {
+    console.error('Erreur GET /api/prospector/campaigns:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/prospector/prospects — List prospects (optionally filtered by campaign_id)
+app.get('/api/prospector/prospects', async (req, res) => {
+  try {
+    let q = supabase.from('prospects').select('id, first_name, last_name, linkedin_url, company, job_title, email, phone, sector, geography, status, source_campaign_id, created_at, updated_at')
+      .order('created_at', { ascending: false });
+
+    if (req.query.campaign_id) q = q.eq('source_campaign_id', req.query.campaign_id);
+    if (req.query.status) q = q.eq('status', req.query.status);
+
+    const { data, error } = await q;
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    console.error('Erreur GET /api/prospector/prospects:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Helper: shift priorities to make room for a given priority
+async function shiftPriorities(targetPrio, excludeId) {
+  // Get all campaigns with priority >= targetPrio, sorted ascending
+  let q = supabase.from('campaigns').select('id, priority')
+    .gte('priority', targetPrio).order('priority', { ascending: true });
+  if (excludeId) q = q.neq('id', excludeId);
+  const { data: toShift } = await q;
+  if (!toShift?.length) return;
+
+  // Shift each one by +1, starting from the highest to avoid unique constraint conflicts
+  for (let i = toShift.length - 1; i >= 0; i--) {
+    const c = toShift[i];
+    // Only shift if it's actually blocking (contiguous)
+    if (i === 0 || toShift[i].priority === toShift[i - 1]?.priority + 1 || toShift[i].priority === targetPrio) {
+      await supabase.from('campaigns').update({ priority: c.priority + 1 }).eq('id', c.id);
+    }
+  }
+}
+
+// POST /api/prospector/campaigns — Create campaign with priority auto-shift
+app.post('/api/prospector/campaigns', async (req, res) => {
+  try {
+    const { name, status, priority, criteria, daily_quota, sector, geography, details, excluded_keywords } = req.body;
+    if (!name) return res.status(400).json({ error: 'name is required' });
+
+    const prio = priority != null ? parseInt(priority) : null;
+
+    // Auto-shift existing priorities if conflict
+    if (prio != null) {
+      const { data: existing } = await supabase.from('campaigns').select('id').eq('priority', prio);
+      if (existing?.length) await shiftPriorities(prio, null);
+    }
+
+    const row = {
+      name,
+      status: status || 'À lancer',
+      priority: prio,
+      criteria: criteria || {},
+      daily_quota: daily_quota != null ? parseInt(daily_quota) : 20,
+      sector: sector || null,
+      geography: geography || null,
+      details: details || null,
+      excluded_keywords: excluded_keywords || [],
+    };
+
+    const { data, error } = await supabase.from('campaigns').insert(row).select().single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.error('Erreur POST /api/prospector/campaigns:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/prospector/campaigns/:id — Update campaign with priority auto-shift
+app.put('/api/prospector/campaigns/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = {};
+    const allowed = ['name', 'status', 'priority', 'criteria', 'daily_quota', 'sector', 'geography', 'details', 'excluded_keywords'];
+    for (const k of allowed) {
+      if (req.body[k] !== undefined) updates[k] = req.body[k];
+    }
+    if (updates.priority != null) {
+      updates.priority = parseInt(updates.priority);
+      const { data: existing } = await supabase.from('campaigns').select('id').eq('priority', updates.priority).neq('id', id);
+      if (existing?.length) await shiftPriorities(updates.priority, id);
+    }
+    if (updates.daily_quota != null) updates.daily_quota = parseInt(updates.daily_quota);
+
+    const { data, error } = await supabase.from('campaigns').update(updates).eq('id', id).select().single();
+    if (error) {
+      if (error.code === '23505') return res.status(409).json({ error: 'Cette priorité est déjà utilisée.' });
+      throw error;
+    }
+    res.json(data);
+  } catch (err) {
+    console.error('Erreur PUT /api/prospector/campaigns/:id:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/prospector/import — Bulk import from Claude Dispatch or external
+app.post('/api/prospector/import', async (req, res) => {
+  try {
+    const { prospects, campaign_id, skip_duplicates = true } = req.body;
+    if (!prospects || !Array.isArray(prospects)) {
+      return res.status(400).json({ error: 'prospects array required' });
+    }
+
+    // Fetch existing prospects for dedup
+    const { data: existing } = await supabase.from('prospects').select('email, linkedin_url, first_name, last_name');
+
+    let imported = 0, duplicates = 0, errors = 0;
+    const toInsert = [];
+
+    for (const p of prospects) {
+      const isDupe = (existing || []).some(e =>
+        (p.email && e.email && p.email.toLowerCase() === e.email.toLowerCase()) ||
+        (p.linkedin_url && e.linkedin_url && p.linkedin_url === e.linkedin_url) ||
+        (p.first_name && p.last_name && e.first_name &&
+         e.first_name.toLowerCase() === p.first_name.toLowerCase() &&
+         e.last_name.toLowerCase() === p.last_name.toLowerCase())
+      );
+
+      if (isDupe) {
+        duplicates++;
+        if (skip_duplicates) continue;
+      }
+
+      const row = {
+        first_name: p.first_name || '',
+        last_name: p.last_name || '',
+        email: p.email || null,
+        phone: p.phone || null,
+        linkedin_url: p.linkedin_url || null,
+        company: p.company || null,
+        job_title: p.job_title || null,
+        sector: p.sector || null,
+        geography: p.geography || null,
+      };
+      if (campaign_id) row.source_campaign_id = campaign_id;
+      toInsert.push(row);
+    }
+
+    if (toInsert.length > 0) {
+      const { error } = await supabase.from('prospects').insert(toInsert);
+      if (error) {
+        console.error('Bulk insert error:', error.message);
+        errors = toInsert.length;
+      } else {
+        imported = toInsert.length;
+      }
+    }
+
+    // Log import
+    await supabase.from('imports').insert({
+      filename: 'api-import',
+      total_rows: prospects.length,
+      imported, duplicates, errors,
+    });
+
+    res.json({ imported, duplicates, errors });
+  } catch (err) {
+    console.error('Erreur /api/prospector/import:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/prospector/export — CSV export
+app.get('/api/prospector/export', async (req, res) => {
+  try {
+    let q = supabase.from('prospects').select('*');
+    if (req.query.status) q = q.eq('status', req.query.status);
+    if (req.query.sector) q = q.eq('sector', req.query.sector);
+    if (req.query.geography) q = q.eq('geography', req.query.geography);
+    if (req.query.campaign_id) q = q.eq('source_campaign_id', req.query.campaign_id);
+    const { data, error } = await q.order('created_at', { ascending: false });
+    if (error) throw error;
+
+    const fields = ['first_name','last_name','email','phone','linkedin_url','company','job_title','sector','geography','status'];
+    const header = fields.join(',');
+    const rows = (data || []).map(r => fields.map(f => `"${(r[f] || '').replace(/"/g, '""')}"`).join(','));
+    const csv = [header, ...rows].join('\n');
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="prospects-export.csv"');
+    res.send(csv);
+  } catch (err) {
+    console.error('Erreur /api/prospector/export:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// PROSPECTOR — Claude Dispatch endpoints
+// ============================================================
+
+const VALID_PROSPECT_STATUSES = [
+  'Nouveau','Invitation envoyée','Invitation acceptée',
+  'Message à valider','Message à envoyer','Message envoyé',
+  'Réponse reçue','RDV planifié','Gagné','Perdu'
+];
+
+// --- Daily quotas ---
+const DAILY_INVITATION_LIMIT = parseInt(process.env.PROSPECTOR_INVITATION_LIMIT) || 23;
+const DAILY_MESSAGE_LIMIT = parseInt(process.env.PROSPECTOR_MESSAGE_LIMIT) || 23;
+
+function todayParis() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Paris' }); // "YYYY-MM-DD"
+}
+
+async function countTodayInvitations() {
+  const today = todayParis();
+  const { count } = await supabase.from('interactions')
+    .select('id', { count: 'exact', head: true })
+    .eq('type', 'Ajout LinkedIn')
+    .eq('date', today);
+  return count || 0;
+}
+
+async function countTodayMessages() {
+  const today = todayParis();
+  const { count } = await supabase.from('interactions')
+    .select('id', { count: 'exact', head: true })
+    .eq('type', 'Message envoyé')
+    .eq('date', today);
+  return count || 0;
+}
+
+// GET /api/prospector/daily-stats
+app.get('/api/prospector/daily-stats', async (req, res) => {
+  try {
+    const invSent = await countTodayInvitations();
+    const msgSent = await countTodayMessages();
+    res.json({
+      date: todayParis(),
+      quotas: {
+        invitations: { sent_today: invSent, limit: DAILY_INVITATION_LIMIT, remaining: Math.max(0, DAILY_INVITATION_LIMIT - invSent) },
+        messages:    { sent_today: msgSent,  limit: DAILY_MESSAGE_LIMIT,    remaining: Math.max(0, DAILY_MESSAGE_LIMIT - msgSent) },
+      },
+    });
+  } catch (err) {
+    console.error('Erreur /api/prospector/daily-stats:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/prospector/sync — Upsert prospects (create or update by linkedin_url)
+// Used by Claude Dispatch after LinkedIn actions
+app.post('/api/prospector/sync', async (req, res) => {
+  try {
+    const { prospects, campaign_id } = req.body;
+    if (!prospects || !Array.isArray(prospects)) {
+      return res.status(400).json({ error: 'prospects array required' });
+    }
+
+    // Quota check: count new invitations in this batch
+    const newInvitations = prospects.filter(p => p.status === 'Invitation envoyée').length;
+    if (newInvitations > 0) {
+      const invSent = await countTodayInvitations();
+      if (invSent + newInvitations > DAILY_INVITATION_LIMIT) {
+        return res.status(429).json({
+          error: "Quota journalier d'invitations atteint",
+          quota: { sent_today: invSent, limit: DAILY_INVITATION_LIMIT, remaining: Math.max(0, DAILY_INVITATION_LIMIT - invSent) },
+        });
+      }
+    }
+
+    let created = 0, updated = 0, errors = 0;
+
+    for (const p of prospects) {
+      try {
+        let existing = null;
+
+        // Find by linkedin_url first (most reliable)
+        if (p.linkedin_url) {
+          const { data } = await supabase.from('prospects')
+            .select('id').eq('linkedin_url', p.linkedin_url).limit(1);
+          if (data?.length) existing = data[0];
+        }
+
+        // Fallback: find by first_name + last_name
+        if (!existing && p.first_name && p.last_name) {
+          const { data } = await supabase.from('prospects')
+            .select('id')
+            .ilike('first_name', p.first_name)
+            .ilike('last_name', p.last_name)
+            .limit(1);
+          if (data?.length) existing = data[0];
+        }
+
+        if (existing) {
+          // Update existing prospect
+          const updates = {};
+          if (p.status && VALID_PROSPECT_STATUSES.includes(p.status)) updates.status = p.status;
+          if (p.company) updates.company = p.company;
+          if (p.job_title) updates.job_title = p.job_title;
+          if (p.email) updates.email = p.email;
+          if (p.phone) updates.phone = p.phone;
+          if (p.sector) updates.sector = p.sector;
+          if (p.geography) updates.geography = p.geography;
+          if (p.linkedin_url) updates.linkedin_url = p.linkedin_url;
+          if (p.pending_message !== undefined) updates.pending_message = p.pending_message;
+          if (p.notes) updates.notes = p.notes;
+          updates.updated_at = new Date().toISOString();
+
+          await supabase.from('prospects').update(updates).eq('id', existing.id);
+          updated++;
+
+          // Log interaction if provided
+          if (p.interaction) {
+            await supabase.from('interactions').insert({
+              prospect_id: existing.id,
+              type: p.interaction.type || 'Note',
+              date: p.interaction.date || new Date().toISOString().split('T')[0],
+              content: p.interaction.content || '',
+            });
+          }
+        } else {
+          // Create new prospect
+          const row = {
+            first_name: p.first_name || '',
+            last_name: p.last_name || '',
+            email: p.email || null,
+            phone: p.phone || null,
+            linkedin_url: p.linkedin_url || null,
+            company: p.company || null,
+            job_title: p.job_title || null,
+            sector: p.sector || null,
+            geography: p.geography || null,
+            status: (p.status && VALID_PROSPECT_STATUSES.includes(p.status)) ? p.status : 'Nouveau',
+            pending_message: p.pending_message || null,
+          };
+          if (campaign_id) row.source_campaign_id = campaign_id;
+
+          const { data: newP } = await supabase.from('prospects').insert(row).select('id').single();
+          created++;
+
+          // Log interaction if provided
+          if (p.interaction && newP) {
+            await supabase.from('interactions').insert({
+              prospect_id: newP.id,
+              type: p.interaction.type || 'Ajout LinkedIn',
+              date: p.interaction.date || new Date().toISOString().split('T')[0],
+              content: p.interaction.content || '',
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Sync error for prospect:', p.first_name, p.last_name, err.message);
+        errors++;
+      }
+    }
+
+    res.json({ created, updated, errors, total: prospects.length });
+  } catch (err) {
+    console.error('Erreur /api/prospector/sync:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/prospector/update-status — Update a prospect's status (by linkedin_url or id)
+app.post('/api/prospector/update-status', async (req, res) => {
+  try {
+    const { linkedin_url, id, status, pending_message } = req.body;
+    if (!status || !VALID_PROSPECT_STATUSES.includes(status)) {
+      return res.status(400).json({ error: 'Invalid status. Valid: ' + VALID_PROSPECT_STATUSES.join(', ') });
+    }
+
+    let prospectId = id;
+    if (!prospectId && linkedin_url) {
+      const { data } = await supabase.from('prospects').select('id').eq('linkedin_url', linkedin_url).limit(1);
+      if (!data?.length) return res.status(404).json({ error: 'Prospect not found' });
+      prospectId = data[0].id;
+    }
+    if (!prospectId) return res.status(400).json({ error: 'id or linkedin_url required' });
+
+    const updates = { status, updated_at: new Date().toISOString() };
+    if (pending_message !== undefined) updates.pending_message = pending_message;
+
+    await supabase.from('prospects').update(updates).eq('id', prospectId);
+    res.json({ success: true, id: prospectId, status });
+  } catch (err) {
+    console.error('Erreur /api/prospector/update-status:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/prospector/pending-messages — Get prospects with status "Message à envoyer" (validated by user)
+// Claude Dispatch polls this to know which messages to send on LinkedIn
+app.get('/api/prospector/pending-messages', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('prospects')
+      .select('id, first_name, last_name, linkedin_url, pending_message')
+      .eq('status', 'Message à envoyer');
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    console.error('Erreur /api/prospector/pending-messages:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/prospector/message-sent — Mark a message as sent (called by Dispatch after sending on LinkedIn)
+app.post('/api/prospector/message-sent', async (req, res) => {
+  try {
+    // Quota check
+    const msgSent = await countTodayMessages();
+    if (msgSent >= DAILY_MESSAGE_LIMIT) {
+      return res.status(429).json({
+        error: 'Quota journalier de messages atteint',
+        quota: { sent_today: msgSent, limit: DAILY_MESSAGE_LIMIT, remaining: 0 },
+      });
+    }
+
+    const { linkedin_url, id } = req.body;
+    let prospectId = id;
+    if (!prospectId && linkedin_url) {
+      const { data } = await supabase.from('prospects').select('id').eq('linkedin_url', linkedin_url).limit(1);
+      if (!data?.length) return res.status(404).json({ error: 'Prospect not found' });
+      prospectId = data[0].id;
+    }
+    if (!prospectId) return res.status(400).json({ error: 'id or linkedin_url required' });
+
+    await supabase.from('prospects').update({
+      status: 'Message envoyé',
+      pending_message: null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', prospectId);
+
+    await supabase.from('interactions').insert({
+      prospect_id: prospectId,
+      type: 'Message envoyé',
+      date: new Date().toISOString().split('T')[0],
+      content: 'Message LinkedIn envoyé via Claude Dispatch',
+    });
+
+    res.json({ success: true, id: prospectId });
+  } catch (err) {
+    console.error('Erreur /api/prospector/message-sent:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
