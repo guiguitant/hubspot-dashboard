@@ -3832,6 +3832,118 @@ app.post('/api/prospector/bulk-update-status', async (req, res) => {
   }
 });
 
+// POST /api/prospector/regenerate-messages — Regenerate message versions via Claude API
+app.post('/api/prospector/regenerate-messages', async (req, res) => {
+  try {
+    const { linkedin_url, id, instructions } = req.body;
+    let prospectId = id;
+    if (!prospectId && linkedin_url) {
+      const { data } = await supabase.from('prospects').select('id').eq('linkedin_url', linkedin_url).limit(1);
+      if (!data?.length) return res.status(404).json({ error: 'Prospect not found' });
+      prospectId = data[0].id;
+    }
+    if (!prospectId) return res.status(400).json({ error: 'id or linkedin_url required' });
+
+    // Fetch prospect + campaign
+    const { data: prospect } = await supabase.from('prospects')
+      .select('*, campaigns(name, sector, geography, criteria, objectives)')
+      .eq('id', prospectId).single();
+    if (!prospect) return res.status(404).json({ error: 'Prospect not found' });
+
+    const camp = prospect.campaigns || {};
+    const criteria = camp.criteria || {};
+    const objectives = (camp.objectives || []).join(', ') || 'non définis';
+    const jobTitles = (criteria.job_titles || []).join(', ') || 'non définis';
+
+    const systemPrompt = `Tu rédiges deux messages LinkedIn de prospection courts pour Nathan.
+
+Prospect : ${prospect.first_name} ${prospect.last_name}, ${prospect.job_title || 'poste inconnu'} chez ${prospect.company || 'entreprise inconnue'}
+Campagne : secteur ${camp.sector || criteria.sector || 'non défini'}, zone ${camp.geography || criteria.geography || 'non définie'}, postes ciblés ${jobTitles}
+Objectifs de la campagne : ${objectives}
+${instructions ? `Instructions supplémentaires : ${instructions}` : ''}
+
+Règles absolues :
+- Vouvoiement (vous, votre) — jamais de tutoiement
+- ZÉRO ligne vide entre les lignes — le message est un bloc continu
+- La phrase après "Bonjour ${prospect.first_name}," commence par une minuscule
+- Pas de pitch commercial — ne pas mentionner Releaf Carbon ni ses services
+- Ton direct, humain, sans jargon
+- CTA = question ouverte, 5 à 8 mots maximum
+
+VERSION A — Angle "problème" — EXACTEMENT 3 lignes :
+Ligne 1 : "Bonjour ${prospect.first_name},"
+Ligne 2 : observation courte sur une tension ou un enjeu lié à leur rôle / secteur / objectifs
+Ligne 3 : CTA court (5-8 mots) — question ouverte sur leur vécu
+
+Exemple de Version A :
+"Bonjour Claire,
+les directions RSE de votre secteur jonglent souvent entre reporting réglementaire et démarches de fond — deux vitesses difficiles à réconcilier.
+Comment vous organisez-vous face à ça ?"
+
+VERSION B — Angle "opportunité" — EXACTEMENT 4 lignes :
+Ligne 1 : "Bonjour ${prospect.first_name},"
+Ligne 2 : observation sur leur secteur ou leur profil
+Ligne 3 : phrase de contexte ou tension sous-jacente
+Ligne 4 : CTA court (5-8 mots) — question stratégique invitant à prendre du recul
+
+Exemple de Version B :
+"Bonjour Marc,
+votre secteur est en train de basculer vers une exigence carbone plus structurée, au-delà du simple bilan annuel.
+Certaines entreprises avancent déjà sur des trajectoires sectorielles, d'autres attendent d'y être contraintes.
+Où en est votre réflexion sur ce sujet ?"
+
+Retourne uniquement un JSON valide (pas de markdown, pas d'explication) :
+{"version_a": "...", "version_b": "..."}`;
+
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY non configurée' });
+
+    const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: systemPrompt }],
+      }),
+    });
+
+    if (!claudeResp.ok) {
+      const errBody = await claudeResp.text();
+      console.error('Claude API error:', claudeResp.status, errBody);
+      return res.status(502).json({ error: `Claude API error: ${claudeResp.status}` });
+    }
+
+    const claudeData = await claudeResp.json();
+    const text = claudeData.content?.[0]?.text || '';
+
+    // Extract JSON from response
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return res.status(502).json({ error: 'Claude did not return valid JSON', raw: text });
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    const messageVersions = [
+      { label: 'Angle problème', content: parsed.version_a || '' },
+      { label: 'Angle opportunité', content: parsed.version_b || '' },
+    ];
+
+    // Save to prospect
+    await supabase.from('prospects').update({
+      message_versions: messageVersions,
+      updated_at: new Date().toISOString(),
+    }).eq('id', prospectId);
+
+    res.json({ success: true, message_versions: messageVersions });
+  } catch (err) {
+    console.error('Erreur /api/prospector/regenerate-messages:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Releaf Pilot démarré sur http://localhost:${PORT}`);
 });

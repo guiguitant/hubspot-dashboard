@@ -206,14 +206,12 @@ const App = (() => {
         </div>
       </div>
       <div class="quick-filters" id="quickFilters">
-        <button class="qf-btn qf-active" data-filter="" onclick="App.quickFilter(this, '')">Tous</button>
-        <button class="qf-btn qf-highlight" data-filter="Profil à valider" onclick="App.quickFilter(this, 'Profil à valider')">
-          À valider <span class="qf-count" id="countAValider"></span>
-        </button>
-        <button class="qf-btn" data-filter="Invitation envoyée" onclick="App.quickFilter(this, 'Invitation envoyée')">Invitation envoyée</button>
-        <button class="qf-btn" data-filter="Invitation acceptée" onclick="App.quickFilter(this, 'Invitation acceptée')">Invitation acceptée</button>
-        <button class="qf-btn" data-filter="Message à valider" onclick="App.quickFilter(this, 'Message à valider')">Message à valider</button>
-        <button class="qf-btn" data-filter="Non pertinent" onclick="App.quickFilter(this, 'Non pertinent')">Non pertinent</button>
+        <button class="qf-btn qf-active" data-filter="" onclick="App.quickFilter(this, '')">Tous <span class="qf-count" id="qfCount-all"></span></button>
+        ${UI.STATUSES.map(s => {
+          const isAValider = s === 'Profil à valider';
+          const label = isAValider ? 'À valider' : s;
+          return `<button class="qf-btn ${isAValider ? 'qf-highlight' : ''}" data-filter="${s}" onclick="App.quickFilter(this, '${s}')">${label} <span class="qf-count" id="qfCount-${s.replace(/\s/g, '_')}"></span></button>`;
+        }).join('')}
       </div>
       <div class="filter-bar">
         <input id="filterSearch" placeholder="Rechercher nom, entreprise, fonction..." oninput="App.filterProspects()">
@@ -246,11 +244,8 @@ const App = (() => {
       if (match) match.classList.add('qf-active');
     }
 
-    // Load count for "À valider"
-    DB.getProspects({ status: 'Profil à valider' }).then(data => {
-      const el = document.getElementById('countAValider');
-      if (el) el.textContent = data.length > 0 ? data.length : '';
-    });
+    // Load counts for all quick filters
+    loadQuickFilterCounts();
 
     filterProspects();
   }
@@ -261,6 +256,41 @@ const App = (() => {
     const statusSel = document.getElementById('filterStatus');
     if (statusSel) statusSel.value = status;
     filterProspects();
+  }
+
+  const QF_COLORS = {
+    'Profil à valider': '#D97706',
+    'Nouveau': '#3B82F6',
+    'Invitation envoyée': '#7C3AED',
+    'Message à valider': '#92400E',
+    'Message à envoyer': '#C2410C',
+    'Message envoyé': '#1D4ED8',
+    'Réponse reçue': '#BE185D',
+    'RDV planifié': '#1D4ED8',
+    'Gagné': '#2D6A4F',
+    'Perdu': '#EF4444',
+    'Non pertinent': '#9CA3AF',
+  };
+
+  async function loadQuickFilterCounts() {
+    const counts = await DB.getProspectCountsByStatus();
+    let total = 0;
+    for (const s of UI.STATUSES) {
+      const count = counts[s] || 0;
+      total += count;
+      const el = document.getElementById(`qfCount-${s.replace(/\s/g, '_')}`);
+      if (el) {
+        el.textContent = count > 0 ? count : '';
+        if (QF_COLORS[s]) el.style.background = QF_COLORS[s];
+      }
+    }
+    const hiddenCount = Object.entries(counts).filter(([k]) => !UI.STATUSES.includes(k) && k !== '').reduce((a, [, v]) => a + v, 0);
+    total += hiddenCount;
+    const allEl = document.getElementById('qfCount-all');
+    if (allEl) {
+      allEl.textContent = total > 0 ? total : '';
+      allEl.style.background = 'var(--color-primary)';
+    }
   }
 
   function toggleSelect(id, checked) {
@@ -378,6 +408,7 @@ const App = (() => {
       <tbody>${tbody}</tbody></table>`;
 
     updateBulkBar();
+    loadQuickFilterCounts();
   }
 
   async function openAddProspect() {
@@ -480,8 +511,17 @@ const App = (() => {
         if (!hasPending && !hasVersions) return '';
         if (hasVersions) {
           return `<div class="message-card">
-            <div class="message-card-title">✉️ Message LinkedIn à valider — choisissez une version</div>
-            <div class="message-versions">
+            <div class="message-card-title" style="justify-content:space-between">
+              <span>✉️ Message LinkedIn à valider — choisissez une version</span>
+              <button class="btn btn-sm btn-outline" id="btnRegenToggle" onclick="App.toggleRegenForm()">Régénérer</button>
+            </div>
+            <div id="regenForm" style="display:none;margin-bottom:16px">
+              <div style="display:flex;gap:8px;align-items:flex-end">
+                <input id="regenInstructions" class="tags-input" style="flex:1" placeholder="Instructions (optionnel) — ex: Ton plus direct, axé sur le DPE">
+                <button class="btn btn-sm btn-primary" id="btnRegenConfirm" onclick="App.regenerateMessages('${id}')">Confirmer</button>
+              </div>
+            </div>
+            <div class="message-versions" id="messageVersionsContainer">
               ${versions.map((v, i) => `
                 <div class="message-version" id="msgVersion${i}">
                   <div class="message-version-header">
@@ -574,6 +614,52 @@ const App = (() => {
       const notes = document.getElementById('prospectNotes')?.value || '';
       await DB.updateProspect(id, { notes });
     }, 1000);
+  }
+
+  function toggleRegenForm() {
+    const form = document.getElementById('regenForm');
+    if (form) form.style.display = form.style.display === 'none' ? '' : 'none';
+  }
+
+  async function regenerateMessages(id) {
+    const btn = document.getElementById('btnRegenConfirm');
+    const instructions = document.getElementById('regenInstructions')?.value || '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Génération en cours...'; }
+
+    try {
+      const resp = await fetch('/api/prospector/regenerate-messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, instructions: instructions || undefined }),
+      });
+      const result = await resp.json();
+      if (!resp.ok) { UI.toast(result.error || 'Erreur', 'error'); return; }
+
+      // Update versions in place
+      const container = document.getElementById('messageVersionsContainer');
+      if (container && result.message_versions) {
+        container.innerHTML = result.message_versions.map((v, i) => `
+          <div class="message-version" id="msgVersion${i}">
+            <div class="message-version-header">
+              <strong>${UI.esc(v.label || 'Version ' + (i+1))}</strong>
+              <button class="btn btn-sm btn-outline" onclick="App.selectMessageVersion('${id}', ${i})">Choisir</button>
+            </div>
+            <div class="message-version-content">${UI.esc(v.content || '')}</div>
+          </div>
+        `).join('');
+        // Reset selection
+        const wrap = document.getElementById('selectedMessageWrap');
+        if (wrap) wrap.style.display = 'none';
+      }
+      // Hide regen form
+      const form = document.getElementById('regenForm');
+      if (form) form.style.display = 'none';
+      UI.toast('Messages régénérés');
+    } catch (err) {
+      UI.toast('Erreur: ' + err.message, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Confirmer'; }
+    }
   }
 
   async function changeProspectStatus(id, status) {
@@ -1381,7 +1467,7 @@ const App = (() => {
     handleAddInteraction, handleAddReminder,
     openAddProspect, openEditProspect, deleteProspect,
     openAddInteraction, openAddReminder, openAddCampaign, openEditCampaign,
-    changeProspectStatus, saveProspectStatus, debounceNotes, selectMessageVersion, validateMessage, rejectMessage, markNonPertinent,
+    changeProspectStatus, saveProspectStatus, debounceNotes, selectMessageVersion, toggleRegenForm, regenerateMessages, validateMessage, rejectMessage, markNonPertinent,
     filterProspects, quickFilter, loadRappels, loadCampagnes,
     toggleSelect, toggleSelectAll, clearSelection, bulkValidate, bulkReject,
     quickValidate, quickReject,

@@ -223,16 +223,27 @@ tr.row-muted td { opacity: 0.5; }
   cursor: pointer;
   transition: all 0.15s;
 }
+.qf-btn { position: relative; }
 .qf-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
 .qf-btn.qf-active { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
-.qf-btn.qf-highlight .qf-count {
-  background: #EF4444;
-  color: #fff;
+.qf-count {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
   font-size: 11px;
-  padding: 1px 6px;
+  font-weight: 700;
+  padding: 0 5px;
   border-radius: 10px;
-  margin-left: 4px;
+  color: #fff;
+  background: #9CA3AF;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
 }
+.qf-count:empty { display: none; }
 
 /* ---- Bulk actions bar ---- */
 .bulk-actions {

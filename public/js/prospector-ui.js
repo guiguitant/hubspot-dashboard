@@ -20,7 +20,8 @@ const UI = (() => {
     'Non pertinent': 'badge-non-pertinent',
   };
 
-  const STATUSES = Object.keys(STATUS_CLASSES);
+  const HIDDEN_STATUSES = ['Invitation acceptée'];
+  const STATUSES = Object.keys(STATUS_CLASSES).filter(s => !HIDDEN_STATUSES.includes(s));
 
   const CAMP_STATUS_CLASSES = {
     'À lancer': 'badge-a-lancer',
