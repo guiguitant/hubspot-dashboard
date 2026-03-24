@@ -3326,7 +3326,7 @@ app.get('/api/prospector/campaigns', async (req, res) => {
     if (req.query.status) {
       q = q.eq('status', req.query.status);
     } else if (req.query.active === 'true') {
-      q = q.in('status', ['À lancer', 'En cours']);
+      q = q.in('status', ['À lancer', 'En cours', 'En suivi']);
     }
 
     const { data: campaigns, error } = await q;
@@ -3386,7 +3386,7 @@ async function shiftPriorities(targetPrio, excludeId) {
 // POST /api/prospector/campaigns — Create campaign with priority auto-shift
 app.post('/api/prospector/campaigns', async (req, res) => {
   try {
-    const { name, status, priority, criteria, daily_quota, sector, geography, details, excluded_keywords } = req.body;
+    const { name, status, priority, criteria, daily_quota, sector, geography, details, excluded_keywords, objectives } = req.body;
     if (!name) return res.status(400).json({ error: 'name is required' });
 
     const prio = priority != null ? parseInt(priority) : null;
@@ -3407,6 +3407,7 @@ app.post('/api/prospector/campaigns', async (req, res) => {
       geography: geography || null,
       details: details || null,
       excluded_keywords: excluded_keywords || [],
+      objectives: objectives || [],
     };
 
     const { data, error } = await supabase.from('campaigns').insert(row).select().single();
@@ -3423,7 +3424,7 @@ app.put('/api/prospector/campaigns/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const updates = {};
-    const allowed = ['name', 'status', 'priority', 'criteria', 'daily_quota', 'sector', 'geography', 'details', 'excluded_keywords'];
+    const allowed = ['name', 'status', 'priority', 'criteria', 'daily_quota', 'sector', 'geography', 'details', 'excluded_keywords', 'objectives'];
     for (const k of allowed) {
       if (req.body[k] !== undefined) updates[k] = req.body[k];
     }
@@ -3543,9 +3544,9 @@ app.get('/api/prospector/export', async (req, res) => {
 // ============================================================
 
 const VALID_PROSPECT_STATUSES = [
-  'Nouveau','Invitation envoyée','Invitation acceptée',
+  'Profil à valider','Nouveau','Invitation envoyée','Invitation acceptée',
   'Message à valider','Message à envoyer','Message envoyé',
-  'Réponse reçue','RDV planifié','Gagné','Perdu'
+  'Réponse reçue','RDV planifié','Gagné','Perdu','Non pertinent'
 ];
 
 // --- Daily quotas ---
@@ -3709,7 +3710,7 @@ app.post('/api/prospector/sync', async (req, res) => {
 // POST /api/prospector/update-status — Update a prospect's status (by linkedin_url or id)
 app.post('/api/prospector/update-status', async (req, res) => {
   try {
-    const { linkedin_url, id, status, pending_message } = req.body;
+    const { linkedin_url, id, status, pending_message, message_versions } = req.body;
     if (!status || !VALID_PROSPECT_STATUSES.includes(status)) {
       return res.status(400).json({ error: 'Invalid status. Valid: ' + VALID_PROSPECT_STATUSES.join(', ') });
     }
@@ -3724,6 +3725,7 @@ app.post('/api/prospector/update-status', async (req, res) => {
 
     const updates = { status, updated_at: new Date().toISOString() };
     if (pending_message !== undefined) updates.pending_message = pending_message;
+    if (message_versions !== undefined) updates.message_versions = message_versions;
 
     await supabase.from('prospects').update(updates).eq('id', prospectId);
     res.json({ success: true, id: prospectId, status });
@@ -3738,7 +3740,7 @@ app.post('/api/prospector/update-status', async (req, res) => {
 app.get('/api/prospector/pending-messages', async (req, res) => {
   try {
     const { data, error } = await supabase.from('prospects')
-      .select('id, first_name, last_name, linkedin_url, pending_message')
+      .select('id, first_name, last_name, linkedin_url, pending_message, message_versions')
       .eq('status', 'Message à envoyer');
     if (error) throw error;
     res.json(data || []);
@@ -3785,6 +3787,47 @@ app.post('/api/prospector/message-sent', async (req, res) => {
     res.json({ success: true, id: prospectId });
   } catch (err) {
     console.error('Erreur /api/prospector/message-sent:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/prospector/validated-profiles — Prospects validated by Nathan, ready for LinkedIn add
+app.get('/api/prospector/validated-profiles', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('prospects')
+      .select('id, first_name, last_name, linkedin_url, company, job_title, source_campaign_id, campaigns(name)')
+      .eq('status', 'Nouveau')
+      .not('linkedin_url', 'is', null);
+    if (error) throw error;
+    res.json((data || []).map(p => ({
+      id: p.id,
+      first_name: p.first_name,
+      last_name: p.last_name,
+      linkedin_url: p.linkedin_url,
+      company: p.company,
+      job_title: p.job_title,
+      campaign_id: p.source_campaign_id,
+      campaign_name: p.campaigns?.name || null,
+    })));
+  } catch (err) {
+    console.error('Erreur /api/prospector/validated-profiles:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/prospector/bulk-update-status — Bulk update prospect statuses
+app.post('/api/prospector/bulk-update-status', async (req, res) => {
+  try {
+    const { ids, status } = req.body;
+    if (!ids?.length || !status) return res.status(400).json({ error: 'ids (array) and status required' });
+    if (!VALID_PROSPECT_STATUSES.includes(status)) {
+      return res.status(400).json({ error: 'Invalid status. Valid: ' + VALID_PROSPECT_STATUSES.join(', ') });
+    }
+    const { error } = await supabase.from('prospects').update({ status, updated_at: new Date().toISOString() }).in('id', ids);
+    if (error) throw error;
+    res.json({ success: true, updated: ids.length });
+  } catch (err) {
+    console.error('Erreur /api/prospector/bulk-update-status:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

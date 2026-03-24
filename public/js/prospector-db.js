@@ -14,13 +14,14 @@ const DB = (() => {
   }
 
   // ---- Prospects ----
-  async function getProspects({ search, status, sector, geography, campaign_id } = {}) {
+  async function getProspects({ search, status, sector, geography, campaign_id, no_campaign } = {}) {
     let q = sb().from('prospects').select('*, campaigns(name)').order('created_at', { ascending: false });
     if (status) q = q.eq('status', status);
     if (sector) q = q.eq('sector', sector);
     if (geography) q = q.eq('geography', geography);
     if (campaign_id) q = q.eq('source_campaign_id', campaign_id);
-    if (search) q = q.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,company.ilike.%${search}%,email.ilike.%${search}%`);
+    if (no_campaign) q = q.is('source_campaign_id', null);
+    if (search) q = q.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,company.ilike.%${search}%,email.ilike.%${search}%,job_title.ilike.%${search}%`);
     const { data, error } = await q;
     if (error) throw error;
     return data;

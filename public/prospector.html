@@ -110,11 +110,7 @@
       <div class="form-row">
         <div class="form-group"><label>Priorité *</label><input name="priority" type="number" min="1" required placeholder="1 = plus prioritaire"></div>
         <div class="form-group"><label>Statut</label>
-          <select name="status">
-            <option value="À lancer">À lancer</option>
-            <option value="En cours">En cours</option>
-            <option value="Terminée">Terminée</option>
-          </select>
+          <select name="status" class="camp-status-select"></select>
         </div>
       </div>
       <div class="form-row">
@@ -125,6 +121,11 @@
         <label>Postes ciblés</label>
         <div class="tags-container" id="addJobTags"></div>
         <input class="tags-input" id="addJobInput" placeholder="Tapez un poste puis Entrée">
+      </div>
+      <div class="form-group">
+        <label>Objectifs</label>
+        <div class="tags-container" id="addObjTags"></div>
+        <input class="tags-input" id="addObjInput" placeholder="Tapez un objectif puis Entrée (ex: Bilan carbone, ACV...)">
       </div>
       <div class="form-group">
         <label>Postes / mots-clés exclus</label>
@@ -139,7 +140,6 @@
         <div class="form-group"><label>Effectif min</label><input name="employees_min" type="number" min="0" placeholder="Ex: 15"></div>
         <div class="form-group"><label>Effectif max</label><input name="employees_max" type="number" min="0" placeholder="Ex: 500"></div>
       </div>
-      <div class="form-group"><label>Quota journalier</label><input name="daily_quota" type="number" min="1" value="20"></div>
       <div class="form-group"><label>Détails de la campagne</label><textarea name="details" rows="4" placeholder="Instructions spécifiques pour Claude (ton, approche, contexte, message type...)"></textarea></div>
       <div id="campaignError" style="display:none;color:#EF4444;font-size:13px;margin-bottom:8px"></div>
       <div class="form-actions">
@@ -161,11 +161,7 @@
       <div class="form-row">
         <div class="form-group"><label>Priorité *</label><input name="priority" type="number" min="1" required></div>
         <div class="form-group"><label>Statut</label>
-          <select name="status">
-            <option value="À lancer">À lancer</option>
-            <option value="En cours">En cours</option>
-            <option value="Terminée">Terminée</option>
-          </select>
+          <select name="status" class="camp-status-select"></select>
         </div>
       </div>
       <div class="form-row">
@@ -176,6 +172,11 @@
         <label>Postes ciblés</label>
         <div class="tags-container" id="editJobTags"></div>
         <input class="tags-input" id="editJobInput" placeholder="Tapez un poste puis Entrée">
+      </div>
+      <div class="form-group">
+        <label>Objectifs</label>
+        <div class="tags-container" id="editObjTags"></div>
+        <input class="tags-input" id="editObjInput" placeholder="Tapez un objectif puis Entrée (ex: Bilan carbone, ACV...)">
       </div>
       <div class="form-group">
         <label>Postes / mots-clés exclus</label>
@@ -190,7 +191,6 @@
         <div class="form-group"><label>Effectif min</label><input name="employees_min" type="number" min="0"></div>
         <div class="form-group"><label>Effectif max</label><input name="employees_max" type="number" min="0"></div>
       </div>
-      <div class="form-group"><label>Quota journalier</label><input name="daily_quota" type="number" min="1"></div>
       <div class="form-group"><label>Détails de la campagne</label><textarea name="details" rows="4" placeholder="Instructions spécifiques pour Claude..."></textarea></div>
       <div id="campaignEditError" style="display:none;color:#EF4444;font-size:13px;margin-bottom:8px"></div>
       <div class="form-actions">

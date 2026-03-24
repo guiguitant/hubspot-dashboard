@@ -6,6 +6,7 @@ const UI = (() => {
 
   // ---- Status badge ----
   const STATUS_CLASSES = {
+    'Profil à valider': 'badge-profil-a-valider',
     'Nouveau': 'badge-nouveau',
     'Invitation envoyée': 'badge-invitation',
     'Invitation acceptée': 'badge-acceptee',
@@ -16,6 +17,7 @@ const UI = (() => {
     'RDV planifié': 'badge-rdv',
     'Gagné': 'badge-gagne',
     'Perdu': 'badge-perdu',
+    'Non pertinent': 'badge-non-pertinent',
   };
 
   const STATUSES = Object.keys(STATUS_CLASSES);
@@ -23,6 +25,7 @@ const UI = (() => {
   const CAMP_STATUS_CLASSES = {
     'À lancer': 'badge-a-lancer',
     'En cours': 'badge-en-cours',
+    'En suivi': 'badge-en-suivi',
     'Terminée': 'badge-terminee',
   };
 

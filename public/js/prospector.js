@@ -19,7 +19,7 @@ const App = (() => {
 
     switch (page) {
       case '#dashboard':       renderDashboard(app); break;
-      case '#prospects':       renderProspects(app); break;
+      case '#prospects':       renderProspects(app, params.get('status')); break;
       case '#prospect-detail': renderProspectDetail(app, params.get('id')); break;
       case '#campagnes':       renderCampagnes(app); break;
       case '#campaign-detail': renderCampaignDetail(app, params.get('id')); break;
@@ -75,7 +75,7 @@ const App = (() => {
     `;
 
     // Load stats in parallel
-    const [week, total, remCount, campCount, reminders, pipeline, activity] = await Promise.all([
+    const [week, total, remCount, campCount, reminders, pipeline, activity, pendingMessages, profilsAValider] = await Promise.all([
       DB.getProspectsThisWeek(),
       DB.getTotalProspects(),
       DB.getPendingReminderCount(),
@@ -83,6 +83,8 @@ const App = (() => {
       DB.getReminders({ status: 'pending' }),
       DB.getProspectCountsByStatus(),
       DB.getRecentInteractions(10),
+      DB.getProspects({ status: 'Message à valider' }),
+      DB.getProspects({ status: 'Profil à valider' }),
     ]);
 
     // Load quotas
@@ -109,33 +111,62 @@ const App = (() => {
     document.getElementById('statReminders').textContent = remCount;
     document.getElementById('statCampaigns').textContent = campCount;
 
-    // Actions à faire
+    // Actions à faire (rappels + messages à valider)
     const todayStr = UI.todayStr();
     const dueReminders = reminders.filter(r => r.due_date <= todayStr);
-    if (dueReminders.length === 0) {
+
+    const actionItems = [];
+
+    // Profils à valider
+    if (profilsAValider.length > 0) {
+      actionItems.push(`<li class="action-item action-highlight">
+        <span class="name"><a class="inline-link" href="#prospects?status=${encodeURIComponent('Profil à valider')}"><strong>${profilsAValider.length} profil(s) à valider</strong></a></span>
+        ${UI.statusBadge('Profil à valider')}
+        <div class="action-btns">
+          <button class="btn btn-sm btn-primary" onclick="location.hash='#prospects?status=${encodeURIComponent('Profil à valider')}'">Voir</button>
+        </div>
+      </li>`);
+    }
+
+    // Messages à valider
+    for (const p of pendingMessages) {
+      actionItems.push(`<li class="action-item">
+        <span class="name"><a class="inline-link" href="#prospect-detail?id=${p.id}">${UI.esc(p.first_name)} ${UI.esc(p.last_name)}</a></span>
+        ${UI.statusBadge('Message à valider')}
+        <span class="note">${UI.esc(p.company || '')}</span>
+        <div class="action-btns">
+          <button class="btn btn-sm btn-primary" onclick="location.hash='#prospect-detail?id=${p.id}'">Voir</button>
+        </div>
+      </li>`);
+    }
+
+    // Rappels
+    for (const r of dueReminders) {
+      const name = r.prospects ? `${r.prospects.first_name} ${r.prospects.last_name}` : '—';
+      const overdue = UI.isOverdue(r.due_date);
+      const today = UI.isToday(r.due_date);
+      actionItems.push(`<li class="action-item">
+        <span class="name"><a class="inline-link" href="#prospect-detail?id=${r.prospect_id}">${UI.esc(name)}</a></span>
+        ${r.type ? UI.typeBadge(r.type) : ''}
+        <span class="note">${UI.esc(r.note || '')}</span>
+        <span class="date ${overdue ? 'overdue' : ''} ${today ? 'today' : ''}">${UI.formatDate(r.due_date)}</span>
+        <div class="action-btns">
+          <button class="btn btn-sm btn-primary" onclick="App.reminderDone('${r.id}')">Fait</button>
+          <button class="btn btn-sm btn-outline" onclick="App.reminderSnooze('${r.id}')">+3j</button>
+        </div>
+      </li>`);
+    }
+
+    if (actionItems.length === 0) {
       document.getElementById('dashActions').innerHTML = UI.emptyState('Aucune action en attente');
     } else {
-      document.getElementById('dashActions').innerHTML = `<ul class="action-list">${dueReminders.map(r => {
-        const name = r.prospects ? `${r.prospects.first_name} ${r.prospects.last_name}` : '—';
-        const overdue = UI.isOverdue(r.due_date);
-        const today = UI.isToday(r.due_date);
-        return `<li class="action-item">
-          <span class="name"><a class="inline-link" href="#prospect-detail?id=${r.prospect_id}">${UI.esc(name)}</a></span>
-          ${r.type ? UI.typeBadge(r.type) : ''}
-          <span class="note">${UI.esc(r.note || '')}</span>
-          <span class="date ${overdue ? 'overdue' : ''} ${today ? 'today' : ''}">${UI.formatDate(r.due_date)}</span>
-          <div class="action-btns">
-            <button class="btn btn-sm btn-primary" onclick="App.reminderDone('${r.id}')">Fait</button>
-            <button class="btn btn-sm btn-outline" onclick="App.reminderSnooze('${r.id}')">+3j</button>
-          </div>
-        </li>`;
-      }).join('')}</ul>`;
+      document.getElementById('dashActions').innerHTML = `<ul class="action-list">${actionItems.join('')}</ul>`;
     }
 
     // Pipeline
     const statuses = UI.STATUSES;
     document.getElementById('dashPipeline').innerHTML = statuses.map(s =>
-      `<li class="pipeline-item">${UI.statusBadge(s)} <span class="pipeline-count">${pipeline[s] || 0}</span></li>`
+      `<li class="pipeline-item" style="cursor:pointer" onclick="location.hash='#prospects?status=${encodeURIComponent(s)}'">${UI.statusBadge(s)} <span class="pipeline-count">${pipeline[s] || 0}</span></li>`
     ).join('');
 
     // Activity
@@ -162,7 +193,10 @@ const App = (() => {
   // ============================================================
   let _prospectFilters = {};
 
-  async function renderProspects(container) {
+  let _selectedProspects = new Set();
+
+  async function renderProspects(container, presetStatus) {
+    _selectedProspects.clear();
     container.innerHTML = `
       <div class="page-header">
         <h1 class="page-title" style="margin-bottom:0">Prospects</h1>
@@ -171,50 +205,179 @@ const App = (() => {
           <button class="btn btn-primary" onclick="App.openAddProspect()">+ Ajouter</button>
         </div>
       </div>
+      <div class="quick-filters" id="quickFilters">
+        <button class="qf-btn qf-active" data-filter="" onclick="App.quickFilter(this, '')">Tous</button>
+        <button class="qf-btn qf-highlight" data-filter="Profil à valider" onclick="App.quickFilter(this, 'Profil à valider')">
+          À valider <span class="qf-count" id="countAValider"></span>
+        </button>
+        <button class="qf-btn" data-filter="Invitation envoyée" onclick="App.quickFilter(this, 'Invitation envoyée')">Invitation envoyée</button>
+        <button class="qf-btn" data-filter="Invitation acceptée" onclick="App.quickFilter(this, 'Invitation acceptée')">Invitation acceptée</button>
+        <button class="qf-btn" data-filter="Message à valider" onclick="App.quickFilter(this, 'Message à valider')">Message à valider</button>
+        <button class="qf-btn" data-filter="Non pertinent" onclick="App.quickFilter(this, 'Non pertinent')">Non pertinent</button>
+      </div>
       <div class="filter-bar">
-        <input id="filterSearch" placeholder="Rechercher nom, entreprise, email..." oninput="App.filterProspects()">
-        <select id="filterStatus" onchange="App.filterProspects()"><option value="">Tous les statuts</option></select>
-        <select id="filterSector" onchange="App.filterProspects()"><option value="">Tous les secteurs</option></select>
-        <select id="filterGeo" onchange="App.filterProspects()"><option value="">Toutes les régions</option></select>
+        <input id="filterSearch" placeholder="Rechercher nom, entreprise, fonction..." oninput="App.filterProspects()">
+        <select id="filterStatus" onchange="App.filterProspects()" style="display:none"><option value="">Tous les statuts</option></select>
+        <select id="filterCampaign" onchange="App.filterProspects()"><option value="">Toutes les campagnes</option><option value="none">Non défini</option></select>
+      </div>
+      <div class="bulk-actions" id="bulkActions" style="display:none">
+        <span id="bulkCount">0 sélectionné(s)</span>
+        <button class="btn btn-sm" style="background:#16A34A;color:#fff" onclick="App.bulkValidate()">Valider</button>
+        <button class="btn btn-sm btn-danger" onclick="App.bulkReject()">Non pertinent</button>
+        <button class="btn btn-sm btn-ghost" onclick="App.clearSelection()">Désélectionner</button>
       </div>
       <div class="card"><div class="table-wrap" id="prospectsTable">${UI.loader()}</div></div>
     `;
 
     // Populate filter dropdowns
-    const [sectors, geos] = await Promise.all([DB.getDistinctValues('sector'), DB.getDistinctValues('geography')]);
+    const [campaigns] = await Promise.all([DB.getCampaigns()]);
     const statuses = UI.STATUSES;
     const statusSel = document.getElementById('filterStatus');
     statuses.forEach(s => { const o = document.createElement('option'); o.value = s; o.textContent = s; statusSel.appendChild(o); });
-    const sectorSel = document.getElementById('filterSector');
-    sectors.forEach(s => { const o = document.createElement('option'); o.value = s; o.textContent = s; sectorSel.appendChild(o); });
-    const geoSel = document.getElementById('filterGeo');
-    geos.forEach(g => { const o = document.createElement('option'); o.value = g; o.textContent = g; geoSel.appendChild(o); });
+    const campSel = document.getElementById('filterCampaign');
+    campaigns.forEach(c => { const o = document.createElement('option'); o.value = c.id; o.textContent = c.name; campSel.appendChild(o); });
 
+    // Pre-select status filter if coming from pipeline click
+    if (presetStatus) {
+      statusSel.value = presetStatus;
+      // Highlight the matching quick filter
+      document.querySelectorAll('.qf-btn').forEach(b => b.classList.remove('qf-active'));
+      const match = document.querySelector(`.qf-btn[data-filter="${presetStatus}"]`);
+      if (match) match.classList.add('qf-active');
+    }
+
+    // Load count for "À valider"
+    DB.getProspects({ status: 'Profil à valider' }).then(data => {
+      const el = document.getElementById('countAValider');
+      if (el) el.textContent = data.length > 0 ? data.length : '';
+    });
+
+    filterProspects();
+  }
+
+  function quickFilter(btn, status) {
+    document.querySelectorAll('.qf-btn').forEach(b => b.classList.remove('qf-active'));
+    btn.classList.add('qf-active');
+    const statusSel = document.getElementById('filterStatus');
+    if (statusSel) statusSel.value = status;
+    filterProspects();
+  }
+
+  function toggleSelect(id, checked) {
+    if (checked) _selectedProspects.add(id);
+    else _selectedProspects.delete(id);
+    updateBulkBar();
+  }
+
+  function toggleSelectAll(checked) {
+    document.querySelectorAll('.prospect-cb').forEach(cb => {
+      cb.checked = checked;
+      if (checked) _selectedProspects.add(cb.dataset.id);
+      else _selectedProspects.delete(cb.dataset.id);
+    });
+    updateBulkBar();
+  }
+
+  function clearSelection() {
+    _selectedProspects.clear();
+    document.querySelectorAll('.prospect-cb').forEach(cb => cb.checked = false);
+    const sa = document.getElementById('selectAll');
+    if (sa) sa.checked = false;
+    updateBulkBar();
+  }
+
+  function updateBulkBar() {
+    const bar = document.getElementById('bulkActions');
+    const count = _selectedProspects.size;
+    if (!bar) return;
+    bar.style.display = count > 0 ? 'flex' : 'none';
+    const el = document.getElementById('bulkCount');
+    if (el) el.textContent = `${count} sélectionné(s)`;
+  }
+
+  async function bulkValidate() {
+    if (_selectedProspects.size === 0) return;
+    const ids = [..._selectedProspects];
+    await fetch('/api/prospector/bulk-update-status', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, status: 'Nouveau' }),
+    });
+    _selectedProspects.clear();
+    UI.toast(`${ids.length} prospect(s) validé(s)`);
+    filterProspects();
+  }
+
+  async function bulkReject() {
+    if (_selectedProspects.size === 0) return;
+    const ids = [..._selectedProspects];
+    await fetch('/api/prospector/bulk-update-status', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, status: 'Non pertinent' }),
+    });
+    _selectedProspects.clear();
+    UI.toast(`${ids.length} prospect(s) rejeté(s)`);
+    filterProspects();
+  }
+
+  async function quickValidate(id) {
+    await fetch('/api/prospector/bulk-update-status', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: [id], status: 'Nouveau' }),
+    });
+    UI.toast('Profil validé');
+    filterProspects();
+  }
+
+  async function quickReject(id) {
+    await fetch('/api/prospector/bulk-update-status', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: [id], status: 'Non pertinent' }),
+    });
+    UI.toast('Profil marqué non pertinent');
     filterProspects();
   }
 
   async function filterProspects() {
     const search = document.getElementById('filterSearch')?.value || '';
     const status = document.getElementById('filterStatus')?.value || '';
-    const sector = document.getElementById('filterSector')?.value || '';
-    const geography = document.getElementById('filterGeo')?.value || '';
+    const campaignFilter = document.getElementById('filterCampaign')?.value || '';
 
-    const prospects = await DB.getProspects({ search, status, sector, geography });
+    const opts = { search, status };
+    if (campaignFilter === 'none') opts.no_campaign = true;
+    else if (campaignFilter) opts.campaign_id = campaignFilter;
+
+    const prospects = await DB.getProspects(opts);
+    const hasValidatable = prospects.some(p => p.status === 'Profil à valider');
     const tbody = prospects.length === 0
-      ? `<tr><td colspan="7">${UI.emptyState('Aucun prospect trouvé')}</td></tr>`
-      : prospects.map(p => `<tr class="clickable" onclick="location.hash='#prospect-detail?id=${p.id}'">
-          <td><strong>${UI.esc(p.first_name)} ${UI.esc(p.last_name)}</strong></td>
-          <td>${UI.esc(p.company || '')}</td>
-          <td>${UI.esc(p.sector || '')}</td>
-          <td>${UI.esc(p.geography || '')}</td>
-          <td>${UI.statusBadge(p.status)}</td>
-          <td class="text-muted text-sm">${UI.formatDate(p.updated_at)}</td>
-          <td>${p.linkedin_url ? `<a href="${UI.esc(p.linkedin_url)}" target="_blank" onclick="event.stopPropagation()" title="Voir LinkedIn">🔗</a>` : ''}</td>
-        </tr>`).join('');
+      ? `<tr><td colspan="8">${UI.emptyState('Aucun prospect trouvé')}</td></tr>`
+      : prospects.map(p => {
+          const campName = p.status === 'Non pertinent' ? 'Non pertinent' : (p.campaigns?.name || 'Non défini');
+          const campClass = p.status === 'Non pertinent' ? 'badge-non-pertinent' : (p.campaigns?.name ? 'badge-type' : 'badge-non-pertinent');
+          const isAValider = p.status === 'Profil à valider';
+          const checked = _selectedProspects.has(p.id) ? 'checked' : '';
+          return `<tr class="clickable ${p.status === 'Non pertinent' ? 'row-muted' : ''} ${isAValider ? 'row-a-valider' : ''}">
+          <td onclick="event.stopPropagation()"><input type="checkbox" class="prospect-cb" data-id="${p.id}" ${checked} onchange="App.toggleSelect('${p.id}', this.checked)"></td>
+          <td onclick="location.hash='#prospect-detail?id=${p.id}'"><strong>${UI.esc(p.first_name)} ${UI.esc(p.last_name)}</strong></td>
+          <td class="text-sm text-muted" onclick="location.hash='#prospect-detail?id=${p.id}'">${UI.esc(p.job_title || '')}</td>
+          <td onclick="location.hash='#prospect-detail?id=${p.id}'">${UI.esc(p.company || '')}</td>
+          <td onclick="location.hash='#prospect-detail?id=${p.id}'"><span class="badge ${campClass}">${UI.esc(campName)}</span></td>
+          <td onclick="location.hash='#prospect-detail?id=${p.id}'">${UI.statusBadge(p.status)}</td>
+          <td class="text-muted text-sm" onclick="location.hash='#prospect-detail?id=${p.id}'">${UI.formatDate(p.updated_at)}</td>
+          <td class="action-btns" onclick="event.stopPropagation()">
+            ${isAValider ? `<button class="btn-icon btn-validate" onclick="App.quickValidate('${p.id}')" title="Valider">✓</button><button class="btn-icon btn-reject" onclick="App.quickReject('${p.id}')" title="Non pertinent">✕</button>` : ''}
+            ${p.linkedin_url ? `<a href="${UI.esc(p.linkedin_url)}" target="_blank" title="Voir LinkedIn">🔗</a>` : ''}
+          </td>
+        </tr>`;
+        }).join('');
 
     document.getElementById('prospectsTable').innerHTML = `
-      <table><thead><tr><th>Nom</th><th>Entreprise</th><th>Secteur</th><th>Région</th><th>Statut</th><th>Dernier contact</th><th></th></tr></thead>
+      <table><thead><tr>
+        <th style="width:30px"><input type="checkbox" id="selectAll" onchange="App.toggleSelectAll(this.checked)"></th>
+        <th>Nom</th><th>Fonction</th><th>Entreprise</th><th>Campagne</th><th>Statut</th><th>Dernier contact</th><th></th>
+      </tr></thead>
       <tbody>${tbody}</tbody></table>`;
+
+    updateBulkBar();
   }
 
   async function openAddProspect() {
@@ -294,10 +457,11 @@ const App = (() => {
             </div>
           </div>
           <div class="flex gap-2 items-center">
-            <select class="status-select" onchange="App.changeProspectStatus('${id}', this.value)">
+            <select class="status-select" id="statusSelect-${id}" data-original="${prospect.status}">
               ${UI.STATUSES.map(s =>
                 `<option ${s === prospect.status ? 'selected' : ''}>${s}</option>`).join('')}
             </select>
+            <button class="btn btn-primary btn-sm" id="btnSaveStatus-${id}" style="display:none" onclick="App.saveProspectStatus('${id}')">Enregistrer</button>
             <button class="btn btn-outline btn-sm" onclick="App.openEditProspect('${id}')">Modifier</button>
             <button class="btn btn-danger btn-sm" onclick="App.deleteProspect('${id}')">Supprimer</button>
           </div>
@@ -309,15 +473,44 @@ const App = (() => {
         </div>
       </div>
 
-      ${prospect.status === 'Message à valider' && prospect.pending_message ? `
-      <div class="message-card">
-        <div class="message-card-title">✉️ Message LinkedIn à valider</div>
-        <textarea class="message-textarea" id="pendingMessage">${UI.esc(prospect.pending_message)}</textarea>
-        <div class="message-actions">
-          <button class="btn btn-primary" onclick="App.validateMessage('${id}')">✓ Valider et envoyer</button>
-          <button class="btn btn-danger btn-sm" onclick="App.rejectMessage('${id}')">✕ Rejeter</button>
-        </div>
-      </div>` : ''}
+      ${prospect.status === 'Message à valider' ? (() => {
+        const versions = prospect.message_versions || [];
+        const hasPending = !!prospect.pending_message;
+        const hasVersions = versions.length > 0;
+        if (!hasPending && !hasVersions) return '';
+        if (hasVersions) {
+          return `<div class="message-card">
+            <div class="message-card-title">✉️ Message LinkedIn à valider — choisissez une version</div>
+            <div class="message-versions">
+              ${versions.map((v, i) => `
+                <div class="message-version" id="msgVersion${i}">
+                  <div class="message-version-header">
+                    <strong>${UI.esc(v.label || 'Version ' + (i+1))}</strong>
+                    <button class="btn btn-sm btn-outline" onclick="App.selectMessageVersion('${id}', ${i})">Choisir</button>
+                  </div>
+                  <div class="message-version-content">${UI.esc(v.content || '')}</div>
+                </div>
+              `).join('')}
+            </div>
+            <div id="selectedMessageWrap" style="display:none">
+              <div class="message-card-title mt-4">Message sélectionné (modifiable)</div>
+              <textarea class="message-textarea" id="pendingMessage"></textarea>
+              <div class="message-actions">
+                <button class="btn btn-primary" onclick="App.validateMessage('${id}')">✓ Valider et envoyer</button>
+                <button class="btn btn-danger btn-sm" onclick="App.rejectMessage('${id}')">✕ Rejeter</button>
+              </div>
+            </div>
+          </div>`;
+        }
+        return `<div class="message-card">
+          <div class="message-card-title">✉️ Message LinkedIn à valider</div>
+          <textarea class="message-textarea" id="pendingMessage">${UI.esc(prospect.pending_message)}</textarea>
+          <div class="message-actions">
+            <button class="btn btn-primary" onclick="App.validateMessage('${id}')">✓ Valider et envoyer</button>
+            <button class="btn btn-danger btn-sm" onclick="App.rejectMessage('${id}')">✕ Rejeter</button>
+          </div>
+        </div>`;
+      })() : ''}
 
       <div class="dash-cols" style="grid-template-columns:1fr 1fr">
         <!-- Interactions -->
@@ -370,6 +563,8 @@ const App = (() => {
         <textarea class="notes-area" id="prospectNotes" oninput="App.debounceNotes('${id}')">${UI.esc(prospect.notes || '')}</textarea>
       </div>
     `;
+
+    initStatusSelectListener(id);
   }
 
   let _notesTimer = null;
@@ -386,6 +581,40 @@ const App = (() => {
     UI.toast('Statut mis à jour');
   }
 
+  async function saveProspectStatus(id) {
+    const sel = document.getElementById(`statusSelect-${id}`);
+    if (!sel) return;
+    const newStatus = sel.value;
+    await DB.updateProspect(id, { status: newStatus });
+    sel.dataset.original = newStatus;
+    document.getElementById(`btnSaveStatus-${id}`).style.display = 'none';
+    UI.toast('Statut mis à jour');
+    renderProspectDetail(document.getElementById('app'), id);
+  }
+
+  function initStatusSelectListener(id) {
+    const sel = document.getElementById(`statusSelect-${id}`);
+    if (!sel) return;
+    sel.addEventListener('change', () => {
+      const btn = document.getElementById(`btnSaveStatus-${id}`);
+      btn.style.display = sel.value !== sel.dataset.original ? '' : 'none';
+    });
+  }
+
+  function selectMessageVersion(id, index) {
+    const prospect = document.getElementById('selectedMessageWrap');
+    if (!prospect) return;
+    // Get version content from the displayed version blocks
+    const versionEl = document.getElementById(`msgVersion${index}`);
+    const content = versionEl?.querySelector('.message-version-content')?.textContent || '';
+    // Show the editable textarea with selected content
+    prospect.style.display = '';
+    document.getElementById('pendingMessage').value = content;
+    // Highlight selected version
+    document.querySelectorAll('.message-version').forEach(el => el.classList.remove('version-selected'));
+    versionEl?.classList.add('version-selected');
+  }
+
   async function validateMessage(id) {
     const msg = document.getElementById('pendingMessage')?.value || '';
     await DB.updateProspect(id, { status: 'Message à envoyer', pending_message: msg });
@@ -397,6 +626,18 @@ const App = (() => {
     await DB.updateProspect(id, { status: 'Invitation acceptée', pending_message: null });
     UI.toast('Message rejeté');
     renderProspectDetail(document.getElementById('app'), id);
+  }
+
+  async function markNonPertinent(id) {
+    await DB.updateProspect(id, { status: 'Non pertinent', source_campaign_id: null });
+    UI.toast('Prospect marqué non pertinent et retiré de la campagne');
+    // Refresh current view
+    const hash = location.hash || '';
+    if (hash.startsWith('#prospect-detail')) {
+      renderProspectDetail(document.getElementById('app'), id);
+    } else {
+      filterProspects();
+    }
   }
 
   async function openEditProspect(id) {
@@ -556,15 +797,20 @@ const App = (() => {
         <div class="flex gap-2">
           <select id="filterCampStatus" onchange="App.loadCampagnes()" style="font-family:inherit;font-size:13px;padding:6px 10px;border:1px solid var(--color-border);border-radius:6px">
             <option value="">Tous les statuts</option>
-            <option value="À lancer">À lancer</option>
-            <option value="En cours">En cours</option>
-            <option value="Terminée">Terminée</option>
           </select>
           <button class="btn btn-primary" onclick="App.openAddCampaign()">+ Nouvelle campagne</button>
         </div>
       </div>
       <div id="campagnesTable">${UI.loader()}</div>
     `;
+    // Populate filter dropdown dynamically
+    const filterSel = document.getElementById('filterCampStatus');
+    UI.CAMP_STATUSES.forEach(s => { const o = document.createElement('option'); o.value = s; o.textContent = s; filterSel.appendChild(o); });
+    // Populate modal selects dynamically
+    document.querySelectorAll('.camp-status-select').forEach(sel => {
+      sel.innerHTML = '';
+      UI.CAMP_STATUSES.forEach(s => { const o = document.createElement('option'); o.value = s; o.textContent = s; sel.appendChild(o); });
+    });
     loadCampagnes();
   }
 
@@ -689,16 +935,16 @@ const App = (() => {
     });
   }
 
-  function buildCampaignBody(raw, jobTagsId, exclTagsId) {
+  function buildCampaignBody(raw, jobTagsId, exclTagsId, objTagsId) {
     return {
       name: raw.name,
       status: raw.status || 'À lancer',
       priority: parseInt(raw.priority) || 1,
       sector: raw.sector || null,
       geography: raw.geography || null,
-      daily_quota: parseInt(raw.daily_quota) || 20,
       details: raw.details || null,
       excluded_keywords: UI.getTagValues(exclTagsId),
+      objectives: UI.getTagValues(objTagsId),
       criteria: {
         sector: raw.sector || null,
         geography: raw.geography || null,
@@ -718,7 +964,7 @@ const App = (() => {
     const errEl = document.getElementById('campaignError');
     errEl.style.display = 'none';
 
-    const body = buildCampaignBody(raw, 'addJobTags', 'addExclTags');
+    const body = buildCampaignBody(raw, 'addJobTags', 'addExclTags', 'addObjTags');
 
     const resp = await fetch('/api/prospector/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const result = await resp.json();
@@ -742,8 +988,10 @@ const App = (() => {
 
   function initAddCampaignTags() {
     document.getElementById('addJobTags').innerHTML = '';
+    document.getElementById('addObjTags').innerHTML = '';
     document.getElementById('addExclTags').innerHTML = '';
     UI.initTagsInput('addJobInput', 'addJobTags', '');
+    UI.initTagsInput('addObjInput', 'addObjTags', 'tag-obj');
     UI.initTagsInput('addExclInput', 'addExclTags', 'tag-excl');
   }
 
@@ -761,13 +1009,14 @@ const App = (() => {
     form.querySelector('[name="revenue_max"]').value = criteria.revenue_max || '';
     form.querySelector('[name="employees_min"]').value = criteria.employees_min || '';
     form.querySelector('[name="employees_max"]').value = criteria.employees_max || '';
-    form.querySelector('[name="daily_quota"]').value = c.daily_quota || 20;
     form.querySelector('[name="details"]').value = c.details || '';
 
     // Populate tags
     UI.setTags('editJobTags', criteria.job_titles || [], '');
+    UI.setTags('editObjTags', c.objectives || [], 'tag-obj');
     UI.setTags('editExclTags', c.excluded_keywords || [], 'tag-excl');
     UI.initTagsInput('editJobInput', 'editJobTags', '');
+    UI.initTagsInput('editObjInput', 'editObjTags', 'tag-obj');
     UI.initTagsInput('editExclInput', 'editExclTags', 'tag-excl');
 
     document.getElementById('campaignEditError').style.display = 'none';
@@ -782,7 +1031,7 @@ const App = (() => {
     const errEl = document.getElementById('campaignEditError');
     errEl.style.display = 'none';
 
-    const body = buildCampaignBody(raw, 'editJobTags', 'editExclTags');
+    const body = buildCampaignBody(raw, 'editJobTags', 'editExclTags', 'editObjTags');
 
     const resp = await fetch(`/api/prospector/campaigns/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const result = await resp.json();
@@ -1132,8 +1381,10 @@ const App = (() => {
     handleAddInteraction, handleAddReminder,
     openAddProspect, openEditProspect, deleteProspect,
     openAddInteraction, openAddReminder, openAddCampaign, openEditCampaign,
-    changeProspectStatus, debounceNotes, validateMessage, rejectMessage,
-    filterProspects, loadRappels, loadCampagnes,
+    changeProspectStatus, saveProspectStatus, debounceNotes, selectMessageVersion, validateMessage, rejectMessage, markNonPertinent,
+    filterProspects, quickFilter, loadRappels, loadCampagnes,
+    toggleSelect, toggleSelectAll, clearSelection, bulkValidate, bulkReject,
+    quickValidate, quickReject,
     reminderDone, reminderSnooze,
     handleImportFile, setMapping, importBack, importNext, launchImport,
   };
