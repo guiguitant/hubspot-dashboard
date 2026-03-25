@@ -3549,6 +3549,25 @@ const VALID_PROSPECT_STATUSES = [
   'Réponse reçue','RDV planifié','Gagné','Perdu','Non pertinent'
 ];
 
+// --- Event logging (prospect_events) ---
+const EVENT_MAP = {
+  'Invitation envoyée': 'invitation_sent',
+  'Invitation acceptée': 'invitation_accepted',
+  'Réponse reçue': 'response_received',
+};
+
+async function logEvent(type, prospectId, campaignId) {
+  try {
+    await supabase.from('prospect_events').insert({
+      type,
+      prospect_id: prospectId || null,
+      campaign_id: campaignId || null,
+    });
+  } catch (e) {
+    console.error('logEvent error:', e.message);
+  }
+}
+
 // --- Daily quotas ---
 const DAILY_INVITATION_LIMIT = parseInt(process.env.PROSPECTOR_INVITATION_LIMIT) || 23;
 const DAILY_MESSAGE_LIMIT = parseInt(process.env.PROSPECTOR_MESSAGE_LIMIT) || 23;
@@ -3638,6 +3657,10 @@ app.post('/api/prospector/sync', async (req, res) => {
         }
 
         if (existing) {
+          // Fetch previous status for event logging
+          const { data: prevData } = await supabase.from('prospects').select('status, source_campaign_id').eq('id', existing.id).single();
+          const prevStatus = prevData?.status;
+
           // Update existing prospect
           const updates = {};
           if (p.status && VALID_PROSPECT_STATUSES.includes(p.status)) updates.status = p.status;
@@ -3654,6 +3677,16 @@ app.post('/api/prospector/sync', async (req, res) => {
 
           await supabase.from('prospects').update(updates).eq('id', existing.id);
           updated++;
+
+          // Log event if status changed
+          const campId = prevData?.source_campaign_id || campaign_id;
+          if (updates.status && updates.status !== prevStatus) {
+            if (updates.status === 'Nouveau' && prevStatus === 'Profil à valider') {
+              logEvent('prospect_validated', existing.id, campId);
+            } else if (EVENT_MAP[updates.status]) {
+              logEvent(EVENT_MAP[updates.status], existing.id, campId);
+            }
+          }
 
           // Log interaction if provided
           if (p.interaction) {
@@ -3683,6 +3716,11 @@ app.post('/api/prospector/sync', async (req, res) => {
 
           const { data: newP } = await supabase.from('prospects').insert(row).select('id').single();
           created++;
+
+          // Log event for new prospect
+          if (newP && EVENT_MAP[row.status]) {
+            logEvent(EVENT_MAP[row.status], newP.id, campaign_id);
+          }
 
           // Log interaction if provided
           if (p.interaction && newP) {
@@ -3723,11 +3761,23 @@ app.post('/api/prospector/update-status', async (req, res) => {
     }
     if (!prospectId) return res.status(400).json({ error: 'id or linkedin_url required' });
 
+    // Fetch previous status + campaign_id for event logging
+    const { data: prev } = await supabase.from('prospects').select('status, source_campaign_id').eq('id', prospectId).single();
+
     const updates = { status, updated_at: new Date().toISOString() };
     if (pending_message !== undefined) updates.pending_message = pending_message;
     if (message_versions !== undefined) updates.message_versions = message_versions;
 
     await supabase.from('prospects').update(updates).eq('id', prospectId);
+
+    // Log event
+    const campId = prev?.source_campaign_id;
+    if (status === 'Nouveau' && prev?.status === 'Profil à valider') {
+      logEvent('prospect_validated', prospectId, campId);
+    } else if (EVENT_MAP[status]) {
+      logEvent(EVENT_MAP[status], prospectId, campId);
+    }
+
     res.json({ success: true, id: prospectId, status });
   } catch (err) {
     console.error('Erreur /api/prospector/update-status:', err.message);
@@ -3784,6 +3834,10 @@ app.post('/api/prospector/message-sent', async (req, res) => {
       content: 'Message LinkedIn envoyé via Claude Dispatch',
     });
 
+    // Log event
+    const { data: pData } = await supabase.from('prospects').select('source_campaign_id').eq('id', prospectId).single();
+    logEvent('message_sent', prospectId, pData?.source_campaign_id);
+
     res.json({ success: true, id: prospectId });
   } catch (err) {
     console.error('Erreur /api/prospector/message-sent:', err.message);
@@ -3823,8 +3877,23 @@ app.post('/api/prospector/bulk-update-status', async (req, res) => {
     if (!VALID_PROSPECT_STATUSES.includes(status)) {
       return res.status(400).json({ error: 'Invalid status. Valid: ' + VALID_PROSPECT_STATUSES.join(', ') });
     }
+
+    // Fetch previous statuses for event logging
+    const { data: prevList } = await supabase.from('prospects').select('id, status, source_campaign_id').in('id', ids);
+
     const { error } = await supabase.from('prospects').update({ status, updated_at: new Date().toISOString() }).in('id', ids);
     if (error) throw error;
+
+    // Log events
+    for (const prev of (prevList || [])) {
+      if (prev.status === status) continue;
+      if (status === 'Nouveau' && prev.status === 'Profil à valider') {
+        logEvent('prospect_validated', prev.id, prev.source_campaign_id);
+      } else if (EVENT_MAP[status]) {
+        logEvent(EVENT_MAP[status], prev.id, prev.source_campaign_id);
+      }
+    }
+
     res.json({ success: true, updated: ids.length });
   } catch (err) {
     console.error('Erreur /api/prospector/bulk-update-status:', err.message);
@@ -3940,6 +4009,55 @@ Retourne uniquement un JSON valide (pas de markdown, pas d'explication) :
     res.json({ success: true, message_versions: messageVersions });
   } catch (err) {
     console.error('Erreur /api/prospector/regenerate-messages:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/prospector/daily-activity — événements par jour sur N jours
+app.get('/api/prospector/daily-activity', async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 30;
+
+    // Build date list
+    const today = new Date();
+    const dates = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      dates.push(d.toISOString().split('T')[0]);
+    }
+    const fromDate = dates[0];
+
+    // Query events grouped by day + type (timezone Paris)
+    const { data: events } = await supabase
+      .from('prospect_events')
+      .select('type, created_at')
+      .gte('created_at', fromDate + 'T00:00:00+01:00');
+
+    // Aggregate by day (Paris timezone) + type
+    const EVENT_TYPES = ['prospect_validated', 'invitation_sent', 'invitation_accepted', 'message_sent', 'response_received'];
+    const series = {};
+    for (const t of EVENT_TYPES) {
+      series[t] = new Array(dates.length).fill(0);
+    }
+
+    for (const ev of (events || [])) {
+      const dayStr = new Date(ev.created_at).toLocaleDateString('en-CA', { timeZone: 'Europe/Paris' });
+      const idx = dates.indexOf(dayStr);
+      if (idx >= 0 && series[ev.type]) {
+        series[ev.type][idx]++;
+      }
+    }
+
+    // Remove types that have all zeros
+    const filtered = {};
+    for (const [type, data] of Object.entries(series)) {
+      if (data.some(v => v > 0)) filtered[type] = data;
+    }
+
+    res.json({ dates, series: filtered });
+  } catch (err) {
+    console.error('Erreur /api/prospector/daily-activity:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

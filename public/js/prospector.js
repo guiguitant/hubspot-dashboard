@@ -68,7 +68,7 @@ const App = (() => {
         </div>
       </div>
       <div class="dash-cols">
-        <div class="card"><div class="card-title">Évolution pipeline — 30 jours</div><div class="pipeline-chart-wrap"><canvas id="pipelineChart"></canvas></div><div id="pipelineLegend" class="pipeline-legend"></div></div>
+        <div class="card"><div class="card-title">Activité quotidienne — 30 jours</div><div class="pipeline-chart-wrap"><canvas id="pipelineChart"></canvas></div><div id="pipelineLegend" class="pipeline-legend"></div></div>
         <div class="card"><div class="card-title">Pipeline</div><ul class="pipeline-list" id="dashPipeline">${UI.loader()}</ul></div>
       </div>
       <div class="card actions-bar"><div class="card-title">📋 Actions à faire</div><div id="dashActions">${UI.loader()}</div></div>
@@ -86,7 +86,7 @@ const App = (() => {
       DB.getRecentInteractions(10),
       DB.getProspects({ status: 'Message à valider' }),
       DB.getProspects({ status: 'Profil à valider' }),
-      fetch('/api/prospector/pipeline-evolution').then(r => r.json()).catch(() => ({ dates: [], series: [] })),
+      fetch('/api/prospector/daily-activity').then(r => r.json()).catch(() => ({ dates: [], series: {} })),
     ]);
 
     // Load quotas
@@ -171,52 +171,55 @@ const App = (() => {
       `<li class="pipeline-item" style="cursor:pointer" onclick="location.hash='#prospects?status=${encodeURIComponent(s)}'">${UI.statusBadge(s)} <span class="pipeline-count">${pipeline[s] || 0}</span></li>`
     ).join('');
 
-    // Pipeline evolution chart
+    // Daily activity chart
     const FR_MONTHS = ['jan', 'fév', 'mar', 'avr', 'mai', 'juin', 'juil', 'aoû', 'sep', 'oct', 'nov', 'déc'];
     const fmtDate = iso => { const d = new Date(iso + 'T00:00:00'); return `${d.getDate()} ${FR_MONTHS[d.getMonth()]}`; };
 
+    const ACTIVITY_SERIES = {
+      prospect_validated:  { label: 'Profils validés',         color: '#8b5cf6' },
+      invitation_sent:     { label: 'Invitations envoyées',    color: '#f59e0b' },
+      invitation_accepted: { label: 'Invitations acceptées',   color: '#3b82f6' },
+      message_sent:        { label: 'Messages envoyés',        color: '#10b981' },
+      response_received:   { label: 'Réponses reçues',         color: '#ec4899' },
+    };
+
     const chartDates = chartData.dates || [];
-    const chartSeries = chartData.series || [];
+    const chartSeries = chartData.series || {};
     const ctx = document.getElementById('pipelineChart');
     const legendEl = document.getElementById('pipelineLegend');
 
     if (ctx) {
-      if (chartSeries.length === 0) {
-        ctx.parentElement.innerHTML = '<div class="empty-state" style="height:320px;display:flex;align-items:center;justify-content:center">Aucune donnée sur les 15 derniers jours</div>';
+      const seriesKeys = Object.keys(chartSeries);
+      if (seriesKeys.length === 0) {
+        ctx.parentElement.innerHTML = '<div class="empty-state" style="height:320px;display:flex;align-items:center;justify-content:center">Aucune activité sur les 30 derniers jours</div>';
       } else {
         if (window._pipelineChart) window._pipelineChart.destroy();
 
-        // Axe J-15 → J+15, aujourd'hui à l'index 15
-        const todayDate = new Date();
-        const allDates = [];
-        for (let i = -15; i <= 15; i++) {
-          const d = new Date(todayDate);
-          d.setDate(d.getDate() + i);
-          allDates.push(d.toISOString().split('T')[0]);
-        }
+        const todayIso = new Date().toISOString().split('T')[0];
+        const todayIdx = chartDates.indexOf(todayIso);
 
-        const datasets = chartSeries.map(s => ({
-          label: s.status,
-          data: allDates.map(d => {
-            const idx = chartDates.indexOf(d);
-            return idx >= 0 ? s.data[idx] : null;
-          }),
-          borderColor: s.color,
-          backgroundColor: s.color + '18',
-          borderWidth: 2,
-          pointRadius: 4,
-          pointHoverRadius: 7,
-          pointHitRadius: 12,
-          tension: 0.35,
-          spanGaps: false,
-          fill: false,
-        }));
+        const datasets = seriesKeys.map(key => {
+          const meta = ACTIVITY_SERIES[key] || { label: key, color: '#6b7280' };
+          return {
+            label: meta.label,
+            data: chartSeries[key],
+            borderColor: meta.color,
+            backgroundColor: meta.color + '18',
+            borderWidth: 2,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            pointHitRadius: 12,
+            tension: 0.35,
+            fill: false,
+          };
+        });
 
         const todayLinePlugin = {
           id: 'todayLine',
           afterDraw(chart) {
+            if (todayIdx < 0) return;
             const { ctx: c, chartArea, scales } = chart;
-            const x = scales.x.getPixelForValue(15);
+            const x = scales.x.getPixelForValue(todayIdx);
             c.save();
             c.beginPath();
             c.moveTo(x, chartArea.top);
@@ -235,7 +238,7 @@ const App = (() => {
 
         window._pipelineChart = new Chart(ctx, {
           type: 'line',
-          data: { labels: allDates.map(fmtDate), datasets },
+          data: { labels: chartDates.map(fmtDate), datasets },
           options: {
             responsive: true,
             maintainAspectRatio: false,
@@ -245,14 +248,14 @@ const App = (() => {
               tooltip: {
                 callbacks: {
                   title: () => '',
-                  label: item => item.raw == null ? null : `${item.dataset.label} — ${item.raw} prospect${item.raw > 1 ? 's' : ''} — ${fmtDate(allDates[item.dataIndex])}`,
+                  label: item => `${item.dataset.label} — ${item.raw} — ${fmtDate(chartDates[item.dataIndex])}`,
                 },
               },
             },
             scales: {
               x: {
                 grid: { display: false },
-                ticks: { color: '#9ca3af', font: { size: 12 }, maxTicksLimit: 7 },
+                ticks: { color: '#9ca3af', font: { size: 12 }, maxTicksLimit: 6 },
               },
               y: {
                 beginAtZero: true,
@@ -264,11 +267,13 @@ const App = (() => {
           plugins: [todayLinePlugin],
         });
 
-        // Custom pill legend
+        // Custom pill legend (all possible types, not just active)
         if (legendEl) {
-          legendEl.innerHTML = chartSeries.map(s =>
-            `<span class="pipeline-legend-pill" style="background:${s.color}22;color:${s.color}">${UI.esc(s.status)}</span>`
-          ).join('');
+          legendEl.innerHTML = Object.entries(ACTIVITY_SERIES)
+            .filter(([key]) => chartSeries[key])
+            .map(([, meta]) =>
+              `<span class="pipeline-legend-pill" style="background:${meta.color}22;color:${meta.color}">${UI.esc(meta.label)}</span>`
+            ).join('');
         }
       }
     }
