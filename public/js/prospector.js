@@ -186,12 +186,13 @@ const App = (() => {
       'Non pertinent': '#9CA3AF',
     };
     const snapshots = chartData.snapshots || [];
-    // Build sorted list of dates (last 30 days)
+    // Build labels: -15 days to +15 days (31 points, today at center)
     const today = new Date();
+    const todayIso = today.toISOString().split('T')[0];
     const labels = [];
-    for (let i = 29; i >= 0; i--) {
+    for (let i = -15; i <= 15; i++) {
       const d = new Date(today);
-      d.setDate(d.getDate() - i);
+      d.setDate(d.getDate() + i);
       labels.push(d.toISOString().split('T')[0]);
     }
     // Group snapshots by status → date → count
@@ -216,6 +217,28 @@ const App = (() => {
     const ctx = document.getElementById('pipelineChart');
     if (ctx) {
       if (window._pipelineChart) window._pipelineChart.destroy();
+      const todayIdx = labels.indexOf(todayIso);
+      const todayLinePlugin = {
+        id: 'todayLine',
+        afterDraw(chart) {
+          if (todayIdx < 0) return;
+          const { ctx: c, chartArea, scales } = chart;
+          const x = scales.x.getPixelForIndex(todayIdx);
+          c.save();
+          c.beginPath();
+          c.moveTo(x, chartArea.top);
+          c.lineTo(x, chartArea.bottom);
+          c.strokeStyle = '#94A3B8';
+          c.lineWidth = 1.5;
+          c.setLineDash([4, 4]);
+          c.stroke();
+          c.fillStyle = '#64748B';
+          c.font = '10px sans-serif';
+          c.textAlign = 'center';
+          c.fillText("Aujourd'hui", x, chartArea.top - 4);
+          c.restore();
+        },
+      };
       window._pipelineChart = new Chart(ctx, {
         type: 'line',
         data: { labels: labels.map(d => d.slice(5)), datasets },
@@ -232,6 +255,7 @@ const App = (() => {
             y: { beginAtZero: true, ticks: { precision: 0, font: { size: 11 } }, grid: { color: '#f0f0f0' } },
           },
         },
+        plugins: [todayLinePlugin],
       });
     }
 

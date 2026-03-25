@@ -3962,9 +3962,9 @@ app.get('/api/prospector/pipeline-chart', async (req, res) => {
       await supabase.from('pipeline_snapshots').upsert(upserts, { onConflict: 'date,status' });
     }
 
-    // Récupérer les 30 derniers jours
+    // Récupérer les 15 derniers jours
     const from = new Date();
-    from.setDate(from.getDate() - 29);
+    from.setDate(from.getDate() - 15);
     const fromStr = from.toISOString().split('T')[0];
     const { data: snapshots } = await supabase
       .from('pipeline_snapshots')
