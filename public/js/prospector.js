@@ -216,7 +216,7 @@ const App = (() => {
           id: 'todayLine',
           afterDraw(chart) {
             const { ctx: c, chartArea, scales } = chart;
-            const x = scales.x.getPixelForIndex(15);
+            const x = scales.x.getPixelForValue(15);
             c.save();
             c.beginPath();
             c.moveTo(x, chartArea.top);
