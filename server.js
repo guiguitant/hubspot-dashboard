@@ -3944,6 +3944,41 @@ Retourne uniquement un JSON valide (pas de markdown, pas d'explication) :
   }
 });
 
+// GET /api/prospector/pipeline-chart — snapshot du jour + 30j d'historique
+app.get('/api/prospector/pipeline-chart', async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+
+    // Comptage actuel par statut
+    const { data: prospects } = await supabase.from('prospects').select('status');
+    const counts = {};
+    for (const p of prospects || []) {
+      if (p.status) counts[p.status] = (counts[p.status] || 0) + 1;
+    }
+
+    // Upsert snapshot du jour
+    const upserts = Object.entries(counts).map(([status, count]) => ({ date: today, status, count }));
+    if (upserts.length > 0) {
+      await supabase.from('pipeline_snapshots').upsert(upserts, { onConflict: 'date,status' });
+    }
+
+    // Récupérer les 30 derniers jours
+    const from = new Date();
+    from.setDate(from.getDate() - 29);
+    const fromStr = from.toISOString().split('T')[0];
+    const { data: snapshots } = await supabase
+      .from('pipeline_snapshots')
+      .select('date,status,count')
+      .gte('date', fromStr)
+      .order('date', { ascending: true });
+
+    res.json({ snapshots: snapshots || [] });
+  } catch (err) {
+    console.error('Erreur /api/prospector/pipeline-chart:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Releaf Pilot démarré sur http://localhost:${PORT}`);
 });

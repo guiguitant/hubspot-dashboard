@@ -150,6 +150,24 @@ body {
 .dash-cols { display: grid; grid-template-columns: 65fr 35fr; gap: 24px; margin-bottom: 28px; }
 @media (max-width: 900px) { .dash-cols { grid-template-columns: 1fr; } .stat-grid { grid-template-columns: repeat(2,1fr); } }
 
+/* ---- Pipeline chart ---- */
+.pipeline-chart-wrap { position: relative; height: 280px; }
+
+/* ---- Actions bar (compact, full width) ---- */
+.actions-bar { margin-bottom: 28px; }
+.actions-bar .action-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.actions-bar .action-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 20px;
+  background: var(--color-bg-alt, #F9FAFB);
+  font-size: var(--font-sm);
+  border-bottom: none;
+}
+.actions-bar .action-item .note { display: none; }
+.actions-bar .action-item .date { font-size: 11px; }
+
 /* ---- Cards / Sections ---- */
 .card {
   background: var(--color-bg);
