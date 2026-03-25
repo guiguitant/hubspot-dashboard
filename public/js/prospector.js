@@ -205,7 +205,8 @@ const App = (() => {
           backgroundColor: s.color + '18',
           borderWidth: 2,
           pointRadius: 4,
-          pointHoverRadius: 6,
+          pointHoverRadius: 7,
+          pointHitRadius: 12,
           tension: 0.35,
           spanGaps: false,
           fill: false,
@@ -238,7 +239,7 @@ const App = (() => {
           options: {
             responsive: true,
             maintainAspectRatio: false,
-            interaction: { mode: 'nearest', intersect: true },
+            interaction: { mode: 'nearest', intersect: false },
             plugins: {
               legend: { display: false },
               tooltip: {
