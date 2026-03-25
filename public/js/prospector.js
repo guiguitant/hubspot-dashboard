@@ -182,23 +182,59 @@ const App = (() => {
 
     if (ctx) {
       if (chartSeries.length === 0) {
-        ctx.parentElement.innerHTML = '<div class="empty-state" style="height:320px;display:flex;align-items:center;justify-content:center">Aucune donnée sur les 30 derniers jours</div>';
+        ctx.parentElement.innerHTML = '<div class="empty-state" style="height:320px;display:flex;align-items:center;justify-content:center">Aucune donnée sur les 15 derniers jours</div>';
       } else {
         if (window._pipelineChart) window._pipelineChart.destroy();
+
+        // Axe J-15 → J+15, aujourd'hui à l'index 15
+        const todayDate = new Date();
+        const allDates = [];
+        for (let i = -15; i <= 15; i++) {
+          const d = new Date(todayDate);
+          d.setDate(d.getDate() + i);
+          allDates.push(d.toISOString().split('T')[0]);
+        }
+
         const datasets = chartSeries.map(s => ({
           label: s.status,
-          data: s.data,
+          data: allDates.map(d => {
+            const idx = chartDates.indexOf(d);
+            return idx >= 0 ? s.data[idx] : null;
+          }),
           borderColor: s.color,
           backgroundColor: s.color + '18',
           borderWidth: 2,
           pointRadius: 4,
           pointHoverRadius: 6,
           tension: 0.35,
+          spanGaps: false,
           fill: false,
         }));
+
+        const todayLinePlugin = {
+          id: 'todayLine',
+          afterDraw(chart) {
+            const { ctx: c, chartArea, scales } = chart;
+            const x = scales.x.getPixelForIndex(15);
+            c.save();
+            c.beginPath();
+            c.moveTo(x, chartArea.top);
+            c.lineTo(x, chartArea.bottom);
+            c.strokeStyle = '#94A3B8';
+            c.lineWidth = 1.5;
+            c.setLineDash([4, 4]);
+            c.stroke();
+            c.fillStyle = '#64748B';
+            c.font = '10px sans-serif';
+            c.textAlign = 'center';
+            c.fillText("Aujourd'hui", x, chartArea.top - 4);
+            c.restore();
+          },
+        };
+
         window._pipelineChart = new Chart(ctx, {
           type: 'line',
-          data: { labels: chartDates.map(fmtDate), datasets },
+          data: { labels: allDates.map(fmtDate), datasets },
           options: {
             responsive: true,
             maintainAspectRatio: false,
@@ -208,14 +244,14 @@ const App = (() => {
               tooltip: {
                 callbacks: {
                   title: () => '',
-                  label: item => `${item.dataset.label} — ${item.raw} prospect${item.raw > 1 ? 's' : ''} — ${fmtDate(chartDates[item.dataIndex])}`,
+                  label: item => item.raw == null ? null : `${item.dataset.label} — ${item.raw} prospect${item.raw > 1 ? 's' : ''} — ${fmtDate(allDates[item.dataIndex])}`,
                 },
               },
             },
             scales: {
               x: {
                 grid: { display: false },
-                ticks: { color: '#9ca3af', font: { size: 12 }, maxTicksLimit: 6 },
+                ticks: { color: '#9ca3af', font: { size: 12 }, maxTicksLimit: 7 },
               },
               y: {
                 beginAtZero: true,
@@ -224,7 +260,9 @@ const App = (() => {
               },
             },
           },
+          plugins: [todayLinePlugin],
         });
+
         // Custom pill legend
         if (legendEl) {
           legendEl.innerHTML = chartSeries.map(s =>

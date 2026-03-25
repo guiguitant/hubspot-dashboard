@@ -3962,10 +3962,10 @@ app.get('/api/prospector/pipeline-evolution', async (req, res) => {
     };
     const STATUSES = Object.keys(COLORS);
 
-    // Générer les 30 derniers jours
+    // Générer J-15 à aujourd'hui (le frontend étend l'axe jusqu'à J+15)
     const today = new Date();
     const dates = [];
-    for (let i = 29; i >= 0; i--) {
+    for (let i = 15; i >= 0; i--) {
       const d = new Date(today);
       d.setDate(d.getDate() - i);
       dates.push(d.toISOString().split('T')[0]);
