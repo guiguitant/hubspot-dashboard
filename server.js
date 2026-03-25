@@ -3637,6 +3637,13 @@ app.post('/api/prospector/sync', async (req, res) => {
 
     for (const p of prospects) {
       try {
+        // Reject Sales Navigator URLs in linkedin_url
+        if (p.linkedin_url && p.linkedin_url.includes('linkedin.com/sales/')) {
+          console.error(`Sync rejected: Sales Nav URL in linkedin_url for ${p.first_name} ${p.last_name}`);
+          errors++;
+          continue;
+        }
+
         let existing = null;
 
         // Find by linkedin_url first (most reliable)
@@ -3671,6 +3678,7 @@ app.post('/api/prospector/sync', async (req, res) => {
           if (p.sector) updates.sector = p.sector;
           if (p.geography) updates.geography = p.geography;
           if (p.linkedin_url) updates.linkedin_url = p.linkedin_url;
+          if (p.sales_nav_url) updates.sales_nav_url = p.sales_nav_url;
           if (p.pending_message !== undefined) updates.pending_message = p.pending_message;
           if (p.notes) updates.notes = p.notes;
           updates.updated_at = new Date().toISOString();
@@ -3705,6 +3713,7 @@ app.post('/api/prospector/sync', async (req, res) => {
             email: p.email || null,
             phone: p.phone || null,
             linkedin_url: p.linkedin_url || null,
+            sales_nav_url: p.sales_nav_url || null,
             company: p.company || null,
             job_title: p.job_title || null,
             sector: p.sector || null,
@@ -3849,7 +3858,7 @@ app.post('/api/prospector/message-sent', async (req, res) => {
 app.get('/api/prospector/validated-profiles', async (req, res) => {
   try {
     const { data, error } = await supabase.from('prospects')
-      .select('id, first_name, last_name, linkedin_url, company, job_title, source_campaign_id, campaigns(name)')
+      .select('id, first_name, last_name, linkedin_url, sales_nav_url, company, job_title, source_campaign_id, campaigns(name)')
       .eq('status', 'Nouveau')
       .not('linkedin_url', 'is', null);
     if (error) throw error;
@@ -3860,6 +3869,7 @@ app.get('/api/prospector/validated-profiles', async (req, res) => {
       linkedin_url: p.linkedin_url,
       company: p.company,
       job_title: p.job_title,
+      sales_nav_url: p.sales_nav_url || null,
       campaign_id: p.source_campaign_id,
       campaign_name: p.campaigns?.name || null,
     })));
