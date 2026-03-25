@@ -3944,6 +3944,60 @@ Retourne uniquement un JSON valide (pas de markdown, pas d'explication) :
   }
 });
 
+// GET /api/prospector/pipeline-evolution — reconstruction jour par jour sur 30 jours
+app.get('/api/prospector/pipeline-evolution', async (req, res) => {
+  try {
+    const COLORS = {
+      'Profil à valider': '#8b5cf6',
+      'Nouveau': '#3b82f6',
+      'Invitation envoyée': '#f59e0b',
+      'Message à valider': '#ec4899',
+      'Message à envoyer': '#06b6d4',
+      'Message envoyé': '#10b981',
+      'Réponse reçue': '#84cc16',
+      'RDV planifié': '#f97316',
+      'Gagné': '#22c55e',
+      'Perdu': '#ef4444',
+      'Non pertinent': '#6b7280',
+    };
+    const STATUSES = Object.keys(COLORS);
+
+    // Générer les 30 derniers jours
+    const today = new Date();
+    const dates = [];
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      dates.push(d.toISOString().split('T')[0]);
+    }
+
+    // Récupérer tous les prospects (statut + date de dernière mise à jour)
+    const { data: prospects } = await supabase
+      .from('prospects')
+      .select('status, updated_at');
+
+    // Pour chaque jour + statut : compter les prospects dont updated_at <= jour
+    const series = [];
+    for (const status of STATUSES) {
+      const data = dates.map(date =>
+        (prospects || []).filter(p =>
+          p.status === status &&
+          p.updated_at &&
+          p.updated_at.split('T')[0] <= date
+        ).length
+      );
+      if (data.some(v => v > 0)) {
+        series.push({ status, color: COLORS[status], data });
+      }
+    }
+
+    res.json({ dates, series });
+  } catch (err) {
+    console.error('Erreur /api/prospector/pipeline-evolution:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/prospector/pipeline-chart — snapshot du jour + 30j d'historique
 app.get('/api/prospector/pipeline-chart', async (req, res) => {
   try {

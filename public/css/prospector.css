@@ -151,7 +151,9 @@ body {
 @media (max-width: 900px) { .dash-cols { grid-template-columns: 1fr; } .stat-grid { grid-template-columns: repeat(2,1fr); } }
 
 /* ---- Pipeline chart ---- */
-.pipeline-chart-wrap { position: relative; height: 280px; }
+.pipeline-chart-wrap { position: relative; height: 320px; }
+.pipeline-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 12px; }
+.pipeline-legend-pill { font-size: 12px; padding: 2px 10px; border-radius: 9999px; font-weight: 500; }
 
 /* ---- Actions bar (compact, full width) ---- */
 .actions-bar { margin-bottom: 28px; }
