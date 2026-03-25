@@ -3544,7 +3544,7 @@ app.get('/api/prospector/export', async (req, res) => {
 // ============================================================
 
 const VALID_PROSPECT_STATUSES = [
-  'Profil à valider','Nouveau','Invitation envoyée','Invitation acceptée',
+  'Profil à valider','Nouveau','Profil restreint','Invitation envoyée','Invitation acceptée',
   'Message à valider','Message à envoyer','Message envoyé',
   'Réponse reçue','RDV planifié','Gagné','Perdu','Non pertinent'
 ];

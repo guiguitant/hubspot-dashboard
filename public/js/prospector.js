@@ -598,7 +598,7 @@ const App = (() => {
           </div>
           <div class="flex gap-2 items-center">
             <select class="status-select" id="statusSelect-${id}" data-original="${prospect.status}">
-              ${UI.STATUSES.map(s =>
+              ${UI.DROPDOWN_STATUSES.map(s =>
                 `<option ${s === prospect.status ? 'selected' : ''}>${s}</option>`).join('')}
             </select>
             <button class="btn btn-primary btn-sm" id="btnSaveStatus-${id}" style="display:none" onclick="App.saveProspectStatus('${id}')">Enregistrer</button>

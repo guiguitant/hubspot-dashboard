@@ -198,6 +198,7 @@ body {
 }
 .badge-profil-a-valider { background: #FEF3C7; color: #D97706; border: 1px solid #F59E0B; }
 .badge-nouveau     { background: #DBEAFE; color: #3B82F6; }
+.badge-profil-restreint { background: #374151; color: #fff; }
 .badge-invitation  { background: #EDE9FE; color: #7C3AED; }
 .badge-acceptee    { background: #D1FAE5; color: #065F46; }
 .badge-a-valider   { background: #FEF3C7; color: #92400E; }
