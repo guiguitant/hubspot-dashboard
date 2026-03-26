@@ -3646,19 +3646,27 @@ app.post('/api/prospector/sync', async (req, res) => {
 
         let existing = null;
 
-        // Find by linkedin_url first (most reliable)
-        if (p.linkedin_url) {
+        // 1. Match by linkedin_url (most reliable)
+        if (!existing && p.linkedin_url) {
           const { data } = await supabase.from('prospects')
-            .select('id').eq('linkedin_url', p.linkedin_url).limit(1);
+            .select('id, linkedin_url, sales_nav_url').eq('linkedin_url', p.linkedin_url).limit(1);
           if (data?.length) existing = data[0];
         }
 
-        // Fallback: find by first_name + last_name
-        if (!existing && p.first_name && p.last_name) {
+        // 2. Match by sales_nav_url
+        if (!existing && p.sales_nav_url) {
           const { data } = await supabase.from('prospects')
-            .select('id')
-            .ilike('first_name', p.first_name)
-            .ilike('last_name', p.last_name)
+            .select('id, linkedin_url, sales_nav_url').eq('sales_nav_url', p.sales_nav_url).limit(1);
+          if (data?.length) existing = data[0];
+        }
+
+        // 3. Fallback: match by first_name + last_name + company (case-insensitive)
+        if (!existing && p.first_name && p.last_name && p.company) {
+          const { data } = await supabase.from('prospects')
+            .select('id, linkedin_url, sales_nav_url')
+            .ilike('first_name', p.first_name.trim())
+            .ilike('last_name', p.last_name.trim())
+            .ilike('company', p.company.trim())
             .limit(1);
           if (data?.length) existing = data[0];
         }
@@ -3668,7 +3676,7 @@ app.post('/api/prospector/sync', async (req, res) => {
           const { data: prevData } = await supabase.from('prospects').select('status, source_campaign_id').eq('id', existing.id).single();
           const prevStatus = prevData?.status;
 
-          // Update existing prospect
+          // Update existing prospect — fill missing URLs when matched via fallback
           const updates = {};
           if (p.status && VALID_PROSPECT_STATUSES.includes(p.status)) updates.status = p.status;
           if (p.company) updates.company = p.company;
