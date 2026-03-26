@@ -68,7 +68,7 @@ const App = (() => {
         </div>
       </div>
       <div class="dash-cols">
-        <div class="card"><div class="card-title">Évolution pipeline — 30 jours</div><div class="pipeline-chart-wrap"><canvas id="pipelineChart"></canvas></div></div>
+        <div class="card"><div class="card-title">Activité quotidienne — 30 jours</div><div class="pipeline-chart-wrap"><canvas id="pipelineChart"></canvas></div><div id="pipelineLegend" class="pipeline-legend"></div></div>
         <div class="card"><div class="card-title">Pipeline</div><ul class="pipeline-list" id="dashPipeline">${UI.loader()}</ul></div>
       </div>
       <div class="card actions-bar"><div class="card-title">📋 Actions à faire</div><div id="dashActions">${UI.loader()}</div></div>
@@ -86,7 +86,7 @@ const App = (() => {
       DB.getRecentInteractions(10),
       DB.getProspects({ status: 'Message à valider' }),
       DB.getProspects({ status: 'Profil à valider' }),
-      fetch('/api/prospector/pipeline-chart').then(r => r.json()).catch(() => ({ snapshots: [] })),
+      fetch('/api/prospector/daily-activity').then(r => r.json()).catch(() => ({ dates: [], series: {} })),
     ]);
 
     // Load quotas
@@ -171,68 +171,111 @@ const App = (() => {
       `<li class="pipeline-item" style="cursor:pointer" onclick="location.hash='#prospects?status=${encodeURIComponent(s)}'">${UI.statusBadge(s)} <span class="pipeline-count">${pipeline[s] || 0}</span></li>`
     ).join('');
 
-    // Pipeline chart (30 days)
-    const CHART_COLORS = {
-      'Profil à valider': '#D97706',
-      'Nouveau': '#3B82F6',
-      'Invitation envoyée': '#7C3AED',
-      'Message à valider': '#92400E',
-      'Message à envoyer': '#C2410C',
-      'Message envoyé': '#1D4ED8',
-      'Réponse reçue': '#BE185D',
-      'RDV planifié': '#0EA5E9',
-      'Gagné': '#2D6A4F',
-      'Perdu': '#EF4444',
-      'Non pertinent': '#9CA3AF',
+    // Daily activity chart
+    const FR_MONTHS = ['jan', 'fév', 'mar', 'avr', 'mai', 'juin', 'juil', 'aoû', 'sep', 'oct', 'nov', 'déc'];
+    const fmtDate = iso => { const d = new Date(iso + 'T00:00:00'); return `${d.getDate()} ${FR_MONTHS[d.getMonth()]}`; };
+
+    const ACTIVITY_SERIES = {
+      prospect_validated:  { label: 'Profils validés',         color: '#8b5cf6' },
+      invitation_sent:     { label: 'Invitations envoyées',    color: '#f59e0b' },
+      invitation_accepted: { label: 'Invitations acceptées',   color: '#3b82f6' },
+      message_sent:        { label: 'Messages envoyés',        color: '#10b981' },
+      response_received:   { label: 'Réponses reçues',         color: '#ec4899' },
     };
-    const snapshots = chartData.snapshots || [];
-    // Build sorted list of dates (last 30 days)
-    const today = new Date();
-    const labels = [];
-    for (let i = 29; i >= 0; i--) {
-      const d = new Date(today);
-      d.setDate(d.getDate() - i);
-      labels.push(d.toISOString().split('T')[0]);
-    }
-    // Group snapshots by status → date → count
-    const byStatus = {};
-    for (const snap of snapshots) {
-      if (!byStatus[snap.status]) byStatus[snap.status] = {};
-      byStatus[snap.status][snap.date] = snap.count;
-    }
-    // Only include statuses that have at least one non-zero data point
-    const activeStatuses = statuses.filter(s => byStatus[s] && Object.values(byStatus[s]).some(v => v > 0));
-    const datasets = activeStatuses.map(s => ({
-      label: s,
-      data: labels.map(d => byStatus[s]?.[d] ?? null),
-      borderColor: CHART_COLORS[s] || '#6B7280',
-      backgroundColor: (CHART_COLORS[s] || '#6B7280') + '22',
-      borderWidth: 2,
-      pointRadius: 3,
-      tension: 0.3,
-      spanGaps: true,
-      fill: false,
-    }));
+
+    const chartDates = chartData.dates || [];
+    const chartSeries = chartData.series || {};
     const ctx = document.getElementById('pipelineChart');
+    const legendEl = document.getElementById('pipelineLegend');
+
     if (ctx) {
-      if (window._pipelineChart) window._pipelineChart.destroy();
-      window._pipelineChart = new Chart(ctx, {
-        type: 'line',
-        data: { labels: labels.map(d => d.slice(5)), datasets },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          interaction: { mode: 'index', intersect: false },
-          plugins: {
-            legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
-            tooltip: { callbacks: { title: (items) => items[0].label } },
+      const seriesKeys = Object.keys(chartSeries);
+      if (seriesKeys.length === 0) {
+        ctx.parentElement.innerHTML = '<div class="empty-state" style="height:320px;display:flex;align-items:center;justify-content:center">Aucune activité sur les 30 derniers jours</div>';
+      } else {
+        if (window._pipelineChart) window._pipelineChart.destroy();
+
+        const todayIso = new Date().toISOString().split('T')[0];
+        const todayIdx = chartDates.indexOf(todayIso);
+
+        const datasets = seriesKeys.map(key => {
+          const meta = ACTIVITY_SERIES[key] || { label: key, color: '#6b7280' };
+          return {
+            label: meta.label,
+            data: chartSeries[key],
+            borderColor: meta.color,
+            backgroundColor: meta.color + '18',
+            borderWidth: 2,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            pointHitRadius: 12,
+            tension: 0.35,
+            fill: false,
+          };
+        });
+
+        const todayLinePlugin = {
+          id: 'todayLine',
+          afterDraw(chart) {
+            if (todayIdx < 0) return;
+            const { ctx: c, chartArea, scales } = chart;
+            const x = scales.x.getPixelForValue(todayIdx);
+            c.save();
+            c.beginPath();
+            c.moveTo(x, chartArea.top);
+            c.lineTo(x, chartArea.bottom);
+            c.strokeStyle = '#94A3B8';
+            c.lineWidth = 1.5;
+            c.setLineDash([4, 4]);
+            c.stroke();
+            c.fillStyle = '#64748B';
+            c.font = '10px sans-serif';
+            c.textAlign = 'center';
+            c.fillText("Aujourd'hui", x, chartArea.top - 4);
+            c.restore();
           },
-          scales: {
-            x: { grid: { display: false }, ticks: { font: { size: 11 }, maxTicksLimit: 10 } },
-            y: { beginAtZero: true, ticks: { precision: 0, font: { size: 11 } }, grid: { color: '#f0f0f0' } },
+        };
+
+        window._pipelineChart = new Chart(ctx, {
+          type: 'line',
+          data: { labels: chartDates.map(fmtDate), datasets },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'nearest', intersect: false },
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  title: () => '',
+                  label: item => `${item.dataset.label} — ${item.raw} — ${fmtDate(chartDates[item.dataIndex])}`,
+                },
+              },
+            },
+            scales: {
+              x: {
+                grid: { display: false },
+                ticks: { color: '#9ca3af', font: { size: 12 }, maxTicksLimit: 6 },
+              },
+              y: {
+                beginAtZero: true,
+                grid: { color: '#f3f4f6', drawBorder: false },
+                ticks: { color: '#9ca3af', font: { size: 12 }, precision: 0 },
+              },
+            },
           },
-        },
-      });
+          plugins: [todayLinePlugin],
+        });
+
+        // Custom pill legend (all possible types, not just active)
+        if (legendEl) {
+          legendEl.innerHTML = Object.entries(ACTIVITY_SERIES)
+            .filter(([key]) => chartSeries[key])
+            .map(([, meta]) =>
+              `<span class="pipeline-legend-pill" style="background:${meta.color}22;color:${meta.color}">${UI.esc(meta.label)}</span>`
+            ).join('');
+        }
+      }
     }
 
     // Activity
@@ -555,7 +598,7 @@ const App = (() => {
           </div>
           <div class="flex gap-2 items-center">
             <select class="status-select" id="statusSelect-${id}" data-original="${prospect.status}">
-              ${UI.STATUSES.map(s =>
+              ${UI.DROPDOWN_STATUSES.map(s =>
                 `<option ${s === prospect.status ? 'selected' : ''}>${s}</option>`).join('')}
             </select>
             <button class="btn btn-primary btn-sm" id="btnSaveStatus-${id}" style="display:none" onclick="App.saveProspectStatus('${id}')">Enregistrer</button>

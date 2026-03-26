@@ -8,6 +8,7 @@ const UI = (() => {
   const STATUS_CLASSES = {
     'Profil à valider': 'badge-profil-a-valider',
     'Nouveau': 'badge-nouveau',
+    'Profil restreint': 'badge-profil-restreint',
     'Invitation envoyée': 'badge-invitation',
     'Invitation acceptée': 'badge-acceptee',
     'Message à valider': 'badge-a-valider',
@@ -22,6 +23,10 @@ const UI = (() => {
 
   const HIDDEN_STATUSES = ['Invitation acceptée'];
   const STATUSES = Object.keys(STATUS_CLASSES).filter(s => !HIDDEN_STATUSES.includes(s));
+
+  // Statuts assignés uniquement par l'automatisation — exclus des dropdowns manuels
+  const AUTO_ONLY_STATUSES = ['Profil restreint'];
+  const DROPDOWN_STATUSES = STATUSES.filter(s => !AUTO_ONLY_STATUSES.includes(s));
 
   const CAMP_STATUS_CLASSES = {
     'À lancer': 'badge-a-lancer',
@@ -165,6 +170,6 @@ const UI = (() => {
     formatDate, todayStr, isOverdue, isToday,
     esc, openModal, closeModal, toast, loader, emptyState, options,
     initTagsInput, addTag, getTagValues, setTags,
-    STATUS_CLASSES, STATUSES, CAMP_STATUS_CLASSES, CAMP_STATUSES,
+    STATUS_CLASSES, STATUSES, DROPDOWN_STATUSES, CAMP_STATUS_CLASSES, CAMP_STATUSES,
   };
 })();

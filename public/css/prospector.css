@@ -151,7 +151,9 @@ body {
 @media (max-width: 900px) { .dash-cols { grid-template-columns: 1fr; } .stat-grid { grid-template-columns: repeat(2,1fr); } }
 
 /* ---- Pipeline chart ---- */
-.pipeline-chart-wrap { position: relative; height: 280px; }
+.pipeline-chart-wrap { position: relative; height: 320px; }
+.pipeline-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 12px; }
+.pipeline-legend-pill { font-size: 12px; padding: 2px 10px; border-radius: 9999px; font-weight: 500; }
 
 /* ---- Actions bar (compact, full width) ---- */
 .actions-bar { margin-bottom: 28px; }
@@ -196,6 +198,7 @@ body {
 }
 .badge-profil-a-valider { background: #FEF3C7; color: #D97706; border: 1px solid #F59E0B; }
 .badge-nouveau     { background: #DBEAFE; color: #3B82F6; }
+.badge-profil-restreint { background: #374151; color: #fff; }
 .badge-invitation  { background: #EDE9FE; color: #7C3AED; }
 .badge-acceptee    { background: #D1FAE5; color: #065F46; }
 .badge-a-valider   { background: #FEF3C7; color: #92400E; }

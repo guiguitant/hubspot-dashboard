@@ -3544,10 +3544,29 @@ app.get('/api/prospector/export', async (req, res) => {
 // ============================================================
 
 const VALID_PROSPECT_STATUSES = [
-  'Profil à valider','Nouveau','Invitation envoyée','Invitation acceptée',
+  'Profil à valider','Nouveau','Profil restreint','Invitation envoyée','Invitation acceptée',
   'Message à valider','Message à envoyer','Message envoyé',
   'Réponse reçue','RDV planifié','Gagné','Perdu','Non pertinent'
 ];
+
+// --- Event logging (prospect_events) ---
+const EVENT_MAP = {
+  'Invitation envoyée': 'invitation_sent',
+  'Invitation acceptée': 'invitation_accepted',
+  'Réponse reçue': 'response_received',
+};
+
+async function logEvent(type, prospectId, campaignId) {
+  try {
+    await supabase.from('prospect_events').insert({
+      type,
+      prospect_id: prospectId || null,
+      campaign_id: campaignId || null,
+    });
+  } catch (e) {
+    console.error('logEvent error:', e.message);
+  }
+}
 
 // --- Daily quotas ---
 const DAILY_INVITATION_LIMIT = parseInt(process.env.PROSPECTOR_INVITATION_LIMIT) || 23;
@@ -3618,27 +3637,46 @@ app.post('/api/prospector/sync', async (req, res) => {
 
     for (const p of prospects) {
       try {
+        // Reject Sales Navigator URLs in linkedin_url
+        if (p.linkedin_url && p.linkedin_url.includes('linkedin.com/sales/')) {
+          console.error(`Sync rejected: Sales Nav URL in linkedin_url for ${p.first_name} ${p.last_name}`);
+          errors++;
+          continue;
+        }
+
         let existing = null;
 
-        // Find by linkedin_url first (most reliable)
-        if (p.linkedin_url) {
+        // 1. Match by linkedin_url (most reliable)
+        if (!existing && p.linkedin_url) {
           const { data } = await supabase.from('prospects')
-            .select('id').eq('linkedin_url', p.linkedin_url).limit(1);
+            .select('id, linkedin_url, sales_nav_url').eq('linkedin_url', p.linkedin_url).limit(1);
           if (data?.length) existing = data[0];
         }
 
-        // Fallback: find by first_name + last_name
-        if (!existing && p.first_name && p.last_name) {
+        // 2. Match by sales_nav_url
+        if (!existing && p.sales_nav_url) {
           const { data } = await supabase.from('prospects')
-            .select('id')
-            .ilike('first_name', p.first_name)
-            .ilike('last_name', p.last_name)
+            .select('id, linkedin_url, sales_nav_url').eq('sales_nav_url', p.sales_nav_url).limit(1);
+          if (data?.length) existing = data[0];
+        }
+
+        // 3. Fallback: match by first_name + last_name + company (case-insensitive)
+        if (!existing && p.first_name && p.last_name && p.company) {
+          const { data } = await supabase.from('prospects')
+            .select('id, linkedin_url, sales_nav_url')
+            .ilike('first_name', p.first_name.trim())
+            .ilike('last_name', p.last_name.trim())
+            .ilike('company', p.company.trim())
             .limit(1);
           if (data?.length) existing = data[0];
         }
 
         if (existing) {
-          // Update existing prospect
+          // Fetch previous status for event logging
+          const { data: prevData } = await supabase.from('prospects').select('status, source_campaign_id').eq('id', existing.id).single();
+          const prevStatus = prevData?.status;
+
+          // Update existing prospect — fill missing URLs when matched via fallback
           const updates = {};
           if (p.status && VALID_PROSPECT_STATUSES.includes(p.status)) updates.status = p.status;
           if (p.company) updates.company = p.company;
@@ -3648,12 +3686,23 @@ app.post('/api/prospector/sync', async (req, res) => {
           if (p.sector) updates.sector = p.sector;
           if (p.geography) updates.geography = p.geography;
           if (p.linkedin_url) updates.linkedin_url = p.linkedin_url;
+          if (p.sales_nav_url) updates.sales_nav_url = p.sales_nav_url;
           if (p.pending_message !== undefined) updates.pending_message = p.pending_message;
           if (p.notes) updates.notes = p.notes;
           updates.updated_at = new Date().toISOString();
 
           await supabase.from('prospects').update(updates).eq('id', existing.id);
           updated++;
+
+          // Log event if status changed
+          const campId = prevData?.source_campaign_id || campaign_id;
+          if (updates.status && updates.status !== prevStatus) {
+            if (updates.status === 'Nouveau' && prevStatus === 'Profil à valider') {
+              logEvent('prospect_validated', existing.id, campId);
+            } else if (EVENT_MAP[updates.status]) {
+              logEvent(EVENT_MAP[updates.status], existing.id, campId);
+            }
+          }
 
           // Log interaction if provided
           if (p.interaction) {
@@ -3672,6 +3721,7 @@ app.post('/api/prospector/sync', async (req, res) => {
             email: p.email || null,
             phone: p.phone || null,
             linkedin_url: p.linkedin_url || null,
+            sales_nav_url: p.sales_nav_url || null,
             company: p.company || null,
             job_title: p.job_title || null,
             sector: p.sector || null,
@@ -3683,6 +3733,11 @@ app.post('/api/prospector/sync', async (req, res) => {
 
           const { data: newP } = await supabase.from('prospects').insert(row).select('id').single();
           created++;
+
+          // Log event for new prospect
+          if (newP && EVENT_MAP[row.status]) {
+            logEvent(EVENT_MAP[row.status], newP.id, campaign_id);
+          }
 
           // Log interaction if provided
           if (p.interaction && newP) {
@@ -3723,11 +3778,23 @@ app.post('/api/prospector/update-status', async (req, res) => {
     }
     if (!prospectId) return res.status(400).json({ error: 'id or linkedin_url required' });
 
+    // Fetch previous status + campaign_id for event logging
+    const { data: prev } = await supabase.from('prospects').select('status, source_campaign_id').eq('id', prospectId).single();
+
     const updates = { status, updated_at: new Date().toISOString() };
     if (pending_message !== undefined) updates.pending_message = pending_message;
     if (message_versions !== undefined) updates.message_versions = message_versions;
 
     await supabase.from('prospects').update(updates).eq('id', prospectId);
+
+    // Log event
+    const campId = prev?.source_campaign_id;
+    if (status === 'Nouveau' && prev?.status === 'Profil à valider') {
+      logEvent('prospect_validated', prospectId, campId);
+    } else if (EVENT_MAP[status]) {
+      logEvent(EVENT_MAP[status], prospectId, campId);
+    }
+
     res.json({ success: true, id: prospectId, status });
   } catch (err) {
     console.error('Erreur /api/prospector/update-status:', err.message);
@@ -3784,6 +3851,10 @@ app.post('/api/prospector/message-sent', async (req, res) => {
       content: 'Message LinkedIn envoyé via Claude Dispatch',
     });
 
+    // Log event
+    const { data: pData } = await supabase.from('prospects').select('source_campaign_id').eq('id', prospectId).single();
+    logEvent('message_sent', prospectId, pData?.source_campaign_id);
+
     res.json({ success: true, id: prospectId });
   } catch (err) {
     console.error('Erreur /api/prospector/message-sent:', err.message);
@@ -3795,7 +3866,7 @@ app.post('/api/prospector/message-sent', async (req, res) => {
 app.get('/api/prospector/validated-profiles', async (req, res) => {
   try {
     const { data, error } = await supabase.from('prospects')
-      .select('id, first_name, last_name, linkedin_url, company, job_title, source_campaign_id, campaigns(name)')
+      .select('id, first_name, last_name, linkedin_url, sales_nav_url, company, job_title, source_campaign_id, campaigns(name)')
       .eq('status', 'Nouveau')
       .not('linkedin_url', 'is', null);
     if (error) throw error;
@@ -3806,6 +3877,7 @@ app.get('/api/prospector/validated-profiles', async (req, res) => {
       linkedin_url: p.linkedin_url,
       company: p.company,
       job_title: p.job_title,
+      sales_nav_url: p.sales_nav_url || null,
       campaign_id: p.source_campaign_id,
       campaign_name: p.campaigns?.name || null,
     })));
@@ -3823,8 +3895,23 @@ app.post('/api/prospector/bulk-update-status', async (req, res) => {
     if (!VALID_PROSPECT_STATUSES.includes(status)) {
       return res.status(400).json({ error: 'Invalid status. Valid: ' + VALID_PROSPECT_STATUSES.join(', ') });
     }
+
+    // Fetch previous statuses for event logging
+    const { data: prevList } = await supabase.from('prospects').select('id, status, source_campaign_id').in('id', ids);
+
     const { error } = await supabase.from('prospects').update({ status, updated_at: new Date().toISOString() }).in('id', ids);
     if (error) throw error;
+
+    // Log events
+    for (const prev of (prevList || [])) {
+      if (prev.status === status) continue;
+      if (status === 'Nouveau' && prev.status === 'Profil à valider') {
+        logEvent('prospect_validated', prev.id, prev.source_campaign_id);
+      } else if (EVENT_MAP[status]) {
+        logEvent(EVENT_MAP[status], prev.id, prev.source_campaign_id);
+      }
+    }
+
     res.json({ success: true, updated: ids.length });
   } catch (err) {
     console.error('Erreur /api/prospector/bulk-update-status:', err.message);
@@ -3944,6 +4031,109 @@ Retourne uniquement un JSON valide (pas de markdown, pas d'explication) :
   }
 });
 
+// GET /api/prospector/daily-activity — événements par jour sur N jours
+app.get('/api/prospector/daily-activity', async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 30;
+
+    // Build date list
+    const today = new Date();
+    const dates = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      dates.push(d.toISOString().split('T')[0]);
+    }
+    const fromDate = dates[0];
+
+    // Query events grouped by day + type (timezone Paris)
+    const { data: events } = await supabase
+      .from('prospect_events')
+      .select('type, created_at')
+      .gte('created_at', fromDate + 'T00:00:00+01:00');
+
+    // Aggregate by day (Paris timezone) + type
+    const EVENT_TYPES = ['prospect_validated', 'invitation_sent', 'invitation_accepted', 'message_sent', 'response_received'];
+    const series = {};
+    for (const t of EVENT_TYPES) {
+      series[t] = new Array(dates.length).fill(0);
+    }
+
+    for (const ev of (events || [])) {
+      const dayStr = new Date(ev.created_at).toLocaleDateString('en-CA', { timeZone: 'Europe/Paris' });
+      const idx = dates.indexOf(dayStr);
+      if (idx >= 0 && series[ev.type]) {
+        series[ev.type][idx]++;
+      }
+    }
+
+    // Remove types that have all zeros
+    const filtered = {};
+    for (const [type, data] of Object.entries(series)) {
+      if (data.some(v => v > 0)) filtered[type] = data;
+    }
+
+    res.json({ dates, series: filtered });
+  } catch (err) {
+    console.error('Erreur /api/prospector/daily-activity:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/prospector/pipeline-evolution — reconstruction jour par jour sur 30 jours
+app.get('/api/prospector/pipeline-evolution', async (req, res) => {
+  try {
+    const COLORS = {
+      'Profil à valider': '#8b5cf6',
+      'Nouveau': '#3b82f6',
+      'Invitation envoyée': '#f59e0b',
+      'Message à valider': '#ec4899',
+      'Message à envoyer': '#06b6d4',
+      'Message envoyé': '#10b981',
+      'Réponse reçue': '#84cc16',
+      'RDV planifié': '#f97316',
+      'Gagné': '#22c55e',
+      'Perdu': '#ef4444',
+      'Non pertinent': '#6b7280',
+    };
+    const STATUSES = Object.keys(COLORS);
+
+    // Générer J-15 à aujourd'hui (le frontend étend l'axe jusqu'à J+15)
+    const today = new Date();
+    const dates = [];
+    for (let i = 15; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      dates.push(d.toISOString().split('T')[0]);
+    }
+
+    // Récupérer tous les prospects (statut + date de dernière mise à jour)
+    const { data: prospects } = await supabase
+      .from('prospects')
+      .select('status, updated_at');
+
+    // Pour chaque jour + statut : compter les prospects dont updated_at <= jour
+    const series = [];
+    for (const status of STATUSES) {
+      const data = dates.map(date =>
+        (prospects || []).filter(p =>
+          p.status === status &&
+          p.updated_at &&
+          p.updated_at.split('T')[0] <= date
+        ).length
+      );
+      if (data.some(v => v > 0)) {
+        series.push({ status, color: COLORS[status], data });
+      }
+    }
+
+    res.json({ dates, series });
+  } catch (err) {
+    console.error('Erreur /api/prospector/pipeline-evolution:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/prospector/pipeline-chart — snapshot du jour + 30j d'historique
 app.get('/api/prospector/pipeline-chart', async (req, res) => {
   try {
@@ -3962,9 +4152,9 @@ app.get('/api/prospector/pipeline-chart', async (req, res) => {
       await supabase.from('pipeline_snapshots').upsert(upserts, { onConflict: 'date,status' });
     }
 
-    // Récupérer les 30 derniers jours
+    // Récupérer les 15 derniers jours
     const from = new Date();
-    from.setDate(from.getDate() - 29);
+    from.setDate(from.getDate() - 15);
     const fromStr = from.toISOString().split('T')[0];
     const { data: snapshots } = await supabase
       .from('pipeline_snapshots')
