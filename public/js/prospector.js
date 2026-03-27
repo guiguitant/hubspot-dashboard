@@ -1424,12 +1424,26 @@ const App = (() => {
         ${campaign.details ? `<div class="mt-4"><div class="profile-field-label">Détails de la campagne</div><div class="text-sm" style="white-space:pre-wrap;margin-top:4px">${UI.esc(campaign.details)}</div></div>` : ''}
       </div>
 
+      <div class="tab-bar mt-6">
+        <button class="tab-btn tab-active" data-tab="prospects" onclick="App.switchCampaignTab(this, 'prospects', '${id}')">Prospects</button>
+        <button class="tab-btn" data-tab="sequence" onclick="App.switchCampaignTab(this, 'sequence', '${id}')">Séquence</button>
+      </div>
+      <div id="campaignTabContent"></div>
+    `;
+
+    // Render default tab (prospects)
+    renderProspectsTab(id, prospects, statusCounts);
+  }
+
+  function renderProspectsTab(id, prospects, statusCounts) {
+    const el = document.getElementById('campaignTabContent');
+    if (!el) return;
+    el.innerHTML = `
       <div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-top:20px">
         ${UI.STATUSES.filter(s => statusCounts[s]).map(s =>
           `<div class="stat-card">${UI.statusBadge(s)} <span class="stat-value" style="font-size:20px;margin-left:8px">${statusCounts[s]}</span></div>`
         ).join('')}
       </div>
-
       <div class="card mt-6">
         <div class="card-title">Prospects de cette campagne</div>
         <div class="table-wrap">
@@ -1445,6 +1459,414 @@ const App = (() => {
         </div>
       </div>
     `;
+  }
+
+  // Cache for tab data so we don't refetch when switching back
+  let _campDetailCache = {};
+
+  function switchCampaignTab(btn, tab, campaignId) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('tab-active'));
+    btn.classList.add('tab-active');
+    if (tab === 'prospects') {
+      // Re-render from cache if available
+      if (_campDetailCache[campaignId]) {
+        const c = _campDetailCache[campaignId];
+        renderProspectsTab(campaignId, c.prospects, c.statusCounts);
+      }
+    } else if (tab === 'sequence') {
+      renderSequenceTab(campaignId);
+    }
+  }
+
+  // ============================================================
+  // SEQUENCE EDITOR
+  // ============================================================
+
+  const STEP_TYPES = {
+    visit_profile: { icon: '👁️', label: 'Visiter le profil' },
+    send_invitation: { icon: '🤝', label: 'Envoyer une invitation' },
+    send_message: { icon: '💬', label: 'Message' },
+  };
+
+  async function renderSequenceTab(campaignId) {
+    const el = document.getElementById('campaignTabContent');
+    if (!el) return;
+    el.innerHTML = UI.loader();
+
+    const resp = await fetch(`/api/sequences?campaign_id=${campaignId}`);
+    const sequence = await resp.json();
+
+    if (!sequence) {
+      el.innerHTML = `
+        <div class="card mt-6" style="text-align:center;padding:60px 20px">
+          <div style="font-size:48px;margin-bottom:16px">📋</div>
+          <div style="font-size:16px;font-weight:600;margin-bottom:8px">Aucune séquence configurée</div>
+          <div class="text-sm text-muted" style="margin-bottom:20px">Définissez les étapes que vous souhaitez automatiser.</div>
+          <button class="btn btn-primary" onclick="App.createSequence('${campaignId}')">Créer une séquence</button>
+        </div>
+      `;
+      return;
+    }
+
+    const steps = sequence.sequence_steps || [];
+    el.innerHTML = `
+      <div class="card mt-6">
+        <div class="seq-header">
+          <div class="flex items-center gap-2">
+            <input class="seq-name-input" value="${UI.esc(sequence.name)}" onblur="App.updateSequenceName('${sequence.id}', this.value)">
+            <span class="badge badge-type">v${sequence.version}</span>
+          </div>
+          <div class="flex gap-2">
+            ${sequence.version >= 1 ? `<button class="btn btn-outline btn-sm" onclick="App.createNewVersion('${campaignId}', ${sequence.version})">Nouvelle version</button>` : ''}
+          </div>
+        </div>
+        <div class="seq-steps-list" id="seqStepsList">
+          ${steps.length === 0 ? '<div class="text-sm text-muted" style="padding:20px;text-align:center">Aucune étape. Ajoutez-en une ci-dessous.</div>' : ''}
+          ${steps.map((s, i) => stepCardHtml(s, i, sequence.id)).join('')}
+        </div>
+        <div style="padding:16px;border-top:1px solid var(--color-border)">
+          <button class="btn btn-primary btn-sm" onclick="App.openStepEditor('${sequence.id}')">+ Ajouter une étape</button>
+        </div>
+      </div>
+    `;
+
+    initStepDrag(sequence.id);
+  }
+
+  function stepCardHtml(step, index, sequenceId) {
+    const meta = STEP_TYPES[step.type] || { icon: '❓', label: step.type };
+    const msgLabel = step.message_label ? ` — ${UI.esc(step.message_label)}` : '';
+    const preview = step.message_content ? UI.esc(step.message_content.substring(0, 100)) + (step.message_content.length > 100 ? '…' : '') : '';
+    const delayText = step.delay_days > 0 ? `J+${step.delay_days}` : 'Immédiat';
+
+    return `<div class="seq-step-card" draggable="true" data-step-id="${step.id}" data-idx="${index}">
+      <div class="seq-step-header">
+        <div class="seq-step-drag" title="Glisser pour réordonner">⠿</div>
+        <span class="seq-step-num">${index + 1}</span>
+        <span class="seq-step-icon">${meta.icon}</span>
+        <span class="seq-step-label">${meta.label}${msgLabel}</span>
+        <span class="seq-delay-badge" title="Exécution entre J+${Math.round(step.delay_days * 0.83)} et J+${Math.round(step.delay_days * 1.17)} (randomisé ±17%)">${delayText}</span>
+        <div class="seq-step-actions">
+          <button class="btn-icon" onclick="App.openStepEditor('${sequenceId}', '${step.id}')" title="Modifier">✏️</button>
+          <button class="btn-icon" onclick="App.deleteStep('${sequenceId}', '${step.id}')" title="Supprimer">🗑️</button>
+        </div>
+      </div>
+      ${preview ? `<div class="seq-step-preview">${preview}</div>` : ''}
+    </div>`;
+  }
+
+  function initStepDrag(sequenceId) {
+    const list = document.getElementById('seqStepsList');
+    if (!list) return;
+    let dragCard = null;
+
+    list.querySelectorAll('.seq-step-card').forEach(card => {
+      card.addEventListener('dragstart', e => {
+        dragCard = card;
+        card.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      card.addEventListener('dragend', () => {
+        card.classList.remove('dragging');
+        list.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
+        dragCard = null;
+      });
+      card.addEventListener('dragover', e => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (card !== dragCard) {
+          list.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
+          card.classList.add('drag-over');
+        }
+      });
+      card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+      card.addEventListener('drop', async e => {
+        e.preventDefault();
+        card.classList.remove('drag-over');
+        if (!dragCard || dragCard === card) return;
+
+        // Reorder in DOM
+        const cards = [...list.querySelectorAll('.seq-step-card')];
+        const fromIdx = cards.indexOf(dragCard);
+        const toIdx = cards.indexOf(card);
+        if (fromIdx < toIdx) card.after(dragCard);
+        else card.before(dragCard);
+
+        // Save new order
+        const ordered_ids = [...list.querySelectorAll('.seq-step-card')].map(c => c.dataset.stepId);
+        await fetch(`/api/sequences/${sequenceId}/steps/reorder`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ordered_ids }),
+        });
+        renderSequenceTab(_currentCampaignId());
+      });
+    });
+  }
+
+  function _currentCampaignId() {
+    const match = location.hash.match(/campaign-detail\?id=([^&]+)/);
+    return match ? match[1] : null;
+  }
+
+  async function createSequence(campaignId) {
+    const resp = await fetch('/api/sequences', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ campaign_id: campaignId }),
+    });
+    if (resp.ok) renderSequenceTab(campaignId);
+  }
+
+  async function createNewVersion(campaignId, currentVersion) {
+    document.getElementById('bulkConfirmModal')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'bulkConfirmModal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+      <div class="modal-box" style="max-width:440px">
+        <h3 style="margin:0 0 12px">⚠️ Nouvelle version de séquence</h3>
+        <p>Cette action créera la <strong>version ${currentVersion + 1}</strong>.</p>
+        <p class="text-sm text-muted">Les prospects déjà en cours continueront sur la v${currentVersion}. Les nouveaux prospects suivront la v${currentVersion + 1}.</p>
+        <div class="modal-actions">
+          <button class="btn btn-outline" onclick="document.getElementById('bulkConfirmModal').remove()">Annuler</button>
+          <button class="btn btn-primary" id="confirmNewVersion">Créer la v${currentVersion + 1}</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+    document.getElementById('confirmNewVersion').addEventListener('click', async () => {
+      modal.remove();
+      await fetch('/api/sequences', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaign_id: campaignId }),
+      });
+      renderSequenceTab(campaignId);
+    });
+  }
+
+  async function updateSequenceName(seqId, name) {
+    if (!name.trim()) return;
+    await fetch(`/api/sequences/${seqId}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim() }),
+    });
+  }
+
+  async function deleteStep(sequenceId, stepId) {
+    if (!confirm('Supprimer cette étape ?')) return;
+    await fetch(`/api/sequences/${sequenceId}/steps/${stepId}`, { method: 'DELETE' });
+    renderSequenceTab(_currentCampaignId());
+  }
+
+  // ============================================================
+  // STEP EDITOR MODAL
+  // ============================================================
+
+  async function openStepEditor(sequenceId, stepId) {
+    let step = null;
+    if (stepId) {
+      const resp = await fetch(`/api/sequences?campaign_id=${_currentCampaignId()}`);
+      const seq = await resp.json();
+      step = (seq?.sequence_steps || []).find(s => s.id === stepId);
+    }
+
+    document.getElementById('stepEditorModal')?.remove();
+    const isEdit = !!step;
+    const modal = document.createElement('div');
+    modal.id = 'stepEditorModal';
+    modal.className = 'modal-overlay';
+    modal.style.display = 'flex';
+
+    const currentType = step?.type || 'visit_profile';
+    const currentDelay = step?.delay_days || 0;
+    const currentMode = step?.message_mode || 'manual';
+    const currentContent = step?.message_content || '';
+    const currentLabel = step?.message_label || '';
+    const currentParams = step?.message_params || {};
+
+    modal.innerHTML = `
+      <div class="modal-box" style="max-width:560px">
+        <button class="modal-close" onclick="document.getElementById('stepEditorModal').remove()">&times;</button>
+        <h3 style="margin:0 0 16px">${isEdit ? 'Modifier l\'étape' : 'Ajouter une étape'}</h3>
+
+        <div class="form-group">
+          <label>Type d'action</label>
+          <select id="stepType" ${isEdit ? 'disabled' : ''} onchange="App._onStepTypeChange()">
+            <option value="visit_profile" ${currentType === 'visit_profile' ? 'selected' : ''}>👁️ Visiter le profil</option>
+            <option value="send_invitation" ${currentType === 'send_invitation' ? 'selected' : ''}>🤝 Envoyer une invitation</option>
+            <option value="send_message" ${currentType === 'send_message' ? 'selected' : ''}>💬 Envoyer un message</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Délai (jours après l'étape précédente)</label>
+          <input type="number" id="stepDelay" min="0" value="${currentDelay}">
+          <div class="text-sm text-muted" style="margin-top:4px">0 = exécuter dès que possible</div>
+        </div>
+
+        <div id="messageFields" style="display:${currentType === 'send_message' ? 'block' : 'none'}">
+          <div class="form-group">
+            <label>Libellé</label>
+            <input id="stepLabel" value="${UI.esc(currentLabel)}" placeholder="Ex: Message 1 — Angle problème">
+          </div>
+
+          <div class="step-msg-tabs">
+            <button class="step-msg-tab ${currentMode === 'manual' ? 'step-msg-tab-active' : ''}" onclick="App._switchMsgTab('manual')">Rédiger</button>
+            <button class="step-msg-tab ${currentMode === 'ai_generated' ? 'step-msg-tab-active' : ''}" onclick="App._switchMsgTab('ai')">Générer avec Claude</button>
+          </div>
+
+          <div id="msgTabManual" style="display:${currentMode === 'manual' ? 'block' : 'none'}">
+            <div class="form-group">
+              <textarea id="stepContent" rows="5" maxlength="300" placeholder="Votre message LinkedIn…" oninput="App._updateCharCount()">${UI.esc(currentContent)}</textarea>
+              <div class="char-counter"><span id="charCount">${currentContent.length}</span> / 300</div>
+            </div>
+          </div>
+
+          <div id="msgTabAI" style="display:${currentMode === 'ai_generated' ? 'block' : 'none'}">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Angle</label>
+                <select id="aiAngle">
+                  <option value="problème" ${currentParams.angle === 'problème' ? 'selected' : ''}>Problème</option>
+                  <option value="opportunité" ${currentParams.angle === 'opportunité' ? 'selected' : ''}>Opportunité</option>
+                  <option value="curiosité" ${currentParams.angle === 'curiosité' ? 'selected' : ''}>Curiosité</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Ton</label>
+                <select id="aiTone">
+                  <option value="conversationnel" ${currentParams.tone === 'conversationnel' ? 'selected' : ''}>Conversationnel</option>
+                  <option value="professionnel" ${currentParams.tone === 'professionnel' ? 'selected' : ''}>Professionnel</option>
+                  <option value="direct" ${currentParams.tone === 'direct' ? 'selected' : ''}>Direct</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Thématique</label>
+              <input id="aiObjective" value="${UI.esc(currentParams.objective || '')}" placeholder="Ex: Bilan carbone, RSE, QHSE">
+            </div>
+            <div class="form-group">
+              <label>Contexte additionnel (optionnel)</label>
+              <input id="aiContext" value="${UI.esc(currentParams.context || '')}" placeholder="Précisions supplémentaires…">
+            </div>
+            <button class="btn btn-outline btn-sm" id="btnGenerate" onclick="App._generateStepMessage('${sequenceId}')">✨ Générer</button>
+            <div id="aiResult" style="margin-top:12px;display:none">
+              <label class="text-sm" style="font-weight:600">Résultat (modifiable) :</label>
+              <textarea id="aiResultContent" rows="5" maxlength="300" oninput="App._updateCharCount()"></textarea>
+              <div class="char-counter"><span id="charCountAI">0</span> / 300</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-actions" style="margin-top:20px">
+          <button class="btn btn-outline" onclick="document.getElementById('stepEditorModal').remove()">Annuler</button>
+          <button class="btn btn-primary" onclick="App._saveStep('${sequenceId}', ${step ? `'${step.id}'` : 'null'})">Sauvegarder</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  }
+
+  function _onStepTypeChange() {
+    const type = document.getElementById('stepType')?.value;
+    const msgFields = document.getElementById('messageFields');
+    if (msgFields) msgFields.style.display = type === 'send_message' ? 'block' : 'none';
+  }
+
+  function _switchMsgTab(tab) {
+    document.getElementById('msgTabManual').style.display = tab === 'manual' ? 'block' : 'none';
+    document.getElementById('msgTabAI').style.display = tab === 'ai' ? 'block' : 'none';
+    document.querySelectorAll('.step-msg-tab').forEach(b => b.classList.remove('step-msg-tab-active'));
+    document.querySelector(`.step-msg-tab:${tab === 'manual' ? 'first-child' : 'last-child'}`)?.classList.add('step-msg-tab-active');
+  }
+
+  function _updateCharCount() {
+    const ta = document.getElementById('stepContent');
+    const el = document.getElementById('charCount');
+    if (ta && el) el.textContent = ta.value.length;
+    const taAI = document.getElementById('aiResultContent');
+    const elAI = document.getElementById('charCountAI');
+    if (taAI && elAI) elAI.textContent = taAI.value.length;
+  }
+
+  async function _generateStepMessage(sequenceId) {
+    const btn = document.getElementById('btnGenerate');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Génération…'; }
+
+    const campaignId = _currentCampaignId();
+    let campaign = {};
+    try { campaign = await DB.getCampaign(campaignId); } catch(e) {}
+
+    const message_params = {
+      angle: document.getElementById('aiAngle')?.value || 'problème',
+      tone: document.getElementById('aiTone')?.value || 'conversationnel',
+      objective: document.getElementById('aiObjective')?.value || '',
+      context: document.getElementById('aiContext')?.value || '',
+    };
+
+    try {
+      const resp = await fetch('/api/sequences/generate-message', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prospect: { first_name: '{Prénom}', job_title: '{Poste}', company: '{Entreprise}' }, campaign, message_params }),
+      });
+      const result = await resp.json();
+      if (result.content) {
+        const resDiv = document.getElementById('aiResult');
+        const resTa = document.getElementById('aiResultContent');
+        if (resDiv) resDiv.style.display = 'block';
+        if (resTa) { resTa.value = result.content; _updateCharCount(); }
+      } else {
+        UI.toast(result.error || 'Erreur de génération');
+      }
+    } catch(e) {
+      UI.toast('Erreur réseau');
+    }
+    if (btn) { btn.disabled = false; btn.textContent = '✨ Générer'; }
+  }
+
+  async function _saveStep(sequenceId, stepId) {
+    const type = document.getElementById('stepType')?.value;
+    const delay_days = parseInt(document.getElementById('stepDelay')?.value) || 0;
+
+    // Validation
+    if (type === 'send_message' && delay_days < 1) {
+      const minWarn = document.getElementById('stepDelay');
+      if (minWarn) { minWarn.style.borderColor = '#EF4444'; }
+      UI.toast('Délai minimum 1 jour pour un message');
+      return;
+    }
+
+    const body = { type, delay_days };
+
+    if (type === 'send_message') {
+      const aiTab = document.getElementById('msgTabAI');
+      const isAI = aiTab?.style.display !== 'none';
+      body.message_label = document.getElementById('stepLabel')?.value || '';
+
+      if (isAI) {
+        body.message_mode = 'ai_generated';
+        body.message_content = document.getElementById('aiResultContent')?.value || '';
+        body.message_params = {
+          angle: document.getElementById('aiAngle')?.value || '',
+          tone: document.getElementById('aiTone')?.value || '',
+          objective: document.getElementById('aiObjective')?.value || '',
+          context: document.getElementById('aiContext')?.value || '',
+        };
+      } else {
+        body.message_mode = 'manual';
+        body.message_content = document.getElementById('stepContent')?.value || '';
+      }
+    }
+
+    const url = stepId
+      ? `/api/sequences/${sequenceId}/steps/${stepId}`
+      : `/api/sequences/${sequenceId}/steps`;
+    const method = stepId ? 'PUT' : 'POST';
+
+    await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    document.getElementById('stepEditorModal')?.remove();
+    renderSequenceTab(_currentCampaignId());
   }
 
   // ============================================================
@@ -1720,5 +2142,8 @@ const App = (() => {
     quickValidate, quickReject,
     reminderDone, reminderSnooze,
     handleImportFile, setMapping, importBack, importNext, launchImport,
+    switchCampaignTab, createSequence, createNewVersion, updateSequenceName,
+    deleteStep, openStepEditor, _onStepTypeChange, _switchMsgTab,
+    _updateCharCount, _generateStepMessage, _saveStep,
   };
 })();

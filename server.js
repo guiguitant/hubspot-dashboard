@@ -4078,6 +4078,277 @@ app.get('/api/prospector/daily-activity', async (req, res) => {
   }
 });
 
+// ============================================================
+//   SEQUENCES — API endpoints
+// ============================================================
+
+// Simple in-memory rate limiter for message generation
+const _genRateMap = new Map();
+function checkGenRateLimit(ip, maxPerMin = 10) {
+  const now = Date.now();
+  const window = 60000;
+  const hits = (_genRateMap.get(ip) || []).filter(t => now - t < window);
+  if (hits.length >= maxPerMin) return false;
+  hits.push(now);
+  _genRateMap.set(ip, hits);
+  return true;
+}
+
+// GET /api/sequences?campaign_id=X — Get active sequence with steps
+app.get('/api/sequences', async (req, res) => {
+  try {
+    const { campaign_id } = req.query;
+    if (!campaign_id) return res.status(400).json({ error: 'campaign_id required' });
+
+    const { data, error } = await supabase
+      .from('sequences')
+      .select('*, sequence_steps(*)')
+      .eq('campaign_id', campaign_id)
+      .eq('is_active', true)
+      .order('version', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error && error.code !== 'PGRST116') throw error;
+    if (!data) return res.json(null);
+
+    data.sequence_steps.sort((a, b) => a.step_order - b.step_order);
+    res.json(data);
+  } catch (err) {
+    console.error('Erreur GET /api/sequences:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/sequences — Create new sequence (with versioning)
+app.post('/api/sequences', async (req, res) => {
+  try {
+    const { campaign_id, name } = req.body;
+    if (!campaign_id) return res.status(400).json({ error: 'campaign_id required' });
+
+    const { data: existing } = await supabase
+      .from('sequences')
+      .select('version')
+      .eq('campaign_id', campaign_id)
+      .order('version', { ascending: false })
+      .limit(1)
+      .single();
+
+    const newVersion = existing ? existing.version + 1 : 1;
+
+    if (existing) {
+      await supabase.from('sequences')
+        .update({ is_active: false })
+        .eq('campaign_id', campaign_id)
+        .eq('is_active', true);
+    }
+
+    const { data, error } = await supabase
+      .from('sequences')
+      .insert({ campaign_id, name: name || 'Séquence principale', version: newVersion })
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.status(201).json(data);
+  } catch (err) {
+    console.error('Erreur POST /api/sequences:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/sequences/:id — Update sequence name
+app.put('/api/sequences/:id', async (req, res) => {
+  try {
+    const { name } = req.body;
+    const { data, error } = await supabase
+      .from('sequences')
+      .update({ name })
+      .eq('id', req.params.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.error('Erreur PUT /api/sequences:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/sequences/:id — Delete sequence (CASCADE on steps)
+app.delete('/api/sequences/:id', async (req, res) => {
+  try {
+    const { error } = await supabase.from('sequences').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Erreur DELETE /api/sequences:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/sequences/:sid/steps — Add step
+app.post('/api/sequences/:sid/steps', async (req, res) => {
+  try {
+    const { sid } = req.params;
+    const { type, delay_days, message_mode, message_content, message_params, message_label } = req.body;
+
+    const validTypes = ['visit_profile', 'send_invitation', 'send_message'];
+    if (!validTypes.includes(type)) return res.status(400).json({ error: 'Invalid type. Valid: ' + validTypes.join(', ') });
+    if (type === 'send_message' && !message_mode) return res.status(400).json({ error: 'message_mode required for send_message' });
+
+    const { data: lastStep } = await supabase
+      .from('sequence_steps')
+      .select('step_order')
+      .eq('sequence_id', sid)
+      .order('step_order', { ascending: false })
+      .limit(1)
+      .single();
+
+    const step_order = lastStep ? lastStep.step_order + 1 : 1;
+
+    const { data, error } = await supabase
+      .from('sequence_steps')
+      .insert({ sequence_id: sid, step_order, type, delay_days: delay_days || 0, message_mode: message_mode || null, message_content: message_content || null, message_params: message_params || null, message_label: message_label || null })
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.status(201).json(data);
+  } catch (err) {
+    console.error('Erreur POST /api/sequences/:sid/steps:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/sequences/:sid/steps/:id — Update step
+app.put('/api/sequences/:sid/steps/:id', async (req, res) => {
+  try {
+    const allowed = ['type', 'delay_days', 'message_mode', 'message_content', 'message_params', 'message_label'];
+    const updates = {};
+    for (const k of allowed) {
+      if (req.body[k] !== undefined) updates[k] = req.body[k];
+    }
+
+    const { data, error } = await supabase
+      .from('sequence_steps')
+      .update(updates)
+      .eq('id', req.params.id)
+      .eq('sequence_id', req.params.sid)
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.error('Erreur PUT /api/sequences/:sid/steps/:id:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/sequences/:sid/steps/:id — Delete step and reorder
+app.delete('/api/sequences/:sid/steps/:id', async (req, res) => {
+  try {
+    const { sid, id } = req.params;
+
+    const { data: deleted } = await supabase.from('sequence_steps').select('step_order').eq('id', id).single();
+    const { error } = await supabase.from('sequence_steps').delete().eq('id', id);
+    if (error) throw error;
+
+    if (deleted) {
+      const { data: remaining } = await supabase.from('sequence_steps')
+        .select('id, step_order')
+        .eq('sequence_id', sid)
+        .gt('step_order', deleted.step_order)
+        .order('step_order', { ascending: true });
+
+      for (const step of (remaining || [])) {
+        await supabase.from('sequence_steps').update({ step_order: step.step_order - 1 }).eq('id', step.id);
+      }
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Erreur DELETE /api/sequences/:sid/steps/:id:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/sequences/:sid/steps/reorder — Reorder steps after drag & drop
+app.post('/api/sequences/:sid/steps/reorder', async (req, res) => {
+  try {
+    const { ordered_ids } = req.body;
+    if (!Array.isArray(ordered_ids)) return res.status(400).json({ error: 'ordered_ids must be an array' });
+
+    for (let i = 0; i < ordered_ids.length; i++) {
+      await supabase.from('sequence_steps').update({ step_order: i + 1 }).eq('id', ordered_ids[i]);
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Erreur POST /api/sequences/:sid/steps/reorder:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/sequences/generate-message — Generate message via Claude API
+app.post('/api/sequences/generate-message', async (req, res) => {
+  try {
+    const ip = req.ip || req.connection.remoteAddress;
+    if (!checkGenRateLimit(ip)) return res.status(429).json({ error: 'Rate limit: max 10 requêtes/minute' });
+
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY non configurée' });
+
+    const { prospect, campaign, message_params } = req.body;
+    if (!message_params) return res.status(400).json({ error: 'message_params required' });
+
+    const systemPrompt = `Tu es un expert en prospection LinkedIn pour Releaf Carbon, une entreprise qui accompagne les entreprises du BTP et de l'industrie sur les sujets RSE et carbone.
+
+Règles de rédaction ABSOLUES :
+- Vouvoiement obligatoire (vous, votre, vos)
+- Pas de ligne vide entre les paragraphes — tout est collé
+- La phrase après "Bonjour [Prénom]," commence par une minuscule
+- Jamais de pitch commercial, jamais de mention de Releaf Carbon
+- Ton conversationnel et humain
+- CTA court et direct : 5 à 8 mots maximum, une question simple`;
+
+    const pFirst = prospect?.first_name || 'Prénom';
+    const userPrompt = `Rédige UN message LinkedIn de prospection pour ce prospect :
+
+Prénom : ${pFirst}
+Poste : ${prospect?.job_title || ''}
+Entreprise : ${prospect?.company || ''}
+Secteur : ${campaign?.sector || campaign?.criteria?.sector || ''}
+Zone géographique : ${campaign?.geography || campaign?.criteria?.geography || ''}
+Angle : ${message_params.angle || 'problème'}
+Ton : ${message_params.tone || 'conversationnel'}
+Thématique : ${message_params.objective || ''}
+${message_params.context ? `Contexte additionnel : ${message_params.context}` : ''}
+
+Le message doit faire 3 à 5 lignes maximum. Commence par "Bonjour ${pFirst},"`;
+
+    const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 300, messages: [{ role: 'user', content: userPrompt }], system: systemPrompt }),
+    });
+
+    if (!claudeResp.ok) {
+      const errBody = await claudeResp.text();
+      console.error('Claude API error:', claudeResp.status, errBody);
+      return res.status(502).json({ error: `Claude API error: ${claudeResp.status}` });
+    }
+
+    const claudeData = await claudeResp.json();
+    const text = claudeData.content?.[0]?.text || '';
+    res.json({ content: text });
+  } catch (err) {
+    console.error('Erreur POST /api/sequences/generate-message:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Releaf Pilot démarré sur http://localhost:${PORT}`);
 });

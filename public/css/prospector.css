@@ -447,6 +447,99 @@ tbody td { padding: 12px; font-size: var(--font-base); vertical-align: middle; }
 .undo-toast .btn-outline { color: #fff; border-color: rgba(255,255,255,0.3); }
 .undo-toast .btn-outline:hover { background: rgba(255,255,255,0.1); }
 @keyframes slideUp { from { transform: translateX(-50%) translateY(20px); opacity: 0; } to { transform: translateX(-50%) translateY(0); opacity: 1; } }
+
+/* ---- Tabs ---- */
+.tab-bar { display: flex; gap: 0; border-bottom: 2px solid var(--color-border); }
+.tab-btn {
+  padding: 10px 20px;
+  background: none;
+  border: none;
+  font-family: inherit;
+  font-size: var(--font-base);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color .2s, border-color .2s;
+}
+.tab-btn:hover { color: var(--color-text); }
+.tab-btn.tab-active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
+
+/* ---- Sequence editor ---- */
+.seq-header { display: flex; align-items: center; justify-content: space-between; padding: 16px; border-bottom: 1px solid var(--color-border); }
+.seq-name-input {
+  border: 1px solid transparent;
+  background: transparent;
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: border-color .2s;
+}
+.seq-name-input:hover, .seq-name-input:focus { border-color: var(--color-border); outline: none; background: var(--color-surface); }
+
+.seq-steps-list { padding: 0; }
+.seq-step-card {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--color-border);
+  transition: background .15s;
+  cursor: default;
+}
+.seq-step-card:hover { background: var(--color-surface); }
+.seq-step-card.dragging { opacity: 0.4; }
+.seq-step-card.drag-over { border-top: 2px solid var(--color-primary); }
+
+.seq-step-header { display: flex; align-items: center; gap: 10px; }
+.seq-step-drag { cursor: grab; color: var(--color-text-muted); font-size: 16px; user-select: none; }
+.seq-step-num {
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700;
+  flex-shrink: 0;
+}
+.seq-step-icon { font-size: 18px; }
+.seq-step-label { font-weight: 500; flex: 1; }
+.seq-delay-badge {
+  background: #EFF6FF;
+  color: #2563EB;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  cursor: help;
+}
+.seq-step-actions { display: flex; gap: 4px; }
+.seq-step-preview {
+  margin-top: 8px;
+  margin-left: 58px;
+  font-size: var(--font-sm);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* ---- Step editor modal ---- */
+#stepEditorModal { display: flex; }
+.step-msg-tabs { display: flex; gap: 0; margin-bottom: 12px; border-bottom: 1px solid var(--color-border); }
+.step-msg-tab {
+  padding: 8px 16px;
+  background: none;
+  border: none;
+  font-family: inherit;
+  font-size: var(--font-sm);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.step-msg-tab-active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
+.char-counter { text-align: right; font-size: 11px; color: var(--color-text-muted); margin-top: 4px; }
+
 .modal {
   background: var(--color-bg);
   border-radius: var(--radius);
