@@ -364,6 +364,7 @@ const App = (() => {
     btn.classList.add('qf-active');
     const statusSel = document.getElementById('filterStatus');
     if (statusSel) statusSel.value = status;
+    clearSelection();
     filterProspects();
   }
 
@@ -429,33 +430,169 @@ const App = (() => {
     const bar = document.getElementById('bulkActions');
     const count = _selectedProspects.size;
     if (!bar) return;
-    bar.style.display = count > 0 ? 'flex' : 'none';
+    // Only show bulk actions in "Profil à valider" view
+    const statusSel = document.getElementById('filterStatus');
+    const isAValider = statusSel && statusSel.value === 'Profil à valider';
+    bar.style.display = count > 0 && isAValider ? 'flex' : 'none';
     const el = document.getElementById('bulkCount');
     if (el) el.textContent = `${count} sélectionné(s)`;
   }
 
+  // --- Bulk operations with confirmation modal + undo ---
+
+  let _lastBulkOp = null; // { bulk_operation_id, count, status, timer }
+
   async function bulkValidate() {
     if (_selectedProspects.size === 0) return;
+    // Validate = Nouveau, not a terminal status → quick confirm for >= 2
     const ids = [..._selectedProspects];
-    await fetch('/api/prospector/bulk-update-status', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids, status: 'Nouveau' }),
-    });
-    _selectedProspects.clear();
-    UI.toast(`${ids.length} prospect(s) validé(s)`);
-    filterProspects();
+    if (ids.length >= 2) {
+      showBulkConfirmModal(ids, 'Nouveau', async () => {
+        await executeBulk(ids, 'Nouveau');
+      });
+    } else {
+      await executeBulk(ids, 'Nouveau');
+    }
   }
 
   async function bulkReject() {
     if (_selectedProspects.size === 0) return;
     const ids = [..._selectedProspects];
-    await fetch('/api/prospector/bulk-update-status', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids, status: 'Non pertinent' }),
+    // Non pertinent = terminal → always confirm for >= 2
+    showBulkConfirmModal(ids, 'Non pertinent', async () => {
+      await executeBulk(ids, 'Non pertinent');
     });
+  }
+
+  async function executeBulk(ids, status) {
+    const resp = await fetch('/api/prospector/bulk-update-status', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, status }),
+    });
+    const result = await resp.json();
     _selectedProspects.clear();
-    UI.toast(`${ids.length} prospect(s) rejeté(s)`);
     filterProspects();
+    loadQuickFilterCounts();
+
+    // Show undo toast if we got a bulk_operation_id
+    if (result.bulk_operation_id) {
+      showUndoToast(result.bulk_operation_id, ids.length, status);
+    } else {
+      UI.toast(`${ids.length} prospect(s) mis à jour`);
+    }
+  }
+
+  function showBulkConfirmModal(ids, status, onConfirm) {
+    // Remove existing modal if any
+    document.getElementById('bulkConfirmModal')?.remove();
+
+    const isTerminal = ['Non pertinent', 'Perdu'].includes(status);
+    const needsTyping = ids.length >= 10;
+
+    // Get prospect names for display
+    const rows = [];
+    document.querySelectorAll('.prospect-cb').forEach(cb => {
+      if (ids.includes(cb.dataset.id)) {
+        const tr = cb.closest('tr');
+        if (tr) {
+          const name = tr.querySelector('td:nth-child(2)')?.textContent?.trim() || '—';
+          const company = tr.querySelector('td:nth-child(4)')?.textContent?.trim() || '';
+          rows.push({ name, company });
+        }
+      }
+    });
+
+    const previewCount = Math.min(rows.length, 5);
+    const previewHtml = rows.slice(0, previewCount).map(r =>
+      `<li>${UI.esc(r.name)}${r.company ? ' — ' + UI.esc(r.company) : ''}</li>`
+    ).join('');
+    const moreHtml = rows.length > previewCount ? `<li class="text-muted">… et ${rows.length - previewCount} autre(s)</li>` : '';
+
+    const modal = document.createElement('div');
+    modal.id = 'bulkConfirmModal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+      <div class="modal-box" style="max-width:480px">
+        <h3 style="margin:0 0 12px">⚠️ Modification en masse</h3>
+        <p>Vous allez changer le statut de <strong>${ids.length} prospect(s)</strong> vers <strong>"${UI.esc(status)}"</strong>.</p>
+        ${isTerminal ? '<div class="bulk-warn">Attention : statut terminal — ces prospects sortiront du pipeline actif.</div>' : ''}
+        <ul class="bulk-preview">${previewHtml}${moreHtml}</ul>
+        ${needsTyping ? '<p class="text-sm">Pour confirmer, tapez <strong>CONFIRMER</strong> :</p><input id="bulkConfirmInput" class="input" placeholder="CONFIRMER" autocomplete="off">' : ''}
+        <div class="modal-actions">
+          <button class="btn btn-outline" onclick="document.getElementById('bulkConfirmModal').remove()">Annuler</button>
+          <button class="btn ${isTerminal ? 'btn-danger' : 'btn-primary'}" id="bulkConfirmBtn" ${needsTyping ? 'disabled' : ''}>Confirmer</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    // Close on overlay click
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+
+    // Typing guard
+    if (needsTyping) {
+      const inp = document.getElementById('bulkConfirmInput');
+      const btn = document.getElementById('bulkConfirmBtn');
+      inp.addEventListener('input', () => { btn.disabled = inp.value.trim() !== 'CONFIRMER'; });
+    }
+
+    // Confirm button
+    document.getElementById('bulkConfirmBtn').addEventListener('click', () => {
+      modal.remove();
+      onConfirm();
+    });
+  }
+
+  function showUndoToast(bulkOpId, count, status) {
+    // Remove existing undo toast
+    document.getElementById('undoToast')?.remove();
+    if (_lastBulkOp?.timer) clearInterval(_lastBulkOp.timer);
+
+    let secondsLeft = 60;
+    const toast = document.createElement('div');
+    toast.id = 'undoToast';
+    toast.className = 'undo-toast';
+    toast.innerHTML = `
+      <span>✅ ${count} prospect(s) → "${UI.esc(status)}"</span>
+      <button class="btn btn-sm btn-outline" id="undoBtn">Annuler (<span id="undoCountdown">${secondsLeft}</span>s)</button>
+    `;
+    document.body.appendChild(toast);
+
+    const countdownEl = document.getElementById('undoCountdown');
+    const timer = setInterval(() => {
+      secondsLeft--;
+      if (countdownEl) countdownEl.textContent = secondsLeft;
+      if (secondsLeft <= 0) {
+        clearInterval(timer);
+        toast.remove();
+        _lastBulkOp = null;
+      }
+    }, 1000);
+
+    _lastBulkOp = { bulk_operation_id: bulkOpId, count, status, timer };
+
+    document.getElementById('undoBtn').addEventListener('click', async () => {
+      clearInterval(timer);
+      toast.innerHTML = '<span>⏳ Annulation en cours…</span>';
+      try {
+        const resp = await fetch('/api/prospector/undo-bulk', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bulk_operation_id: bulkOpId }),
+        });
+        const result = await resp.json();
+        if (result.success) {
+          toast.innerHTML = `<span>✅ Annulé — ${result.restored} prospect(s) restauré(s)</span>`;
+          filterProspects();
+          loadQuickFilterCounts();
+        } else {
+          toast.innerHTML = `<span>❌ Erreur : ${UI.esc(result.error || 'Échec')}</span>`;
+        }
+      } catch (e) {
+        toast.innerHTML = `<span>❌ Erreur réseau</span>`;
+      }
+      setTimeout(() => toast.remove(), 4000);
+      _lastBulkOp = null;
+    });
   }
 
   async function quickValidate(id) {
@@ -494,14 +631,15 @@ const App = (() => {
           const campClass = p.status === 'Non pertinent' ? 'badge-non-pertinent' : (p.campaigns?.name ? 'badge-type' : 'badge-non-pertinent');
           const isAValider = p.status === 'Profil à valider';
           const checked = _selectedProspects.has(p.id) ? 'checked' : '';
+          const href = `#prospect-detail?id=${p.id}`;
           return `<tr class="clickable ${p.status === 'Non pertinent' ? 'row-muted' : ''} ${isAValider ? 'row-a-valider' : ''}">
           <td onclick="event.stopPropagation()"><input type="checkbox" class="prospect-cb" data-id="${p.id}" ${checked} onchange="App.toggleSelect('${p.id}', this.checked)"></td>
-          <td onclick="location.hash='#prospect-detail?id=${p.id}'"><strong>${UI.esc(p.first_name)} ${UI.esc(p.last_name)}</strong></td>
-          <td class="text-sm text-muted" onclick="location.hash='#prospect-detail?id=${p.id}'">${UI.esc(p.job_title || '')}</td>
-          <td onclick="location.hash='#prospect-detail?id=${p.id}'">${UI.esc(p.company || '')}</td>
-          <td onclick="location.hash='#prospect-detail?id=${p.id}'"><span class="badge ${campClass}">${UI.esc(campName)}</span></td>
-          <td onclick="location.hash='#prospect-detail?id=${p.id}'">${UI.statusBadge(p.status)}</td>
-          <td class="text-muted text-sm" onclick="location.hash='#prospect-detail?id=${p.id}'">${UI.formatDate(p.updated_at)}</td>
+          <td><a href="${href}" class="row-link"><strong>${UI.esc(p.first_name)} ${UI.esc(p.last_name)}</strong></a></td>
+          <td class="text-sm text-muted"><a href="${href}" class="row-link">${UI.esc(p.job_title || '')}</a></td>
+          <td><a href="${href}" class="row-link">${UI.esc(p.company || '')}</a></td>
+          <td><a href="${href}" class="row-link"><span class="badge ${campClass}">${UI.esc(campName)}</span></a></td>
+          <td><a href="${href}" class="row-link">${UI.statusBadge(p.status)}</a></td>
+          <td class="text-muted text-sm"><a href="${href}" class="row-link">${UI.formatDate(p.updated_at)}</a></td>
           <td class="action-btns" onclick="event.stopPropagation()">
             ${isAValider ? `<button class="btn-icon btn-validate" onclick="App.quickValidate('${p.id}')" title="Valider">✓</button><button class="btn-icon btn-reject" onclick="App.quickReject('${p.id}')" title="Non pertinent">✕</button>` : ''}
             ${p.linkedin_url ? `<a href="${UI.esc(p.linkedin_url)}" target="_blank" title="Voir LinkedIn">🔗</a>` : ''}

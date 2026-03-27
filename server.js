@@ -3887,7 +3887,7 @@ app.get('/api/prospector/validated-profiles', async (req, res) => {
   }
 });
 
-// POST /api/prospector/bulk-update-status — Bulk update prospect statuses
+// POST /api/prospector/bulk-update-status — Bulk update with status_history tracking
 app.post('/api/prospector/bulk-update-status', async (req, res) => {
   try {
     const { ids, status } = req.body;
@@ -3896,25 +3896,94 @@ app.post('/api/prospector/bulk-update-status', async (req, res) => {
       return res.status(400).json({ error: 'Invalid status. Valid: ' + VALID_PROSPECT_STATUSES.join(', ') });
     }
 
-    // Fetch previous statuses for event logging
+    const bulkOperationId = crypto.randomUUID();
+
+    // Use RPC to run in a single transaction (trigger captures bulk_operation_id)
+    const { data: updatedCount, error: rpcError } = await supabase.rpc('bulk_update_prospect_status', {
+      p_ids: ids,
+      p_status: status,
+      p_bulk_id: bulkOperationId,
+    });
+
+    if (rpcError) {
+      // Fallback: RPC not yet created, use direct update
+      console.warn('bulk RPC not available, using direct update:', rpcError.message);
+      const { data: prevList } = await supabase.from('prospects').select('id, status, source_campaign_id').in('id', ids);
+      const { error } = await supabase.from('prospects').update({ status, updated_at: new Date().toISOString() }).in('id', ids);
+      if (error) throw error;
+      // Log events
+      for (const prev of (prevList || [])) {
+        if (prev.status === status) continue;
+        if (status === 'Nouveau' && prev.status === 'Profil à valider') {
+          logEvent('prospect_validated', prev.id, prev.source_campaign_id);
+        } else if (EVENT_MAP[status]) {
+          logEvent(EVENT_MAP[status], prev.id, prev.source_campaign_id);
+        }
+      }
+      return res.json({ success: true, updated: ids.length, bulk_operation_id: null });
+    }
+
+    // Log prospect_events for each changed prospect
     const { data: prevList } = await supabase.from('prospects').select('id, status, source_campaign_id').in('id', ids);
-
-    const { error } = await supabase.from('prospects').update({ status, updated_at: new Date().toISOString() }).in('id', ids);
-    if (error) throw error;
-
-    // Log events
     for (const prev of (prevList || [])) {
-      if (prev.status === status) continue;
-      if (status === 'Nouveau' && prev.status === 'Profil à valider') {
+      if (status === 'Nouveau' && prev.status !== 'Nouveau') {
         logEvent('prospect_validated', prev.id, prev.source_campaign_id);
       } else if (EVENT_MAP[status]) {
         logEvent(EVENT_MAP[status], prev.id, prev.source_campaign_id);
       }
     }
 
-    res.json({ success: true, updated: ids.length });
+    res.json({ success: true, updated: updatedCount || ids.length, bulk_operation_id: bulkOperationId });
   } catch (err) {
     console.error('Erreur /api/prospector/bulk-update-status:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/prospector/undo-bulk — Undo a bulk operation
+app.post('/api/prospector/undo-bulk', async (req, res) => {
+  try {
+    const { bulk_operation_id } = req.body;
+    if (!bulk_operation_id) return res.status(400).json({ error: 'bulk_operation_id required' });
+
+    const { data: history, error: histErr } = await supabase
+      .from('status_history')
+      .select('prospect_id, old_status, new_status')
+      .eq('bulk_operation_id', bulk_operation_id);
+
+    if (histErr) throw histErr;
+    if (!history?.length) return res.status(404).json({ error: 'Operation not found or already undone' });
+
+    let restored = 0;
+    for (const row of history) {
+      if (row.old_status) {
+        await supabase.from('prospects')
+          .update({ status: row.old_status, updated_at: new Date().toISOString() })
+          .eq('id', row.prospect_id);
+        restored++;
+      }
+    }
+
+    res.json({ success: true, restored });
+  } catch (err) {
+    console.error('Erreur /api/prospector/undo-bulk:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/prospector/status-history/:prospect_id — History of status changes
+app.get('/api/prospector/status-history/:prospect_id', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('status_history')
+      .select('*')
+      .eq('prospect_id', req.params.prospect_id)
+      .order('changed_at', { ascending: false })
+      .limit(50);
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    console.error('Erreur /api/prospector/status-history:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
