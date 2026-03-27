@@ -319,7 +319,7 @@ const App = (() => {
         ${UI.STATUSES.map(s => {
           const isAValider = s === 'Profil à valider';
           const label = isAValider ? 'À valider' : s;
-          return `<button class="qf-btn ${isAValider ? 'qf-highlight' : ''}" data-filter="${s}" onclick="App.quickFilter(this, '${s}')">${label} <span class="qf-count" id="qfCount-${s.replace(/\s/g, '_')}"></span></button>`;
+          return `<button class="qf-btn ${isAValider ? 'qf-active' : ''}" data-filter="${s}" onclick="App.quickFilter(this, '${s}')">${label} <span class="qf-count" id="qfCount-${s.replace(/\s/g, '_')}"></span></button>`;
         }).join('')}
       </div>
       <div class="filter-bar">

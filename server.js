@@ -27,8 +27,6 @@ const HUBSPOT_HOST = IS_EU ? 'api-eu1.hubapi.com' : 'api.hubapi.com';
 // Detect auth mode: pat-* tokens use Bearer, others use hapikey query param
 const IS_PAT = HUBSPOT_API_KEY.startsWith('pat-');
 
-console.log(`API HubSpot: https://${HUBSPOT_HOST} | Auth: ${IS_PAT ? 'Bearer token' : 'API key (hapikey)'}`);
-
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -467,14 +465,10 @@ async function fetchAndParseCRPrev() {
   const csvText = await fetchCSV(url);
   const rows = parseCsvCRPrev(csvText);
 
-  console.log('[CRPrev] Lignes parsées:', rows.length);
-  console.log('[CRPrev] 5 premières lignes col0:', rows.slice(0, 5).map(r => JSON.stringify(r[0])));
-
   // Trouver la ligne contenant les mois (format MM/YYYY)
   let monthRowIdx = -1;
   for (let i = 0; i < Math.min(15, rows.length); i++) {
     const found = rows[i].some(cell => /^\d{2}\/\d{4}$/.test(cell.trim()));
-    console.log(`[CRPrev] Ligne ${i}:`, rows[i].slice(0, 4).map(c => JSON.stringify(c)), '→ mois?', found);
     if (found) { monthRowIdx = i; break; }
   }
   if (monthRowIdx === -1) throw new Error('Structure CR_Prév non reconnue');
@@ -1461,19 +1455,13 @@ async function fetchRecentTransactions() {
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
     const fromDate = sixMonthsAgo.toISOString().split('T')[0];
     const filter = JSON.stringify([{ field: 'date', operator: 'gteq', value: fromDate }]);
-    console.log(`Chargement des transactions Pennylane depuis ${fromDate}...`);
     const transactions = await pennylaneFetchAll('/transactions', { filter });
     _transactionsCache = transactions;
-    console.log(`${transactions.length} transactions chargées (6 derniers mois)`);
     return transactions;
   } catch (err) {
     console.error('Erreur fetchRecentTransactions:', err.message);
     return _transactionsCache;
   }
-}
-
-function getTransactions() {
-  return _transactionsCache;
 }
 
 // Cache for tresorerie data (avoid hammering API)
@@ -2502,30 +2490,6 @@ app.get('/api/scenarios/:id/projection', async (req, res) => {
   }
 });
 
-// DEBUG: temporary endpoint to inspect raw Pennylane data
-app.get('/api/debug-pennylane', async (req, res) => {
-  try {
-    // Fetch sample transactions
-    const transactions = await pennylaneFetchAll('/transactions', {}, 1); // 1 page only
-    // Fetch categories
-    let categories = [];
-    try { categories = await pennylaneFetchAll('/categories', {}, 5); } catch(e) { categories = [{ error: e.message }]; }
-    // Fetch category_groups
-    let categoryGroups = [];
-    try { categoryGroups = await pennylaneFetchAll('/category_groups', {}, 5); } catch(e) { categoryGroups = [{ error: e.message }]; }
-
-    res.json({
-      sampleTransactions: transactions.slice(0, 5),
-      transactionKeys: transactions.length > 0 ? Object.keys(transactions[0]) : [],
-      categories: categories.slice(0, 30),
-      categoryKeys: categories.length > 0 ? Object.keys(categories[0]) : [],
-      categoryGroups: categoryGroups.slice(0, 20),
-      categoryGroupKeys: categoryGroups.length > 0 ? Object.keys(categoryGroups[0]) : [],
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 // --- Qonto API integration ---
 const QONTO_ORG_ID = process.env.QONTO_ORG_ID;
@@ -3208,41 +3172,6 @@ app.get('/api/charges-hybride', async (req, res) => {
     });
   } catch (err) {
     console.error('Erreur /api/charges-hybride:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/debug/previsionnel', async (_req, res) => {
-  crPrevCache = null;
-  try {
-    const url = `https://docs.google.com/spreadsheets/d/e/${GSHEET_PUBLISHED_ID}/pub?output=csv&gid=${CRPREV_GID}`;
-    const csvText = await fetchCSV(url);
-    const rows = parseCsvCRPrev(csvText);
-
-    // Trouver la ligne des mois
-    let monthRowIdx = -1;
-    for (let i = 0; i < Math.min(15, rows.length); i++) {
-      if (rows[i].some(cell => /^\d{2}\/\d{4}$/.test(cell.trim()))) { monthRowIdx = i; break; }
-    }
-
-    // Afficher les 10 lignes autour de monthRowIdx + les premières colonnes
-    const sampleRows = [];
-    const start = Math.max(0, monthRowIdx);
-    for (let r = start; r < Math.min(start + 12, rows.length); r++) {
-      sampleRows.push({
-        rowIndex: r,
-        col0: rows[r][0],
-        col1: rows[r][1],
-        col2: rows[r][2],
-        col3: rows[r][3],
-        col4: rows[r][4],
-        col5: rows[r][5],
-      });
-    }
-
-    const { budgetCols, categories } = await fetchAndParseCRPrev();
-    res.json({ monthRowIdx, budgetCols: budgetCols.slice(0, 5), categories, sampleRows });
-  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
@@ -4145,95 +4074,6 @@ app.get('/api/prospector/daily-activity', async (req, res) => {
     res.json({ dates, series: filtered });
   } catch (err) {
     console.error('Erreur /api/prospector/daily-activity:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /api/prospector/pipeline-evolution — reconstruction jour par jour sur 30 jours
-app.get('/api/prospector/pipeline-evolution', async (req, res) => {
-  try {
-    const COLORS = {
-      'Profil à valider': '#8b5cf6',
-      'Nouveau': '#3b82f6',
-      'Invitation envoyée': '#f59e0b',
-      'Message à valider': '#ec4899',
-      'Message à envoyer': '#06b6d4',
-      'Message envoyé': '#10b981',
-      'Réponse reçue': '#84cc16',
-      'RDV planifié': '#f97316',
-      'Gagné': '#22c55e',
-      'Perdu': '#ef4444',
-      'Non pertinent': '#6b7280',
-    };
-    const STATUSES = Object.keys(COLORS);
-
-    // Générer J-15 à aujourd'hui (le frontend étend l'axe jusqu'à J+15)
-    const today = new Date();
-    const dates = [];
-    for (let i = 15; i >= 0; i--) {
-      const d = new Date(today);
-      d.setDate(d.getDate() - i);
-      dates.push(d.toISOString().split('T')[0]);
-    }
-
-    // Récupérer tous les prospects (statut + date de dernière mise à jour)
-    const { data: prospects } = await supabase
-      .from('prospects')
-      .select('status, updated_at');
-
-    // Pour chaque jour + statut : compter les prospects dont updated_at <= jour
-    const series = [];
-    for (const status of STATUSES) {
-      const data = dates.map(date =>
-        (prospects || []).filter(p =>
-          p.status === status &&
-          p.updated_at &&
-          p.updated_at.split('T')[0] <= date
-        ).length
-      );
-      if (data.some(v => v > 0)) {
-        series.push({ status, color: COLORS[status], data });
-      }
-    }
-
-    res.json({ dates, series });
-  } catch (err) {
-    console.error('Erreur /api/prospector/pipeline-evolution:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /api/prospector/pipeline-chart — snapshot du jour + 30j d'historique
-app.get('/api/prospector/pipeline-chart', async (req, res) => {
-  try {
-    const today = new Date().toISOString().split('T')[0];
-
-    // Comptage actuel par statut
-    const { data: prospects } = await supabase.from('prospects').select('status');
-    const counts = {};
-    for (const p of prospects || []) {
-      if (p.status) counts[p.status] = (counts[p.status] || 0) + 1;
-    }
-
-    // Upsert snapshot du jour
-    const upserts = Object.entries(counts).map(([status, count]) => ({ date: today, status, count }));
-    if (upserts.length > 0) {
-      await supabase.from('pipeline_snapshots').upsert(upserts, { onConflict: 'date,status' });
-    }
-
-    // Récupérer les 15 derniers jours
-    const from = new Date();
-    from.setDate(from.getDate() - 15);
-    const fromStr = from.toISOString().split('T')[0];
-    const { data: snapshots } = await supabase
-      .from('pipeline_snapshots')
-      .select('date,status,count')
-      .gte('date', fromStr)
-      .order('date', { ascending: true });
-
-    res.json({ snapshots: snapshots || [] });
-  } catch (err) {
-    console.error('Erreur /api/prospector/pipeline-chart:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
