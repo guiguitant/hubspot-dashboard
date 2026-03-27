@@ -466,8 +466,16 @@ tbody td { padding: 12px; font-size: var(--font-base); vertical-align: middle; }
 .tab-btn:hover { color: var(--color-text); }
 .tab-btn.tab-active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
 
-/* ---- Sequence editor ---- */
-.seq-header { display: flex; align-items: center; justify-content: space-between; padding: 16px; border-bottom: 1px solid var(--color-border); }
+/* ---- Sequence editor — split panel ---- */
+.seq-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
 .seq-name-input {
   border: 1px solid transparent;
   background: transparent;
@@ -480,50 +488,104 @@ tbody td { padding: 12px; font-size: var(--font-base); vertical-align: middle; }
 }
 .seq-name-input:hover, .seq-name-input:focus { border-color: var(--color-border); outline: none; background: var(--color-surface); }
 
-.seq-steps-list { padding: 0; }
+.seq-split {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  border: 1px solid var(--color-border);
+  border-top: none;
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: var(--color-bg);
+  min-height: 420px;
+}
+@media (max-width: 768px) { .seq-split { grid-template-columns: 1fr; } }
+
+.seq-left {
+  border-right: 1px solid var(--color-border);
+  padding: 12px;
+  overflow-y: auto;
+  max-height: 520px;
+}
+.seq-right {
+  padding: 20px;
+  overflow-y: auto;
+  max-height: 520px;
+}
+.seq-config-inner h3 { margin: 0 0 16px; font-size: 16px; }
+
 .seq-step-card {
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
   transition: background .15s;
-  cursor: default;
+  border: 1px solid transparent;
 }
 .seq-step-card:hover { background: var(--color-surface); }
+.seq-step-card.seq-step-active { background: var(--color-primary-light); border-color: var(--color-primary); }
 .seq-step-card.dragging { opacity: 0.4; }
 .seq-step-card.drag-over { border-top: 2px solid var(--color-primary); }
 
-.seq-step-header { display: flex; align-items: center; gap: 10px; }
-.seq-step-drag { cursor: grab; color: var(--color-text-muted); font-size: 16px; user-select: none; }
+.seq-step-drag { cursor: grab; color: var(--color-text-muted); font-size: 14px; user-select: none; }
 .seq-step-num {
-  width: 24px; height: 24px;
+  width: 22px; height: 22px;
   border-radius: 50%;
   background: var(--color-primary);
   color: #fff;
   display: flex; align-items: center; justify-content: center;
-  font-size: 12px; font-weight: 700;
+  font-size: 11px; font-weight: 700;
   flex-shrink: 0;
 }
-.seq-step-icon { font-size: 18px; }
-.seq-step-label { font-weight: 500; flex: 1; }
-.seq-delay-badge {
-  background: #EFF6FF;
-  color: #2563EB;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 2px 10px;
-  border-radius: 9999px;
+.seq-step-icon { font-size: 16px; }
+.seq-step-label { font-weight: 500; flex: 1; font-size: var(--font-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.seq-delay-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
   cursor: help;
 }
-.seq-step-actions { display: flex; gap: 4px; }
-.seq-step-preview {
+.seq-delay-line { flex: 1; height: 1px; background: var(--color-border); }
+.seq-delay-text { font-size: 11px; color: var(--color-text-muted); white-space: nowrap; }
+
+.seq-add-step {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid var(--color-border);
   margin-top: 8px;
-  margin-left: 58px;
-  font-size: var(--font-sm);
-  color: var(--color-text-muted);
-  font-style: italic;
 }
 
-/* ---- Step editor modal ---- */
-#stepEditorModal { display: flex; }
+/* ---- Placeholder bar ---- */
+.ph-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+  padding: 8px;
+  background: var(--color-surface);
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+}
+.ph-group { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.ph-group-label { font-size: 10px; color: var(--color-text-muted); text-transform: uppercase; font-weight: 600; margin-right: 2px; }
+.ph-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+  font-family: inherit;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--color-primary);
+  font-weight: 500;
+  transition: background .15s;
+}
+.ph-btn:hover { background: var(--color-primary-light); }
+
+/* ---- Step message tabs ---- */
 .step-msg-tabs { display: flex; gap: 0; margin-bottom: 12px; border-bottom: 1px solid var(--color-border); }
 .step-msg-tab {
   padding: 8px 16px;
@@ -539,6 +601,36 @@ tbody td { padding: 12px; font-size: var(--font-base); vertical-align: middle; }
 }
 .step-msg-tab-active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
 .char-counter { text-align: right; font-size: 11px; color: var(--color-text-muted); margin-top: 4px; }
+
+/* ---- Review tab ---- */
+.review-prospect-list { max-height: 450px; overflow-y: auto; }
+.review-prospect-item {
+  padding: 10px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: background .15s;
+}
+.review-prospect-item:hover { background: var(--color-surface); }
+.review-prospect-item.review-active { background: var(--color-primary-light); }
+.review-delay { font-size: 12px; color: var(--color-text-muted); padding: 8px 0; text-align: center; }
+.review-step { margin-bottom: 12px; }
+.review-step-header { font-weight: 600; font-size: var(--font-sm); margin-bottom: 6px; }
+.review-msg-preview {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 12px;
+  font-size: var(--font-sm);
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+.ph-missing { background: #FEF3C7; color: #D97706; padding: 1px 4px; border-radius: 3px; font-weight: 500; }
+
+/* ---- Placeholder modal ---- */
+#phModal { display: flex; }
 
 .modal {
   background: var(--color-bg);

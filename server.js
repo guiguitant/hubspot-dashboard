@@ -4193,9 +4193,16 @@ app.post('/api/sequences/:sid/steps', async (req, res) => {
     const { sid } = req.params;
     const { type, delay_days, message_mode, message_content, message_params, message_label } = req.body;
 
-    const validTypes = ['visit_profile', 'send_invitation', 'send_message'];
+    const validTypes = ['send_invitation', 'send_message'];
     if (!validTypes.includes(type)) return res.status(400).json({ error: 'Invalid type. Valid: ' + validTypes.join(', ') });
     if (type === 'send_message' && !message_mode) return res.status(400).json({ error: 'message_mode required for send_message' });
+    if (type === 'send_message' && (delay_days || 0) < 1) return res.status(400).json({ error: 'delay_days minimum 1 for send_message' });
+
+    // Only one send_invitation per sequence
+    if (type === 'send_invitation') {
+      const { data: existing } = await supabase.from('sequence_steps').select('id').eq('sequence_id', sid).eq('type', 'send_invitation');
+      if (existing?.length) return res.status(400).json({ error: 'Une seule étape invitation par séquence' });
+    }
 
     const { data: lastStep } = await supabase
       .from('sequence_steps')
@@ -4291,7 +4298,7 @@ app.post('/api/sequences/:sid/steps/reorder', async (req, res) => {
   }
 });
 
-// POST /api/sequences/generate-message — Generate message via Claude API
+// POST /api/sequences/generate-message — Generate message via Claude API with placeholders
 app.post('/api/sequences/generate-message', async (req, res) => {
   try {
     const ip = req.ip || req.connection.remoteAddress;
@@ -4300,38 +4307,43 @@ app.post('/api/sequences/generate-message', async (req, res) => {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY non configurée' });
 
-    const { prospect, campaign, message_params } = req.body;
+    const { campaign, message_params } = req.body;
     if (!message_params) return res.status(400).json({ error: 'message_params required' });
+
+    // Fetch placeholders for prompt
+    const { data: placeholders } = await supabase.from('placeholders').select('key, label, description').order('source');
+    const placeholderList = (placeholders || []).map(p => `{{${p.key}}} → ${p.label}${p.description ? ` (${p.description})` : ''}`).join('\n');
 
     const systemPrompt = `Tu es un expert en prospection LinkedIn pour Releaf Carbon, une entreprise qui accompagne les entreprises du BTP et de l'industrie sur les sujets RSE et carbone.
 
-Règles de rédaction ABSOLUES :
+PLACEHOLDERS DISPONIBLES — utilise-les dans le message au lieu des vraies valeurs :
+${placeholderList}
+
+Règles ABSOLUES de rédaction :
 - Vouvoiement obligatoire (vous, votre, vos)
 - Pas de ligne vide entre les paragraphes — tout est collé
-- La phrase après "Bonjour [Prénom]," commence par une minuscule
+- La phrase après "Bonjour {{prospect_first_name}}," commence par une minuscule
 - Jamais de pitch commercial, jamais de mention de Releaf Carbon
-- Ton conversationnel et humain
-- CTA court et direct : 5 à 8 mots maximum, une question simple`;
+- Ton selon les paramètres fournis
+- CTA : 5 à 8 mots maximum, une question directe
+- Maximum 5 lignes au total`;
 
-    const pFirst = prospect?.first_name || 'Prénom';
-    const userPrompt = `Rédige UN message LinkedIn de prospection pour ce prospect :
+    const userPrompt = `Rédige un message LinkedIn de prospection.
 
-Prénom : ${pFirst}
-Poste : ${prospect?.job_title || ''}
-Entreprise : ${prospect?.company || ''}
-Secteur : ${campaign?.sector || campaign?.criteria?.sector || ''}
-Zone géographique : ${campaign?.geography || campaign?.criteria?.geography || ''}
-Angle : ${message_params.angle || 'problème'}
-Ton : ${message_params.tone || 'conversationnel'}
-Thématique : ${message_params.objective || ''}
-${message_params.context ? `Contexte additionnel : ${message_params.context}` : ''}
+Paramètres :
+- Angle : ${message_params.angle || 'problème'}
+- Ton : ${message_params.tone || 'conversationnel'}
+- Thématique : ${message_params.objective || ''}
+${message_params.context ? `- Contexte : ${message_params.context}` : ''}
+- Secteur de la campagne : ${campaign?.criteria?.sector || campaign?.sector || ''}
+- Zone géographique : ${campaign?.criteria?.geography || campaign?.geography || ''}
 
-Le message doit faire 3 à 5 lignes maximum. Commence par "Bonjour ${pFirst},"`;
+Commence par "Bonjour {{prospect_first_name}}," et utilise les placeholders disponibles.`;
 
     const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 300, messages: [{ role: 'user', content: userPrompt }], system: systemPrompt }),
+      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 300, system: systemPrompt, messages: [{ role: 'user', content: userPrompt }] }),
     });
 
     if (!claudeResp.ok) {
@@ -4345,6 +4357,126 @@ Le message doit faire 3 à 5 lignes maximum. Commence par "Bonjour ${pFirst},"`;
     res.json({ content: text });
   } catch (err) {
     console.error('Erreur POST /api/sequences/generate-message:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/sequences/preview?campaign_id=X&prospect_id=X — Preview with placeholder replacement
+app.get('/api/sequences/preview', async (req, res) => {
+  try {
+    const { campaign_id, prospect_id } = req.query;
+    if (!campaign_id || !prospect_id) return res.status(400).json({ error: 'campaign_id and prospect_id required' });
+
+    // Fetch sequence + prospect + campaign
+    const [seqResp, prospResp, campResp] = await Promise.all([
+      supabase.from('sequences').select('*, sequence_steps(*)').eq('campaign_id', campaign_id).eq('is_active', true).order('version', { ascending: false }).limit(1).single(),
+      supabase.from('prospects').select('*').eq('id', prospect_id).single(),
+      supabase.from('campaigns').select('*').eq('id', campaign_id).single(),
+    ]);
+
+    if (!seqResp.data) return res.json({ steps: [], status: 'no_sequence' });
+
+    const prospect = prospResp.data || {};
+    const campaign = campResp.data || {};
+    const steps = (seqResp.data.sequence_steps || []).sort((a, b) => a.step_order - b.step_order);
+
+    const replacements = {
+      '{{prospect_first_name}}': prospect.first_name || '',
+      '{{prospect_last_name}}': prospect.last_name || '',
+      '{{prospect_company}}': prospect.company || '',
+      '{{prospect_job_title}}': prospect.job_title || '',
+      '{{user_first_name}}': 'Nathan',
+      '{{campaign_name}}': campaign.name || '',
+    };
+
+    // Also fetch custom placeholders
+    const { data: customPh } = await supabase.from('placeholders').select('key').eq('source', 'custom');
+    for (const ph of (customPh || [])) {
+      if (!replacements[`{{${ph.key}}}`]) replacements[`{{${ph.key}}}`] = '';
+    }
+
+    const preview = steps.map(step => ({
+      ...step,
+      message_preview: step.message_content
+        ? Object.entries(replacements).reduce((msg, [key, val]) => msg.replaceAll(key, val || `⚠️${key}`), step.message_content)
+        : null,
+    }));
+
+    res.json({ steps: preview, status: 'not_started', sequence: { id: seqResp.data.id, name: seqResp.data.name, version: seqResp.data.version } });
+  } catch (err) {
+    console.error('Erreur GET /api/sequences/preview:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+//   PLACEHOLDERS — CRUD
+// ============================================================
+
+// GET /api/placeholders
+app.get('/api/placeholders', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('placeholders').select('*').order('source').order('label');
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    console.error('Erreur GET /api/placeholders:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/placeholders
+app.post('/api/placeholders', async (req, res) => {
+  try {
+    const { key, label, description } = req.body;
+    if (!key || !label) return res.status(400).json({ error: 'key and label required' });
+    if (!/^[a-z0-9_]+$/.test(key)) return res.status(400).json({ error: 'key must contain only lowercase letters, digits, and underscores' });
+
+    const { data, error } = await supabase.from('placeholders')
+      .insert({ key, label, description: description || null, source: 'custom', is_system: false })
+      .select().single();
+
+    if (error) {
+      if (error.code === '23505') return res.status(409).json({ error: 'This key already exists' });
+      throw error;
+    }
+    res.status(201).json(data);
+  } catch (err) {
+    console.error('Erreur POST /api/placeholders:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/placeholders/:id
+app.put('/api/placeholders/:id', async (req, res) => {
+  try {
+    const { data: existing } = await supabase.from('placeholders').select('is_system').eq('id', req.params.id).single();
+    if (existing?.is_system) return res.status(403).json({ error: 'Cannot modify system placeholders' });
+
+    const { label, description } = req.body;
+    const { data, error } = await supabase.from('placeholders')
+      .update({ label, description })
+      .eq('id', req.params.id)
+      .select().single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.error('Erreur PUT /api/placeholders:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/placeholders/:id
+app.delete('/api/placeholders/:id', async (req, res) => {
+  try {
+    const { data: existing } = await supabase.from('placeholders').select('is_system').eq('id', req.params.id).single();
+    if (existing?.is_system) return res.status(403).json({ error: 'Cannot delete system placeholders' });
+
+    const { error } = await supabase.from('placeholders').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Erreur DELETE /api/placeholders:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
