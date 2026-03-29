@@ -22,6 +22,10 @@
     <a href="#placeholders" data-page="placeholders">Placeholders</a>
   </div>
   <div class="navbar-end">
+    <div id="currentAccountBadge" style="display:none" class="navbar-account">
+      <span>👤</span>
+      <span class="navbar-account-name" id="currentAccountName"></span>
+    </div>
     <button class="navbar-bell" id="bellBtn" onclick="location.hash='#rappels'">
       🔔 <span class="bell-badge" id="bellBadge" style="display:none">0</span>
     </button>
@@ -253,8 +257,26 @@
 <!-- Scripts -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+
+<!-- Account Context & Selector (Multi-User) -->
+<script src="/js/account-context.js"></script>
+<script src="/js/account-selector.js"></script>
+
+<!-- Prospector App -->
 <script src="/js/prospector-ui.js"></script>
 <script src="/js/prospector-db.js"></script>
 <script src="/js/prospector.js"></script>
+
+<!-- Account Badge Update -->
+<script>
+document.addEventListener('account-selected', (e) => {
+  const badge = document.getElementById('currentAccountBadge');
+  const name = document.getElementById('currentAccountName');
+  if (e.detail) {
+    name.textContent = e.detail.name;
+    badge.style.display = 'flex';
+  }
+});
+</script>
 </body>
 </html>

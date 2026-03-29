@@ -1041,3 +1041,157 @@ tbody td { padding: 12px; font-size: var(--font-base); vertical-align: middle; }
 }
 .quota-fill.quota-orange { background: var(--color-today); }
 .quota-fill.quota-red { background: var(--color-overdue); }
+
+/* ============================================
+   Account Selector Styles
+   ============================================ */
+.account-selector-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(2px);
+}
+
+.account-selector-modal {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 20px 25px rgba(0, 0, 0, 0.15);
+  width: 100%;
+  max-width: 500px;
+  max-height: 80vh;
+  overflow-y: auto;
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.account-selector-header {
+  padding: 40px 30px 20px;
+  border-bottom: 1px solid var(--color-border);
+  text-align: center;
+}
+
+.account-selector-header h1 {
+  font-size: var(--font-2xl);
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: var(--color-text);
+}
+
+.account-selector-header p {
+  font-size: var(--font-lg);
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.account-selector-list {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 200px;
+}
+
+.account-selector-item {
+  padding: 16px;
+  border: 2px solid var(--color-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: white;
+}
+
+.account-selector-item:hover {
+  border-color: var(--color-primary);
+  box-shadow: 0 4px 12px rgba(45, 106, 79, 0.1);
+  transform: translateY(-2px);
+}
+
+.account-selector-item:active {
+  transform: translateY(0);
+}
+
+.account-selector-name {
+  font-size: var(--font-base);
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 4px;
+}
+
+.account-selector-slug {
+  font-size: var(--font-sm);
+  color: var(--color-text-muted);
+  margin-bottom: 4px;
+}
+
+.account-selector-email {
+  font-size: var(--font-sm);
+  color: var(--color-primary);
+}
+
+.account-selector-footer {
+  padding: 12px 30px 20px;
+  border-top: 1px solid var(--color-border);
+  text-align: center;
+}
+
+.account-selector-error {
+  padding: 20px;
+  background: #FEE2E2;
+  border: 1px solid #FECACA;
+  border-radius: 8px;
+  color: #991B1B;
+  text-align: center;
+  font-size: var(--font-sm);
+}
+
+.spinner {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--color-text-muted);
+  font-size: var(--font-sm);
+}
+
+.spinner::after {
+  content: '';
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-left: 8px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Current account badge in navbar */
+.navbar-account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  border-radius: 20px;
+  font-size: var(--font-sm);
+  font-weight: 500;
+}
+
+.navbar-account-name {
+  font-weight: 600;
+}
