@@ -35,6 +35,10 @@ class AccountSelector {
 
   // Load and display accounts
   async show() {
+    // If selector already exists, remove it
+    const existing = document.getElementById('accountSelectorOverlay');
+    if (existing) existing.remove();
+
     this.create();
 
     try {

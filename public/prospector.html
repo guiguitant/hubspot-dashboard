@@ -22,10 +22,10 @@
     <a href="#placeholders" data-page="placeholders">Placeholders</a>
   </div>
   <div class="navbar-end">
-    <div id="currentAccountBadge" style="display:none" class="navbar-account">
+    <button class="navbar-account-btn" id="accountSwitchBtn" style="display:none" title="Cliquez pour changer de compte">
       <span>👤</span>
       <span class="navbar-account-name" id="currentAccountName"></span>
-    </div>
+    </button>
     <button class="navbar-bell" id="bellBtn" onclick="location.hash='#rappels'">
       🔔 <span class="bell-badge" id="bellBadge" style="display:none">0</span>
     </button>
@@ -290,14 +290,26 @@ window.fetch = function(url, options = {}) {
 <script src="/js/prospector-db.js"></script>
 <script src="/js/prospector.js"></script>
 
-<!-- Account Badge Update -->
+<!-- Account Switcher Button & Badge Update -->
 <script>
 document.addEventListener('account-selected', (e) => {
-  const badge = document.getElementById('currentAccountBadge');
+  const btn = document.getElementById('accountSwitchBtn');
   const name = document.getElementById('currentAccountName');
   if (e.detail) {
     name.textContent = e.detail.name;
-    badge.style.display = 'flex';
+    btn.style.display = 'flex';
+  }
+});
+
+// Account switcher button click handler
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('accountSwitchBtn');
+  if (btn) {
+    btn.addEventListener('click', () => {
+      // Show account selector again
+      const selector = new AccountSelector();
+      selector.show();
+    });
   }
 });
 </script>

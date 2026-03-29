@@ -1179,19 +1179,38 @@ tbody td { padding: 12px; font-size: var(--font-base); vertical-align: middle; }
   to { transform: rotate(360deg); }
 }
 
-/* Current account badge in navbar */
-.navbar-account {
+/* Account switcher button in navbar */
+.navbar-account-btn {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px 12px;
   background: var(--color-primary-light);
   color: var(--color-primary);
+  border: none;
   border-radius: 20px;
   font-size: var(--font-sm);
   font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-right: 12px;
+}
+
+.navbar-account-btn:hover {
+  background: var(--color-primary);
+  color: white;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(45, 106, 79, 0.2);
+}
+
+.navbar-account-btn:active {
+  transform: translateY(0);
 }
 
 .navbar-account-name {
   font-weight: 600;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
