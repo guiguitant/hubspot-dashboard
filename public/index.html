@@ -384,6 +384,59 @@
       gap: 0.5rem;
     }
 
+    /* --- Accordion --- */
+    details.section { padding-bottom: 1.2rem; }
+    details.section > summary {
+      list-style: none;
+      cursor: pointer;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: var(--text);
+      outline: none;
+    }
+    details.section > summary::-webkit-details-marker { display: none; }
+    details.section > summary::before {
+      content: '';
+      display: inline-block;
+      width: 3px;
+      height: 1.1em;
+      background: var(--primary);
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+    details.section > summary::after {
+      content: '';
+      margin-left: auto;
+      width: 0.5rem;
+      height: 0.5rem;
+      border-right: 2px solid var(--text-secondary);
+      border-bottom: 2px solid var(--text-secondary);
+      transform: rotate(-45deg);
+      transition: transform 0.25s ease;
+      flex-shrink: 0;
+    }
+    details.section[open] > summary::after {
+      transform: rotate(45deg);
+    }
+    /* Smooth open/close via grid trick */
+    details.section > .accordion-body {
+      display: grid;
+      grid-template-rows: 0fr;
+      transition: grid-template-rows 0.28s ease, margin-top 0.28s ease;
+      margin-top: 0;
+    }
+    details.section[open] > .accordion-body {
+      grid-template-rows: 1fr;
+      margin-top: 1.2rem;
+    }
+    details.section > .accordion-body > .accordion-inner {
+      overflow: hidden;
+    }
+
     .section-title::before {
       content: '';
       display: inline-block;
@@ -1026,6 +1079,48 @@
       .app-main { margin-left: 0; }
     }
     @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+    /* --- Prospection Gmail --- */
+    .prosp-layout { display: grid; grid-template-columns: 40% 1fr; gap: 0; height: calc(100vh - 200px); min-height: 500px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin: 0 1.5rem 1.5rem; }
+    .prosp-list-col { overflow-y: auto; border-right: 1px solid var(--border); background: var(--bg); }
+    .prosp-panel-col { overflow-y: auto; background: var(--bg-secondary); }
+    .prosp-mail-card { padding: 0.85rem 1rem; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.15s; }
+    .prosp-mail-card:hover { background: var(--bg-secondary); }
+    .prosp-mail-card.active { background: rgba(15,123,108,0.1); border-left: 3px solid var(--success); }
+    .prosp-mail-card.analyzed::after { content: '✓'; float: right; font-size: 0.7rem; color: var(--success); margin-top: 2px; }
+    .prosp-mail-from { font-size: 0.82rem; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .prosp-mail-subject { font-size: 0.8rem; color: var(--text); margin: 0.15rem 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .prosp-mail-meta { font-size: 0.72rem; color: var(--text-secondary); display: flex; justify-content: space-between; }
+    .prosp-mail-snippet { font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .prosp-empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 1rem; color: var(--text-secondary); font-size: 0.85rem; text-align: center; padding: 2rem; }
+    .prosp-panel-inner { padding: 1.25rem; }
+    .prosp-panel-header { margin-bottom: 1rem; }
+    .prosp-panel-from { font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.25rem; }
+    .prosp-panel-subject { font-size: 1rem; font-weight: 600; color: var(--text); }
+    .prosp-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 1rem; }
+    .prosp-tab { padding: 0.5rem 1rem; font-size: 0.82rem; font-weight: 500; cursor: pointer; border: none; background: none; color: var(--text-secondary); border-bottom: 2px solid transparent; transition: all 0.15s; }
+    .prosp-tab.active { color: var(--success); border-bottom-color: var(--success); }
+    .prosp-tab-content { display: none; }
+    .prosp-tab-content.active { display: block; }
+    .prosp-score { display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; }
+    .prosp-score-dots { display: flex; gap: 4px; }
+    .prosp-score-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--border); }
+    .prosp-score-dot.filled { background: var(--success); }
+    .prosp-kv { font-size: 0.82rem; margin-bottom: 0.5rem; }
+    .prosp-kv-label { font-weight: 600; color: var(--text); margin-bottom: 0.2rem; }
+    .prosp-kv-val { color: var(--text-secondary); }
+    .prosp-list-ul { list-style: none; padding: 0; margin: 0.25rem 0; }
+    .prosp-list-ul li::before { content: '• '; color: var(--success); }
+    .prosp-list-ul li { font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 0.2rem; }
+    .prosp-red-flag { font-size: 0.8rem; color: #ef4444; background: rgba(239,68,68,0.08); padding: 0.3rem 0.6rem; border-radius: var(--radius); margin-bottom: 0.3rem; }
+    .prosp-reply-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 0.85rem; margin-bottom: 0.75rem; background: var(--bg); }
+    .prosp-reply-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); margin-bottom: 0.35rem; }
+    .prosp-reply-subject { font-size: 0.82rem; font-weight: 600; color: var(--text); margin-bottom: 0.35rem; }
+    .prosp-reply-body { font-size: 0.8rem; color: var(--text-secondary); white-space: pre-wrap; line-height: 1.5; max-height: 140px; overflow-y: auto; margin-bottom: 0.5rem; }
+    .prosp-copy-btn { font-size: 0.72rem; padding: 0.25rem 0.6rem; }
+    .prosp-context-area { width: 100%; padding: 0.5rem; font-size: 0.82rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); resize: vertical; min-height: 60px; margin-bottom: 0.5rem; }
+    .prosp-loading { display: flex; align-items: center; gap: 0.5rem; color: var(--text-secondary); font-size: 0.82rem; padding: 1rem 0; }
+    .prosp-loading-spinner { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--success); border-radius: 50%; animation: spin 0.7s linear infinite; }
   </style>
 </head>
 <body>
@@ -1054,7 +1149,7 @@
               Analyse clients
             </button>
             <button class="sidebar-link" onclick="navigateTo('prospection')" data-page="prospection">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12M2 6h10M2 9h8M2 12h6"/><path d="M13 8l2 2-2 2"/></svg>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 2h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H9l-3 2-3-2H2a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><path d="M5 6h6M5 9h4"/></svg>
               Prospection
             </button>
           </div>
@@ -1272,44 +1367,60 @@
 
     <hr class="divider">
 
+    <!-- Analyse des dernières campagnes Emelia -->
+    <details class="section" id="accordionEmelia">
+      <summary>Analyse des derni&egrave;res campagnes</summary>
+      <div class="accordion-body"><div class="accordion-inner">
+        <div id="emeliaCampaign">
+          <p style="color:var(--text-secondary);font-size:0.85rem">Chargement...</p>
+        </div>
+      </div></div>
+    </details>
+
+    <hr class="divider">
+
     <!-- Table -->
-    <div class="section">
-      <div class="section-title">Detail mois par mois</div>
-      <div class="table-wrapper">
-        <table>
-          <thead>
-            <tr>
-              <th>Mois</th>
-              <th>CA 2026</th>
-              <th>CA 2025</th>
-              <th>% vs N-1</th>
-              <th>Objectif</th>
-              <th>% vs Obj</th>
-              <th>Progression</th>
-            </tr>
-          </thead>
-          <tbody id="tableBody"></tbody>
-        </table>
-      </div>
-    </div>
+    <details class="section" id="accordionDetail">
+      <summary>Detail mois par mois</summary>
+      <div class="accordion-body"><div class="accordion-inner">
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Mois</th>
+                <th>CA 2026</th>
+                <th>CA 2025</th>
+                <th>% vs N-1</th>
+                <th>Objectif</th>
+                <th>% vs Obj</th>
+                <th>Progression</th>
+              </tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+        </div>
+      </div></div>
+    </details>
 
     <hr class="divider">
 
     <!-- Reconciliation HubSpot / Notion -->
-    <div class="section">
-      <div class="section-title">Réconciliation HubSpot &harr; Notion &mdash; <span id="reconYear"></span></div>
-      <div class="recon-stats" id="reconStats"></div>
-      <div class="recon-tabs" id="reconTabs">
-        <button class="recon-tab active" data-tab="matched" onclick="switchReconTab('matched')">Matchés <span class="recon-tab-count" id="reconCountMatched">0</span></button>
-        <button class="recon-tab" data-tab="hsOnly" onclick="switchReconTab('hsOnly')">HubSpot seul <span class="recon-tab-count" id="reconCountHs">0</span></button>
-        <button class="recon-tab" data-tab="notionOnly" onclick="switchReconTab('notionOnly')">Notion seul <span class="recon-tab-count" id="reconCountNotion">0</span></button>
-      </div>
-      <div class="table-wrapper">
-        <div id="reconContent">
-          <p style="color:var(--text-secondary);font-size:0.85rem">Chargement de la réconciliation...</p>
+    <details class="section" id="accordionRecon">
+      <summary>Réconciliation HubSpot &harr; Notion &mdash; <span id="reconYear"></span></summary>
+      <div class="accordion-body"><div class="accordion-inner">
+        <div class="recon-stats" id="reconStats"></div>
+        <div class="recon-tabs" id="reconTabs">
+          <button class="recon-tab active" data-tab="matched" onclick="switchReconTab('matched')">Matchés <span class="recon-tab-count" id="reconCountMatched">0</span></button>
+          <button class="recon-tab" data-tab="hsOnly" onclick="switchReconTab('hsOnly')">HubSpot seul <span class="recon-tab-count" id="reconCountHs">0</span></button>
+          <button class="recon-tab" data-tab="notionOnly" onclick="switchReconTab('notionOnly')">Notion seul <span class="recon-tab-count" id="reconCountNotion">0</span></button>
         </div>
-      </div>
-    </div>
+        <div class="table-wrapper">
+          <div id="reconContent">
+            <p style="color:var(--text-secondary);font-size:0.85rem">Chargement de la réconciliation...</p>
+          </div>
+        </div>
+      </div></div>
+    </details>
   </div>
   </div>
   <!-- end page-dashboard -->
@@ -1448,77 +1559,69 @@
   </div>
   <!-- end page-analyse-clients -->
 
-  <!-- PAGE: Prospection -->
+  <!-- PAGE: Prospection Gmail -->
   <div class="app-page" id="page-prospection">
-  <div class="page">
-    <div class="page-icon">&#128233;</div>
-    <h1 class="page-title">Prospection</h1>
-    <p class="page-desc">Analyse des reponses aux campagnes de prospection email (Emelia).</p>
-
-    <div class="kpi-row" id="prospKpis">
-      <div class="kpi-block">
-        <div class="kpi-label">Total reponses</div>
-        <div class="kpi-value" id="prospKpiTotal">--</div>
-      </div>
-      <div class="kpi-block" style="border-left:3px solid #22c55e">
-        <div class="kpi-label">Interesses</div>
-        <div class="kpi-value" id="prospKpiInteresse" style="color:#22c55e">--</div>
-      </div>
-      <div class="kpi-block" style="border-left:3px solid #ef4444">
-        <div class="kpi-label">Pas interesses</div>
-        <div class="kpi-value" id="prospKpiPasInteresse" style="color:#ef4444">--</div>
-      </div>
-      <div class="kpi-block" style="border-left:3px solid #eab308">
-        <div class="kpi-label">A qualifier</div>
-        <div class="kpi-value" id="prospKpiAQualifier" style="color:#eab308">--</div>
-      </div>
+    <!-- État : non connecté -->
+    <div id="prospGmailConnect" class="page" style="display:none;align-items:center;justify-content:center;min-height:60vh;flex-direction:column;gap:1.5rem;text-align:center">
+      <div class="page-icon">&#128236;</div>
+      <h1 class="page-title">Prospection</h1>
+      <p class="page-desc" style="max-width:420px">Connecte ton compte Gmail pour analyser tes mails de prospection avec Claude.</p>
+      <button class="btn" onclick="connectGmail()" style="display:flex;align-items:center;gap:0.6rem;padding:0.75rem 1.5rem;font-size:0.95rem">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+        Connecter Gmail
+      </button>
+      <p id="prospConnectError" style="color:#ef4444;font-size:0.8rem;display:none"></p>
     </div>
 
-    <div class="section">
-      <div class="section-title">Emails de prospection</div>
-      <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.75rem;flex-wrap:wrap">
-        <button class="btn" onclick="syncProspection()" id="prospSyncBtn" style="font-size:0.8rem;padding:0.35rem 0.8rem;display:flex;align-items:center;gap:0.4rem">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 8a6 6 0 0 1 10.47-4"/><path d="M14 8a6 6 0 0 1-10.47 4"/><path d="M12.47 1v3h-3"/><path d="M3.53 15v-3h3"/></svg>
-          Sync emails
-        </button>
-        <div style="display:flex;align-items:center;gap:0.4rem">
-          <span style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em">Periode</span>
-          <select class="notion-select" id="prospPeriodSelect" onchange="setProspPeriod(this.value)">
-            <option value="all">Toutes</option>
-            <option value="m">Mensuel</option>
-            <option value="q">Trimestriel</option>
-            <option value="y">Annuel</option>
-            <option value="custom">Personnalise</option>
-          </select>
-          <select class="notion-select" id="prospPeriodDetail" onchange="setProspPeriodDetail(this.value)" style="display:none"></select>
-          <div id="prospPeriodCustom" style="display:none;align-items:center;gap:0.3rem">
-            <input type="date" id="prospDateDebut" style="padding:0.3rem 0.5rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
-            <span style="font-size:0.75rem;color:var(--text-secondary)">au</span>
-            <input type="date" id="prospDateFin" style="padding:0.3rem 0.5rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
-            <button class="btn" onclick="applyProspCustomPeriod()" style="font-size:0.75rem;padding:0.2rem 0.5rem">OK</button>
+    <!-- État : connecté -->
+    <div id="prospGmailMain" style="display:none">
+      <div class="page" style="padding-bottom:0">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.75rem;margin-bottom:1rem">
+          <div>
+            <div class="page-icon" style="display:inline;font-size:1.4rem;margin-right:0.5rem">&#128236;</div>
+            <span class="page-title" style="font-size:1.3rem">Prospection</span>
+            <span id="prospGmailBadge" style="margin-left:0.75rem;font-size:0.75rem;color:var(--text-secondary);background:var(--bg-secondary);padding:0.2rem 0.6rem;border-radius:99px;border:1px solid var(--border)"></span>
+          </div>
+          <div style="display:flex;align-items:center;gap:0.75rem">
+            <button class="btn" onclick="refreshGmailMessages()" id="prospRefreshBtn" style="font-size:0.8rem;padding:0.35rem 0.8rem;display:flex;align-items:center;gap:0.4rem">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 8a6 6 0 0 1 10.47-4"/><path d="M14 8a6 6 0 0 1-10.47 4"/><path d="M12.47 1v3h-3"/><path d="M3.53 15v-3h3"/></svg>
+              Actualiser
+            </button>
+            <button onclick="disconnectGmail()" style="background:none;border:none;cursor:pointer;font-size:0.75rem;color:var(--text-secondary);text-decoration:underline">Déconnecter</button>
           </div>
         </div>
-        <div style="display:flex;align-items:center;gap:0.4rem">
-          <span style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em">Categorie</span>
-          <select class="notion-select" id="prospCatSelect" onchange="renderProspection()">
-            <option value="all">Tous</option>
-            <option value="interesse">Interesses</option>
-            <option value="a_qualifier">A qualifier</option>
-            <option value="pas_interesse">Pas interesses</option>
-            <option value="auto_reply">Auto-replies</option>
+
+        <!-- Filtres -->
+        <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem;flex-wrap:wrap">
+          <input type="text" id="prospSearch" placeholder="Rechercher..." oninput="filterGmailMessages()" style="padding:0.35rem 0.7rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.82rem;background:var(--bg);color:var(--text);min-width:180px">
+          <select class="notion-select" id="prospPeriodFilter" onchange="filterGmailMessages()">
+            <option value="all">Toutes périodes</option>
+            <option value="today">Aujourd'hui</option>
+            <option value="week">Cette semaine</option>
+            <option value="month">Ce mois</option>
           </select>
         </div>
       </div>
-      <div class="table-wrapper">
-        <div id="prospContent">
-          <p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Cliquez sur "Sync emails" pour recuperer les reponses.</p>
+
+      <!-- Layout 2 colonnes -->
+      <div class="prosp-layout">
+        <!-- Colonne gauche : liste mails -->
+        <div class="prosp-list-col">
+          <div id="prospMailList"><p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p></div>
+        </div>
+
+        <!-- Colonne droite : panneau analyse -->
+        <div class="prosp-panel-col" id="prospPanel">
+          <div class="prosp-empty-state">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <p>Sélectionne un mail<br>pour l'analyser avec Claude</p>
+          </div>
         </div>
       </div>
     </div>
-
-  </div>
   </div>
   <!-- end page-prospection -->
+
 
   <!-- PAGE: Tresorerie -->
   <div class="app-page" id="page-tresorerie">
@@ -1895,6 +1998,28 @@
       <div class="modal-footer">
         <button class="btn" onclick="closeDealsModal()">Fermer</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Modal Emelia Steps -->
+  <div class="modal-overlay" id="emeliStepsModalOverlay">
+    <div class="modal" style="max-width:680px">
+      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
+        <h2>D&eacute;tail par &eacute;tape</h2>
+        <button onclick="closeEmeliaStepsModal()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--text)">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:1rem" id="emeliStepsModalBody"></div>
+    </div>
+  </div>
+
+  <!-- Modal Emelia Label Contacts -->
+  <div class="modal-overlay" id="emeliContactsModalOverlay">
+    <div class="modal" style="max-width:560px">
+      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
+        <h2 id="emeliContactsModalTitle">Contacts</h2>
+        <button onclick="closeEmeliaContactsModal()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--text)">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:1rem;max-height:60vh;overflow-y:auto" id="emeliContactsModalBody"></div>
     </div>
   </div>
 
@@ -2327,7 +2452,7 @@
       }
 
       if (page === 'cockpit') refreshCockpit();
-      if (page === 'dashboard') { if (dashboardData) render(); else { refreshData(); refreshReconData(); } }
+      if (page === 'dashboard') { if (dashboardData) render(); else { refreshData(); refreshReconData(); } refreshEmeliaCampaign(); }
       if (page === 'facturation') { if (factData) { loadFactOverrides().then(() => { renderFactAlerts(); renderFactKpis(); renderFactTable(); }); } else refreshFactData(); }
       if (page === 'tresorerie') { if (tresoData) { renderTresoKpis(); renderTresoChart(); renderChargesChart(); renderChargesDetail(); renderMasseSalariale(); } else refreshTresoData(); }
       if (page === 'masse-salariale') refreshMasseSalarialePage();
@@ -2335,7 +2460,7 @@
       if (page === 'analytics') initAnalytics();
       if (page === 'frais-km' && !fraisKmData) refreshFraisKmClients();
       if (page === 'analyse-clients' && !analyseClientsData) refreshAnalyseClients();
-      if (page === 'prospection' && !prospData) refreshProspection();
+      if (page === 'prospection') initProspectionGmail();
     }
 
     // --- Auth masse salariale ---
@@ -2414,7 +2539,6 @@
       else if (currentPage === 'scenarios') refreshScenariosPage();
       else if (currentPage === 'frais-km') refreshFraisKmClients();
       else if (currentPage === 'analyse-clients') { analyseClientsData = null; refreshAnalyseClients(); }
-      else if (currentPage === 'prospection') { prospData = null; refreshProspection(); }
     }
 
     const MONTHS_FR = [
@@ -3208,8 +3332,194 @@
       }
     }
 
+    function openEmeliaStepsModal() {
+      const steps = window._emeliSteps || [];
+      const body = document.getElementById('emeliStepsModalBody');
+      if (!steps.length) {
+        body.innerHTML = '<p style="color:var(--text-secondary)">Aucune donn&eacute;e disponible.</p>';
+      } else {
+        body.innerHTML = `<table style="width:100%;font-size:0.85rem">
+          <thead><tr>
+            <th style="text-align:left;padding:0.5rem 0.75rem">&Eacute;tape</th>
+            <th style="text-align:left;padding:0.5rem 0.75rem">Objet</th>
+            <th style="text-align:right;padding:0.5rem 0.75rem">Envoy&eacute;s</th>
+            <th style="text-align:right;padding:0.5rem 0.75rem">Ouvertures</th>
+            <th style="text-align:right;padding:0.5rem 0.75rem">R&eacute;ponses</th>
+          </tr></thead>
+          <tbody>${steps.map(s => `<tr>
+            <td style="padding:0.5rem 0.75rem;font-weight:600">&Eacute;tape ${s.index}</td>
+            <td style="padding:0.5rem 0.75rem;color:var(--text-secondary);font-size:0.8rem">${s.subject || '--'}</td>
+            <td style="padding:0.5rem 0.75rem;text-align:right">${s.sent ?? '--'}</td>
+            <td style="padding:0.5rem 0.75rem;text-align:right">${s.first_open != null ? s.first_open + ' <span style="color:var(--text-secondary)">(' + Math.round(s.first_open_percent) + '%)</span>' : '--'}</td>
+            <td style="padding:0.5rem 0.75rem;text-align:right">${s.replied != null ? s.replied + ' <span style="color:var(--text-secondary)">(' + Math.round(s.replied_percent) + '%)</span>' : '--'}</td>
+          </tr>`).join('')}</tbody>
+        </table>`;
+      }
+      document.getElementById('emeliStepsModalOverlay').classList.add('active');
+    }
+
+    async function openEmeliaContactsModal(labelFullName, labelName) {
+      const overlay = document.getElementById('emeliContactsModalOverlay');
+      const body = document.getElementById('emeliContactsModalBody');
+      document.getElementById('emeliContactsModalTitle').textContent = labelName;
+      body.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem">Chargement...</p>';
+      overlay.classList.add('active');
+      try {
+        const res = await fetch(`/api/emelia-label-contacts?label=${encodeURIComponent(labelFullName)}`);
+        const data = await res.json();
+        const contacts = data.contacts || [];
+        if (!contacts.length) {
+          body.innerHTML = '<p style="color:var(--text-secondary)">Aucun contact.</p>';
+          return;
+        }
+        body.innerHTML = contacts.map(c => `
+          <div style="display:flex;align-items:center;gap:0.75rem;padding:0.5rem 0;border-bottom:1px solid var(--border)">
+            <div style="width:32px;height:32px;border-radius:50%;background:var(--primary);color:white;display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:700;flex-shrink:0">
+              ${c.name.charAt(0).toUpperCase()}
+            </div>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:0.88rem;font-weight:600">${c.name}</div>
+              <div style="font-size:0.78rem;color:var(--text-secondary)">${c.email}</div>
+            </div>
+            <div style="font-size:0.8rem;color:var(--text-secondary);text-transform:capitalize">${c.company}</div>
+          </div>`).join('');
+      } catch (err) {
+        body.innerHTML = '<p style="color:var(--danger)">Erreur de chargement.</p>';
+      }
+    }
+
+    function closeEmeliaContactsModal() {
+      document.getElementById('emeliContactsModalOverlay').classList.remove('active');
+    }
+
+    document.getElementById('emeliContactsModalOverlay').addEventListener('click', e => {
+      if (e.target === e.currentTarget) closeEmeliaContactsModal();
+    });
+
+    function closeEmeliaStepsModal() {
+      document.getElementById('emeliStepsModalOverlay').classList.remove('active');
+    }
+
+    document.getElementById('emeliStepsModalOverlay').addEventListener('click', e => {
+      if (e.target === e.currentTarget) closeEmeliaStepsModal();
+    });
+
+    // --- Emelia Campaign ---
+    async function fetchEmeliaCampaign() {
+      const res = await fetch('/api/emelia-campaign');
+      if (!res.ok) throw new Error('Erreur Emelia');
+      return res.json();
+    }
+
+    async function fetchEmeliaLabels() {
+      const res = await fetch('/api/emelia-labels');
+      if (!res.ok) return { labels: [] };
+      return res.json();
+    }
+
+    const LABEL_CONFIG = [
+      { name: 'RDV confirmé',        color: '#22c55e', emoji: '📅' },
+      { name: 'Intéréssé plus tard', color: '#3b82f6', emoji: '⏳' },
+      { name: 'A relancer',          color: '#f59e0b', emoji: '🔁' },
+      { name: 'Pas intéréssé',       color: '#ef4444', emoji: '✗'  },
+      { name: 'OOO',                 color: '#94a3b8', emoji: '🏖'  },
+    ];
+
+    function renderEmeliaCampaign(data, labels) {
+      const el = document.getElementById('emeliaCampaign');
+      if (!el) return;
+      if (!data || !data.campaign) {
+        el.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem">Aucune campagne trouv&eacute;e.</p>';
+        return;
+      }
+      const c = data.campaign;
+      const stats = c.stats || {};
+      const sent = stats.sent || 0;
+      const opens = stats.first_open || 0;
+      const replies = stats.replied || 0;
+      const openRate = stats.first_open_percent ? Math.round(stats.first_open_percent) : 0;
+      const replyRate = stats.replied_percent ? Math.round(stats.replied_percent) : 0;
+
+      const statusLabel = { RUNNING: 'En cours', PAUSED: 'En pause', FINISHED: 'Termin&eacute;e', DRAFT: 'Brouillon' }[c.status] || c.status || '--';
+      const statusColor = c.status === 'RUNNING' ? 'var(--success)' : c.status === 'FINISHED' ? 'var(--text-secondary)' : 'var(--warning)';
+
+      // Stocker les steps pour le modal
+      window._emeliSteps = c.steps || [];
+
+      // Construire le HTML des labels
+      const labelsMap = {};
+      (labels || []).forEach(l => { labelsMap[l.name] = l.count; });
+
+      const labelsHtml = LABEL_CONFIG.map(cfg => {
+        const count = labelsMap[cfg.name] || 0;
+        const pct = replies > 0 ? Math.round((count / replies) * 100) : 0;
+        const fullName = (labels.find(l => l.name === cfg.name) || {}).fullName || cfg.name;
+        return `<div onclick="openEmeliaContactsModal('${fullName.replace(/'/g,"\\'")}','${cfg.name.replace(/'/g,"\\'")}') "
+          style="display:flex;align-items:center;gap:0.75rem;padding:0.5rem 0;border-bottom:1px solid var(--border);cursor:pointer;transition:opacity 0.15s" onmouseenter="this.style.opacity='.7'" onmouseleave="this.style.opacity='1'">
+          <span style="width:8px;height:8px;border-radius:50%;background:${cfg.color};flex-shrink:0"></span>
+          <span style="flex:1;font-size:0.88rem">${cfg.name}</span>
+          <span style="font-weight:600;font-size:0.9rem;min-width:2rem;text-align:right">${count}</span>
+          <span style="font-size:0.78rem;color:var(--text-secondary);min-width:3rem;text-align:right">${pct}%</span>
+          <span style="font-size:0.75rem;color:var(--text-light)">&rsaquo;</span>
+        </div>`;
+      }).join('');
+
+      const progress = Math.round(stats.progress_percent || 0);
+      const radius = 22;
+      const circ = +(2 * Math.PI * radius).toFixed(2);
+      const dash = +((progress / 100) * circ).toFixed(2);
+
+      el.innerHTML = `
+        <div style="margin-bottom:1.2rem;display:flex;align-items:center;gap:0.75rem">
+          <span style="font-weight:600;font-size:1rem">${c.name}</span>
+          <span style="font-size:0.78rem;color:${statusColor};background:color-mix(in srgb,${statusColor} 12%,transparent);padding:2px 8px;border-radius:12px;border:1px solid color-mix(in srgb,${statusColor} 30%,transparent)">${statusLabel}</span>
+          <div style="margin-left:auto;display:flex;flex-direction:column;align-items:center;gap:0.15rem">
+            <svg width="60" height="60" viewBox="0 0 60 60">
+              <circle cx="30" cy="30" r="${radius}" fill="none" stroke="var(--border)" stroke-width="5"/>
+              <circle cx="30" cy="30" r="${radius}" fill="none" stroke="var(--primary)" stroke-width="5"
+                stroke-dasharray="${dash} ${circ}"
+                stroke-linecap="round"
+                transform="rotate(-90 30 30)"/>
+              <text x="30" y="34" text-anchor="middle" font-size="11" font-weight="600" fill="currentColor">${progress}%</text>
+            </svg>
+            <span style="font-size:0.7rem;color:var(--text-secondary)">progression</span>
+          </div>
+        </div>
+        <div class="kpi-row" style="margin-bottom:1.5rem">
+          <div class="kpi-block" onclick="openEmeliaStepsModal()" style="cursor:pointer">
+            <div class="kpi-label">Emails envoy&eacute;s</div>
+            <div class="kpi-value">${sent}</div>
+            <div class="kpi-sub" style="color:var(--primary)">Voir par &eacute;tape &rsaquo;</div>
+          </div>
+          <div class="kpi-block">
+            <div class="kpi-label">Ouvertures</div>
+            <div class="kpi-value">${opens}</div>
+            <div class="kpi-sub">${openRate}% du total</div>
+          </div>
+          <div class="kpi-block">
+            <div class="kpi-label">R&eacute;ponses</div>
+            <div class="kpi-value">${replies}</div>
+            <div class="kpi-sub">${replyRate}% du total</div>
+          </div>
+        </div>
+        <div style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.4rem">Qualification des r&eacute;ponses</div>
+        <div>${labelsHtml}</div>
+      `;
+    }
+
+    async function refreshEmeliaCampaign() {
+      try {
+        const [campaignData, labelsData] = await Promise.all([fetchEmeliaCampaign(), fetchEmeliaLabels()]);
+        renderEmeliaCampaign(campaignData, labelsData.labels || []);
+      } catch (err) {
+        console.error('Erreur Emelia:', err);
+        const el = document.getElementById('emeliaCampaign');
+        if (el) el.innerHTML = '<p style="color:var(--danger);font-size:0.85rem">Erreur de chargement Emelia.</p>';
+      }
+    }
+
     refreshCockpit();
-    refreshTimer = setInterval(function() { if (currentPage === 'cockpit') refreshCockpit(); else if (currentPage === 'dashboard') { refreshData(); refreshReconData(); } }, 5 * 60 * 1000);
+    refreshTimer = setInterval(function() { if (currentPage === 'cockpit') refreshCockpit(); else if (currentPage === 'dashboard') { refreshData(); refreshReconData(); refreshEmeliaCampaign(); } }, 5 * 60 * 1000);
 
     // --- Analytics ---
     let analyticsCurrentPreset = 'exercice-courant';
@@ -6454,207 +6764,301 @@
       doc.save(fileName);
     }
 
-    // --- Prospection ---
-    let prospData = null;
-    let prospPeriodType = 'all';
-    let prospPeriodStart = null;
-    let prospPeriodEnd = null;
+    // --- Prospection Gmail + Claude ---
+    let gmailMessages = [];
+    let gmailMessagesFiltered = [];
+    let gmailCache = {}; // id -> full message data
+    let analysisCache = {}; // id -> { analysis, reply, followup }
+    let selectedMailId = null;
 
-    const PROSP_CAT_LABELS = { interesse: 'Interesse', pas_interesse: 'Pas interesse', auto_reply: 'Auto-reply', a_qualifier: 'A qualifier' };
-    const PROSP_CAT_COLORS = { interesse: '#22c55e', pas_interesse: '#ef4444', auto_reply: '#94a3b8', a_qualifier: '#eab308' };
-
-    async function refreshProspection() {
+    async function initProspectionGmail() {
       try {
-        const res = await fetch('/api/prospection/prospects');
-        if (!res.ok) throw new Error('Erreur ' + res.status);
-        prospData = await res.json();
-        renderProspection();
-      } catch (err) {
-        document.getElementById('prospContent').innerHTML = '<p style="color:#ef4444;padding:1rem">' + err.message + '</p>';
-      }
-    }
-
-    async function syncProspection() {
-      const btn = document.getElementById('prospSyncBtn');
-      btn.disabled = true;
-      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" style="animation:spin 1s linear infinite"><path d="M2 8a6 6 0 0 1 10.47-4"/><path d="M14 8a6 6 0 0 1-10.47 4"/><path d="M12.47 1v3h-3"/><path d="M3.53 15v-3h3"/></svg> Sync en cours...';
-      try {
-        const res = await fetch('/api/prospection/sync', { method: 'POST' });
-        if (!res.ok) throw new Error('Erreur ' + res.status);
-        const result = await res.json();
-        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 8a6 6 0 0 1 10.47-4"/><path d="M14 8a6 6 0 0 1-10.47 4"/><path d="M12.47 1v3h-3"/><path d="M3.53 15v-3h3"/></svg> Sync emails';
-        btn.disabled = false;
-        await refreshProspection();
-      } catch (err) {
-        btn.innerHTML = 'Erreur sync';
-        btn.disabled = false;
-        alert('Erreur sync: ' + err.message);
-      }
-    }
-
-    async function qualifyProspect(id, category) {
-      try {
-        const res = await fetch('/api/prospection/qualify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id, category }),
-        });
-        if (!res.ok) throw new Error('Erreur ' + res.status);
-        // Update local data
-        if (prospData) {
-          const item = prospData.find(p => p.id === id);
-          if (item) { item.category = category; item.manual_override = true; }
-          renderProspection();
+        const res = await fetch('/auth/google/status');
+        const { connected, email } = await res.json();
+        document.getElementById('prospGmailConnect').style.display = connected ? 'none' : 'flex';
+        document.getElementById('prospGmailMain').style.display = connected ? 'block' : 'none';
+        if (connected) {
+          document.getElementById('prospGmailBadge').textContent = email || '';
+          if (gmailMessages.length === 0) refreshGmailMessages();
         }
-      } catch (err) {
-        alert('Erreur qualification: ' + err.message);
+        // Handle OAuth redirect params
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('gmail_connected')) {
+          history.replaceState({}, '', '/');
+          initProspectionGmail();
+        }
+        if (params.get('gmail_error')) {
+          document.getElementById('prospConnectError').textContent = 'Erreur : ' + params.get('gmail_error');
+          document.getElementById('prospConnectError').style.display = 'block';
+          history.replaceState({}, '', '/');
+        }
+      } catch(err) {
+        console.error('Gmail status error:', err);
       }
     }
 
-    function getFilteredProspects() {
-      if (!prospData) return [];
-      let list = [...prospData];
-
-      // Period filter
-      if (prospPeriodStart && prospPeriodEnd) {
-        list = list.filter(p => {
-          if (!p.date) return false;
-          const d = new Date(p.date);
-          return d >= prospPeriodStart && d <= prospPeriodEnd;
-        });
-      }
-
-      // Category filter
-      const catFilter = (document.getElementById('prospCatSelect') || {}).value || 'all';
-      if (catFilter !== 'all') {
-        list = list.filter(p => p.category === catFilter);
-      }
-
-      return list;
+    function connectGmail() {
+      window.location.href = '/auth/google';
     }
 
-    function renderProspection() {
-      const filtered = getFilteredProspects();
-      const all = prospData || [];
+    async function disconnectGmail() {
+      await fetch('/auth/google/logout', { method: 'POST' });
+      gmailMessages = []; gmailMessagesFiltered = []; gmailCache = {}; analysisCache = {}; selectedMailId = null;
+      initProspectionGmail();
+    }
 
-      // KPIs based on filtered data
-      const total = filtered.length;
-      const interesse = filtered.filter(p => p.category === 'interesse').length;
-      const pasInteresse = filtered.filter(p => p.category === 'pas_interesse').length;
-      const aQualifier = filtered.filter(p => p.category === 'a_qualifier').length;
+    async function refreshGmailMessages() {
+      const btn = document.getElementById('prospRefreshBtn');
+      if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
+      document.getElementById('prospMailList').innerHTML = '<div class="prosp-loading"><div class="prosp-loading-spinner"></div> Chargement des mails...</div>';
+      try {
+        const res = await fetch('/api/gmail/messages');
+        if (res.status === 401) { initProspectionGmail(); return; }
+        if (!res.ok) throw new Error('Erreur ' + res.status);
+        gmailMessages = await res.json();
+        filterGmailMessages();
+      } catch(err) {
+        document.getElementById('prospMailList').innerHTML = '<p style="color:#ef4444;padding:1rem;font-size:0.82rem">' + err.message + '</p>';
+      } finally {
+        if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+      }
+    }
 
-      document.getElementById('prospKpiTotal').textContent = total;
-      document.getElementById('prospKpiInteresse').textContent = interesse;
-      document.getElementById('prospKpiPasInteresse').textContent = pasInteresse;
-      document.getElementById('prospKpiAQualifier').textContent = aQualifier;
+    function filterGmailMessages() {
+      const search = (document.getElementById('prospSearch')?.value || '').toLowerCase();
+      const period = document.getElementById('prospPeriodFilter')?.value || 'all';
+      const now = new Date();
 
-      // Table
-      if (filtered.length === 0) {
-        document.getElementById('prospContent').innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Aucun email trouve.</p>';
+      gmailMessagesFiltered = gmailMessages.filter(m => {
+        const matchSearch = !search || m.from.toLowerCase().includes(search) || m.subject.toLowerCase().includes(search);
+        let matchPeriod = true;
+        if (period !== 'all') {
+          const date = new Date(m.date);
+          if (period === 'today') matchPeriod = date.toDateString() === now.toDateString();
+          else if (period === 'week') { const d = new Date(now); d.setDate(d.getDate() - 7); matchPeriod = date >= d; }
+          else if (period === 'month') matchPeriod = date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+        }
+        return matchSearch && matchPeriod;
+      });
+      renderGmailList();
+    }
+
+    function renderGmailList() {
+      const el = document.getElementById('prospMailList');
+      if (!gmailMessagesFiltered.length) {
+        el.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Aucun mail trouvé.</p>';
         return;
       }
-
-      let html = '<table class="data-table"><thead><tr>';
-      html += '<th>Date</th><th>Nom</th><th>Email</th><th>Sujet</th><th>Extrait</th><th>Categorie</th>';
-      html += '</tr></thead><tbody>';
-
-      for (const p of filtered) {
-        const date = p.date ? new Date(p.date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '-';
-        const catColor = PROSP_CAT_COLORS[p.category] || '#94a3b8';
-        const preview = (p.body_preview || '').substring(0, 100) + ((p.body_preview || '').length > 100 ? '...' : '');
-
-        html += '<tr>';
-        html += '<td style="white-space:nowrap;font-size:0.8rem">' + date + '</td>';
-        html += '<td style="font-size:0.8rem;font-weight:500">' + escapeHtml(p.from_name || '-') + '</td>';
-        html += '<td style="font-size:0.78rem;color:var(--text-secondary)">' + escapeHtml(p.from_email || '-') + '</td>';
-        html += '<td style="font-size:0.8rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escapeHtml(p.subject || '') + '">' + escapeHtml(p.subject || '-') + '</td>';
-        html += '<td style="font-size:0.75rem;color:var(--text-secondary);max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escapeHtml(preview) + '">' + escapeHtml(preview || '-') + '</td>';
-        html += '<td><select class="notion-select" style="font-size:0.75rem;border-color:' + catColor + ';color:' + catColor + '" onchange="qualifyProspect(' + p.id + ', this.value)">';
-        for (const [key, label] of Object.entries(PROSP_CAT_LABELS)) {
-          html += '<option value="' + key + '"' + (p.category === key ? ' selected' : '') + '>' + label + '</option>';
-        }
-        html += '</select></td>';
-        html += '</tr>';
+      let html = '';
+      for (const m of gmailMessagesFiltered) {
+        const from = m.from.replace(/<.*>/, '').trim() || m.from;
+        const date = new Date(m.date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
+        const analyzed = !!analysisCache[m.id];
+        html += `<div class="prosp-mail-card${m.id === selectedMailId ? ' active' : ''}${analyzed ? ' analyzed' : ''}" onclick="selectGmailMail('${m.id}')">
+          <div class="prosp-mail-from">${escapeHtml(from)}</div>
+          <div class="prosp-mail-subject">${escapeHtml(m.subject || '(sans objet)')}</div>
+          <div class="prosp-mail-meta"><span>${escapeHtml(m.from.match(/<(.+)>/)?.[1] || '')}</span><span>${date}</span></div>
+          <div class="prosp-mail-snippet">${escapeHtml(m.snippet)}</div>
+        </div>`;
       }
+      el.innerHTML = html;
+    }
 
-      html += '</tbody></table>';
-      document.getElementById('prospContent').innerHTML = html;
+    async function selectGmailMail(id) {
+      selectedMailId = id;
+      renderGmailList();
+      const panel = document.getElementById('prospPanel');
+      panel.innerHTML = '<div class="prosp-panel-inner"><div class="prosp-loading"><div class="prosp-loading-spinner"></div> Chargement du mail...</div></div>';
+
+      try {
+        if (!gmailCache[id]) {
+          const res = await fetch('/api/gmail/message/' + id);
+          if (!res.ok) throw new Error('Erreur ' + res.status);
+          gmailCache[id] = await res.json();
+        }
+        renderMailPanel(gmailCache[id]);
+      } catch(err) {
+        panel.innerHTML = '<div class="prosp-panel-inner"><p style="color:#ef4444;font-size:0.82rem">' + err.message + '</p></div>';
+      }
+    }
+
+    function renderMailPanel(mail) {
+      const panel = document.getElementById('prospPanel');
+      const cached = analysisCache[mail.id] || {};
+      panel.innerHTML = `
+        <div class="prosp-panel-inner">
+          <div class="prosp-panel-header">
+            <div class="prosp-panel-from">${escapeHtml(mail.from)}</div>
+            <div class="prosp-panel-subject">${escapeHtml(mail.subject || '(sans objet)')}</div>
+          </div>
+          <div class="prosp-tabs">
+            <button class="prosp-tab active" onclick="showProspTab('analyse')">Analyse</button>
+            <button class="prosp-tab" onclick="showProspTab('repondre')">Répondre</button>
+            ${mail.isThread ? '<button class="prosp-tab" onclick="showProspTab(\'relance\')">Relance</button>' : ''}
+          </div>
+          <div id="prosp-tab-analyse" class="prosp-tab-content active">
+            ${cached.analysis ? renderAnalysisContent(cached.analysis) : `
+              <button class="btn" onclick="analyzeGmailMail('${mail.id}')" style="margin-bottom:1rem">
+                ✦ Analyser avec Claude
+              </button>
+              <div id="prosp-analyze-result"></div>
+            `}
+          </div>
+          <div id="prosp-tab-repondre" class="prosp-tab-content">
+            ${cached.reply ? renderReplyContent(cached.reply) : `
+              <div style="margin-bottom:0.5rem">
+                <label style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:0.25rem">Contexte (optionnel)</label>
+                <textarea class="prosp-context-area" id="prosp-context-input" placeholder="Ex: on a déjà échangé sur ce sujet en janvier..."></textarea>
+              </div>
+              <button class="btn" onclick="generateGmailReply('${mail.id}')" style="margin-bottom:1rem">
+                ✦ Générer des réponses
+              </button>
+              <div id="prosp-reply-result"></div>
+            `}
+          </div>
+          ${mail.isThread ? `<div id="prosp-tab-relance" class="prosp-tab-content">
+            ${cached.followup ? renderFollowupContent(cached.followup) : `
+              <button class="btn" onclick="generateGmailFollowup('${mail.id}')" style="margin-bottom:1rem">
+                ✦ Générer des relances
+              </button>
+              <div id="prosp-followup-result"></div>
+            `}
+          </div>` : ''}
+        </div>`;
+    }
+
+    function showProspTab(tab) {
+      document.querySelectorAll('.prosp-tab').forEach((t, i) => {
+        const tabs = ['analyse', 'repondre', 'relance'];
+        t.classList.toggle('active', t.textContent.toLowerCase().includes(tab) || (tab === 'repondre' && t.textContent.includes('pondre')) || (tab === 'relance' && t.textContent.includes('lance')));
+      });
+      document.querySelectorAll('.prosp-tab-content').forEach(c => c.classList.remove('active'));
+      const target = document.getElementById('prosp-tab-' + tab);
+      if (target) target.classList.add('active');
+    }
+
+    function renderAnalysisContent(a) {
+      const dots = Array.from({length: 5}, (_, i) => `<div class="prosp-score-dot${i < a.interest_score ? ' filled' : ''}"></div>`).join('');
+      const flags = (a.red_flags || []).map(f => `<div class="prosp-red-flag">⚠ ${escapeHtml(f)}</div>`).join('');
+      const points = (a.key_points || []).map(p => `<li>${escapeHtml(p)}</li>`).join('');
+      return `
+        <div class="prosp-kv"><div class="prosp-kv-label">Résumé</div><div class="prosp-kv-val">${escapeHtml(a.summary || '')}</div></div>
+        <div class="prosp-kv">
+          <div class="prosp-kv-label">Intérêt</div>
+          <div class="prosp-score"><div class="prosp-score-dots">${dots}</div><span style="font-size:0.8rem;color:var(--text-secondary)">${a.interest_score}/5 — ${escapeHtml(a.interest_reason || '')}</span></div>
+        </div>
+        <div class="prosp-kv"><div class="prosp-kv-label">Points clés</div><ul class="prosp-list-ul">${points}</ul></div>
+        ${flags ? `<div class="prosp-kv"><div class="prosp-kv-label">Alertes</div>${flags}</div>` : ''}`;
+    }
+
+    function renderReplyContent(r) {
+      return `
+        <div class="prosp-reply-card">
+          <div class="prosp-reply-label">Refus poli</div>
+          <div class="prosp-reply-subject">Objet : ${escapeHtml(r.refusal?.subject || '')}</div>
+          <div class="prosp-reply-body">${escapeHtml(r.refusal?.body || '')}</div>
+          <button class="btn prosp-copy-btn" onclick="copyToClipboard(${JSON.stringify(r.refusal?.body || '')}, this)">Copier</button>
+        </div>
+        <div class="prosp-reply-card">
+          <div class="prosp-reply-label" style="color:var(--success)">Réponse d'intérêt</div>
+          <div class="prosp-reply-subject">Objet : ${escapeHtml(r.interest?.subject || '')}</div>
+          <div class="prosp-reply-body">${escapeHtml(r.interest?.body || '')}</div>
+          <button class="btn prosp-copy-btn" onclick="copyToClipboard(${JSON.stringify(r.interest?.body || '')}, this)">Copier</button>
+        </div>`;
+    }
+
+    function renderFollowupContent(f) {
+      return `
+        <div class="prosp-reply-card">
+          <div class="prosp-reply-label">Relance douce</div>
+          <div class="prosp-reply-subject">Objet : ${escapeHtml(f.soft?.subject || '')}</div>
+          <div class="prosp-reply-body">${escapeHtml(f.soft?.body || '')}</div>
+          <button class="btn prosp-copy-btn" onclick="copyToClipboard(${JSON.stringify(f.soft?.body || '')}, this)">Copier</button>
+        </div>
+        <div class="prosp-reply-card">
+          <div class="prosp-reply-label" style="color:var(--primary)">Relance directe</div>
+          <div class="prosp-reply-subject">Objet : ${escapeHtml(f.direct?.subject || '')}</div>
+          <div class="prosp-reply-body">${escapeHtml(f.direct?.body || '')}</div>
+          <button class="btn prosp-copy-btn" onclick="copyToClipboard(${JSON.stringify(f.direct?.body || '')}, this)">Copier</button>
+        </div>`;
+    }
+
+    async function analyzeGmailMail(id) {
+      const resultEl = document.getElementById('prosp-analyze-result');
+      resultEl.innerHTML = '<div class="prosp-loading"><div class="prosp-loading-spinner"></div> Analyse en cours...</div>';
+      const mail = gmailCache[id];
+      try {
+        const res = await fetch('/api/gmail/analyze', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mailContent: mail.body, subject: mail.subject, from: mail.from })
+        });
+        if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Erreur ' + res.status); }
+        const analysis = await res.json();
+        if (!analysisCache[id]) analysisCache[id] = {};
+        analysisCache[id].analysis = analysis;
+        renderGmailList();
+        const tabContent = document.getElementById('prosp-tab-analyse');
+        if (tabContent) tabContent.innerHTML = renderAnalysisContent(analysis);
+      } catch(err) {
+        resultEl.innerHTML = '<p style="color:#ef4444;font-size:0.82rem">' + err.message + '</p>';
+      }
+    }
+
+    async function generateGmailReply(id) {
+      const resultEl = document.getElementById('prosp-reply-result');
+      const context = document.getElementById('prosp-context-input')?.value || '';
+      resultEl.innerHTML = '<div class="prosp-loading"><div class="prosp-loading-spinner"></div> Génération en cours...</div>';
+      const mail = gmailCache[id];
+      try {
+        const res = await fetch('/api/gmail/reply', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mailContent: mail.body, subject: mail.subject, from: mail.from, context })
+        });
+        if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Erreur ' + res.status); }
+        const reply = await res.json();
+        if (!analysisCache[id]) analysisCache[id] = {};
+        analysisCache[id].reply = reply;
+        const tabContent = document.getElementById('prosp-tab-repondre');
+        if (tabContent) tabContent.innerHTML = renderReplyContent(reply);
+      } catch(err) {
+        resultEl.innerHTML = '<p style="color:#ef4444;font-size:0.82rem">' + err.message + '</p>';
+      }
+    }
+
+    async function generateGmailFollowup(id) {
+      const resultEl = document.getElementById('prosp-followup-result');
+      resultEl.innerHTML = '<div class="prosp-loading"><div class="prosp-loading-spinner"></div> Génération en cours...</div>';
+      const mail = gmailCache[id];
+      try {
+        const res = await fetch('/api/gmail/followup', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mailContent: mail.body, subject: mail.subject, from: mail.from })
+        });
+        if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Erreur ' + res.status); }
+        const followup = await res.json();
+        if (!analysisCache[id]) analysisCache[id] = {};
+        analysisCache[id].followup = followup;
+        const tabContent = document.getElementById('prosp-tab-relance');
+        if (tabContent) tabContent.innerHTML = renderFollowupContent(followup);
+      } catch(err) {
+        resultEl.innerHTML = '<p style="color:#ef4444;font-size:0.82rem">' + err.message + '</p>';
+      }
+    }
+
+    function copyToClipboard(text, btn) {
+      navigator.clipboard.writeText(text).then(() => {
+        const orig = btn.textContent;
+        btn.textContent = 'Copié ✓';
+        btn.style.background = 'var(--success)';
+        setTimeout(() => { btn.textContent = orig; btn.style.background = ''; }, 2000);
+      });
     }
 
     function escapeHtml(str) {
+      if (!str) return '';
       const div = document.createElement('div');
       div.textContent = str;
       return div.innerHTML;
-    }
-
-    function setProspPeriod(type) {
-      prospPeriodType = type;
-      const detailSel = document.getElementById('prospPeriodDetail');
-      const customDiv = document.getElementById('prospPeriodCustom');
-      const year = new Date().getFullYear();
-
-      if (type === 'all') {
-        detailSel.style.display = 'none';
-        customDiv.style.display = 'none';
-        prospPeriodStart = null;
-        prospPeriodEnd = null;
-        renderProspection();
-      } else if (type === 'm') {
-        customDiv.style.display = 'none';
-        detailSel.style.display = '';
-        let html = '';
-        MONTHS_FR.forEach((m, i) => { html += '<option value="' + i + '">' + m + ' ' + year + '</option>'; });
-        detailSel.innerHTML = html;
-        detailSel.value = new Date().getMonth();
-        setProspPeriodDetail(detailSel.value);
-      } else if (type === 'q') {
-        customDiv.style.display = 'none';
-        detailSel.style.display = '';
-        const currentQ = Math.floor(new Date().getMonth() / 3);
-        let html = '';
-        for (let q = 0; q < 4; q++) { html += '<option value="' + q + '">T' + (q + 1) + ' ' + year + '</option>'; }
-        detailSel.innerHTML = html;
-        detailSel.value = currentQ;
-        setProspPeriodDetail(detailSel.value);
-      } else if (type === 'y') {
-        customDiv.style.display = 'none';
-        detailSel.style.display = '';
-        let html = '';
-        for (let y = year; y >= year - 2; y--) { html += '<option value="' + y + '">' + y + '</option>'; }
-        detailSel.innerHTML = html;
-        detailSel.value = year;
-        setProspPeriodDetail(detailSel.value);
-      } else if (type === 'custom') {
-        detailSel.style.display = 'none';
-        customDiv.style.display = 'flex';
-        prospPeriodStart = null;
-        prospPeriodEnd = null;
-      }
-    }
-
-    function setProspPeriodDetail(val) {
-      const year = new Date().getFullYear();
-      const v = parseInt(val);
-      if (prospPeriodType === 'm') {
-        prospPeriodStart = new Date(year, v, 1);
-        prospPeriodEnd = new Date(year, v + 1, 0, 23, 59, 59);
-      } else if (prospPeriodType === 'q') {
-        prospPeriodStart = new Date(year, v * 3, 1);
-        prospPeriodEnd = new Date(year, v * 3 + 3, 0, 23, 59, 59);
-      } else if (prospPeriodType === 'y') {
-        prospPeriodStart = new Date(v, 0, 1);
-        prospPeriodEnd = new Date(v, 11, 31, 23, 59, 59);
-      }
-      renderProspection();
-    }
-
-    function applyProspCustomPeriod() {
-      const d1 = document.getElementById('prospDateDebut').value;
-      const d2 = document.getElementById('prospDateFin').value;
-      if (!d1 || !d2) return alert('Saisissez les deux dates');
-      prospPeriodStart = new Date(d1 + 'T00:00:00');
-      prospPeriodEnd = new Date(d2 + 'T23:59:59');
-      renderProspection();
     }
 
   </script>
