@@ -4,6 +4,9 @@ const https = require('https');
 const path = require('path');
 const fs = require('fs');
 const { createClient } = require('@supabase/supabase-js');
+const session = require('express-session');
+const { google } = require('googleapis');
+const Anthropic = require('@anthropic-ai/sdk');
 
 // --- Supabase ---
 const supabase = createClient(
@@ -31,6 +34,12 @@ console.log(`API HubSpot: https://${HUBSPOT_HOST} | Auth: ${IS_PAT ? 'Bearer tok
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'releaf-pilot-secret',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { secure: false, maxAge: 7 * 24 * 60 * 60 * 1000 }
+}));
 
 // --- HubSpot API helpers ---
 
@@ -358,6 +367,222 @@ app.get('/api/dashboard', async (req, res) => {
     });
   } catch (err) {
     console.error('Erreur dashboard:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Emelia API (GraphQL) ---
+const EMELIA_API_KEY = process.env.EMELIA_API_KEY;
+
+function emeliRequest(body) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    const options = {
+      hostname: 'api.emelia.io',
+      path: '/graphql',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': EMELIA_API_KEY,
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    };
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => (data += chunk));
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          if (json.errors) reject(new Error(json.errors[0].message));
+          else resolve(json.data);
+        } catch (e) {
+          reject(new Error('Réponse Emelia invalide'));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
+function emeliRestRequest(path) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'api.emelia.io',
+      path,
+      method: 'GET',
+      headers: { 'Authorization': EMELIA_API_KEY },
+    };
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => (data += chunk));
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch (e) { reject(new Error('Réponse Emelia invalide')); }
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+async function fetchLastEmeliaCampaign() {
+  const listData = await emeliRequest({
+    operationName: 'GetCampaignsStat',
+    query: `query GetCampaignsStat($options: JSON) {
+      all_campaigns(options: $options) { _id name status createdAt }
+    }`,
+    variables: { options: { withArchived: false } },
+  });
+
+  const campaigns = (listData && listData.all_campaigns) || [];
+  const active = campaigns.filter(c => c.status !== 'DRAFT');
+  if (!active.length) return null;
+
+  active.sort((a, b) => {
+    const parse = s => { const [d,m,y] = s.split('/'); return new Date(y,m-1,d); };
+    return parse(b.createdAt) - parse(a.createdAt);
+  });
+  const campaign = active[0];
+
+  const [statsData, detailData] = await Promise.all([
+    emeliRestRequest(`/stats?campaignId=${campaign._id}&detailed=true`),
+    emeliRequest({
+      operationName: 'GetCampaignData',
+      query: `query GetCampaignData($id: ID!) {
+        campaign(id: $id) {
+          steps { delay { amount unit } versions { subject disabled } }
+        }
+      }`,
+      variables: { id: campaign._id },
+    }),
+  ]);
+
+  const steps = (detailData.campaign.steps || []).map((step, i) => {
+    const v = step.versions.find(v => !v.disabled) || step.versions[0] || {};
+    return {
+      index: i + 1,
+      subject: v.subject || '',
+      delay: step.delay,
+      ...(statsData.steps[i] && statsData.steps[i][0] ? {
+        sent: statsData.steps[i][0].sent,
+        first_open: statsData.steps[i][0].first_open,
+        first_open_percent: statsData.steps[i][0].first_open_percent,
+        replied: statsData.steps[i][0].replied,
+        replied_percent: statsData.steps[i][0].replied_percent,
+        bounced: statsData.steps[i][0].bounced,
+      } : {}),
+    };
+  });
+
+  return {
+    ...campaign,
+    steps,
+    stats: statsData.global,
+  };
+}
+
+app.get('/api/emelia-campaign', async (req, res) => {
+  try {
+    const campaign = await fetchLastEmeliaCampaign();
+    res.json({ campaign: campaign || null });
+  } catch (err) {
+    console.error('Erreur Emelia:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Microsoft Graph API ---
+const MS_TENANT_ID = process.env.MS_TENANT_ID;
+const MS_CLIENT_ID = process.env.MS_CLIENT_ID;
+const MS_CLIENT_SECRET = process.env.MS_CLIENT_SECRET;
+const MS_USER_EMAIL = process.env.MS_USER_EMAIL;
+
+async function getMsAccessToken() {
+  const payload = new URLSearchParams({
+    grant_type: 'client_credentials',
+    client_id: MS_CLIENT_ID,
+    client_secret: MS_CLIENT_SECRET,
+    scope: 'https://graph.microsoft.com/.default',
+  }).toString();
+
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'login.microsoftonline.com',
+      path: `/${MS_TENANT_ID}/oauth2/v2.0/token`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    };
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          if (json.access_token) resolve(json.access_token);
+          else reject(new Error(json.error_description || 'Token MS invalide'));
+        } catch (e) { reject(e); }
+      });
+    });
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
+function msGraphRequest(token, path) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'graph.microsoft.com',
+      path,
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    };
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch (e) { reject(new Error('Réponse Graph invalide')); }
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+async function fetchOutlookCategories() {
+  const token = await getMsAccessToken();
+  const categories = {};
+  let url = `/v1.0/users/${encodeURIComponent(MS_USER_EMAIL)}/messages?$select=subject,categories,from,receivedDateTime&$filter=isDraft%20eq%20false&$top=100&$orderby=receivedDateTime%20desc`;
+
+  while (url) {
+    const data = await msGraphRequest(token, url.replace('https://graph.microsoft.com', ''));
+    for (const msg of (data.value || [])) {
+      for (const cat of (msg.categories || [])) {
+        if (!categories[cat]) categories[cat] = [];
+        categories[cat].push({
+          subject: msg.subject,
+          from: msg.from?.emailAddress?.address || '',
+          date: msg.receivedDateTime,
+        });
+      }
+    }
+    url = data['@odata.nextLink'] || null;
+  }
+  return categories;
+}
+
+app.get('/api/outlook-categories', async (req, res) => {
+  try {
+    const categories = await fetchOutlookCategories();
+    res.json({ categories });
+  } catch (err) {
+    console.error('Erreur Graph:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -2667,6 +2892,138 @@ function classifyEmail(subject, bodyPreview) {
   return 'a_qualifier';
 }
 
+// GET /api/emelia-labels — lit les labels Gmail et compte les emails
+app.get('/api/emelia-labels', async (req, res) => {
+  if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
+    return res.status(500).json({ error: 'GMAIL non configuré' });
+  }
+  const imap = createImapConnection();
+  const SYSTEM_SKIP = ['inbox', 'sent', 'drafts', 'trash', 'spam', 'all mail', 'important',
+    'starred', '[gmail]', 'sent mail', 'bin', 'junk', 'notes', 'brouillons', 'corbeille',
+    'messages envoyés', 'suivis', 'tous les messages'];
+
+  try {
+    const labels = await new Promise((resolve, reject) => {
+      imap.once('ready', () => {
+        imap.getBoxes((err, boxes) => {
+          if (err) { imap.end(); return reject(err); }
+
+          const candidates = [];
+          const walk = (obj, prefix = '') => {
+            for (const [name, box] of Object.entries(obj)) {
+              const fullName = prefix ? `${prefix}/${name}` : name;
+              if (!SYSTEM_SKIP.includes(name.toLowerCase())) {
+                candidates.push({ name, fullName });
+              }
+              if (box.children) walk(box.children, fullName);
+            }
+          };
+          walk(boxes);
+
+          // Pour chaque boîte, compte les expéditeurs uniques
+          const results = [];
+          let i = 0;
+          const next = () => {
+            if (i >= candidates.length) { imap.end(); return resolve(results); }
+            const { name, fullName } = candidates[i++];
+            imap.openBox(fullName, true, (err, box) => {
+              if (err || !box.messages.total) {
+                results.push({ name, fullName, count: 0 });
+                return next();
+              }
+              imap.search(['ALL'], (err, uids) => {
+                if (err || !uids.length) {
+                  results.push({ name, fullName, count: 0 });
+                  return next();
+                }
+                const f = imap.fetch(uids, { bodies: 'HEADER.FIELDS (FROM)', struct: false });
+                const senders = new Set();
+                f.on('message', (msg) => {
+                  msg.on('body', (stream) => {
+                    let raw = '';
+                    stream.on('data', d => raw += d);
+                    stream.on('end', () => {
+                      const match = raw.match(/From:\s*.*?([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/i);
+                      if (match) senders.add(match[1].toLowerCase());
+                    });
+                  });
+                });
+                f.once('error', () => { results.push({ name, fullName, count: 0 }); next(); });
+                f.once('end', () => { results.push({ name, fullName, count: senders.size }); next(); });
+              });
+            });
+          };
+          next();
+        });
+      });
+      imap.once('error', reject);
+      imap.connect();
+    });
+    res.json({ labels });
+  } catch (err) {
+    console.error('Erreur IMAP labels:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/emelia-label-contacts?label=INBOX/RDV%20confirmé
+app.get('/api/emelia-label-contacts', async (req, res) => {
+  const labelName = req.query.label;
+  if (!labelName) return res.status(400).json({ error: 'label requis' });
+  if (!GMAIL_USER || !GMAIL_APP_PASSWORD) return res.status(500).json({ error: 'GMAIL non configuré' });
+
+  const imap = createImapConnection();
+  try {
+    const contacts = await new Promise((resolve, reject) => {
+      imap.once('ready', () => {
+        imap.openBox(labelName, true, (err) => {
+          if (err) { imap.end(); return reject(err); }
+          imap.search(['ALL'], (err, uids) => {
+            if (err || !uids.length) { imap.end(); return resolve([]); }
+            const f = imap.fetch(uids, { bodies: 'HEADER.FIELDS (FROM)', struct: false });
+            const seen = new Map();
+            f.on('message', (msg) => {
+              msg.on('body', (stream) => {
+                let raw = '';
+                stream.on('data', d => raw += d);
+                stream.on('end', () => {
+                  const match = raw.match(/From:\s*(.*)/i);
+                  if (!match) return;
+                  const full = match[1].trim();
+                  // Parse "Name <email>" or just "email"
+                  const detailed = full.match(/^"?([^"<]+)"?\s*<([^>]+)>/);
+                  let name, email;
+                  if (detailed) {
+                    name = detailed[1].trim();
+                    email = detailed[2].trim().toLowerCase();
+                  } else {
+                    email = full.replace(/[<>]/g, '').trim().toLowerCase();
+                    name = email;
+                  }
+                  if (!seen.has(email)) {
+                    const domain = email.split('@')[1] || '';
+                    const company = domain.replace(/\.(com|fr|io|net|org|co\.uk|eu)$/i, '').replace(/[-_]/g, ' ');
+                    seen.set(email, { name, email, company });
+                  }
+                });
+              });
+            });
+            f.once('error', () => { imap.end(); resolve([]); });
+            f.once('end', () => { imap.end(); resolve([...seen.values()]); });
+          });
+        });
+      });
+      imap.once('error', reject);
+      imap.connect();
+    });
+    contacts.sort((a, b) => a.name.localeCompare(b.name));
+    res.json({ contacts });
+  } catch (err) {
+    console.error('Erreur IMAP contacts:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/prospection/sync — sync IMAP replies into Supabase
 app.post('/api/prospection/sync', async (req, res) => {
   try {
@@ -3707,6 +4064,210 @@ app.post('/api/prospector/sync', async (req, res) => {
   }
 });
 
+// ============================================================
+// --- Gmail OAuth 2.0 + Analyse Claude ---
+// ============================================================
+
+function getOAuth2Client() {
+  return new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/auth/google/callback'
+  );
+}
+
+// GET /auth/google — initiate OAuth flow
+app.get('/auth/google', (req, res) => {
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    return res.status(500).send('GOOGLE_CLIENT_ID et GOOGLE_CLIENT_SECRET manquants dans .env');
+  }
+  const oauth2Client = getOAuth2Client();
+  const url = oauth2Client.generateAuthUrl({
+    access_type: 'offline',
+    prompt: 'consent',
+    scope: ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/userinfo.email']
+  });
+  res.redirect(url);
+});
+
+// GET /auth/google/callback — receive OAuth code, store token
+app.get('/auth/google/callback', async (req, res) => {
+  const { code, error } = req.query;
+  if (error) return res.redirect('/?gmail_error=' + encodeURIComponent(error));
+  try {
+    const oauth2Client = getOAuth2Client();
+    const { tokens } = await oauth2Client.getToken(code);
+    oauth2Client.setCredentials(tokens);
+    // Get user email
+    const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
+    const { data: userInfo } = await oauth2.userinfo.get();
+    req.session.gmailToken = tokens;
+    req.session.gmailEmail = userInfo.email;
+    res.redirect('/?gmail_connected=1');
+  } catch (err) {
+    console.error('Gmail OAuth callback error:', err.message);
+    res.redirect('/?gmail_error=' + encodeURIComponent(err.message));
+  }
+});
+
+// GET /auth/google/status
+app.get('/auth/google/status', (req, res) => {
+  res.json({
+    connected: !!req.session.gmailToken,
+    email: req.session.gmailEmail || null
+  });
+});
+
+// POST /auth/google/logout
+app.post('/auth/google/logout', (req, res) => {
+  req.session.gmailToken = null;
+  req.session.gmailEmail = null;
+  res.json({ ok: true });
+});
+
+// Helper: get authenticated Gmail client, refreshing token if needed
+async function getGmailClient(req) {
+  if (!req.session.gmailToken) throw new Error('Non connecté à Gmail');
+  const oauth2Client = getOAuth2Client();
+  oauth2Client.setCredentials(req.session.gmailToken);
+  // Auto-refresh if token expired
+  oauth2Client.on('tokens', (tokens) => {
+    if (tokens.refresh_token) req.session.gmailToken.refresh_token = tokens.refresh_token;
+    req.session.gmailToken.access_token = tokens.access_token;
+    req.session.gmailToken.expiry_date = tokens.expiry_date;
+  });
+  return google.gmail({ version: 'v1', auth: oauth2Client });
+}
+
+// Helper: extract plain text body from Gmail message payload
+function extractTextBody(payload) {
+  if (!payload) return '';
+  if (payload.mimeType === 'text/plain' && payload.body && payload.body.data) {
+    return Buffer.from(payload.body.data, 'base64').toString('utf-8');
+  }
+  if (payload.parts) {
+    for (const part of payload.parts) {
+      const text = extractTextBody(part);
+      if (text) return text;
+    }
+  }
+  return '';
+}
+
+// Helper: get header value from Gmail message
+function getHeader(headers, name) {
+  const h = headers.find(h => h.name.toLowerCase() === name.toLowerCase());
+  return h ? h.value : '';
+}
+
+// GET /api/gmail/messages — fetch 20 most recent inbox messages
+app.get('/api/gmail/messages', async (req, res) => {
+  try {
+    const gmail = await getGmailClient(req);
+    const listRes = await gmail.users.messages.list({
+      userId: 'me',
+      maxResults: 20,
+      labelIds: ['INBOX'],
+      q: 'in:inbox'
+    });
+    const messages = listRes.data.messages || [];
+    if (messages.length === 0) return res.json([]);
+
+    const details = await Promise.all(messages.map(async (m) => {
+      const msg = await gmail.users.messages.get({
+        userId: 'me',
+        id: m.id,
+        format: 'metadata',
+        metadataHeaders: ['From', 'Subject', 'Date']
+      });
+      const headers = msg.data.payload.headers;
+      const snippet = msg.data.snippet || '';
+      return {
+        id: m.id,
+        threadId: msg.data.threadId,
+        from: getHeader(headers, 'From'),
+        subject: getHeader(headers, 'Subject'),
+        date: getHeader(headers, 'Date'),
+        snippet: snippet.substring(0, 200),
+        labelIds: msg.data.labelIds || []
+      };
+    }));
+    res.json(details);
+  } catch (err) {
+    console.error('Gmail messages error:', err.message);
+    res.status(err.message.includes('Non connecté') ? 401 : 500).json({ error: err.message });
+  }
+});
+
+// GET /api/gmail/message/:id — get full plain text body of a message
+app.get('/api/gmail/message/:id', async (req, res) => {
+  try {
+    const gmail = await getGmailClient(req);
+    const msg = await gmail.users.messages.get({
+      userId: 'me',
+      id: req.params.id,
+      format: 'full'
+    });
+    const headers = msg.data.payload.headers;
+    const body = extractTextBody(msg.data.payload) || msg.data.snippet || '';
+    // Check if thread has more than 1 message (for follow-up tab)
+    const thread = await gmail.users.threads.get({ userId: 'me', id: msg.data.threadId });
+    const isThread = (thread.data.messages || []).length > 1;
+    res.json({
+      id: msg.data.id,
+      threadId: msg.data.threadId,
+      from: getHeader(headers, 'From'),
+      subject: getHeader(headers, 'Subject'),
+      date: getHeader(headers, 'Date'),
+      body: body.trim().substring(0, 8000),
+      isThread
+    });
+  } catch (err) {
+    console.error('Gmail message detail error:', err.message);
+    res.status(err.message.includes('Non connecté') ? 401 : 500).json({ error: err.message });
+  }
+});
+
+// Helper: call Claude and return parsed JSON from response
+async function callClaudeJSON(systemPrompt, userContent) {
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const stream = anthropic.messages.stream({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 2048,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userContent }]
+  });
+  const message = await stream.finalMessage();
+  const text = message.content.find(b => b.type === 'text')?.text || '{}';
+  // Extract JSON from response (Claude may wrap it in markdown)
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('Réponse Claude invalide (JSON attendu)');
+  return JSON.parse(jsonMatch[0]);
+}
+
+// POST /api/gmail/analyze — analyse a mail with Claude
+app.post('/api/gmail/analyze', async (req, res) => {
+  try {
+    const { mailContent, subject, from } = req.body;
+    if (!mailContent) return res.status(400).json({ error: 'mailContent requis' });
+    if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error: 'ANTHROPIC_API_KEY manquante dans .env' });
+
+    const systemPrompt = `Tu es un assistant commercial expert. Analyse ce mail de prospection et réponds UNIQUEMENT en JSON valide avec les champs :
+- summary (string) : résumé de la proposition en 2-3 phrases
+- interest_score (number 1-5) : score d'intérêt potentiel pour Releaf Carbon (cabinet de conseil en décarbonation)
+- interest_reason (string) : justification du score en 1 phrase
+- key_points (array of strings) : 3-5 points clés de l'offre ou de la demande
+- red_flags (array of strings) : signaux d'alerte (spam, arnaque, hors sujet), ou tableau vide si aucun`;
+
+    const userContent = `Expéditeur : ${from}\nObjet : ${subject}\n\nContenu du mail :\n${mailContent}`;
+    const result = await callClaudeJSON(systemPrompt, userContent);
+    res.json(result);
+  } catch (err) {
+    console.error('Claude analyze error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/prospector/update-status — Update a prospect's status (by linkedin_url or id)
 app.post('/api/prospector/update-status', async (req, res) => {
   try {
@@ -3731,6 +4292,28 @@ app.post('/api/prospector/update-status', async (req, res) => {
     res.json({ success: true, id: prospectId, status });
   } catch (err) {
     console.error('Erreur /api/prospector/update-status:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/gmail/reply — generate 2 reply options
+app.post('/api/gmail/reply', async (req, res) => {
+  try {
+    const { mailContent, subject, from, context } = req.body;
+    if (!mailContent) return res.status(400).json({ error: 'mailContent requis' });
+    if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error: 'ANTHROPIC_API_KEY manquante dans .env' });
+
+    const systemPrompt = `Tu es un assistant professionnel pour Guillaume, co-dirigeant de Releaf Carbon (cabinet de conseil en décarbonation à Lille). Génère 2 réponses email en JSON valide :
+- refusal : objet (string) + corps (string) d'un refus poli, court et définitif
+- interest : objet (string) + corps (string) d'une réponse d'intérêt avec demande d'informations complémentaires
+
+Réponds UNIQUEMENT en JSON. Ton professionnel, en français, signé "Guillaume - Releaf Carbon".`;
+
+    const userContent = `Expéditeur : ${from}\nObjet : ${subject}\n${context ? `Contexte supplémentaire : ${context}\n` : ''}Mail original :\n${mailContent}`;
+    const result = await callClaudeJSON(systemPrompt, userContent);
+    res.json(result);
+  } catch (err) {
+    console.error('Claude reply error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -3943,6 +4526,29 @@ Retourne uniquement un JSON valide (pas de markdown, pas d'explication) :
     res.status(500).json({ error: err.message });
   }
 });
+
+// POST /api/gmail/followup — generate 2 follow-up options
+app.post('/api/gmail/followup', async (req, res) => {
+  try {
+    const { mailContent, subject, from } = req.body;
+    if (!mailContent) return res.status(400).json({ error: 'mailContent requis' });
+    if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error: 'ANTHROPIC_API_KEY manquante dans .env' });
+
+    const systemPrompt = `Tu es un expert en suivi commercial pour Releaf Carbon. Génère 2 messages de relance en JSON valide :
+- soft : objet (string) + corps (string) d'une relance douce et cordiale
+- direct : objet (string) + corps (string) d'une relance directe avec demande d'action claire
+
+Réponds UNIQUEMENT en JSON. En français, signé "Guillaume - Releaf Carbon".`;
+
+    const userContent = `Expéditeur : ${from}\nObjet : ${subject}\n\nHistorique du thread :\n${mailContent}`;
+    const result = await callClaudeJSON(systemPrompt, userContent);
+    res.json(result);
+  } catch (err) {
+    console.error('Claude followup error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 app.listen(PORT, () => {
   console.log(`Releaf Pilot démarré sur http://localhost:${PORT}`);
