@@ -262,6 +262,29 @@
 <script src="/js/account-context.js"></script>
 <script src="/js/account-selector.js"></script>
 
+<!-- Global fetch wrapper to inject X-Account-Id header -->
+<script>
+const originalFetch = window.fetch;
+window.fetch = function(url, options = {}) {
+  // Only inject header for /api/prospector/* endpoints
+  if (typeof url === 'string' && url.includes('/api/prospector')) {
+    const accountId = accountContext.getAccountId();
+    if (!accountId) {
+      // Account not selected, reject the request
+      return Promise.reject(new Error('No account selected'));
+    }
+    options = {
+      ...options,
+      headers: {
+        ...(options.headers || {}),
+        'X-Account-Id': accountId,
+      }
+    };
+  }
+  return originalFetch.call(this, url, options);
+};
+</script>
+
 <!-- Prospector App -->
 <script src="/js/prospector-ui.js"></script>
 <script src="/js/prospector-db.js"></script>

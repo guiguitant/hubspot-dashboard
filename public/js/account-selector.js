@@ -111,6 +111,30 @@ class AccountSelector {
 window.AccountSelector = AccountSelector;
 
 // Auto-show on page load if no account selected
-document.addEventListener('DOMContentLoaded', () => {
-  AccountSelector.checkAndShow();
+// IMPORTANT: This blocks DOM content from being fully interactive until account is selected
+document.addEventListener('DOMContentLoaded', async () => {
+  if (!accountContext.isAccountSelected()) {
+    // Prevent other scripts from running until account is selected
+    const blocker = document.createElement('div');
+    blocker.id = 'accountSelectorBlocker';
+    blocker.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(255, 255, 255, 0.95);
+      z-index: 9998;
+    `;
+    document.body.appendChild(blocker);
+
+    const selector = new AccountSelector();
+    await selector.show();
+
+    // Remove blocker when account is selected
+    document.addEventListener('account-selected', () => {
+      const blocker = document.getElementById('accountSelectorBlocker');
+      if (blocker) blocker.remove();
+    });
+  }
 });
