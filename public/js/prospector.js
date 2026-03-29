@@ -2274,6 +2274,14 @@ const App = (() => {
   // ============================================================
   function init() {
     window.addEventListener('hashchange', router);
+
+    // Reload page when account changes (to refresh all data with new account_id header)
+    document.addEventListener('account-changed', (e) => {
+      console.log('Account changed to:', e.detail?.name);
+      // Reload the current page to refresh all data
+      router();
+    });
+
     router();
   }
 
