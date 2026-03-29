@@ -6,34 +6,73 @@
 class AccountContext {
   constructor() {
     this.currentAccount = null;
+    this.currentJWT = null;
     this.accounts = [];
     this.loadFromSession();
   }
 
-  // Load account from session storage
+  // Load account and JWT from session storage
   loadFromSession() {
     const stored = sessionStorage.getItem('releaf_account');
+    const storedJWT = sessionStorage.getItem('releaf_jwt_token');
     if (stored) {
       try {
         this.currentAccount = JSON.parse(stored);
+        if (storedJWT) {
+          this.currentJWT = storedJWT;
+        }
       } catch (e) {
         console.error('Failed to parse stored account:', e);
         sessionStorage.removeItem('releaf_account');
+        sessionStorage.removeItem('releaf_jwt_token');
       }
     }
   }
 
-  // Save account to session storage
+  // Save account and JWT to session storage
   saveToSession() {
     if (this.currentAccount) {
       sessionStorage.setItem('releaf_account', JSON.stringify(this.currentAccount));
     }
+    if (this.currentJWT) {
+      sessionStorage.setItem('releaf_jwt_token', this.currentJWT);
+    }
   }
 
-  // Set current account
-  setAccount(account) {
+  // Fetch JWT token for the current account from the server
+  async fetchJWTToken() {
+    if (!this.currentAccount?.id) {
+      throw new Error('No account selected');
+    }
+
+    try {
+      const response = await fetch(`/api/accounts/${this.currentAccount.id}/jwt`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch JWT token: ${response.statusText}`);
+      }
+      const data = await response.json();
+      this.currentJWT = data.token;
+      this.saveToSession();
+      return this.currentJWT;
+    } catch (error) {
+      console.error('Error fetching JWT token:', error);
+      throw error;
+    }
+  }
+
+  // Set current account (fetches JWT token automatically)
+  async setAccount(account) {
     this.currentAccount = account;
     this.saveToSession();
+
+    // Fetch JWT token for the new account
+    try {
+      await this.fetchJWTToken();
+    } catch (error) {
+      console.error('Failed to fetch JWT token for account:', error);
+      // Continue even if JWT fetch fails - server endpoints still work with accountContext middleware
+    }
+
     document.dispatchEvent(new CustomEvent('account-changed', { detail: account }));
   }
 
@@ -45,6 +84,11 @@ class AccountContext {
   // Get account ID for API headers
   getAccountId() {
     return this.currentAccount?.id || null;
+  }
+
+  // Get JWT token for Supabase authentication
+  getJWTToken() {
+    return this.currentJWT || null;
   }
 
   // Fetch all available accounts

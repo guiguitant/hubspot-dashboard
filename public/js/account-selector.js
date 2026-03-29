@@ -72,20 +72,25 @@ class AccountSelector {
 
     // Add click handlers
     document.querySelectorAll('.account-selector-item').forEach(item => {
-      item.addEventListener('click', () => {
+      item.addEventListener('click', async () => {
         const accountId = item.getAttribute('data-account-id');
         const account = accounts.find(a => a.id === accountId);
-        this.selectAccount(account);
+        try {
+          await this.selectAccount(account);
+        } catch (error) {
+          console.error('Failed to select account:', error);
+        }
       });
     });
   }
 
   // Handle account selection
-  selectAccount(account) {
-    accountContext.setAccount(account);
+  async selectAccount(account) {
+    await accountContext.setAccount(account);
     this.hide();
 
     // Notify app that account was selected
+    // Note: account-changed is also dispatched by accountContext.setAccount()
     document.dispatchEvent(new CustomEvent('account-selected', { detail: account }));
   }
 

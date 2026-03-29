@@ -3,12 +3,19 @@ const express = require('express');
 const https = require('https');
 const path = require('path');
 const fs = require('fs');
+const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
 
 // --- Supabase ---
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_ANON_KEY
+);
+
+// Supabase admin client (bypasses RLS for public endpoints like /api/accounts)
+const supabaseAdmin = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
 );
 
 const app = express();
@@ -45,6 +52,33 @@ function normalizeLinkedinUrl(url) {
     return `https://www.linkedin.com/in/${match[1].toLowerCase()}`;
   }
   return url.toLowerCase();
+}
+
+// Generate a Supabase JWT token with custom account_id claim (for RLS)
+// This allows RLS policies to read the account_id from the JWT
+function generateSupabaseJWT(accountId) {
+  const secret = process.env.SUPABASE_JWT_SECRET;
+
+  if (!secret) {
+    console.warn('SUPABASE_JWT_SECRET not set - RLS policies may not work');
+    return null;
+  }
+
+  const payload = {
+    sub: accountId,
+    aud: 'authenticated',
+    role: 'authenticated',
+    account_id: accountId, // Custom claim for RLS
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60) // 24h expiry
+  };
+
+  try {
+    return jwt.sign(payload, secret);
+  } catch (err) {
+    console.error('Error generating JWT:', err.message);
+    return null;
+  }
 }
 
 // --- HubSpot API helpers ---
@@ -3285,9 +3319,11 @@ const accountContext = async (req, res, next) => {
 // ============================================================
 // ACCOUNTS — Routes (public, no auth required)
 // ============================================================
+// GET /api/accounts — List all accounts (PUBLIC, no auth required)
+// Uses admin client to bypass RLS for account selection
 app.get('/api/accounts', async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('accounts')
       .select('id, name, slug, email')
       .order('name');
@@ -3299,9 +3335,10 @@ app.get('/api/accounts', async (req, res) => {
   }
 });
 
+// GET /api/accounts/:slug — Get a specific account by slug (PUBLIC)
 app.get('/api/accounts/:slug', async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('accounts')
       .select('*')
       .eq('slug', req.params.slug)
@@ -3310,6 +3347,42 @@ app.get('/api/accounts/:slug', async (req, res) => {
     res.json(data);
   } catch (err) {
     console.error('Erreur GET /api/accounts/:slug:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/accounts/:id/jwt — Generate a JWT token for RLS policies
+// Client-side Supabase calls use this token for account filtering
+app.get('/api/accounts/:id/jwt', async (req, res) => {
+  try {
+    const accountId = req.params.id;
+    if (!accountId) return res.status(400).json({ error: 'Account ID required' });
+
+    // Verify account exists
+    const { data: account, error: accountErr } = await supabase
+      .from('accounts')
+      .select('id, name')
+      .eq('id', accountId)
+      .single();
+
+    if (accountErr || !account) {
+      return res.status(404).json({ error: 'Compte non trouvé' });
+    }
+
+    // Generate JWT token with account_id claim
+    const token = generateSupabaseJWT(accountId);
+    if (!token) {
+      return res.status(500).json({ error: 'Could not generate token - SUPABASE_JWT_SECRET not configured' });
+    }
+
+    res.json({
+      token,
+      account_id: accountId,
+      account_name: account.name,
+      expires_in: 86400 // 24h in seconds
+    });
+  } catch (err) {
+    console.error('Erreur GET /api/accounts/:id/jwt:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -3405,7 +3478,7 @@ app.get('/prospector', (req, res) => {
 // GET /api/prospector/campaigns — List campaigns sorted by priority
 app.get('/api/prospector/campaigns', accountContext, async (req, res) => {
   try {
-    let q = supabase.from('campaigns').select('*').eq('account_id', req.accountId).order('priority', { ascending: true, nullsFirst: false });
+    let q = supabaseAdmin.from('campaigns').select('*').eq('account_id', req.accountId).order('priority', { ascending: true, nullsFirst: false });
 
     if (req.query.status) {
       q = q.eq('status', req.query.status);
@@ -3419,7 +3492,7 @@ app.get('/api/prospector/campaigns', accountContext, async (req, res) => {
     // Attach prospect counts
     const result = [];
     for (const c of campaigns) {
-      const { count } = await supabase
+      const { count } = await supabaseAdmin
         .from('prospect_account')
         .select('id', { count: 'exact', head: true })
         .eq('campaign_id', c.id)
@@ -3437,7 +3510,7 @@ app.get('/api/prospector/campaigns', accountContext, async (req, res) => {
 // GET /api/prospector/prospects — List prospects (optionally filtered by campaign_id)
 app.get('/api/prospector/prospects', accountContext, async (req, res) => {
   try {
-    let q = supabase
+    let q = supabaseAdmin
       .from('prospect_account')
       .select(`
         id,
@@ -3478,7 +3551,7 @@ app.get('/api/prospector/prospects', accountContext, async (req, res) => {
 // Helper: shift priorities to make room for a given priority
 async function shiftPriorities(targetPrio, excludeId, accountId) {
   // Get all campaigns with priority >= targetPrio, sorted ascending, for this account
-  let q = supabase.from('campaigns').select('id, priority')
+  let q = supabaseAdmin.from('campaigns').select('id, priority')
     .eq('account_id', accountId)
     .gte('priority', targetPrio).order('priority', { ascending: true });
   if (excludeId) q = q.neq('id', excludeId);
@@ -3490,7 +3563,7 @@ async function shiftPriorities(targetPrio, excludeId, accountId) {
     const c = toShift[i];
     // Only shift if it's actually blocking (contiguous)
     if (i === 0 || toShift[i].priority === toShift[i - 1]?.priority + 1 || toShift[i].priority === targetPrio) {
-      await supabase.from('campaigns').update({ priority: c.priority + 1 }).eq('id', c.id);
+      await supabaseAdmin.from('campaigns').update({ priority: c.priority + 1 }).eq('id', c.id);
     }
   }
 }
@@ -3505,7 +3578,7 @@ app.post('/api/prospector/campaigns', accountContext, async (req, res) => {
 
     // Auto-shift existing priorities if conflict
     if (prio != null) {
-      const { data: existing } = await supabase.from('campaigns').select('id').eq('priority', prio).eq('account_id', req.accountId);
+      const { data: existing } = await supabaseAdmin.from('campaigns').select('id').eq('priority', prio).eq('account_id', req.accountId);
       if (existing?.length) await shiftPriorities(prio, null, req.accountId);
     }
 
@@ -3523,7 +3596,7 @@ app.post('/api/prospector/campaigns', accountContext, async (req, res) => {
       account_id: req.accountId,
     };
 
-    const { data, error } = await supabase.from('campaigns').insert(row).select().single();
+    const { data, error } = await supabaseAdmin.from('campaigns').insert(row).select().single();
     if (error) throw error;
     res.json(data);
   } catch (err) {
@@ -3543,12 +3616,12 @@ app.put('/api/prospector/campaigns/:id', accountContext, async (req, res) => {
     }
     if (updates.priority != null) {
       updates.priority = parseInt(updates.priority);
-      const { data: existing } = await supabase.from('campaigns').select('id').eq('priority', updates.priority).eq('account_id', req.accountId).neq('id', id);
+      const { data: existing } = await supabaseAdmin.from('campaigns').select('id').eq('priority', updates.priority).eq('account_id', req.accountId).neq('id', id);
       if (existing?.length) await shiftPriorities(updates.priority, id, req.accountId);
     }
     if (updates.daily_quota != null) updates.daily_quota = parseInt(updates.daily_quota);
 
-    const { data, error } = await supabase.from('campaigns').update(updates).eq('id', id).eq('account_id', req.accountId).select().single();
+    const { data, error } = await supabaseAdmin.from('campaigns').update(updates).eq('id', id).eq('account_id', req.accountId).select().single();
     if (error) {
       if (error.code === '23505') return res.status(409).json({ error: 'Cette priorité est déjà utilisée.' });
       throw error;
@@ -3569,7 +3642,7 @@ app.post('/api/prospector/import', accountContext, async (req, res) => {
     }
 
     // Fetch existing prospects for dedup
-    const { data: existing } = await supabase.from('prospects').select('email, linkedin_url, first_name, last_name');
+    const { data: existing } = await supabaseAdmin.from('prospects').select('email, linkedin_url, first_name, last_name');
 
     let imported = 0, duplicates = 0, errors = 0;
     const toInsert = [];
@@ -3607,7 +3680,7 @@ app.post('/api/prospector/import', accountContext, async (req, res) => {
     }
 
     if (toInsert.length > 0) {
-      const { data: inserted, error } = await supabase.from('prospects').insert(toInsert).select();
+      const { data: inserted, error } = await supabaseAdmin.from('prospects').insert(toInsert).select();
       if (error) {
         console.error('Bulk insert error:', error.message);
         errors = toInsert.length;
@@ -3625,7 +3698,7 @@ app.post('/api/prospector/import', accountContext, async (req, res) => {
         }
 
         if (prospectAccountToInsert.length > 0) {
-          const { error: paError } = await supabase.from('prospect_account').insert(prospectAccountToInsert);
+          const { error: paError } = await supabaseAdmin.from('prospect_account').insert(prospectAccountToInsert);
           if (paError) {
             console.error('prospect_account insert error:', paError.message);
           }
@@ -3634,7 +3707,7 @@ app.post('/api/prospector/import', accountContext, async (req, res) => {
     }
 
     // Log import
-    await supabase.from('imports').insert({
+    await supabaseAdmin.from('imports').insert({
       filename: 'api-import',
       total_rows: prospects.length,
       imported, duplicates, errors,
@@ -3651,7 +3724,7 @@ app.post('/api/prospector/import', accountContext, async (req, res) => {
 // GET /api/prospector/export — CSV export
 app.get('/api/prospector/export', accountContext, async (req, res) => {
   try {
-    let q = supabase
+    let q = supabaseAdmin
       .from('prospect_account')
       .select(`
         status,
@@ -3709,7 +3782,7 @@ const EVENT_MAP = {
 
 async function logEvent(type, prospectId, campaignId, accountId) {
   try {
-    await supabase.from('prospect_events').insert({
+    await supabaseAdmin.from('prospect_events').insert({
       type,
       prospect_id: prospectId || null,
       campaign_id: campaignId || null,
@@ -3730,7 +3803,7 @@ function todayParis() {
 
 async function countTodayInvitations(accountId) {
   const today = todayParis();
-  const { count } = await supabase.from('interactions')
+  const { count } = await supabaseAdmin.from('interactions')
     .select('id', { count: 'exact', head: true })
     .eq('type', 'Ajout LinkedIn')
     .eq('date', today)
@@ -3740,7 +3813,7 @@ async function countTodayInvitations(accountId) {
 
 async function countTodayMessages(accountId) {
   const today = todayParis();
-  const { count } = await supabase.from('interactions')
+  const { count } = await supabaseAdmin.from('interactions')
     .select('id', { count: 'exact', head: true })
     .eq('type', 'Message envoyé')
     .eq('date', today)
@@ -3804,21 +3877,21 @@ app.post('/api/prospector/sync', accountContext, async (req, res) => {
 
         // 1. Match by linkedin_url (most reliable)
         if (!existing && p.linkedin_url) {
-          const { data } = await supabase.from('prospects')
+          const { data } = await supabaseAdmin.from('prospects')
             .select('id, linkedin_url, sales_nav_url').eq('linkedin_url', p.linkedin_url).limit(1);
           if (data?.length) existing = data[0];
         }
 
         // 2. Match by sales_nav_url
         if (!existing && p.sales_nav_url) {
-          const { data } = await supabase.from('prospects')
+          const { data } = await supabaseAdmin.from('prospects')
             .select('id, linkedin_url, sales_nav_url').eq('sales_nav_url', p.sales_nav_url).limit(1);
           if (data?.length) existing = data[0];
         }
 
         // 3. Fallback: match by first_name + last_name + company (case-insensitive)
         if (!existing && p.first_name && p.last_name && p.company) {
-          const { data } = await supabase.from('prospects')
+          const { data } = await supabaseAdmin.from('prospects')
             .select('id, linkedin_url, sales_nav_url')
             .ilike('first_name', p.first_name.trim())
             .ilike('last_name', p.last_name.trim())
@@ -3829,7 +3902,7 @@ app.post('/api/prospector/sync', accountContext, async (req, res) => {
 
         if (existing) {
           // Fetch previous status from prospect_account for this account
-          const { data: prevPA } = await supabase
+          const { data: prevPA } = await supabaseAdmin
             .from('prospect_account')
             .select('status, campaign_id')
             .eq('prospect_id', existing.id)
@@ -3851,13 +3924,13 @@ app.post('/api/prospector/sync', accountContext, async (req, res) => {
           if (p.pending_message !== undefined) updates.pending_message = p.pending_message;
           updates.updated_at = new Date().toISOString();
 
-          await supabase.from('prospects').update(updates).eq('id', existing.id);
+          await supabaseAdmin.from('prospects').update(updates).eq('id', existing.id);
           updated++;
 
           // Update prospect_account status
           if (p.status && VALID_PROSPECT_STATUSES.includes(p.status)) {
             const paUpdates = { status: p.status, updated_at: new Date().toISOString() };
-            await supabase
+            await supabaseAdmin
               .from('prospect_account')
               .update(paUpdates)
               .eq('prospect_id', existing.id)
@@ -3876,7 +3949,7 @@ app.post('/api/prospector/sync', accountContext, async (req, res) => {
 
           // Log interaction if provided
           if (p.interaction) {
-            await supabase.from('interactions').insert({
+            await supabaseAdmin.from('interactions').insert({
               prospect_id: existing.id,
               account_id: req.accountId,
               type: p.interaction.type || 'Note',
@@ -3902,7 +3975,7 @@ app.post('/api/prospector/sync', accountContext, async (req, res) => {
           };
           if (campaign_id) row.source_campaign_id = campaign_id;
 
-          const { data: newP } = await supabase.from('prospects').insert(row).select('id').single();
+          const { data: newP } = await supabaseAdmin.from('prospects').insert(row).select('id').single();
           created++;
 
           // Create prospect_account record for this account
@@ -3913,7 +3986,7 @@ app.post('/api/prospector/sync', accountContext, async (req, res) => {
               status: row.status,
               campaign_id: campaign_id || null,
             };
-            await supabase.from('prospect_account').insert(paRow);
+            await supabaseAdmin.from('prospect_account').insert(paRow);
 
             // Log event for new prospect
             if (EVENT_MAP[row.status]) {
@@ -3923,7 +3996,7 @@ app.post('/api/prospector/sync', accountContext, async (req, res) => {
 
           // Log interaction if provided
           if (p.interaction && newP) {
-            await supabase.from('interactions').insert({
+            await supabaseAdmin.from('interactions').insert({
               prospect_id: newP.id,
               account_id: req.accountId,
               type: p.interaction.type || 'Ajout LinkedIn',
@@ -3956,14 +4029,14 @@ app.post('/api/prospector/update-status', accountContext, async (req, res) => {
     let prospectId = id;
     if (!prospectId && linkedin_url) {
       const normalizedUrl = normalizeLinkedinUrl(linkedin_url);
-      const { data } = await supabase.from('prospects').select('id').eq('linkedin_url', normalizedUrl).limit(1);
+      const { data } = await supabaseAdmin.from('prospects').select('id').eq('linkedin_url', normalizedUrl).limit(1);
       if (!data?.length) return res.status(404).json({ error: 'Prospect not found' });
       prospectId = data[0].id;
     }
     if (!prospectId) return res.status(400).json({ error: 'id or linkedin_url required' });
 
     // Fetch previous status + campaign_id from prospect_account (for this account only)
-    const { data: prev } = await supabase
+    const { data: prev } = await supabaseAdmin
       .from('prospect_account')
       .select('status, campaign_id')
       .eq('prospect_id', prospectId)
@@ -3978,14 +4051,14 @@ app.post('/api/prospector/update-status', accountContext, async (req, res) => {
     const updates = { status, updated_at: new Date().toISOString() };
     if (pending_message !== undefined) {
       // Store message in prospects table temporarily (deprecated but still used)
-      await supabase.from('prospects').update({ pending_message }).eq('id', prospectId);
+      await supabaseAdmin.from('prospects').update({ pending_message }).eq('id', prospectId);
     }
     if (message_versions !== undefined) {
       // Store message versions in prospects table temporarily (deprecated but still used)
-      await supabase.from('prospects').update({ message_versions }).eq('id', prospectId);
+      await supabaseAdmin.from('prospects').update({ message_versions }).eq('id', prospectId);
     }
 
-    const { data: updated, error } = await supabase
+    const { data: updated, error } = await supabaseAdmin
       .from('prospect_account')
       .update(updates)
       .eq('prospect_id', prospectId)
@@ -4014,7 +4087,7 @@ app.post('/api/prospector/update-status', accountContext, async (req, res) => {
 // Claude Dispatch polls this to know which messages to send on LinkedIn
 app.get('/api/prospector/pending-messages', accountContext, async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('prospect_account')
       .select(`
         prospects!inner(id, first_name, last_name, linkedin_url, pending_message, message_versions)
@@ -4049,14 +4122,14 @@ app.post('/api/prospector/message-sent', accountContext, async (req, res) => {
     let prospectId = id;
     if (!prospectId && linkedin_url) {
       const normalizedUrl = normalizeLinkedinUrl(linkedin_url);
-      const { data } = await supabase.from('prospects').select('id').eq('linkedin_url', normalizedUrl).limit(1);
+      const { data } = await supabaseAdmin.from('prospects').select('id').eq('linkedin_url', normalizedUrl).limit(1);
       if (!data?.length) return res.status(404).json({ error: 'Prospect not found' });
       prospectId = data[0].id;
     }
     if (!prospectId) return res.status(400).json({ error: 'id or linkedin_url required' });
 
     // Update prospect_account status
-    const { data: pa } = await supabase
+    const { data: pa } = await supabaseAdmin
       .from('prospect_account')
       .select('campaign_id')
       .eq('prospect_id', prospectId)
@@ -4067,18 +4140,18 @@ app.post('/api/prospector/message-sent', accountContext, async (req, res) => {
       return res.status(404).json({ error: 'Prospect not found in your account' });
     }
 
-    await supabase.from('prospect_account').update({
+    await supabaseAdmin.from('prospect_account').update({
       status: 'Message envoyé',
       updated_at: new Date().toISOString(),
     }).eq('prospect_id', prospectId).eq('account_id', req.accountId);
 
     // Clear pending_message from prospects
-    await supabase.from('prospects').update({
+    await supabaseAdmin.from('prospects').update({
       pending_message: null,
       updated_at: new Date().toISOString(),
     }).eq('id', prospectId);
 
-    await supabase.from('interactions').insert({
+    await supabaseAdmin.from('interactions').insert({
       prospect_id: prospectId,
       account_id: req.accountId,
       type: 'Message envoyé',
@@ -4099,7 +4172,7 @@ app.post('/api/prospector/message-sent', accountContext, async (req, res) => {
 // GET /api/prospector/validated-profiles — Prospects validated, ready for LinkedIn add
 app.get('/api/prospector/validated-profiles', accountContext, async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('prospect_account')
       .select(`
         status,
@@ -4143,42 +4216,38 @@ app.post('/api/prospector/bulk-update-status', accountContext, async (req, res) 
 
     const bulkOperationId = crypto.randomUUID();
 
-    // Use RPC to run in a single transaction (trigger captures bulk_operation_id)
-    const { data: updatedCount, error: rpcError } = await supabase.rpc('bulk_update_prospect_status', {
-      p_ids: ids,
-      p_status: status,
-      p_bulk_id: bulkOperationId,
-    });
+    // Verify all prospects belong to this account
+    const { data: ownedProspects, error: checkErr } = await supabase
+      .from('prospect_account')
+      .select('prospect_id, campaign_id, status')
+      .eq('account_id', req.accountId)
+      .in('prospect_id', ids);
 
-    if (rpcError) {
-      // Fallback: RPC not yet created, use direct update
-      console.warn('bulk RPC not available, using direct update:', rpcError.message);
-      const { data: prevList } = await supabase.from('prospects').select('id, status, source_campaign_id').in('id', ids);
-      const { error } = await supabase.from('prospects').update({ status, updated_at: new Date().toISOString() }).in('id', ids);
-      if (error) throw error;
-      // Log events
-      for (const prev of (prevList || [])) {
-        if (prev.status === status) continue;
-        if (status === 'Nouveau' && prev.status === 'Profil à valider') {
-          logEvent('prospect_validated', prev.id, prev.source_campaign_id);
-        } else if (EVENT_MAP[status]) {
-          logEvent(EVENT_MAP[status], prev.id, prev.source_campaign_id);
-        }
-      }
-      return res.json({ success: true, updated: ids.length, bulk_operation_id: null });
+    if (checkErr) throw checkErr;
+    if (!ownedProspects?.length || ownedProspects.length !== ids.length) {
+      return res.status(403).json({ error: 'One or more prospects do not belong to your account' });
     }
+
+    // Update prospect_account records for this account only
+    const { error: updateErr } = await supabase
+      .from('prospect_account')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('account_id', req.accountId)
+      .in('prospect_id', ids);
+
+    if (updateErr) throw updateErr;
 
     // Log prospect_events for each changed prospect
-    const { data: prevList } = await supabase.from('prospects').select('id, status, source_campaign_id').in('id', ids);
-    for (const prev of (prevList || [])) {
-      if (status === 'Nouveau' && prev.status !== 'Nouveau') {
-        logEvent('prospect_validated', prev.id, prev.source_campaign_id);
+    for (const pa of (ownedProspects || [])) {
+      if (pa.status === status) continue;
+      if (status === 'Nouveau' && pa.status !== 'Nouveau') {
+        logEvent('prospect_validated', pa.prospect_id, pa.campaign_id, req.accountId);
       } else if (EVENT_MAP[status]) {
-        logEvent(EVENT_MAP[status], prev.id, prev.source_campaign_id);
+        logEvent(EVENT_MAP[status], pa.prospect_id, pa.campaign_id, req.accountId);
       }
     }
 
-    res.json({ success: true, updated: updatedCount || ids.length, bulk_operation_id: bulkOperationId });
+    res.json({ success: true, updated: ownedProspects.length, bulk_operation_id: bulkOperationId });
   } catch (err) {
     console.error('Erreur /api/prospector/bulk-update-status:', err.message);
     res.status(500).json({ error: err.message });
@@ -4186,7 +4255,7 @@ app.post('/api/prospector/bulk-update-status', accountContext, async (req, res) 
 });
 
 // POST /api/prospector/undo-bulk — Undo a bulk operation
-app.post('/api/prospector/undo-bulk', async (req, res) => {
+app.post('/api/prospector/undo-bulk', accountContext, async (req, res) => {
   try {
     const { bulk_operation_id } = req.body;
     if (!bulk_operation_id) return res.status(400).json({ error: 'bulk_operation_id required' });
@@ -4194,7 +4263,8 @@ app.post('/api/prospector/undo-bulk', async (req, res) => {
     const { data: history, error: histErr } = await supabase
       .from('status_history')
       .select('prospect_id, old_status, new_status')
-      .eq('bulk_operation_id', bulk_operation_id);
+      .eq('bulk_operation_id', bulk_operation_id)
+      .eq('account_id', req.accountId);
 
     if (histErr) throw histErr;
     if (!history?.length) return res.status(404).json({ error: 'Operation not found or already undone' });
@@ -4202,9 +4272,10 @@ app.post('/api/prospector/undo-bulk', async (req, res) => {
     let restored = 0;
     for (const row of history) {
       if (row.old_status) {
-        await supabase.from('prospects')
+        await supabaseAdmin.from('prospect_account')
           .update({ status: row.old_status, updated_at: new Date().toISOString() })
-          .eq('id', row.prospect_id);
+          .eq('prospect_id', row.prospect_id)
+          .eq('account_id', req.accountId);
         restored++;
       }
     }
@@ -4217,12 +4288,25 @@ app.post('/api/prospector/undo-bulk', async (req, res) => {
 });
 
 // GET /api/prospector/status-history/:prospect_id — History of status changes
-app.get('/api/prospector/status-history/:prospect_id', async (req, res) => {
+app.get('/api/prospector/status-history/:prospect_id', accountContext, async (req, res) => {
   try {
+    // Verify prospect belongs to this account
+    const { data: owns, error: checkErr } = await supabase
+      .from('prospect_account')
+      .select('prospect_id')
+      .eq('prospect_id', req.params.prospect_id)
+      .eq('account_id', req.accountId)
+      .single();
+
+    if (checkErr || !owns) {
+      return res.status(403).json({ error: 'Prospect not found in your account' });
+    }
+
     const { data, error } = await supabase
       .from('status_history')
       .select('*')
       .eq('prospect_id', req.params.prospect_id)
+      .eq('account_id', req.accountId)
       .order('changed_at', { ascending: false })
       .limit(50);
     if (error) throw error;
@@ -4234,19 +4318,31 @@ app.get('/api/prospector/status-history/:prospect_id', async (req, res) => {
 });
 
 // POST /api/prospector/regenerate-messages — Regenerate message versions via Claude API
-app.post('/api/prospector/regenerate-messages', async (req, res) => {
+app.post('/api/prospector/regenerate-messages', accountContext, async (req, res) => {
   try {
     const { linkedin_url, id, instructions } = req.body;
     let prospectId = id;
     if (!prospectId && linkedin_url) {
-      const { data } = await supabase.from('prospects').select('id').eq('linkedin_url', linkedin_url).limit(1);
+      const { data } = await supabaseAdmin.from('prospects').select('id').eq('linkedin_url', linkedin_url).limit(1);
       if (!data?.length) return res.status(404).json({ error: 'Prospect not found' });
       prospectId = data[0].id;
     }
     if (!prospectId) return res.status(400).json({ error: 'id or linkedin_url required' });
 
+    // Verify prospect belongs to this account
+    const { data: owns, error: checkErr } = await supabaseAdmin
+      .from('prospect_account')
+      .select('prospect_id')
+      .eq('prospect_id', prospectId)
+      .eq('account_id', req.accountId)
+      .single();
+
+    if (checkErr || !owns) {
+      return res.status(403).json({ error: 'Prospect not found in your account' });
+    }
+
     // Fetch prospect + campaign
-    const { data: prospect } = await supabase.from('prospects')
+    const { data: prospect } = await supabaseAdmin.from('prospects')
       .select('*, campaigns(name, sector, geography, criteria, objectives)')
       .eq('id', prospectId).single();
     if (!prospect) return res.status(404).json({ error: 'Prospect not found' });
@@ -4333,7 +4429,7 @@ Retourne uniquement un JSON valide (pas de markdown, pas d'explication) :
     ];
 
     // Save to prospect
-    await supabase.from('prospects').update({
+    await supabaseAdmin.from('prospects').update({
       message_versions: messageVersions,
       updated_at: new Date().toISOString(),
     }).eq('id', prospectId);
@@ -4346,7 +4442,7 @@ Retourne uniquement un JSON valide (pas de markdown, pas d'explication) :
 });
 
 // GET /api/prospector/daily-activity — événements par jour sur N jours
-app.get('/api/prospector/daily-activity', async (req, res) => {
+app.get('/api/prospector/daily-activity', accountContext, async (req, res) => {
   try {
     const days = parseInt(req.query.days) || 30;
 
@@ -4360,10 +4456,11 @@ app.get('/api/prospector/daily-activity', async (req, res) => {
     }
     const fromDate = dates[0];
 
-    // Query events grouped by day + type (timezone Paris)
+    // Query events grouped by day + type (timezone Paris), filtered by account
     const { data: events } = await supabase
       .from('prospect_events')
       .select('type, created_at')
+      .eq('account_id', req.accountId)
       .gte('created_at', fromDate + 'T00:00:00+01:00');
 
     // Aggregate by day (Paris timezone) + type

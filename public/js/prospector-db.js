@@ -4,26 +4,61 @@
 
 const DB = (() => {
   let _sb = null;
+  let _lastJWT = null;
+
   function sb() {
     if (!_sb) {
       const url = document.querySelector('meta[name="supabase-url"]')?.content;
       const key = document.querySelector('meta[name="supabase-key"]')?.content;
       _sb = supabase.createClient(url, key);
     }
+
+    // If JWT token is available, set it as the session auth token
+    const currentJWT = typeof accountContext !== 'undefined' ? accountContext.getJWTToken() : null;
+    if (currentJWT && currentJWT !== _lastJWT) {
+      _lastJWT = currentJWT;
+      // Set the JWT token for RLS filtering
+      // The token format is: { accessToken: token, refreshToken: null, expiresIn: 86400, expiresAt: timestamp, user: { id: account_id } }
+      _sb.auth.setSession({
+        access_token: currentJWT,
+        refresh_token: '',
+        expires_in: 86400,
+        expires_at: Math.floor(Date.now() / 1000) + 86400,
+        token_type: 'bearer',
+        user: { id: accountContext.getAccountId() }
+      }).catch(err => console.warn('Failed to set auth session:', err));
+    }
+
     return _sb;
   }
 
   // ---- Prospects ----
   async function getProspects({ search, status, sector, geography, campaign_id, no_campaign } = {}) {
-    let q = sb().from('prospects').select('*, campaigns(name)').order('created_at', { ascending: false });
-    if (status) q = q.eq('status', status);
-    if (sector) q = q.eq('sector', sector);
-    if (geography) q = q.eq('geography', geography);
-    if (campaign_id) q = q.eq('source_campaign_id', campaign_id);
-    if (no_campaign) q = q.is('source_campaign_id', null);
-    if (search) q = q.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,company.ilike.%${search}%,email.ilike.%${search}%,job_title.ilike.%${search}%`);
-    const { data, error } = await q;
-    if (error) throw error;
+    // Use API endpoint which handles account filtering via X-Account-Id header
+    const params = new URLSearchParams();
+    if (status) params.append('status', status);
+    if (campaign_id) params.append('campaign_id', campaign_id);
+
+    const url = `/api/prospector/prospects${params.size ? '?' + params : ''}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Failed to fetch prospects: ${response.statusText}`);
+    let data = await response.json();
+
+    // Client-side filtering for fields not handled by API
+    if (sector) data = data.filter(p => p.sector === sector);
+    if (geography) data = data.filter(p => p.geography === geography);
+    if (no_campaign) data = data.filter(p => !p.campaign_id);
+    if (search) {
+      const s = search.toLowerCase();
+      data = data.filter(p =>
+        (p.first_name?.toLowerCase().includes(s)) ||
+        (p.last_name?.toLowerCase().includes(s)) ||
+        (p.company?.toLowerCase().includes(s)) ||
+        (p.email?.toLowerCase().includes(s)) ||
+        (p.job_title?.toLowerCase().includes(s))
+      );
+    }
+
     return data;
   }
 
@@ -90,9 +125,10 @@ const DB = (() => {
 
   // ---- Campaigns ----
   async function getCampaigns() {
-    const { data, error } = await sb().from('campaigns').select('*').order('created_at', { ascending: false });
-    if (error) throw error;
-    return data;
+    // Use API endpoint which handles account filtering via X-Account-Id header
+    const response = await fetch('/api/prospector/campaigns');
+    if (!response.ok) throw new Error(`Failed to fetch campaigns: ${response.statusText}`);
+    return await response.json();
   }
 
   async function getCampaign(id) {
@@ -202,36 +238,68 @@ const DB = (() => {
 
   // ---- Stats ----
   async function getProspectsThisWeek() {
-    const now = new Date();
-    const monday = new Date(now);
-    monday.setDate(now.getDate() - now.getDay() + (now.getDay() === 0 ? -6 : 1));
-    monday.setHours(0, 0, 0, 0);
-    const { count, error } = await sb().from('prospects').select('id', { count: 'exact', head: true })
-      .gte('created_at', monday.toISOString());
-    if (error) return 0;
-    return count || 0;
+    try {
+      const now = new Date();
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - now.getDay() + (now.getDay() === 0 ? -6 : 1));
+      monday.setHours(0, 0, 0, 0);
+      const prospects = await getProspects();
+      return prospects.filter(p => new Date(p.created_at) >= monday).length;
+    } catch (e) {
+      console.error('Error in getProspectsThisWeek:', e);
+      return 0;
+    }
   }
 
   async function getTotalProspects() {
-    const { count, error } = await sb().from('prospects').select('id', { count: 'exact', head: true });
-    if (error) return 0;
-    return count || 0;
+    try {
+      const prospects = await getProspects();
+      return prospects.length;
+    } catch (e) {
+      console.error('Error in getTotalProspects:', e);
+      return 0;
+    }
   }
 
   async function getActiveCampaignCount() {
-    const { count, error } = await sb().from('campaigns').select('id', { count: 'exact', head: true }).eq('status', 'Active');
-    if (error) return 0;
-    return count || 0;
+    try {
+      const campaigns = await getCampaigns();
+      return campaigns.filter(c => c.status === 'Active').length;
+    } catch (e) {
+      console.error('Error in getActiveCampaignCount:', e);
+      return 0;
+    }
   }
 
   async function getProspectCountsByStatus() {
-    const { data, error } = await sb().from('prospects').select('status');
-    if (error) return {};
-    const counts = {};
-    for (const r of data) {
-      counts[r.status] = (counts[r.status] || 0) + 1;
+    try {
+      const prospects = await getProspects();
+      const counts = {};
+      for (const p of prospects) {
+        counts[p.status] = (counts[p.status] || 0) + 1;
+      }
+      return counts;
+    } catch (e) {
+      console.error('Error in getProspectCountsByStatus:', e);
+      return {};
     }
-    return counts;
+  }
+
+  // Initialize JWT token and set up account change listener
+  function initializeJWTAuth() {
+    if (typeof accountContext !== 'undefined') {
+      // Listen for account changes to refresh JWT token
+      document.addEventListener('account-changed', (event) => {
+        // Force refresh of Supabase session by resetting the cached client
+        // This ensures the new JWT token is used for subsequent queries
+        sb(); // Call sb() to trigger JWT update logic
+      });
+    }
+  }
+
+  // Initialize on module load if accountContext is available
+  if (typeof accountContext !== 'undefined') {
+    initializeJWTAuth();
   }
 
   return {
@@ -243,5 +311,6 @@ const DB = (() => {
     getReminders, getProspectReminders, createReminder, markReminderDone, snoozeReminder,
     getPendingReminderCount, createImport,
     getProspectsThisWeek, getTotalProspects, getActiveCampaignCount, getProspectCountsByStatus,
+    initializeJWTAuth,
   };
 })();
