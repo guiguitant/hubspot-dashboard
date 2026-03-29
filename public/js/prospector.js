@@ -1154,10 +1154,22 @@ const App = (() => {
     const statusFilter = document.getElementById('filterCampStatus')?.value || '';
     let url = '/api/prospector/campaigns';
     if (statusFilter) url += `?status=${encodeURIComponent(statusFilter)}`;
-    const resp = await fetch(url);
-    const campaigns = await resp.json();
-    _campaignsCache = campaigns;
-    renderCampaignCards();
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        console.error('Failed to load campaigns:', resp.status);
+        _campaignsCache = [];
+        renderCampaignCards();
+        return;
+      }
+      const campaigns = await resp.json();
+      _campaignsCache = Array.isArray(campaigns) ? campaigns : [];
+      renderCampaignCards();
+    } catch (err) {
+      console.error('Error loading campaigns:', err);
+      _campaignsCache = [];
+      renderCampaignCards();
+    }
   }
 
   function renderCampaignCards() {
