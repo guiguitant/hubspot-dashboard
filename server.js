@@ -4512,15 +4512,16 @@ function checkGenRateLimit(ip, maxPerMin = 10) {
 }
 
 // GET /api/sequences?campaign_id=X — Get active sequence with steps
-app.get('/api/sequences', async (req, res) => {
+app.get('/api/sequences', accountContext, async (req, res) => {
   try {
     const { campaign_id } = req.query;
     if (!campaign_id) return res.status(400).json({ error: 'campaign_id required' });
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('sequences')
       .select('*, sequence_steps(*)')
       .eq('campaign_id', campaign_id)
+      .eq('account_id', req.accountId)
       .eq('is_active', true)
       .order('version', { ascending: false })
       .limit(1)
@@ -4538,31 +4539,31 @@ app.get('/api/sequences', async (req, res) => {
 });
 
 // POST /api/sequences — Create new sequence (with versioning)
-app.post('/api/sequences', async (req, res) => {
+app.post('/api/sequences', accountContext, async (req, res) => {
   try {
     const { campaign_id, name } = req.body;
     if (!campaign_id) return res.status(400).json({ error: 'campaign_id required' });
 
-    const { data: existing } = await supabase
+    // Get the highest version for this campaign
+    const { data: allSeqs } = await supabaseAdmin
       .from('sequences')
-      .select('version')
+      .select('version, id')
       .eq('campaign_id', campaign_id)
-      .order('version', { ascending: false })
-      .limit(1)
-      .single();
+      .eq('account_id', req.accountId)
+      .order('version', { ascending: false });
 
-    const newVersion = existing ? existing.version + 1 : 1;
+    const newVersion = (allSeqs && allSeqs.length > 0) ? allSeqs[0].version + 1 : 1;
 
-    if (existing) {
-      await supabase.from('sequences')
-        .update({ is_active: false })
-        .eq('campaign_id', campaign_id)
-        .eq('is_active', true);
-    }
+    // Deactivate ALL active sequences for this campaign
+    await supabaseAdmin.from('sequences')
+      .update({ is_active: false })
+      .eq('campaign_id', campaign_id)
+      .eq('account_id', req.accountId);
 
-    const { data, error } = await supabase
+    // Create new sequence with the new version
+    const { data, error } = await supabaseAdmin
       .from('sequences')
-      .insert({ campaign_id, name: name || 'Séquence principale', version: newVersion })
+      .insert({ campaign_id, account_id: req.accountId, name: name || 'Séquence principale', version: newVersion, is_active: true })
       .select()
       .single();
 
@@ -4575,13 +4576,14 @@ app.post('/api/sequences', async (req, res) => {
 });
 
 // PUT /api/sequences/:id — Update sequence name
-app.put('/api/sequences/:id', async (req, res) => {
+app.put('/api/sequences/:id', accountContext, async (req, res) => {
   try {
     const { name } = req.body;
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('sequences')
       .update({ name })
       .eq('id', req.params.id)
+      .eq('account_id', req.accountId)
       .select()
       .single();
     if (error) throw error;
@@ -4593,9 +4595,9 @@ app.put('/api/sequences/:id', async (req, res) => {
 });
 
 // DELETE /api/sequences/:id — Delete sequence (CASCADE on steps)
-app.delete('/api/sequences/:id', async (req, res) => {
+app.delete('/api/sequences/:id', accountContext, async (req, res) => {
   try {
-    const { error } = await supabase.from('sequences').delete().eq('id', req.params.id);
+    const { error } = await supabaseAdmin.from('sequences').delete().eq('id', req.params.id).eq('account_id', req.accountId);
     if (error) throw error;
     res.json({ success: true });
   } catch (err) {
@@ -4605,7 +4607,7 @@ app.delete('/api/sequences/:id', async (req, res) => {
 });
 
 // POST /api/sequences/:sid/steps — Add step
-app.post('/api/sequences/:sid/steps', async (req, res) => {
+app.post('/api/sequences/:sid/steps', accountContext, async (req, res) => {
   try {
     const { sid } = req.params;
     const { type, delay_days, message_mode, message_content, message_params, message_label } = req.body;
@@ -4617,11 +4619,11 @@ app.post('/api/sequences/:sid/steps', async (req, res) => {
 
     // Only one send_invitation per sequence
     if (type === 'send_invitation') {
-      const { data: existing } = await supabase.from('sequence_steps').select('id').eq('sequence_id', sid).eq('type', 'send_invitation');
+      const { data: existing } = await supabaseAdmin.from('sequence_steps').select('id').eq('sequence_id', sid).eq('type', 'send_invitation');
       if (existing?.length) return res.status(400).json({ error: 'Une seule étape invitation par séquence' });
     }
 
-    const { data: lastStep } = await supabase
+    const { data: lastStep } = await supabaseAdmin
       .from('sequence_steps')
       .select('step_order')
       .eq('sequence_id', sid)
@@ -4631,7 +4633,7 @@ app.post('/api/sequences/:sid/steps', async (req, res) => {
 
     const step_order = lastStep ? lastStep.step_order + 1 : 1;
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('sequence_steps')
       .insert({ sequence_id: sid, step_order, type, delay_days: delay_days || 0, message_mode: message_mode || null, message_content: message_content || null, message_params: message_params || null, message_label: message_label || null })
       .select()
@@ -4646,15 +4648,15 @@ app.post('/api/sequences/:sid/steps', async (req, res) => {
 });
 
 // PUT /api/sequences/:sid/steps/:id — Update step
-app.put('/api/sequences/:sid/steps/:id', async (req, res) => {
+app.put('/api/sequences/:sid/steps/:id', accountContext, async (req, res) => {
   try {
-    const allowed = ['type', 'delay_days', 'message_mode', 'message_content', 'message_params', 'message_label'];
+    const allowed = ['type', 'delay_days', 'message_mode', 'message_content', 'message_params', 'message_label', 'selected_message', 'selected_mode', 'has_note', 'note_content'];
     const updates = {};
     for (const k of allowed) {
       if (req.body[k] !== undefined) updates[k] = req.body[k];
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('sequence_steps')
       .update(updates)
       .eq('id', req.params.id)
@@ -4671,23 +4673,23 @@ app.put('/api/sequences/:sid/steps/:id', async (req, res) => {
 });
 
 // DELETE /api/sequences/:sid/steps/:id — Delete step and reorder
-app.delete('/api/sequences/:sid/steps/:id', async (req, res) => {
+app.delete('/api/sequences/:sid/steps/:id', accountContext, async (req, res) => {
   try {
     const { sid, id } = req.params;
 
-    const { data: deleted } = await supabase.from('sequence_steps').select('step_order').eq('id', id).single();
-    const { error } = await supabase.from('sequence_steps').delete().eq('id', id);
+    const { data: deleted } = await supabaseAdmin.from('sequence_steps').select('step_order').eq('id', id).single();
+    const { error } = await supabaseAdmin.from('sequence_steps').delete().eq('id', id);
     if (error) throw error;
 
     if (deleted) {
-      const { data: remaining } = await supabase.from('sequence_steps')
+      const { data: remaining } = await supabaseAdmin.from('sequence_steps')
         .select('id, step_order')
         .eq('sequence_id', sid)
         .gt('step_order', deleted.step_order)
         .order('step_order', { ascending: true });
 
       for (const step of (remaining || [])) {
-        await supabase.from('sequence_steps').update({ step_order: step.step_order - 1 }).eq('id', step.id);
+        await supabaseAdmin.from('sequence_steps').update({ step_order: step.step_order - 1 }).eq('id', step.id);
       }
     }
 
@@ -4699,13 +4701,13 @@ app.delete('/api/sequences/:sid/steps/:id', async (req, res) => {
 });
 
 // POST /api/sequences/:sid/steps/reorder — Reorder steps after drag & drop
-app.post('/api/sequences/:sid/steps/reorder', async (req, res) => {
+app.post('/api/sequences/:sid/steps/reorder', accountContext, async (req, res) => {
   try {
     const { ordered_ids } = req.body;
     if (!Array.isArray(ordered_ids)) return res.status(400).json({ error: 'ordered_ids must be an array' });
 
     for (let i = 0; i < ordered_ids.length; i++) {
-      await supabase.from('sequence_steps').update({ step_order: i + 1 }).eq('id', ordered_ids[i]);
+      await supabaseAdmin.from('sequence_steps').update({ step_order: i + 1 }).eq('id', ordered_ids[i]);
     }
 
     res.json({ success: true });
@@ -4716,7 +4718,7 @@ app.post('/api/sequences/:sid/steps/reorder', async (req, res) => {
 });
 
 // POST /api/sequences/generate-message — Generate message via Claude API with placeholders
-app.post('/api/sequences/generate-message', async (req, res) => {
+app.post('/api/sequences/generate-message', accountContext, async (req, res) => {
   try {
     const ip = req.ip || req.connection.remoteAddress;
     if (!checkGenRateLimit(ip)) return res.status(429).json({ error: 'Rate limit: max 10 requêtes/minute' });
@@ -4728,7 +4730,7 @@ app.post('/api/sequences/generate-message', async (req, res) => {
     if (!message_params) return res.status(400).json({ error: 'message_params required' });
 
     // Fetch placeholders for prompt
-    const { data: placeholders } = await supabase.from('placeholders').select('key, label, description').order('source');
+    const { data: placeholders } = await supabaseAdmin.from('placeholders').select('key, label, description').order('source');
     const placeholderList = (placeholders || []).map(p => `{{${p.key}}} → ${p.label}${p.description ? ` (${p.description})` : ''}`).join('\n');
 
     const systemPrompt = `Tu es un expert en prospection LinkedIn pour Releaf Carbon, une entreprise qui accompagne les entreprises du BTP et de l'industrie sur les sujets RSE et carbone.
@@ -4779,22 +4781,24 @@ Commence par "Bonjour {{prospect_first_name}}," et utilise les placeholders disp
 });
 
 // GET /api/sequences/preview?campaign_id=X&prospect_id=X — Preview with placeholder replacement
-app.get('/api/sequences/preview', async (req, res) => {
+app.get('/api/sequences/preview', accountContext, async (req, res) => {
   try {
     const { campaign_id, prospect_id } = req.query;
     if (!campaign_id || !prospect_id) return res.status(400).json({ error: 'campaign_id and prospect_id required' });
 
-    // Fetch sequence + prospect + campaign
-    const [seqResp, prospResp, campResp] = await Promise.all([
-      supabase.from('sequences').select('*, sequence_steps(*)').eq('campaign_id', campaign_id).eq('is_active', true).order('version', { ascending: false }).limit(1).single(),
-      supabase.from('prospects').select('*').eq('id', prospect_id).single(),
-      supabase.from('campaigns').select('*').eq('id', campaign_id).single(),
+    // Fetch sequence + prospect + campaign + account
+    const [seqResp, prospResp, campResp, acctResp] = await Promise.all([
+      supabaseAdmin.from('sequences').select('*, sequence_steps(*)').eq('campaign_id', campaign_id).eq('account_id', req.accountId).eq('is_active', true).order('version', { ascending: false }).limit(1).single(),
+      supabaseAdmin.from('prospects').select('*').eq('id', prospect_id).single(),
+      supabaseAdmin.from('campaigns').select('*').eq('id', campaign_id).single(),
+      supabaseAdmin.from('accounts').select('name').eq('id', req.accountId).single(),
     ]);
 
     if (!seqResp.data) return res.json({ steps: [], status: 'no_sequence' });
 
     const prospect = prospResp.data || {};
     const campaign = campResp.data || {};
+    const account = acctResp.data || {};
     const steps = (seqResp.data.sequence_steps || []).sort((a, b) => a.step_order - b.step_order);
 
     const replacements = {
@@ -4802,12 +4806,12 @@ app.get('/api/sequences/preview', async (req, res) => {
       '{{prospect_last_name}}': prospect.last_name || '',
       '{{prospect_company}}': prospect.company || '',
       '{{prospect_job_title}}': prospect.job_title || '',
-      '{{user_first_name}}': 'Nathan',
+      '{{user_first_name}}': account.name || 'Votre prénom',
       '{{campaign_name}}': campaign.name || '',
     };
 
     // Also fetch custom placeholders
-    const { data: customPh } = await supabase.from('placeholders').select('key').eq('source', 'custom');
+    const { data: customPh } = await supabaseAdmin.from('placeholders').select('key').eq('source', 'custom');
     for (const ph of (customPh || [])) {
       if (!replacements[`{{${ph.key}}}`]) replacements[`{{${ph.key}}}`] = '';
     }
@@ -4833,7 +4837,7 @@ app.get('/api/sequences/preview', async (req, res) => {
 // GET /api/placeholders
 app.get('/api/placeholders', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('placeholders').select('*').order('source').order('label');
+    const { data, error } = await supabaseAdmin.from('placeholders').select('*').order('source').order('label');
     if (error) throw error;
     res.json(data || []);
   } catch (err) {
@@ -4849,7 +4853,7 @@ app.post('/api/placeholders', async (req, res) => {
     if (!key || !label) return res.status(400).json({ error: 'key and label required' });
     if (!/^[a-z0-9_]+$/.test(key)) return res.status(400).json({ error: 'key must contain only lowercase letters, digits, and underscores' });
 
-    const { data, error } = await supabase.from('placeholders')
+    const { data, error } = await supabaseAdmin.from('placeholders')
       .insert({ key, label, description: description || null, source: 'custom', is_system: false })
       .select().single();
 
@@ -4867,11 +4871,11 @@ app.post('/api/placeholders', async (req, res) => {
 // PUT /api/placeholders/:id
 app.put('/api/placeholders/:id', async (req, res) => {
   try {
-    const { data: existing } = await supabase.from('placeholders').select('is_system').eq('id', req.params.id).single();
+    const { data: existing } = await supabaseAdmin.from('placeholders').select('is_system').eq('id', req.params.id).single();
     if (existing?.is_system) return res.status(403).json({ error: 'Cannot modify system placeholders' });
 
     const { label, description } = req.body;
-    const { data, error } = await supabase.from('placeholders')
+    const { data, error } = await supabaseAdmin.from('placeholders')
       .update({ label, description })
       .eq('id', req.params.id)
       .select().single();
@@ -4886,14 +4890,64 @@ app.put('/api/placeholders/:id', async (req, res) => {
 // DELETE /api/placeholders/:id
 app.delete('/api/placeholders/:id', async (req, res) => {
   try {
-    const { data: existing } = await supabase.from('placeholders').select('is_system').eq('id', req.params.id).single();
+    const { data: existing } = await supabaseAdmin.from('placeholders').select('is_system').eq('id', req.params.id).single();
     if (existing?.is_system) return res.status(403).json({ error: 'Cannot delete system placeholders' });
 
-    const { error } = await supabase.from('placeholders').delete().eq('id', req.params.id);
+    const { error } = await supabaseAdmin.from('placeholders').delete().eq('id', req.params.id);
     if (error) throw error;
     res.json({ success: true });
   } catch (err) {
     console.error('Erreur DELETE /api/placeholders:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+//   LOGS ENDPOINT
+// ============================================================
+
+// GET /api/logs — Activity log (status changes + interactions)
+app.get('/api/logs', accountContext, async (req, res) => {
+  try {
+    const { campaign_id, from, to, type } = req.query;
+    const limit = 100;
+
+    let query = supabaseAdmin.from('status_history').select(`
+      created_at,
+      prospect:prospects(id, first_name, last_name, company),
+      old_status,
+      new_status,
+      source,
+      bulk_operation_id
+    `).eq('account_id', req.accountId);
+
+    // Filter by campaign if provided
+    if (campaign_id) {
+      query = query.eq('campaign_id', campaign_id);
+    }
+
+    // Filter by date range
+    if (from) {
+      query = query.gte('created_at', from);
+    }
+    if (to) {
+      query = query.lte('created_at', to);
+    }
+
+    // Type filter: "status_change" is implicit (status_history table), "interaction" would be different
+    if (type && type !== 'status_change') {
+      // For now, only status_change is supported from this table
+      return res.json([]);
+    }
+
+    const { data, error } = await query
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    console.error('Erreur GET /api/logs:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

@@ -18,6 +18,7 @@
     <a href="#prospects" data-page="prospects">Prospects</a>
     <a href="#campagnes" data-page="campagnes">Campagnes</a>
     <a href="#imports" data-page="imports">Imports</a>
+    <a href="#logs" data-page="logs">Logs</a>
     <a href="#rappels" data-page="rappels">Rappels</a>
     <a href="#placeholders" data-page="placeholders">Placeholders</a>
   </div>
@@ -266,8 +267,8 @@
 <script>
 const originalFetch = window.fetch;
 window.fetch = function(url, options = {}) {
-  // Only inject header for /api/prospector/* endpoints
-  if (typeof url === 'string' && url.includes('/api/prospector')) {
+  // Inject header for /api/prospector/* and /api/sequences/* endpoints
+  if (typeof url === 'string' && (url.includes('/api/prospector') || url.includes('/api/sequences'))) {
     const accountId = accountContext.getAccountId();
     if (!accountId) {
       // Account not selected, reject the request

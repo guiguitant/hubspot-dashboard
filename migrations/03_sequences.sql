@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS sequence_steps (
   type TEXT NOT NULL CHECK (type IN ('send_invitation', 'send_message')),
   delay_days INTEGER NOT NULL DEFAULT 0,
   icebreaker_mode TEXT CHECK (icebreaker_mode IN ('auto', 'generic')) DEFAULT 'generic',
+  has_note BOOLEAN NOT NULL DEFAULT false,
+  note_content TEXT DEFAULT NULL,
   message_mode TEXT CHECK (message_mode IN ('manual', 'ai_generated')) DEFAULT NULL,
   message_content TEXT DEFAULT NULL,
   message_params JSONB DEFAULT NULL,

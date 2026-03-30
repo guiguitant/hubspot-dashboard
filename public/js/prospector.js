@@ -24,6 +24,7 @@ const App = (() => {
       case '#campagnes':       renderCampagnes(app); break;
       case '#campaign-detail': renderCampaignDetail(app, params.get('id')); break;
       case '#imports':         renderImports(app); break;
+      case '#logs':            renderLogs(app); break;
       case '#rappels':         renderRappels(app); break;
       case '#placeholders':    renderPlaceholders(app); break;
       default:                 renderDashboard(app);
@@ -320,7 +321,7 @@ const App = (() => {
         ${UI.STATUSES.map(s => {
           const isAValider = s === 'Profil à valider';
           const label = isAValider ? 'À valider' : s;
-          return `<button class="qf-btn ${isAValider ? 'qf-active' : ''}" data-filter="${s}" onclick="App.quickFilter(this, '${s}')">${label} <span class="qf-count" id="qfCount-${s.replace(/\s/g, '_')}"></span></button>`;
+          return `<button class="qf-btn" data-filter="${s}" onclick="App.quickFilter(this, '${s}')">${label} <span class="qf-count" id="qfCount-${s.replace(/\s/g, '_')}"></span></button>`;
         }).join('')}
       </div>
       <div class="filter-bar">
@@ -1106,6 +1107,105 @@ const App = (() => {
   }
 
   // ============================================================
+  // LOGS
+  // ============================================================
+  async function renderLogs(container) {
+    container.innerHTML = `
+      <div class="page-header">
+        <h1 class="page-title" style="margin-bottom:0">Journal d'activité</h1>
+      </div>
+      <div class="card">
+        <div style="padding:16px;border-bottom:1px solid var(--color-border);display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px">
+          <div>
+            <label style="font-size:12px;color:var(--color-text-muted);font-weight:600;display:block;margin-bottom:4px">Campagne</label>
+            <select id="logsCampaignFilter" onchange="App.loadLogs()">
+              <option value="">Toutes les campagnes</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:12px;color:var(--color-text-muted);font-weight:600;display:block;margin-bottom:4px">Du</label>
+            <input type="date" id="logsFromFilter" onchange="App.loadLogs()">
+          </div>
+          <div>
+            <label style="font-size:12px;color:var(--color-text-muted);font-weight:600;display:block;margin-bottom:4px">Au</label>
+            <input type="date" id="logsToFilter" onchange="App.loadLogs()">
+          </div>
+          <div>
+            <label style="font-size:12px;color:var(--color-text-muted);font-weight:600;display:block;margin-bottom:4px">Type</label>
+            <select id="logsTypeFilter" onchange="App.loadLogs()">
+              <option value="">Tous les types</option>
+              <option value="status_change">Changement de statut</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table><thead><tr><th>Date / Heure</th><th>Prospect</th><th>Action</th><th>Détail</th></tr></thead>
+          <tbody id="logsList">${UI.loader()}</tbody></table>
+        </div>
+      </div>`;
+
+    // Load campaigns for filter dropdown
+    const campaignFilter = document.getElementById('logsCampaignFilter');
+    try {
+      const resp = await fetch('/api/prospector/campaigns');
+      const camps = await resp.json();
+      camps.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.name;
+        campaignFilter.appendChild(opt);
+      });
+    } catch(e) {}
+
+    loadLogs();
+  }
+
+  async function loadLogs() {
+    const campaignId = document.getElementById('logsCampaignFilter')?.value || '';
+    const fromDate = document.getElementById('logsFromFilter')?.value || '';
+    const toDate = document.getElementById('logsToFilter')?.value || '';
+    const type = document.getElementById('logsTypeFilter')?.value || '';
+
+    let url = '/api/logs';
+    const params = [];
+    if (campaignId) params.push(`campaign_id=${campaignId}`);
+    if (fromDate) params.push(`from=${fromDate}`);
+    if (toDate) params.push(`to=${toDate}`);
+    if (type) params.push(`type=${type}`);
+    if (params.length > 0) url += '?' + params.join('&');
+
+    try {
+      const resp = await fetch(url);
+      const logs = await resp.json();
+      const el = document.getElementById('logsList');
+      if (!el) return;
+
+      if (logs.length === 0) {
+        el.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:30px;color:var(--color-text-muted)">Aucun log</td></tr>`;
+        return;
+      }
+
+      el.innerHTML = logs.map(log => {
+        const prospectName = log.prospect ? `${log.prospect.first_name} ${log.prospect.last_name}` : '—';
+        const prospectCompany = log.prospect?.company ? ` (${log.prospect.company})` : '';
+        const actionText = log.new_status ? `Statut : ${log.old_status} → ${log.new_status}` : '—';
+        const sourceText = log.source || '—';
+        const dateStr = UI.formatDate(log.created_at);
+
+        return `<tr>
+          <td class="text-sm">${dateStr}</td>
+          <td><strong>${UI.esc(prospectName)}</strong><div class="text-sm text-muted">${UI.esc(prospectCompany)}</div></td>
+          <td>${actionText}</td>
+          <td class="text-sm text-muted">${sourceText}</td>
+        </tr>`;
+      }).join('');
+    } catch(e) {
+      const el = document.getElementById('logsList');
+      if (el) el.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:30px;color:#EF4444">Erreur : ${e.message}</td></tr>`;
+    }
+  }
+
+  // ============================================================
   // CAMPAGNES
   // ============================================================
   async function renderCampagnes(container) {
@@ -1539,7 +1639,7 @@ const App = (() => {
           }).join('')}
           ${steps.length === 0 ? '<div class="text-sm text-muted" style="padding:20px;text-align:center">Aucune étape</div>' : ''}
           <div class="seq-add-step">
-            <button class="btn btn-outline btn-sm" onclick="App.addStep('${sequence.id}', 'send_invitation')">🤝 Invitation</button>
+            ${!steps.some(s => s.type === 'send_invitation') ? `<button class="btn btn-outline btn-sm" onclick="App.addStep('${sequence.id}', 'send_invitation')">🤝 Invitation</button>` : ''}
             <button class="btn btn-outline btn-sm" onclick="App.addStep('${sequence.id}', 'send_message')">💬 Message</button>
           </div>
         </div>
@@ -1584,12 +1684,43 @@ const App = (() => {
     const mode = step.message_mode || 'manual';
 
     if (step.type === 'send_invitation') {
+      const hasNote = step.has_note || false;
+      const noteContent = step.note_content || '';
+      const phGroups = {};
+      for (const ph of (_placeholdersCache || [])) {
+        if (!phGroups[ph.source]) phGroups[ph.source] = [];
+        phGroups[ph.source].push(ph);
+      }
+      const phBarHtml = hasNote ? Object.entries(phGroups).map(([src, phs]) =>
+        `<div class="ph-group"><span class="ph-group-label">${src}</span>${phs.map(p => `<button class="ph-btn" onclick="App._insertPlaceholder('{{${p.key}}}')" title="${UI.esc(p.description || p.label)}">${UI.esc(p.label)}</button>`).join('')}</div>`
+      ).join('') : '';
+
       el.innerHTML = `
         <div class="seq-config-inner">
           <h3>${meta.icon} ${meta.label}</h3>
           <div class="form-group"><label>Libellé</label><input id="cfgLabel" value="${UI.esc(step.message_label || 'Invitation LinkedIn')}" placeholder="Invitation LinkedIn"></div>
           <div class="form-group"><label>Délai (jours)</label><input type="number" id="cfgDelay" min="0" value="${step.delay_days}"><div class="text-sm text-muted" style="margin-top:4px">0 = immédiatement</div></div>
-          <div class="text-sm text-muted" style="background:#F0FDF4;padding:10px;border-radius:6px;margin:12px 0">L'invitation sera envoyée sans note de personnalisation.</div>
+
+          <div class="form-group">
+            <label style="display:flex;align-items:center;gap:8px">
+              <input type="checkbox" id="cfgHasNote" ${hasNote ? 'checked' : ''} onchange="App._toggleInvitationNote()">
+              <span>Inclure une note personnalisée</span>
+            </label>
+          </div>
+
+          <div id="invitationNotePanel" style="display:${hasNote ? 'block' : 'none'}">
+            <div class="ph-bar">${phBarHtml}</div>
+            <div class="form-group">
+              <textarea id="cfgNoteContent" rows="4" maxlength="300" placeholder="Votre note personnalisée…" oninput="App._updateNoteCharCount()">${UI.esc(noteContent)}</textarea>
+              <div class="char-counter"><span id="noteCharCount">${noteContent.length}</span> / 300</div>
+              <div id="noteWarning" style="display:${noteContent.length > 300 ? 'block' : 'none'};color:#EF4444;font-size:13px;margin-top:4px">⚠️ Limite LinkedIn dépassée (max 300 caractères)</div>
+            </div>
+          </div>
+
+          <div id="invitationNoNotePanel" style="display:${!hasNote ? 'block' : 'none'};text-align:center">
+            <div class="text-sm text-muted" style="background:#F0FDF4;padding:10px;border-radius:6px">L'invitation sera envoyée sans note.</div>
+          </div>
+
           <button class="btn btn-primary" onclick="App._saveStepConfig('${sequenceId}','${step.id}')">Sauvegarder</button>
         </div>`;
       return;
@@ -1611,12 +1742,19 @@ const App = (() => {
         <div class="form-group"><label>Libellé de l'étape</label><input id="cfgLabel" value="${UI.esc(step.message_label || '')}" placeholder="Ex: Message 1 — Premier contact"></div>
         <div class="form-group"><label>Délai (jours)</label><input type="number" id="cfgDelay" min="1" value="${step.delay_days}"><div class="text-sm text-muted" style="margin-top:4px">Minimum 1 jour</div></div>
 
-        <div class="step-msg-tabs">
-          <button class="step-msg-tab ${mode === 'manual' ? 'step-msg-tab-active' : ''}" onclick="App._switchMsgTab('manual')">Rédiger</button>
-          <button class="step-msg-tab ${mode === 'ai_generated' ? 'step-msg-tab-active' : ''}" onclick="App._switchMsgTab('ai')">Générer avec Claude</button>
+        <div class="msg-zone-selector">
+          <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+            <input type="radio" name="msgMode" value="manual" ${mode === 'manual' ? 'checked' : ''} onchange="App._switchMsgTab('manual')">
+            <span style="font-weight:500">Message manuel</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px">
+            <input type="radio" name="msgMode" value="claude" ${mode === 'ai_generated' ? 'checked' : ''} onchange="App._switchMsgTab('ai')">
+            <span style="font-weight:500">Message Claude</span>
+          </label>
         </div>
 
-        <div id="msgTabManual" style="display:${mode === 'manual' ? 'block' : 'none'}">
+        <div id="msgTabManual" class="msg-zone ${mode === 'manual' ? 'msg-zone-active' : 'msg-zone-inactive'}" style="display:${mode === 'manual' ? 'block' : 'none'}">
+          <div class="msg-zone-badge">✓ Sera envoyé</div>
           <div class="ph-bar">${phBarHtml}</div>
           <div class="form-group">
             <textarea id="stepContent" rows="6" maxlength="300" placeholder="Votre message LinkedIn…" oninput="App._updateCharCount()">${UI.esc(step.message_content || '')}</textarea>
@@ -1624,7 +1762,8 @@ const App = (() => {
           </div>
         </div>
 
-        <div id="msgTabAI" style="display:${mode === 'ai_generated' ? 'block' : 'none'}">
+        <div id="msgTabAI" class="msg-zone ${mode === 'ai_generated' ? 'msg-zone-active' : 'msg-zone-inactive'}" style="display:${mode === 'ai_generated' ? 'block' : 'none'}">
+          <div class="msg-zone-badge">✓ Sera envoyé</div>
           <div class="form-group"><label>Angle</label><input id="aiAngle" value="${UI.esc(params.angle || '')}" placeholder="ex: pression réglementaire, enjeux carbone..."></div>
           <div class="form-group"><label>Ton</label><input id="aiTone" value="${UI.esc(params.tone || '')}" placeholder="ex: chaleureux et direct, très formel, décontracté..."></div>
           <div class="form-group"><label>Thématique</label><input id="aiObjective" value="${UI.esc(params.objective || '')}" placeholder="ex: Bilan carbone, RSE, QHSE..."></div>
@@ -1668,22 +1807,30 @@ const App = (() => {
         dragCard = card;
         card.classList.add('dragging');
         e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/html', card.innerHTML);
+        e.stopPropagation();
       });
-      card.addEventListener('dragend', () => {
+      card.addEventListener('dragend', e => {
         card.classList.remove('dragging');
         list.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
         dragCard = null;
+        e.stopPropagation();
       });
       card.addEventListener('dragover', e => {
         e.preventDefault();
+        e.stopPropagation();
         if (card !== dragCard && card.classList.contains('seq-step-card')) {
           list.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
           card.classList.add('drag-over');
         }
       });
-      card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+      card.addEventListener('dragleave', e => {
+        card.classList.remove('drag-over');
+        e.stopPropagation();
+      });
       card.addEventListener('drop', async e => {
         e.preventDefault();
+        e.stopPropagation();
         card.classList.remove('drag-over');
         if (!dragCard || dragCard === card) return;
         const ordered_ids = [...list.querySelectorAll('.seq-step-card')].map(c => c.dataset.stepId);
@@ -1759,11 +1906,32 @@ const App = (() => {
   function _onStepTypeChange() {} // no longer needed in split panel
 
   function _switchMsgTab(tab) {
-    document.getElementById('msgTabManual').style.display = tab === 'manual' ? 'block' : 'none';
-    document.getElementById('msgTabAI').style.display = tab === 'ai' ? 'block' : 'none';
-    document.querySelectorAll('.step-msg-tab').forEach(b => b.classList.remove('step-msg-tab-active'));
-    if (tab === 'manual') document.querySelector('.step-msg-tab:first-child')?.classList.add('step-msg-tab-active');
-    else document.querySelector('.step-msg-tab:last-child')?.classList.add('step-msg-tab-active');
+    const manualZone = document.getElementById('msgTabManual');
+    const aiZone = document.getElementById('msgTabAI');
+
+    if (tab === 'manual') {
+      if (manualZone) {
+        manualZone.style.display = 'block';
+        manualZone.classList.remove('msg-zone-inactive');
+        manualZone.classList.add('msg-zone-active');
+      }
+      if (aiZone) {
+        aiZone.style.display = 'none';
+        aiZone.classList.remove('msg-zone-active');
+        aiZone.classList.add('msg-zone-inactive');
+      }
+    } else {
+      if (aiZone) {
+        aiZone.style.display = 'block';
+        aiZone.classList.remove('msg-zone-inactive');
+        aiZone.classList.add('msg-zone-active');
+      }
+      if (manualZone) {
+        manualZone.style.display = 'none';
+        manualZone.classList.remove('msg-zone-active');
+        manualZone.classList.add('msg-zone-inactive');
+      }
+    }
   }
 
   function _updateCharCount() {
@@ -1773,6 +1941,22 @@ const App = (() => {
     const taAI = document.getElementById('aiResultContent');
     const elAI = document.getElementById('charCountAI');
     if (taAI && elAI) elAI.textContent = taAI.value.length;
+  }
+
+  function _toggleInvitationNote() {
+    const hasNote = document.getElementById('cfgHasNote')?.checked || false;
+    document.getElementById('invitationNotePanel').style.display = hasNote ? 'block' : 'none';
+    document.getElementById('invitationNoNotePanel').style.display = hasNote ? 'none' : 'block';
+  }
+
+  function _updateNoteCharCount() {
+    const ta = document.getElementById('cfgNoteContent');
+    const el = document.getElementById('noteCharCount');
+    const warning = document.getElementById('noteWarning');
+    if (ta && el) {
+      el.textContent = ta.value.length;
+      if (warning) warning.style.display = ta.value.length > 300 ? 'block' : 'none';
+    }
   }
 
   async function _generateStepMessage() {
@@ -1800,6 +1984,12 @@ const App = (() => {
         document.getElementById('aiResult').style.display = 'block';
         document.getElementById('aiResultContent').value = result.content;
         if (regenBtn) regenBtn.style.display = '';
+
+        // Auto-switch to Claude tab
+        document.querySelector('input[name="msgMode"][value="claude"]').checked = true;
+        App._switchMsgTab('ai');
+        UI.toast('Message Claude sélectionné');
+
         _updateCharCount();
       } else {
         UI.toast(result.error || 'Erreur de génération');
@@ -1816,6 +2006,22 @@ const App = (() => {
 
     const body = { delay_days, message_label: label };
 
+    // Check if this is a send_invitation step (has note panel)
+    const hasNoteCheckbox = document.getElementById('cfgHasNote');
+    if (hasNoteCheckbox) {
+      body.has_note = hasNoteCheckbox.checked;
+      if (hasNoteCheckbox.checked) {
+        const noteContent = document.getElementById('cfgNoteContent')?.value || '';
+        if (noteContent.length > 300) {
+          UI.toast('Note trop longue (max 300 caractères LinkedIn)');
+          return;
+        }
+        body.note_content = noteContent;
+      } else {
+        body.note_content = null;
+      }
+    }
+
     // Determine if this is a message step
     const manualTab = document.getElementById('msgTabManual');
     if (manualTab) {
@@ -1823,6 +2029,8 @@ const App = (() => {
       if (isAI) {
         body.message_mode = 'ai_generated';
         body.message_content = document.getElementById('aiResultContent')?.value || '';
+        body.selected_message = document.getElementById('aiResultContent')?.value || '';
+        body.selected_mode = 'ai_generated';
         body.message_params = {
           angle: document.getElementById('aiAngle')?.value || '',
           tone: document.getElementById('aiTone')?.value || '',
@@ -1832,6 +2040,8 @@ const App = (() => {
       } else {
         body.message_mode = 'manual';
         body.message_content = document.getElementById('stepContent')?.value || '';
+        body.selected_message = document.getElementById('stepContent')?.value || '';
+        body.selected_mode = 'manual';
       }
 
       if (delay_days < 1) {
@@ -2254,6 +2464,17 @@ const App = (() => {
   // ============================================================
   function init() {
     window.addEventListener('hashchange', router);
+
+    // Add explicit click handlers to navbar links to ensure navigation works
+    document.querySelectorAll('.navbar-nav a, .navbar-bell, .navbar-logo').forEach(link => {
+      link.addEventListener('click', (e) => {
+        const href = link.getAttribute('href') || link.href;
+        if (href && href.startsWith('#')) {
+          e.preventDefault();
+          location.hash = href;
+        }
+      });
+    });
 
     // Reload page when account changes (to refresh all data with new account_id header)
     document.addEventListener('account-changed', (e) => {
