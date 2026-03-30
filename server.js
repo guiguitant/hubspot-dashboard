@@ -4903,6 +4903,259 @@ app.delete('/api/placeholders/:id', async (req, res) => {
 });
 
 // ============================================================
+//   SEQUENCE EXECUTION ENGINE (Sprint 2)
+// ============================================================
+
+// POST /api/sequences/enroll — Enroll prospect in active campaign sequence
+app.post('/api/sequences/enroll', accountContext, async (req, res) => {
+  try {
+    const { prospect_id, campaign_id } = req.body;
+    if (!prospect_id || !campaign_id) {
+      return res.status(400).json({ error: 'prospect_id and campaign_id required' });
+    }
+
+    // 1. Get active sequence for campaign
+    const { data: sequence } = await supabaseAdmin.from('sequences')
+      .select('id')
+      .eq('campaign_id', campaign_id)
+      .eq('account_id', req.accountId)
+      .eq('is_active', true)
+      .single();
+
+    if (!sequence) {
+      return res.json({ enrolled: false, reason: 'no_active_sequence' });
+    }
+
+    // 2. Check if already enrolled
+    const { data: existing } = await supabaseAdmin.from('prospect_sequence_state')
+      .select('id')
+      .eq('prospect_id', prospect_id)
+      .eq('sequence_id', sequence.id)
+      .single();
+
+    if (existing) {
+      return res.json({ enrolled: false, reason: 'already_enrolled' });
+    }
+
+    // 3. Insert into prospect_sequence_state
+    const { data: state, error: insertError } = await supabaseAdmin.from('prospect_sequence_state')
+      .insert({
+        prospect_id,
+        sequence_id: sequence.id,
+        account_id: req.accountId,
+        current_step_order: 1,
+        status: 'active',
+        next_action_at: new Date(),
+        enrolled_at: new Date()
+      })
+      .select();
+
+    if (insertError) throw insertError;
+
+    // 4. Get first step details
+    const { data: firstStep } = await supabaseAdmin.from('sequence_steps')
+      .select('type, delay_days')
+      .eq('sequence_id', sequence.id)
+      .eq('step_order', 1)
+      .single();
+
+    res.json({
+      enrolled: true,
+      sequence_id: sequence.id,
+      state_id: state[0].id,
+      first_step: firstStep
+    });
+  } catch (err) {
+    console.error('Erreur POST /api/sequences/enroll:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/sequences/due-actions — Get actions ready to execute now
+app.get('/api/sequences/due-actions', accountContext, async (req, res) => {
+  try {
+    // 1. Get due prospect_sequence_state
+    const { data: dueStates, error: statesError } = await supabaseAdmin
+      .from('prospect_sequence_state')
+      .select('id, prospect_id, current_step_order, sequence_id')
+      .eq('account_id', req.accountId)
+      .eq('status', 'active')
+      .lte('next_action_at', new Date().toISOString())
+      .order('next_action_at', { ascending: true });
+
+    if (statesError) throw statesError;
+
+    // 2. For each state, get the step details
+    const dueActions = [];
+    for (const state of dueStates || []) {
+      const { data: step } = await supabaseAdmin.from('sequence_steps')
+        .select('*')
+        .eq('sequence_id', state.sequence_id)
+        .eq('step_order', state.current_step_order)
+        .single();
+
+      const { data: prospect } = await supabaseAdmin.from('prospects')
+        .select('id, first_name, last_name, company, job_title, linkedin_url')
+        .eq('id', state.prospect_id)
+        .single();
+
+      const { data: pa } = await supabaseAdmin.from('prospect_account')
+        .select('status, campaign_id')
+        .eq('prospect_id', state.prospect_id)
+        .eq('account_id', req.accountId)
+        .single();
+
+      if (step && prospect && pa) {
+        dueActions.push({ ...state, step, prospect, prospect_account: pa });
+      }
+    }
+
+    // 3. Also get pending messages to send
+    const { data: pendingMessages, error: msgError } = await supabaseAdmin
+      .from('prospect_account')
+      .select('*, prospects(id, first_name, last_name, company, job_title, linkedin_url)')
+      .eq('account_id', req.accountId)
+      .eq('status', 'Message à envoyer');
+
+    if (msgError) throw msgError;
+
+    res.json({
+      sequence_actions: dueActions,
+      pending_messages: (pendingMessages || []).map(pa => ({
+        ...pa,
+        action_type: 'send_pending_message'
+      }))
+    });
+  } catch (err) {
+    console.error('Erreur GET /api/sequences/due-actions:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/sequences/complete-step — Mark step as done, calculate next action
+app.post('/api/sequences/complete-step', accountContext, async (req, res) => {
+  try {
+    const { state_id, completed_step_order } = req.body;
+    if (!state_id || completed_step_order === undefined) {
+      return res.status(400).json({ error: 'state_id and completed_step_order required' });
+    }
+
+    // Get current state + sequence
+    const { data: state } = await supabaseAdmin.from('prospect_sequence_state')
+      .select('*, sequences(*)')
+      .eq('id', state_id)
+      .eq('account_id', req.accountId)
+      .single();
+
+    if (!state) return res.status(404).json({ error: 'State not found' });
+
+    // Get next step
+    const { data: nextStep } = await supabaseAdmin.from('sequence_steps')
+      .select('*')
+      .eq('sequence_id', state.sequence_id)
+      .eq('step_order', completed_step_order + 1)
+      .single();
+
+    let updateData = { last_action_at: new Date() };
+
+    if (!nextStep) {
+      // No more steps → completed
+      updateData.status = 'completed';
+    } else {
+      // Calculate next action with ±17% jitter
+      const jitter = 0.83 + Math.random() * 0.34;
+      const delayMs = nextStep.delay_days * jitter * 24 * 60 * 60 * 1000;
+      const nextActionAt = new Date(Date.now() + delayMs);
+
+      updateData.current_step_order = completed_step_order + 1;
+      updateData.next_action_at = nextActionAt;
+    }
+
+    const { error: updateError } = await supabaseAdmin.from('prospect_sequence_state')
+      .update(updateData)
+      .eq('id', state_id);
+
+    if (updateError) throw updateError;
+
+    res.json({ success: true, next_step: nextStep, next_action_at: updateData.next_action_at });
+  } catch (err) {
+    console.error('Erreur POST /api/sequences/complete-step:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/prospects/:id/linkedin-activity — Get cached activity or trigger scraping
+app.get('/api/prospects/:id/linkedin-activity', accountContext, async (req, res) => {
+  try {
+    const { data: activity } = await supabaseAdmin.from('prospect_activity')
+      .select('*')
+      .eq('prospect_id', req.params.id)
+      .single();
+
+    if (activity) {
+      const age = Date.now() - new Date(activity.scraped_at).getTime();
+      if (age < 48 * 3600 * 1000) {
+        // Cache is fresh
+        return res.json(activity);
+      }
+    }
+
+    // Cache missing or stale → trigger scraping via Task 2
+    res.json({ needs_scraping: true, prospect_id: req.params.id });
+  } catch (err) {
+    console.error('Erreur GET /api/prospects/:id/linkedin-activity:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/prospects/:id/linkedin-activity — Save scraped activity + icebreaker
+app.post('/api/prospects/:id/linkedin-activity', accountContext, async (req, res) => {
+  try {
+    const { raw_posts, icebreaker_generated, icebreaker_mode, is_relevant } = req.body;
+
+    const { error } = await supabaseAdmin.from('prospect_activity')
+      .upsert({
+        prospect_id: req.params.id,
+        raw_posts,
+        icebreaker_generated,
+        icebreaker_mode,
+        is_relevant,
+        scraped_at: new Date()
+      }, { onConflict: 'prospect_id' });
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Erreur POST /api/prospects/:id/linkedin-activity:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/sequences/stop — Manually stop a prospect's sequence
+app.post('/api/sequences/stop', accountContext, async (req, res) => {
+  try {
+    const { prospect_id, reason } = req.body;
+    if (!prospect_id || !['manual', 'reply', 'error'].includes(reason)) {
+      return res.status(400).json({ error: 'prospect_id and valid reason required' });
+    }
+
+    const status = reason === 'error' ? 'paused' : 'stopped_reply';
+
+    const { error } = await supabaseAdmin.from('prospect_sequence_state')
+      .update({ status, updated_at: new Date() })
+      .eq('prospect_id', prospect_id)
+      .eq('account_id', req.accountId)
+      .eq('status', 'active');
+
+    if (error) throw error;
+    res.json({ success: true, status });
+  } catch (err) {
+    console.error('Erreur POST /api/sequences/stop:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
 //   LOGS ENDPOINT
 // ============================================================
 
