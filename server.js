@@ -3291,44 +3291,106 @@ app.get('/api/previsionnel-charges', async (req, res) => {
 // ============================================================
 // Middleware to validate account_id from header or query param
 const accountContext = async (req, res, next) => {
-  const accountId = req.headers['x-account-id'] || req.query.account_id;
+  // Priorité 1: JWT Supabase Auth (utilisateurs connectés via Magic Link)
+  const authHeader = req.headers['authorization'];
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.replace('Bearer ', '');
 
-  if (!accountId) {
-    return res.status(400).json({ error: 'account_id requis (header: X-Account-Id)' });
-  }
+    try {
+      // Vérifier le token avec supabaseAdmin
+      const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+      if (error || !user) {
+        return res.status(401).json({ error: 'Token invalide ou expiré' });
+      }
 
-  try {
-    const { data: account, error } = await supabase
-      .from('accounts')
-      .select('*')
-      .eq('id', accountId)
-      .single();
+      // Récupérer le compte de l'utilisateur connecté
+      const { data: authAccount, error: acctError } = await supabaseAdmin
+        .from('accounts')
+        .select('id, name, slug, email, is_admin')
+        .eq('email', user.email)
+        .single();
 
-    if (error || !account) {
-      return res.status(404).json({ error: 'Compte non trouvé' });
+      if (acctError || !authAccount) {
+        return res.status(403).json({ error: 'Aucun compte Releaf associé à cet email' });
+      }
+
+      // Mode admin: Nathan peut switcher vers un autre compte via X-Switch-Account
+      const switchAccountId = req.headers['x-switch-account'];
+      if (authAccount.is_admin && switchAccountId) {
+        const { data: targetAccount, error: switchError } = await supabaseAdmin
+          .from('accounts')
+          .select('id, name, slug, email, is_admin')
+          .eq('id', switchAccountId)
+          .single();
+
+        if (switchError || !targetAccount) {
+          return res.status(404).json({ error: 'Compte cible introuvable' });
+        }
+
+        req.accountId = targetAccount.id;
+        req.account = targetAccount;
+        req.adminAccount = authAccount; // compte réel de Nathan
+        return next();
+      }
+
+      req.accountId = authAccount.id;
+      req.account = authAccount;
+      return next();
+    } catch (err) {
+      console.error('Erreur vérification token:', err);
+      return res.status(401).json({ error: 'Erreur de vérification du token' });
     }
-
-    req.account = account;
-    req.accountId = accountId;
-    next();
-  } catch (err) {
-    res.status(500).json({ error: 'Erreur validation compte' });
   }
+
+  // Priorité 2: X-Account-Id (pour Dispatch — pas de session utilisateur)
+  const accountId = req.headers['x-account-id'] || req.query.account_id;
+  if (accountId) {
+    try {
+      const { data: account, error } = await supabaseAdmin
+        .from('accounts')
+        .select('id, name, slug, email, is_admin')
+        .eq('id', accountId)
+        .single();
+
+      if (error || !account) {
+        return res.status(404).json({ error: 'Compte non trouvé' });
+      }
+
+      req.accountId = accountId;
+      req.account = account;
+      return next();
+    } catch (err) {
+      return res.status(500).json({ error: 'Erreur validation compte' });
+    }
+  }
+
+  return res.status(401).json({ error: 'Non authentifié. Bearer token ou X-Account-Id requis' });
 };
 
 // ============================================================
 // ACCOUNTS — Routes (public, no auth required)
 // ============================================================
-// GET /api/accounts — List all accounts (PUBLIC, no auth required)
-// Uses admin client to bypass RLS for account selection
-app.get('/api/accounts', async (req, res) => {
+// GET /api/accounts/me — Return the authenticated user's account
+// Requires Bearer token (Supabase Auth)
+app.get('/api/accounts/me', accountContext, (req, res) => {
+  res.json({ account: req.account });
+});
+
+// GET /api/accounts — List all accounts (admin only)
+// Used for the admin account switcher
+app.get('/api/accounts', accountContext, async (req, res) => {
+  // Check if user is admin
+  if (!req.account.is_admin) {
+    return res.status(403).json({ error: 'Accès réservé à l\'admin' });
+  }
+
   try {
     const { data, error } = await supabaseAdmin
       .from('accounts')
-      .select('id, name, slug, email')
+      .select('id, name, slug, email, is_admin')
       .order('name');
     if (error) throw error;
-    res.json(data || []);
+    res.json({ accounts: data || [] });
   } catch (err) {
     console.error('Erreur GET /api/accounts:', err.message);
     res.status(500).json({ error: err.message });
