@@ -4215,7 +4215,7 @@ app.post('/api/prospector/bulk-update-status', accountContext, async (req, res) 
     const bulkOperationId = crypto.randomUUID();
 
     // Verify all prospects belong to this account
-    const { data: ownedProspects, error: checkErr } = await supabase
+    const { data: ownedProspects, error: checkErr } = await supabaseAdmin
       .from('prospect_account')
       .select('prospect_id, campaign_id, status')
       .eq('account_id', req.accountId)
@@ -4227,7 +4227,7 @@ app.post('/api/prospector/bulk-update-status', accountContext, async (req, res) 
     }
 
     // Update prospect_account records for this account only
-    const { error: updateErr } = await supabase
+    const { error: updateErr } = await supabaseAdmin
       .from('prospect_account')
       .update({ status, updated_at: new Date().toISOString() })
       .eq('account_id', req.accountId)
@@ -4258,7 +4258,7 @@ app.post('/api/prospector/undo-bulk', accountContext, async (req, res) => {
     const { bulk_operation_id } = req.body;
     if (!bulk_operation_id) return res.status(400).json({ error: 'bulk_operation_id required' });
 
-    const { data: history, error: histErr } = await supabase
+    const { data: history, error: histErr } = await supabaseAdmin
       .from('status_history')
       .select('prospect_id, old_status, new_status')
       .eq('bulk_operation_id', bulk_operation_id)
