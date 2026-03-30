@@ -87,11 +87,11 @@ const App = (() => {
       DB.getRecentInteractions(10),
       DB.getProspects({ status: 'Message à valider' }),
       DB.getProspects({ status: 'Profil à valider' }),
-      fetch('/api/prospector/daily-activity').then(r => r.json()).catch(() => ({ dates: [], series: {} })),
+      APIClient.get('/api/prospector/daily-activity').then(r => r.json()).catch(() => ({ dates: [], series: {} })),
     ]);
 
     // Load quotas
-    fetch('/api/prospector/daily-stats').then(r => r.json()).then(stats => {
+    APIClient.get('/api/prospector/daily-stats').then(r => r.json()).then(stats => {
       const card = document.getElementById('quotasCard');
       if (!card || !stats.quotas) return;
       card.style.display = '';
@@ -466,10 +466,7 @@ const App = (() => {
   }
 
   async function executeBulk(ids, status) {
-    const resp = await fetch('/api/prospector/bulk-update-status', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids, status }),
-    });
+    const resp = await APIClient.post('/api/prospector/bulk-update-status', { ids, status });
     const result = await resp.json();
     _selectedProspects.clear();
     filterProspects();
@@ -576,10 +573,7 @@ const App = (() => {
       clearInterval(timer);
       toast.innerHTML = '<span>⏳ Annulation en cours…</span>';
       try {
-        const resp = await fetch('/api/prospector/undo-bulk', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ bulk_operation_id: bulkOpId }),
-        });
+        const resp = await APIClient.post('/api/prospector/undo-bulk', { bulk_operation_id: bulkOpId });
         const result = await resp.json();
         if (result.success) {
           toast.innerHTML = `<span>✅ Annulé — ${result.restored} prospect(s) restauré(s)</span>`;
@@ -597,19 +591,13 @@ const App = (() => {
   }
 
   async function quickValidate(id) {
-    await fetch('/api/prospector/bulk-update-status', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: [id], status: 'Nouveau' }),
-    });
+    await APIClient.post('/api/prospector/bulk-update-status', { ids: [id], status: 'Nouveau' });
     UI.toast('Profil validé');
     filterProspects();
   }
 
   async function quickReject(id) {
-    await fetch('/api/prospector/bulk-update-status', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: [id], status: 'Non pertinent' }),
-    });
+    await APIClient.post('/api/prospector/bulk-update-status', { ids: [id], status: 'Non pertinent' });
     UI.toast('Profil marqué non pertinent');
     filterProspects();
   }
@@ -875,11 +863,7 @@ const App = (() => {
     if (btn) { btn.disabled = true; btn.textContent = 'Génération en cours...'; }
 
     try {
-      const resp = await fetch('/api/prospector/regenerate-messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, instructions: instructions || undefined }),
-      });
+      const resp = await APIClient.post('/api/prospector/regenerate-messages', { id, instructions: instructions || undefined });
       const result = await resp.json();
       if (!resp.ok) { UI.toast(result.error || 'Erreur', 'error'); return; }
 
@@ -1271,11 +1255,7 @@ const App = (() => {
 
         const updates = _campaignsCache.map((c, i) => ({ id: c.id, priority: i + 1 }));
         for (const u of updates) {
-          await fetch(`/api/prospector/campaigns/${u.id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ priority: u.priority }),
-          });
+          await APIClient.put(`/api/prospector/campaigns/${u.id}`, { priority: u.priority });
         }
       });
     });
@@ -1312,7 +1292,7 @@ const App = (() => {
 
     const body = buildCampaignBody(raw, 'addJobTags', 'addExclTags', 'addObjTags');
 
-    const resp = await fetch('/api/prospector/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const resp = await APIClient.post('/api/prospector/campaigns', body);
     const result = await resp.json();
     if (!resp.ok) {
       errEl.textContent = result.error || 'Erreur';
@@ -1379,7 +1359,7 @@ const App = (() => {
 
     const body = buildCampaignBody(raw, 'editJobTags', 'editExclTags', 'editObjTags');
 
-    const resp = await fetch(`/api/prospector/campaigns/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const resp = await APIClient.put(`/api/prospector/campaigns/${id}`, body);
     const result = await resp.json();
     if (!resp.ok) {
       errEl.textContent = result.error || 'Erreur';
