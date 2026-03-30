@@ -3675,7 +3675,6 @@ app.post('/api/prospector/import', accountContext, async (req, res) => {
         sector: p.sector || null,
         geography: p.geography || null,
       };
-      if (campaign_id) row.source_campaign_id = campaign_id;
       toInsert.push(row);
     }
 
@@ -3959,6 +3958,7 @@ app.post('/api/prospector/sync', accountContext, async (req, res) => {
           }
         } else {
           // Create new prospect
+          const paStatus = (p.status && VALID_PROSPECT_STATUSES.includes(p.status)) ? p.status : 'Nouveau';
           const row = {
             first_name: p.first_name || '',
             last_name: p.last_name || '',
@@ -3970,10 +3970,8 @@ app.post('/api/prospector/sync', accountContext, async (req, res) => {
             job_title: p.job_title || null,
             sector: p.sector || null,
             geography: p.geography || null,
-            status: (p.status && VALID_PROSPECT_STATUSES.includes(p.status)) ? p.status : 'Nouveau',
             pending_message: p.pending_message || null,
           };
-          if (campaign_id) row.source_campaign_id = campaign_id;
 
           const { data: newP } = await supabaseAdmin.from('prospects').insert(row).select('id').single();
           created++;
@@ -3983,14 +3981,14 @@ app.post('/api/prospector/sync', accountContext, async (req, res) => {
             const paRow = {
               prospect_id: newP.id,
               account_id: req.accountId,
-              status: row.status,
+              status: paStatus,
               campaign_id: campaign_id || null,
             };
             await supabaseAdmin.from('prospect_account').insert(paRow);
 
             // Log event for new prospect
-            if (EVENT_MAP[row.status]) {
-              logEvent(EVENT_MAP[row.status], newP.id, campaign_id, req.accountId);
+            if (EVENT_MAP[paStatus]) {
+              logEvent(EVENT_MAP[paStatus], newP.id, campaign_id, req.accountId);
             }
           }
 
@@ -4329,10 +4327,10 @@ app.post('/api/prospector/regenerate-messages', accountContext, async (req, res)
     }
     if (!prospectId) return res.status(400).json({ error: 'id or linkedin_url required' });
 
-    // Verify prospect belongs to this account
+    // Verify prospect belongs to this account and get campaign_id
     const { data: owns, error: checkErr } = await supabaseAdmin
       .from('prospect_account')
-      .select('prospect_id')
+      .select('prospect_id, campaign_id')
       .eq('prospect_id', prospectId)
       .eq('account_id', req.accountId)
       .single();
@@ -4341,13 +4339,19 @@ app.post('/api/prospector/regenerate-messages', accountContext, async (req, res)
       return res.status(403).json({ error: 'Prospect not found in your account' });
     }
 
-    // Fetch prospect + campaign
+    // Fetch prospect
     const { data: prospect } = await supabaseAdmin.from('prospects')
-      .select('*, campaigns(name, sector, geography, criteria, objectives)')
+      .select('*')
       .eq('id', prospectId).single();
     if (!prospect) return res.status(404).json({ error: 'Prospect not found' });
 
-    const camp = prospect.campaigns || {};
+    // Fetch campaign if available
+    const { data: campData } = owns?.campaign_id
+      ? await supabaseAdmin.from('campaigns')
+          .select('name, sector, geography, criteria, objectives')
+          .eq('id', owns.campaign_id).single()
+      : { data: null };
+    const camp = campData || {};
     const criteria = camp.criteria || {};
     const objectives = (camp.objectives || []).join(', ') || 'non définis';
     const jobTitles = (criteria.job_titles || []).join(', ') || 'non définis';
