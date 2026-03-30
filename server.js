@@ -5040,9 +5040,9 @@ app.post('/api/sequences/complete-step', accountContext, async (req, res) => {
       return res.status(400).json({ error: 'state_id and completed_step_order required' });
     }
 
-    // Get current state + sequence
+    // Get current state
     const { data: state } = await supabaseAdmin.from('prospect_sequence_state')
-      .select('*, sequences(*)')
+      .select('*')
       .eq('id', state_id)
       .eq('account_id', req.accountId)
       .single();
