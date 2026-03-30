@@ -1525,6 +1525,9 @@ const App = (() => {
       <div id="campaignTabContent"></div>
     `;
 
+    // Save cache for tab switching
+    _campDetailCache[id] = { prospects, statusCounts };
+
     // Render default tab (prospects)
     renderProspectsTab(id, prospects, statusCounts);
   }
@@ -2050,10 +2053,18 @@ const App = (() => {
       }
     }
 
-    await fetch(`/api/sequences/${sequenceId}/steps/${stepId}`, {
+    const res = await fetch(`/api/sequences/${sequenceId}/steps/${stepId}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
+
+    if (!res.ok) {
+      const err = await res.text();
+      console.error('Erreur PUT step:', err);
+      UI.toast('Erreur lors de la sauvegarde : ' + (err || res.statusText));
+      return;
+    }
+
     UI.toast('Étape sauvegardée');
     renderSequenceTab(_currentCampaignId());
   }
@@ -2465,16 +2476,21 @@ const App = (() => {
   function init() {
     window.addEventListener('hashchange', router);
 
-    // Add explicit click handlers to navbar links to ensure navigation works
-    document.querySelectorAll('.navbar-nav a, .navbar-bell, .navbar-logo').forEach(link => {
-      link.addEventListener('click', (e) => {
-        const href = link.getAttribute('href') || link.href;
-        if (href && href.startsWith('#')) {
+    // Handle anchor links with hash navigation (only for <a> tags, not buttons)
+    document.addEventListener('click', (e) => {
+      let link = e.target;
+      // Walk up to find an <a> tag
+      while (link && link.tagName !== 'A') {
+        link = link.parentElement;
+      }
+      if (link && link.tagName === 'A') {
+        const href = link.getAttribute('href');
+        if (href?.startsWith('#')) {
           e.preventDefault();
           location.hash = href;
         }
-      });
-    });
+      }
+    }, true); // Use capture phase
 
     // Reload page when account changes (to refresh all data with new account_id header)
     document.addEventListener('account-changed', (e) => {
@@ -2486,7 +2502,12 @@ const App = (() => {
     router();
   }
 
-  document.addEventListener('DOMContentLoaded', init);
+  // Call init immediately or when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
 
   return {
     handleAddProspect, handleEditProspect, handleAddCampaign, handleEditCampaign,
