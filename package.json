@@ -11,9 +11,12 @@
     "frontend:preview": "vite preview"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.80.0",
     "@supabase/supabase-js": "^2.99.1",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
+    "express-session": "^1.19.0",
+    "googleapis": "^171.4.0",
     "imap": "^0.8.19",
     "jsonwebtoken": "^9.0.3",
     "mailparser": "^3.9.4",
