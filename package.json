@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "description": "Dashboard de pilotage commercial connecté à HubSpot",
   "main": "server.js",
-  "type": "module",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
