@@ -3390,62 +3390,6 @@ app.get('/api/accounts/:id/jwt', async (req, res) => {
 // ============================================================
 // TASK LOCKS — Routes
 // ============================================================
-app.post('/api/task-locks/acquire', accountContext, async (req, res) => {
-  try {
-    const { lock_type, task_name, duration_minutes } = req.body;
-    if (!lock_type) return res.status(400).json({ error: 'lock_type required' });
-
-    const { data, error } = await supabase.rpc('acquire_task_lock', {
-      p_lock_type: lock_type,
-      p_account_id: req.accountId,
-      p_task_name: task_name || 'unknown',
-      p_duration_minutes: duration_minutes || 60
-    });
-
-    if (error) throw error;
-
-    if (data === true) {
-      return res.json({ acquired: true });
-    }
-
-    // Lock already held — return info about existing lock
-    const { data: existingLock } = await supabase
-      .from('task_locks')
-      .select(`*, accounts(name)`)
-      .eq('lock_type', lock_type)
-      .single();
-
-    return res.status(423).json({
-      acquired: false,
-      locked_by: existingLock?.accounts?.name,
-      locked_at: existingLock?.locked_at,
-      expires_at: existingLock?.expires_at,
-      task_name: existingLock?.task_name
-    });
-  } catch (err) {
-    console.error('Erreur POST /api/task-locks/acquire:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/task-locks/release', accountContext, async (req, res) => {
-  try {
-    const { lock_type } = req.body;
-    if (!lock_type) return res.status(400).json({ error: 'lock_type required' });
-
-    const { error } = await supabase.rpc('release_task_lock', {
-      p_lock_type: lock_type,
-      p_account_id: req.accountId
-    });
-
-    if (error) throw error;
-    res.json({ released: true });
-  } catch (err) {
-    console.error('Erreur POST /api/task-locks/release:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 app.get('/api/task-locks', async (req, res) => {
   try {
     // Clean up expired locks
@@ -4898,6 +4842,77 @@ app.delete('/api/placeholders/:id', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error('Erreur DELETE /api/placeholders:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+//   TASK LOCKS (Sprint 2 Part 3)
+// ============================================================
+
+// POST /api/task-locks/acquire — Acquire a lock to prevent concurrent execution
+app.post('/api/task-locks/acquire', accountContext, async (req, res) => {
+  try {
+    const { lock_type, task_name } = req.body;
+    if (!lock_type || !task_name) {
+      return res.status(400).json({ error: 'lock_type and task_name required' });
+    }
+
+    // Try to insert a new lock
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 min expiry
+    const lockedBy = `worker_${Date.now()}`; // Use timestamp as unique identifier
+    const { data: lock, error: insertError } = await supabaseAdmin.from('task_locks')
+      .insert({
+        account_id: req.accountId,
+        lock_type,
+        task_name,
+        locked_by: lockedBy,
+        expires_at: expiresAt
+      })
+      .select()
+      .single();
+
+    if (insertError && insertError.code === '23505') {
+      // Unique constraint violated — lock already exists
+      const { data: existing } = await supabaseAdmin.from('task_locks')
+        .select('locked_by, acquired_at')
+        .eq('account_id', req.accountId)
+        .eq('lock_type', lock_type)
+        .single();
+
+      return res.json({
+        acquired: false,
+        locked_by: existing?.locked_by,
+        acquired_at: existing?.acquired_at
+      });
+    }
+
+    if (insertError) throw insertError;
+
+    res.json({ acquired: true, lock_id: lock.id, expires_at: expiresAt });
+  } catch (err) {
+    console.error('Erreur POST /api/task-locks/acquire:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/task-locks/release — Release a lock
+app.post('/api/task-locks/release', accountContext, async (req, res) => {
+  try {
+    const { lock_type } = req.body;
+    if (!lock_type) {
+      return res.status(400).json({ error: 'lock_type required' });
+    }
+
+    const { error } = await supabaseAdmin.from('task_locks')
+      .delete()
+      .eq('account_id', req.accountId)
+      .eq('lock_type', lock_type);
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Erreur POST /api/task-locks/release:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
