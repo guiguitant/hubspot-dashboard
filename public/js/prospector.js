@@ -358,6 +358,19 @@ const App = (() => {
     // Load counts for all quick filters
     loadQuickFilterCounts();
 
+    // Load sequence states for badge display (asynchronous)
+    _seqStatesCache = null;
+    APIClient.get('/api/sequences/states')
+      .then(map => {
+        _seqStatesCache = map;
+        // Update badges if table is already rendered
+        document.querySelectorAll('[data-seq-badge]').forEach(el => {
+          const pid = el.dataset.seqBadge;
+          el.innerHTML = _seqBadgeHtml(_seqStatesCache[pid]);
+        });
+      })
+      .catch(() => {});
+
     filterProspects();
   }
 
@@ -603,6 +616,15 @@ const App = (() => {
     filterProspects();
   }
 
+  function _seqBadgeHtml(s) {
+    if (!s) return '<span class="badge badge-non-pertinent">Non enrôlé</span>';
+    if (s.status === 'active') return `<span class="badge badge-envoye">Active — Étape ${s.current_step_order}</span>`;
+    if (s.status === 'completed') return '<span class="badge badge-gagne">Terminée ✅</span>';
+    if (s.status === 'stopped_reply') return '<span class="badge badge-perdu">Arrêtée ⛔</span>';
+    if (s.status === 'paused') return '<span class="badge badge-a-valider">En pause</span>';
+    return '<span class="badge badge-non-pertinent">Non enrôlé</span>';
+  }
+
   async function filterProspects() {
     const search = document.getElementById('filterSearch')?.value || '';
     const status = document.getElementById('filterStatus')?.value || '';
@@ -629,6 +651,7 @@ const App = (() => {
           <td><a href="${href}" class="row-link">${UI.esc(p.company || '')}</a></td>
           <td><a href="${href}" class="row-link"><span class="badge ${campClass}">${UI.esc(campName)}</span></a></td>
           <td><a href="${href}" class="row-link">${UI.statusBadge(p.status)}</a></td>
+          <td data-seq-badge="${p.id}">${_seqBadgeHtml(_seqStatesCache?.[p.id])}</td>
           <td class="text-muted text-sm"><a href="${href}" class="row-link">${UI.formatDate(p.updated_at)}</a></td>
           <td class="action-btns" onclick="event.stopPropagation()">
             ${isAValider ? `<button class="btn-icon btn-validate" onclick="App.quickValidate('${p.id}')" title="Valider">✓</button><button class="btn-icon btn-reject" onclick="App.quickReject('${p.id}')" title="Non pertinent">✕</button>` : ''}
@@ -640,7 +663,7 @@ const App = (() => {
     document.getElementById('prospectsTable').innerHTML = `
       <table><thead><tr>
         <th style="width:30px"><input type="checkbox" id="selectAll" onchange="App.toggleSelectAll(this.checked)"></th>
-        <th>Nom</th><th>Fonction</th><th>Entreprise</th><th>Campagne</th><th>Statut</th><th>Dernier contact</th><th></th>
+        <th>Nom</th><th>Fonction</th><th>Entreprise</th><th>Campagne</th><th>Statut</th><th>Séquence</th><th>Dernier contact</th><th></th>
       </tr></thead>
       <tbody>${tbody}</tbody></table>`;
 
@@ -704,6 +727,11 @@ const App = (() => {
       DB.getCampaigns(),
     ]);
 
+    // Fetch sequence preview if prospect has a campaign
+    const seqResp = prospect.source_campaign_id
+      ? await APIClient.get(`/api/sequences/preview?campaign_id=${prospect.source_campaign_id}&prospect_id=${id}`).catch(() => null)
+      : null;
+
     // Check duplicates
     const dupes = await DB.checkDuplicates(prospect, id);
 
@@ -722,6 +750,13 @@ const App = (() => {
               ${prospect.sector ? `<span class="badge badge-type">${UI.esc(prospect.sector)}</span>` : ''}
               ${prospect.geography ? `<span class="badge badge-type">${UI.esc(prospect.geography)}</span>` : ''}
               ${campName !== '—' ? `<span class="badge badge-type">${UI.esc(campName)}</span>` : ''}
+              ${seqResp?.activity ? (() => {
+                const a = seqResp.activity;
+                const cls = a.is_relevant ? 'badge-gagne' : 'badge-non-pertinent';
+                const label = a.is_relevant ? '🌱 Icebreaker personnalisé' : 'Icebreaker générique';
+                const tooltip = a.icebreaker_generated ? `title="${UI.esc(a.icebreaker_generated)}"` : '';
+                return `<span class="badge ${cls}" ${tooltip} style="cursor:help">${label}</span>`;
+              })() : ''}
             </div>
           </div>
           <div class="flex gap-2 items-center">
@@ -740,6 +775,15 @@ const App = (() => {
           <div><div class="profile-field-label">LinkedIn</div><div class="profile-field-value">${prospect.linkedin_url ? `<a href="${UI.esc(prospect.linkedin_url)}" target="_blank">Voir le profil ↗</a>` : '—'}</div></div>
         </div>
       </div>
+
+      ${prospect.source_campaign_id && seqResp?.steps?.length > 0 && !seqResp.sequence_state
+        ? `<div class="card mt-6" style="padding:16px;display:flex;align-items:center;gap:12px">
+            <button class="btn btn-primary" id="btnStartSeq" onclick="App.enrollProspect('${id}', '${prospect.source_campaign_id}')">▶ Démarrer la séquence</button>
+            <span class="text-sm text-muted">${UI.esc(seqResp.sequence?.name || 'Séquence disponible')}</span>
+          </div>`
+        : prospect.source_campaign_id && !seqResp?.steps?.length
+          ? `<div class="text-sm text-muted" style="padding:8px 0">Aucune séquence configurée pour cette campagne.</div>`
+          : ''}
 
       ${prospect.status === 'Message à valider' ? (() => {
         const versions = prospect.message_versions || [];
@@ -1006,6 +1050,19 @@ const App = (() => {
     location.hash = '#prospects';
   }
 
+  async function enrollProspect(prospectId, campaignId) {
+    const btn = document.getElementById('btnStartSeq');
+    if (btn) { btn.disabled = true; btn.textContent = 'Enrôlement…'; }
+    const resp = await APIClient.post('/api/sequences/enroll', { prospect_id: prospectId, campaign_id: campaignId });
+    if (resp.enrolled) {
+      UI.toast('Prospect enrôlé dans la séquence');
+      renderProspectDetail(document.getElementById('app'), prospectId);
+    } else {
+      UI.toast(resp.reason === 'no_active_sequence' ? 'Aucune séquence active' : 'Déjà enrôlé', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = '▶ Démarrer la séquence'; }
+    }
+  }
+
   function openAddInteraction(prospectId) {
     document.getElementById('formAddInteraction').reset();
     document.getElementById('formAddInteraction').querySelector('[name="prospect_id"]').value = prospectId;
@@ -1135,6 +1192,7 @@ const App = (() => {
             <select id="logsTypeFilter" onchange="App.loadLogs()">
               <option value="">Tous les types</option>
               <option value="status_change">Changement de statut</option>
+              <option value="sequence">Séquences</option>
             </select>
           </div>
         </div>
@@ -1185,10 +1243,26 @@ const App = (() => {
         return;
       }
 
+      const isSeq = type === 'sequence';
       el.innerHTML = logs.map(log => {
         const prospectName = log.prospect ? `${log.prospect.first_name} ${log.prospect.last_name}` : '—';
         const prospectCompany = log.prospect?.company ? ` (${log.prospect.company})` : '';
-        const actionText = log.new_status ? `Statut : ${log.old_status} → ${log.new_status}` : '—';
+
+        let actionText = '—';
+        if (isSeq) {
+          // For sequence logs: status → action label
+          const statusMap = {
+            'active': `Étape ${log.current_step_order} en cours`,
+            'completed': 'Séquence terminée',
+            'stopped_reply': 'Arrêtée — réponse reçue',
+            'paused': 'Mise en pause'
+          };
+          actionText = statusMap[log.status] || log.status;
+        } else {
+          // For status_change logs
+          actionText = log.new_status ? `Statut : ${log.old_status} → ${log.new_status}` : '—';
+        }
+
         const sourceText = log.source || '—';
         const dateStr = UI.formatDate(log.created_at);
 
@@ -1588,6 +1662,7 @@ const App = (() => {
 
   let _seqActiveStepId = null; // currently selected step in split panel
   let _placeholdersCache = null;
+  let _seqStatesCache = null; // prospect sequence states for list badges
 
   async function renderSequenceTab(campaignId) {
     const el = document.getElementById('campaignTabContent');
@@ -1632,9 +1707,11 @@ const App = (() => {
             const label = s.message_label || meta.label;
             const isActive = s.id === _seqActiveStepId ? ' seq-step-active' : '';
             const delayHtml = i > 0 ? _delayHtml(s.delay_days) : '';
+            const stepStatus = _getStepStatus(s);
+            const statusClass = `step-status-${stepStatus}`;
             return `${delayHtml}<div class="seq-step-card${isActive}" draggable="true" data-step-id="${s.id}" data-idx="${i}" onclick="App.selectStep('${s.id}', '${campaignId}')">
               <span class="seq-step-drag" title="Glisser pour réordonner">⠿</span>
-              <span class="seq-step-num">${i + 1}</span>
+              <span class="seq-step-num ${statusClass}">${i + 1}</span>
               <span class="seq-step-icon">${meta.icon}</span>
               <span class="seq-step-label">${UI.esc(label)}</span>
               <button class="btn-icon" onclick="event.stopPropagation();App.deleteStep('${sequence.id}','${s.id}')" title="Supprimer">🗑️</button>
@@ -1657,6 +1734,26 @@ const App = (() => {
     } else {
       document.getElementById('seqStepConfig').innerHTML = '<div class="text-sm text-muted" style="padding:30px;text-align:center">Sélectionnez une étape</div>';
     }
+  }
+
+  // Determine step completion status for color coding
+  function _getStepStatus(step) {
+    if (step.type === 'send_invitation') {
+      // send_invitation is always complete once saved
+      return 'complete'; // green
+    }
+    if (step.type === 'send_message') {
+      // Check if message_content is set
+      const content = (step.message_content || '').trim();
+      if (step.message_content === null || step.message_content === undefined) {
+        return 'new'; // gray - never saved
+      }
+      if (content === '') {
+        return 'incomplete'; // orange - saved but empty
+      }
+      return 'complete'; // green - has content
+    }
+    return 'complete'; // default to green for other types
   }
 
   function _delayHtml(days) {
@@ -1705,7 +1802,7 @@ const App = (() => {
           <div class="form-group"><label>Délai (jours)</label><input type="number" id="cfgDelay" min="0" value="${step.delay_days}"><div class="text-sm text-muted" style="margin-top:4px">0 = immédiatement</div></div>
 
           <div class="form-group">
-            <label style="display:flex;align-items:center;gap:8px">
+            <label class="checkbox-inline">
               <input type="checkbox" id="cfgHasNote" ${hasNote ? 'checked' : ''} onchange="App._toggleInvitationNote()">
               <span>Inclure une note personnalisée</span>
             </label>
@@ -1746,11 +1843,11 @@ const App = (() => {
         <div class="form-group"><label>Délai (jours)</label><input type="number" id="cfgDelay" min="1" value="${step.delay_days}"><div class="text-sm text-muted" style="margin-top:4px">Minimum 1 jour</div></div>
 
         <div class="msg-zone-selector">
-          <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+          <label class="checkbox-inline" style="margin-bottom:12px">
             <input type="radio" name="msgMode" value="manual" ${mode === 'manual' ? 'checked' : ''} onchange="App._switchMsgTab('manual')">
             <span style="font-weight:500">Message manuel</span>
           </label>
-          <label style="display:flex;align-items:center;gap:8px">
+          <label class="checkbox-inline">
             <input type="radio" name="msgMode" value="claude" ${mode === 'ai_generated' ? 'checked' : ''} onchange="App._switchMsgTab('ai')">
             <span style="font-weight:500">Message Claude</span>
           </label>
@@ -1760,26 +1857,32 @@ const App = (() => {
           <div class="msg-zone-badge">✓ Sera envoyé</div>
           <div class="ph-bar">${phBarHtml}</div>
           <div class="form-group">
-            <textarea id="stepContent" rows="6" maxlength="300" placeholder="Votre message LinkedIn…" oninput="App._updateCharCount()">${UI.esc(step.message_content || '')}</textarea>
-            <div class="char-counter"><span id="charCount">${(step.message_content || '').length}</span> / 300</div>
+            <textarea id="stepContent" class="msg-textarea" placeholder="Votre message LinkedIn…" oninput="App._updateCharCount()">${UI.esc(step.message_content || '')}</textarea>
+            <div id="charCountContainer" class="char-counter"><span id="charCount">${(step.message_content || '').length}</span> caractères</div>
           </div>
         </div>
 
         <div id="msgTabAI" class="msg-zone ${mode === 'ai_generated' ? 'msg-zone-active' : 'msg-zone-inactive'}" style="display:${mode === 'ai_generated' ? 'block' : 'none'}">
           <div class="msg-zone-badge">✓ Sera envoyé</div>
-          <div class="form-group"><label>Angle</label><input id="aiAngle" value="${UI.esc(params.angle || '')}" placeholder="ex: pression réglementaire, enjeux carbone..."></div>
-          <div class="form-group"><label>Ton</label><input id="aiTone" value="${UI.esc(params.tone || '')}" placeholder="ex: chaleureux et direct, très formel, décontracté..."></div>
-          <div class="form-group"><label>Thématique</label><input id="aiObjective" value="${UI.esc(params.objective || '')}" placeholder="ex: Bilan carbone, RSE, QHSE..."></div>
-          <div class="form-group"><label>Contexte additionnel (optionnel)</label><input id="aiContext" value="${UI.esc(params.context || '')}" placeholder="Précisions supplémentaires…"></div>
+          <div class="form-row">
+            <div class="form-group"><label>Angle</label><input id="aiAngle" value="${UI.esc(params.angle || '')}" placeholder="ex: pression réglementaire..."></div>
+            <div class="form-group"><label>Ton</label><input id="aiTone" value="${UI.esc(params.tone || '')}" placeholder="ex: chaleureux et direct..."></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Thématique</label><input id="aiObjective" value="${UI.esc(params.objective || '')}" placeholder="ex: Bilan carbone, RSE..."></div>
+            <div class="form-group"><label>Contexte (optionnel)</label><input id="aiContext" value="${UI.esc(params.context || '')}" placeholder="Précisions…"></div>
+          </div>
           <div class="flex gap-2">
             <button class="btn btn-outline btn-sm" id="btnGenerate" onclick="App._generateStepMessage('${sequenceId}')">✨ Générer avec Claude</button>
             <button class="btn btn-ghost btn-sm" id="btnRegenerate" onclick="App._generateStepMessage('${sequenceId}')" style="display:none">↺ Régénérer</button>
           </div>
           <div class="text-sm text-muted" style="margin-top:6px">Claude utilisera automatiquement les placeholders de votre bibliothèque.</div>
           <div id="aiResult" style="margin-top:12px;display:${step.message_content && mode === 'ai_generated' ? 'block' : 'none'}">
-            <div class="ph-bar">${phBarHtml}</div>
-            <textarea id="aiResultContent" rows="6" maxlength="300" oninput="App._updateCharCount()">${mode === 'ai_generated' ? UI.esc(step.message_content || '') : ''}</textarea>
-            <div class="char-counter"><span id="charCountAI">${mode === 'ai_generated' ? (step.message_content || '').length : 0}</span> / 300</div>
+            <div class="ph-bar" style="margin-bottom:12px">${phBarHtml}</div>
+            <div class="form-group">
+              <textarea id="aiResultContent" class="msg-textarea msg-textarea-large" oninput="App._updateCharCount()">${mode === 'ai_generated' ? UI.esc(step.message_content || '') : ''}</textarea>
+              <div id="charCountContainerAI" class="char-counter"><span id="charCountAI">${mode === 'ai_generated' ? (step.message_content || '').length : 0}</span> caractères</div>
+            </div>
           </div>
         </div>
 
@@ -1790,14 +1893,19 @@ const App = (() => {
   }
 
   function _insertPlaceholder(placeholder) {
-    const ta = document.getElementById('stepContent') || document.getElementById('aiResultContent');
+    const ta = document.getElementById('stepContent') || document.getElementById('aiResultContent') || document.getElementById('cfgNoteContent');
     if (!ta) return;
     const start = ta.selectionStart;
     const end = ta.selectionEnd;
     ta.value = ta.value.substring(0, start) + placeholder + ta.value.substring(end);
     ta.selectionStart = ta.selectionEnd = start + placeholder.length;
     ta.focus();
-    _updateCharCount();
+    // Update appropriate character counter
+    if (ta.id === 'cfgNoteContent') {
+      _updateNoteCharCount();
+    } else {
+      _updateCharCount();
+    }
   }
 
   function initStepDrag(sequenceId) {
@@ -1940,10 +2048,15 @@ const App = (() => {
   function _updateCharCount() {
     const ta = document.getElementById('stepContent');
     const el = document.getElementById('charCount');
-    if (ta && el) el.textContent = ta.value.length;
+    if (ta && el) {
+      el.textContent = ta.value.length;
+    }
+
     const taAI = document.getElementById('aiResultContent');
     const elAI = document.getElementById('charCountAI');
-    if (taAI && elAI) elAI.textContent = taAI.value.length;
+    if (taAI && elAI) {
+      elAI.textContent = taAI.value.length;
+    }
   }
 
   function _toggleInvitationNote() {
@@ -2032,8 +2145,6 @@ const App = (() => {
       if (isAI) {
         body.message_mode = 'ai_generated';
         body.message_content = document.getElementById('aiResultContent')?.value || '';
-        body.selected_message = document.getElementById('aiResultContent')?.value || '';
-        body.selected_mode = 'ai_generated';
         body.message_params = {
           angle: document.getElementById('aiAngle')?.value || '',
           tone: document.getElementById('aiTone')?.value || '',
@@ -2043,8 +2154,6 @@ const App = (() => {
       } else {
         body.message_mode = 'manual';
         body.message_content = document.getElementById('stepContent')?.value || '';
-        body.selected_message = document.getElementById('stepContent')?.value || '';
-        body.selected_mode = 'manual';
       }
 
       if (delay_days < 1) {
@@ -2116,17 +2225,60 @@ const App = (() => {
 
     const prospect = document.querySelector(`.review-prospect-item[data-id="${prospectId}"]`);
     const name = prospect?.querySelector('strong')?.textContent || '';
+    const seqState = data.sequence_state || null;
+
+    // Helper: render status banner
+    function _seqBanner(state, steps) {
+      if (!state) return `<div class="seq-status-banner seq-not-started">Pas encore démarré</div>`;
+      const { status, current_step_order, next_action_at, enrolled_at } = state;
+      if (status === 'active') {
+        const daysUntil = Math.ceil((new Date(next_action_at) - Date.now()) / 86400000);
+        const nextStep = steps.find(s => s.step_order === current_step_order);
+        const nextLabel = nextStep ? (nextStep.message_label || STEP_TYPES[nextStep.type]?.label || nextStep.type) : '';
+        return `<div class="seq-status-banner seq-active">
+          <strong>En cours — Étape ${current_step_order}/${steps.length}</strong>
+          <div>Prochaine action : ${UI.esc(nextLabel)} — ${daysUntil <= 0 ? 'maintenant' : 'dans ' + daysUntil + ' jour' + (daysUntil > 1 ? 's' : '')} (le ${UI.formatDate(next_action_at)})</div>
+          <div class="text-sm text-muted">Enrôlé le : ${UI.formatDate(enrolled_at)}</div>
+        </div>`;
+      }
+      if (status === 'stopped_reply') return `<div class="seq-status-banner seq-stopped">⛔ Séquence arrêtée — réponse reçue</div>`;
+      if (status === 'completed') return `<div class="seq-status-banner seq-completed">✅ Séquence terminée</div>`;
+      if (status === 'paused') return `<div class="seq-status-banner seq-paused">⏸️ Mise en pause</div>`;
+      return '';
+    }
+
+    // Helper: step state class
+    function _stepStateCls(stepOrder, state) {
+      if (!state || state.status === 'stopped_reply') return 'step-locked';
+      if (state.status === 'completed') return 'step-done';
+      if (stepOrder < state.current_step_order) return 'step-done';
+      if (stepOrder === state.current_step_order) return 'step-active';
+      return 'step-locked';
+    }
+
+    // Helper: step icon
+    function _stepIcon(stepOrder, state) {
+      if (!state) return '🔒';
+      if (state.status === 'stopped_reply') return '⛔';
+      if (state.status === 'completed') return '✓';
+      if (stepOrder < state.current_step_order) return '✓';
+      if (stepOrder === state.current_step_order) return '⏳';
+      return '🔒';
+    }
 
     panel.innerHTML = `
       <div class="seq-config-inner">
         <h3>Prévisualisation pour ${UI.esc(name)}</h3>
-        <div class="text-sm text-muted" style="margin-bottom:16px">Statut : Pas encore démarré</div>
+        ${_seqBanner(seqState, data.steps)}
         ${data.steps.map((s, i) => {
           const meta = STEP_TYPES[s.type] || { icon: '❓', label: s.type };
           const label = s.message_label || meta.label;
+          const stepOrder = s.step_order || (i + 1);
+          const icon = _stepIcon(stepOrder, seqState);
+          const cls = _stepStateCls(stepOrder, seqState);
           const delayHtml = i > 0 ? `<div class="review-delay">${s.delay_days === 0 ? 'Immédiatement' : `Attendre ${s.delay_days} jour${s.delay_days > 1 ? 's' : ''}`}</div>` : '';
           const previewHtml = s.message_preview ? `<div class="review-msg-preview">${UI.esc(s.message_preview).replace(/⚠️\{\{(\w+)\}\}/g, '<span class="ph-missing">{{$1}}</span>')}</div>` : '';
-          return `${delayHtml}<div class="review-step"><div class="review-step-header">${meta.icon} Étape ${i + 1} — ${UI.esc(label)}</div>${previewHtml}</div>`;
+          return `${delayHtml}<div class="review-step ${cls}"><div class="review-step-header">${icon} Étape ${stepOrder} — ${UI.esc(label)}</div>${previewHtml}</div>`;
         }).join('')}
       </div>`;
   }
@@ -2523,6 +2675,7 @@ const App = (() => {
     switchCampaignTab, createSequence, createNewVersion, updateSequenceName,
     addStep, deleteStep, selectStep, _switchMsgTab,
     _updateCharCount, _generateStepMessage, _saveStepConfig, _insertPlaceholder,
+    _toggleInvitationNote, _updateNoteCharCount,
     _selectReviewProspect, _filterReviewList,
     openAddPlaceholder, savePlaceholder, deletePlaceholder,
   };

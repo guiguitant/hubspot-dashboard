@@ -4745,6 +4745,19 @@ app.get('/api/sequences/preview', accountContext, async (req, res) => {
     const account = acctResp.data || {};
     const steps = (seqResp.data.sequence_steps || []).sort((a, b) => a.step_order - b.step_order);
 
+    // Fetch sequence state and activity for real-time status
+    const [seqStateResp, activityResp] = await Promise.all([
+      supabaseAdmin.from('prospect_sequence_state')
+        .select('status, current_step_order, next_action_at, enrolled_at')
+        .eq('prospect_id', prospect_id)
+        .eq('account_id', req.accountId)
+        .maybeSingle(),
+      supabaseAdmin.from('prospect_activity')
+        .select('icebreaker_generated, icebreaker_mode, is_relevant, scraped_at')
+        .eq('prospect_id', prospect_id)
+        .maybeSingle(),
+    ]);
+
     const replacements = {
       '{{prospect_first_name}}': prospect.first_name || '',
       '{{prospect_last_name}}': prospect.last_name || '',
@@ -4767,7 +4780,13 @@ app.get('/api/sequences/preview', accountContext, async (req, res) => {
         : null,
     }));
 
-    res.json({ steps: preview, status: 'not_started', sequence: { id: seqResp.data.id, name: seqResp.data.name, version: seqResp.data.version } });
+    res.json({
+      steps: preview,
+      status: 'not_started',
+      sequence: { id: seqResp.data.id, name: seqResp.data.name, version: seqResp.data.version },
+      sequence_state: seqStateResp.data || null,
+      activity: activityResp.data || null,
+    });
   } catch (err) {
     console.error('Erreur GET /api/sequences/preview:', err.message);
     res.status(500).json({ error: err.message });
@@ -5202,9 +5221,31 @@ app.get('/api/logs', accountContext, async (req, res) => {
       query = query.lte('created_at', to);
     }
 
-    // Type filter: "status_change" is implicit (status_history table), "interaction" would be different
-    if (type && type !== 'status_change') {
-      // For now, only status_change is supported from this table
+    // Type filter: handle both "status_change" and "sequence" types
+    if (type === 'sequence') {
+      // Return sequence events from prospect_sequence_state
+      let seqQuery = supabaseAdmin.from('prospect_sequence_state')
+        .select('updated_at, prospect_id, status, current_step_order, prospects(first_name, last_name, company)')
+        .eq('account_id', req.accountId)
+        .order('updated_at', { ascending: false })
+        .limit(limit);
+
+      if (from) seqQuery = seqQuery.gte('updated_at', from);
+      if (to) seqQuery = seqQuery.lte('updated_at', to);
+
+      const { data: seqData, error: seqError } = await seqQuery;
+      if (seqError) throw seqError;
+
+      const normalized = (seqData || []).map(row => ({
+        created_at: row.updated_at,
+        prospect: row.prospects,
+        action_category: 'sequence',
+        status: row.status,
+        current_step_order: row.current_step_order,
+      }));
+      return res.json(normalized);
+    } else if (type && type !== 'status_change') {
+      // Only status_change and sequence are supported
       return res.json([]);
     }
 
@@ -5216,6 +5257,30 @@ app.get('/api/logs', accountContext, async (req, res) => {
     res.json(data || []);
   } catch (err) {
     console.error('Erreur GET /api/logs:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// GET /api/sequences/states — Sequence states for all prospects
+// ============================================================
+app.get('/api/sequences/states', accountContext, async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('prospect_sequence_state')
+      .select('prospect_id, status, current_step_order, sequence_id')
+      .eq('account_id', req.accountId);
+
+    if (error) return res.status(500).json({ error: error.message });
+
+    // Return a map { prospect_id → { status, current_step_order, sequence_id } }
+    const map = {};
+    for (const row of (data || [])) {
+      map[row.prospect_id] = row;
+    }
+    res.json(map);
+  } catch (err) {
+    console.error('Erreur GET /api/sequences/states:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
