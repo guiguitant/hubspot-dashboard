@@ -292,17 +292,36 @@ window.fetch = function(url, options = {}) {
 
 <!-- Account Switcher Button & Badge Update -->
 <script>
-document.addEventListener('account-selected', (e) => {
+// Update header when account is selected
+function updateHeaderWithAccount(account) {
   const btn = document.getElementById('accountSwitchBtn');
   const name = document.getElementById('currentAccountName');
-  if (e.detail) {
-    name.textContent = e.detail.name;
+  if (account) {
+    name.textContent = account.name;
     btn.style.display = 'flex';
+  } else {
+    btn.style.display = 'none';
+    name.textContent = '';
   }
+}
+
+// Listen for account-selected event (from user selection)
+document.addEventListener('account-selected', (e) => {
+  updateHeaderWithAccount(e.detail);
+});
+
+// Listen for account-changed event (from JWT fetch)
+document.addEventListener('account-changed', (e) => {
+  updateHeaderWithAccount(e.detail);
 });
 
 // Account switcher button click handler
 document.addEventListener('DOMContentLoaded', () => {
+  // Check if account is already loaded from sessionStorage (e.g., after hard refresh)
+  if (accountContext.isAccountSelected()) {
+    updateHeaderWithAccount(accountContext.getAccount());
+  }
+
   const btn = document.getElementById('accountSwitchBtn');
   if (btn) {
     btn.addEventListener('click', () => {
