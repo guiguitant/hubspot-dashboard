@@ -1,35 +1,52 @@
-# Authentification Supabase Magic Link — Guide de configuration
+# Authentification PIN — Guide de configuration
+
+## Vue d'ensemble
+
+Releaf Prospector utilise une **authentification PIN simple** au lieu de Magic Links.
+
+**Avantages :**
+- ✅ Pas de limite email Supabase
+- ✅ Instantané (pas d'attendre un email)
+- ✅ Parfait pour une app interne
+- ✅ Sécurisé avec JWT tokens
+
+---
 
 ## Prérequis à faire par Nathan
 
-### 1. Configurer Supabase Auth dans le Dashboard
+### 1. Ajouter colonne PIN à Supabase (déjà fait)
 
-1. Aller à **Authentication → Settings** dans le dashboard Supabase
-2. Section **Email Auth**:
-   - ✅ Email Auth: **Actif** (par défaut)
-   - ✅ Magic Links: **Actif** (par défaut)
+Si elle n'existe pas encore, exécuter dans **Supabase SQL Editor** :
 
-3. Section **Email Templates** → **Magic Link**:
-   - Vérifier le template par défaut ou personnaliser avec le branding "Releaf Carbon"
+```sql
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS pin VARCHAR(255);
+```
 
-### 2. Configurer les Redirect URLs
+### 2. Configurer les 3 PINs pour les comptes
 
-1. Dans **Authentication → Settings** → **URL Configuration**:
-   - Ajouter `https://hubspot-dashboard-1c7z.onrender.com` (production Render)
-   - Ajouter `http://localhost:3000` (développement local)
+Dans **Supabase SQL Editor**, exécuter :
 
-2. Sauvegarder
+```sql
+UPDATE accounts SET pin = '19970705' WHERE email = 'nathangourdin@releafcarbon.com';
+UPDATE accounts SET pin = '19970921' WHERE email = 'guillaumetant@releafcarbon.com';
+UPDATE accounts SET pin = '19970624' WHERE email = 'vincentmory@releafcarbon.com';
+```
 
-### 3. Récupérer les variables d'environnement
+**Important:** Les PINs sont les dates de naissance des utilisateurs (YYYYMMDD).
+- Nathan : 07/07/1997 → `19970705`
+- Guillaume : 21/09/1997 → `19970921`
+- Vincent : 24/06/1997 → `19970624`
+
+### 3. Récupérer les variables d'environnement Supabase
 
 1. Aller à **Settings → API → Project API keys**
-2. Copier:
-   - `SUPABASE_URL` (URL du projet)
-   - `SUPABASE_ANON_KEY` (anon public key)
-   - `SUPABASE_SERVICE_ROLE_KEY` (service_role secret key) ⚠️ À garder secret!
-   - `SUPABASE_JWT_SECRET` (JWT secret)
+2. Copier :
+   - `SUPABASE_URL`
+   - `SUPABASE_ANON_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY` ⚠️ Secret!
+   - `SUPABASE_JWT_SECRET`
 
-3. Ajouter à `.env` (copier depuis `.env.example`):
+3. Ajouter à `.env` :
    ```
    SUPABASE_URL=https://xxxx.supabase.co
    SUPABASE_ANON_KEY=eyJh...
@@ -37,49 +54,27 @@
    SUPABASE_JWT_SECRET=your_jwt_secret
    ```
 
-4. Pour Vite (frontend), ajouter aussi:
-   ```
-   VITE_SUPABASE_URL=https://xxxx.supabase.co
-   VITE_SUPABASE_ANON_KEY=eyJh...
-   ```
+### 4. Vérifier les permissions admin
 
-### 4. Exécuter la migration de base de données
-
-1. Dans Supabase Dashboard → **SQL Editor**
-2. Exécuter la migration `migrations/07_auth_supabase.sql`:
-   ```sql
-   ALTER TABLE accounts
-     ADD COLUMN IF NOT EXISTS email TEXT UNIQUE;
-   ALTER TABLE accounts
-     ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT false;
-   CREATE INDEX IF NOT EXISTS idx_accounts_email ON accounts(email);
-   ```
-
-### 5. Mettre à jour les emails et permissions
-
-Dans **SQL Editor**, mettre à jour les emails des utilisateurs:
+Dans **Supabase SQL Editor** :
 
 ```sql
-UPDATE accounts SET email = 'nathan@releafcarbon.com', is_admin = true  WHERE slug = 'nathan';
-UPDATE accounts SET email = 'guillaume@releafcarbon.com', is_admin = false WHERE slug = 'guillaume';
-UPDATE accounts SET email = 'vincent@releafcarbon.com',  is_admin = false WHERE slug = 'vincent';
+-- Nathan est le seul admin
+UPDATE accounts SET is_admin = true  WHERE email = 'nathangourdin@releafcarbon.com';
+UPDATE accounts SET is_admin = false WHERE email = 'guillaumetant@releafcarbon.com';
+UPDATE accounts SET is_admin = false WHERE email = 'vincentmory@releafcarbon.com';
 ```
 
-⚠️ **Important**: Nathan est le seul avec `is_admin = true`. Cela lui permet:
-- De voir le sélecteur de compte dans le header
-- De switcher entre les comptes de Guillaume et Vincent sans se déconnecter
-- De debug l'app sans se ré-authentifier
+⚠️ **Important**: Nathan (`is_admin = true`) peut switcher entre les comptes sans se déconnecter.
 
-### 6. Déployer les variables d'environnement sur Render
+### 5. Déployer les variables d'environnement sur Render
 
 1. Aller à votre application Render: **Settings → Environment**
-2. Ajouter les variables:
+2. Ajouter :
    - `SUPABASE_URL`
    - `SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY`
    - `SUPABASE_JWT_SECRET`
-   - `VITE_SUPABASE_URL`
-   - `VITE_SUPABASE_ANON_KEY`
 
 3. Déclencher un redéploiement
 
@@ -87,59 +82,217 @@ UPDATE accounts SET email = 'vincent@releafcarbon.com',  is_admin = false WHERE 
 
 ## Architecture de l'authentification
 
-### Flow utilisateur classique (Guillaume, Vincent)
+### Flow utilisateur standard (Guillaume, Vincent)
 
-1. Utilisateur va sur l'app → page de login
-2. Entre son email → reçoit un magic link par email
-3. Clique sur le lien → redirigé et connecté automatiquement
-4. Voit ses propres données (prospection, séquences, etc.)
-5. Clique "Déconnexion" → retour page login
+1. Utilisateur va sur `/prospector-app`
+2. Voit formulaire : Email + PIN
+3. Entre email + PIN
+4. Reçoit JWT token (stocké en sessionStorage)
+5. Voit ses propres données (prospection, séquences, etc.)
+6. Clique "Déconnexion" → retour formulaire login
 
 ### Mode admin (Nathan uniquement)
 
-1. Nathan se connecte avec son email
-2. Voit un sélecteur de compte jaune "🔧 Admin" dans le header
+1. Nathan se connecte avec son email + PIN
+2. Voit sélecteur de compte jaune "🔧 Admin" dans le header
 3. Peut changer de compte (Guillaume, Vincent, Nathan)
 4. Les données s'affichent pour le compte sélectionné
-5. **sessionStorage** garde le compte actif (reset au Ctrl+Shift+R intentionnellement)
-6. Nathan reste connecté avec son email — pas besoin de se ré-authentifier
+5. **sessionStorage** garde le compte actif (reset au Ctrl+Shift+R)
+6. Nathan reste connecté — pas besoin de se ré-authentifier
+
+---
+
+## Endpoints API
+
+### POST /api/accounts/login-pin
+
+Authentifier un utilisateur avec email + PIN.
+
+**Requête :**
+```bash
+curl -X POST http://localhost:3000/api/accounts/login-pin \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "nathangourdin@releafcarbon.com",
+    "pin": "19970705"
+  }'
+```
+
+**Réponse (succès) :**
+```json
+{
+  "token": "eyJh...",
+  "account_id": "uuid-...",
+  "account_name": "Nathan",
+  "is_admin": true,
+  "expires_in": 86400
+}
+```
+
+**Réponse (erreur) :**
+```json
+{
+  "error": "Email non trouvé"
+}
+```
+
+ou
+
+```json
+{
+  "error": "PIN incorrect"
+}
+```
+
+### GET /api/accounts/me
+
+Vérifier l'authentification actuelle (nécessite header `Authorization: Bearer {token}`).
+
+**Requête :**
+```bash
+curl -X GET http://localhost:3000/api/accounts/me \
+  -H "Authorization: Bearer eyJh..."
+```
+
+**Réponse :**
+```json
+{
+  "account": {
+    "id": "uuid-...",
+    "name": "Nathan",
+    "email": "nathangourdin@releafcarbon.com",
+    "is_admin": true
+  }
+}
+```
+
+---
+
+## Flux d'authentification côté frontend
+
+1. **Utilisateur arrive sur `/prospector-app`**
+   - App.jsx vérifie si un token existe en sessionStorage
+   - Si oui → initialise la session
+   - Si non → affiche LoginPage
+
+2. **Utilisateur rentre email + PIN**
+   - LoginPage appelle `POST /api/accounts/login-pin`
+   - Si succès → stocke token en sessionStorage
+   - Appelle `onLoginSuccess` callback → App.jsx se met à jour
+
+3. **App.jsx initialise la session**
+   - Appelle `GET /api/accounts/me` avec le token
+   - Récupère infos du compte
+   - Rend MainApp avec accès aux données
+
+4. **Utilisateur se déconnecte**
+   - Clique "Déconnexion"
+   - sessionStorage est vidé
+   - Retour à LoginPage
 
 ---
 
 ## Sécurité
 
-- ✅ Tokens JWT Supabase vérifiés côté serveur
-- ✅ X-Account-Id ne fonctionne qu'avec les tasks Dispatch (via service_role)
+- ✅ PINs stockés en base de données (jamais en code)
+- ✅ JWT tokens générés côté serveur (avec SUPABASE_JWT_SECRET)
+- ✅ Tokens vérifés sur chaque requête API
+- ✅ Tokens stockés en sessionStorage (pas de localStorage → meilleur que cookies HTTP)
+- ✅ Tokens expirés après 24h
+- ✅ X-Account-Id fonctionne uniquement avec service_role (Dispatch tasks)
 - ✅ X-Switch-Account réservé aux admins (`is_admin = true`)
 - ✅ RLS policies protègent les données au niveau base de données
-- ✅ Tokens auto-refreshés par Supabase
 
 ---
 
 ## Dépannage
 
-### "Aucun compte Releaf associé à cet email"
-→ L'email n'existe pas dans la table `accounts` ou n'a pas la colonne `email` mise à jour.
-→ Vérifier que la migration a bien été exécutée et les emails mis à jour.
+### "Email non trouvé"
+→ L'email n'existe pas dans la table `accounts`
+→ Vérifier que c'est bien `nathangourdin@releafcarbon.com` (pas `nathan@...`)
+→ Vérifier la base de données : `SELECT email FROM accounts;`
+
+### "PIN incorrect"
+→ Le PIN entré ne correspond pas
+→ Vérifier auprès de Nathan quels sont les bons PINs
+→ Vérifier en base : `SELECT email, pin FROM accounts;`
+
+### "No session available" (erreur côté frontend)
+→ Token n'est pas en sessionStorage
+→ Se reconnecter via formulaire login
+→ Vérifier que le formulaire appelle bien `loginSuccess` callback
 
 ### "Token invalide ou expiré"
-→ Le token a expiré ou n'a pas été créé correctement.
-→ Supabase devrait auto-refresh — rafraîchir la page ou se reconnecter.
-
-### Magic Link ne reçoit pas d'email
-→ Vérifier les **Email Templates** dans Supabase (sender, contenu)
-→ Vérifier les logs d'envoi dans Supabase Dashboard → **Logs**
-→ En dev, Magic Links sont toujours envoyés ; en prod, vérifier la configuration SMTP
+→ Rafraîchir la page (F5)
+→ Si erreur persiste → se reconnecter
 
 ### Le sélecteur admin n'apparaît pas (Nathan)
-→ Vérifier que `is_admin = true` pour Nathan dans la base
+→ Vérifier que `is_admin = true` pour Nathan en base
 → Rafraîchir la page (Ctrl+Shift+R)
 
 ---
 
-## Prochaines étapes
+## Développement local
 
-Une fois l'authentification testée:
-1. Intégrer les composants existants (prospector, séquences, etc.) dans la nouvelle interface React
-2. Remplacer le placeholder MainApp par le dashboard complet
-3. Garder prospector.js pour Dispatch (inchangé)
+### 1. Démarrer le backend
+
+```bash
+npm start
+# Écoute sur http://localhost:3000
+```
+
+### 2. Démarrer le frontend (dans un autre terminal)
+
+```bash
+npm run frontend:dev
+# Écoute sur http://localhost:5173
+# Proxie /api/* vers localhost:3000
+```
+
+### 3. Accéder à l'app
+
+```
+http://localhost:5173/prospector-app
+```
+
+### 4. Tester le login
+
+Email: `nathangourdin@releafcarbon.com`
+PIN: `19970705`
+
+---
+
+## Production (Render)
+
+1. Build React app : `npm run frontend:build` (fait automatiquement par Procfile)
+2. Express sert `/dist` et `/api` endpoints
+3. Procfile : `web: npm run frontend:build && npm start`
+4. Variables d'environnement configurées dans Render Settings
+
+---
+
+## Changement de PIN
+
+Si un utilisateur veut changer son PIN (dans le futur) :
+
+```sql
+UPDATE accounts SET pin = 'nouveau_pin' WHERE email = '...';
+```
+
+Pas besoin de redéployer — le changement prend effet immédiatement.
+
+---
+
+## Notes importantes
+
+- **Pas de reset PIN** : Contacter Nathan directement pour réinitialiser
+- **Pas de "Mot de passe oublié"** : Le PIN est simple et connu de chaque utilisateur
+- **Session timeout** : Les tokens expirent après 24h (relogin automatique)
+- **Admin switching** : Seul Nathan peut switcher. Guillaume et Vincent voient uniquement leurs données
+- **Logout clears everything** : sessionStorage est vidé complètement
+
+---
+
+**Version :** PIN Authentication (Sprint 2 Part 4)
+**Mise à jour :** 2026-03-31
+**Auteur :** Releaf Prospector Team
