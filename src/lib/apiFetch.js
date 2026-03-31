@@ -1,5 +1,3 @@
-import { supabase } from './supabase'
-
 // State management for API context
 let _activeAccountId = null
 let _authAccountIsAdmin = false
@@ -10,8 +8,8 @@ export const setApiFetchContext = (activeAccountId, isAdmin) => {
 }
 
 export const apiFetch = async (url, options = {}) => {
-  const { data: { session } } = await supabase.auth.getSession()
-  const token = session?.access_token
+  // Get token from sessionStorage (set by PIN login)
+  const token = sessionStorage.getItem('supabase.auth.token')
 
   if (!token) {
     throw new Error('No session available')

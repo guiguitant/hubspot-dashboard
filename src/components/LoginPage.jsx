@@ -1,9 +1,8 @@
 import { useState } from 'react'
-import { supabase } from '../lib/supabase'
 
-export default function LoginPage() {
+export default function LoginPage({ onLoginSuccess }) {
   const [email, setEmail] = useState('')
-  const [sent, setSent] = useState(false)
+  const [pin, setPin] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -12,43 +11,42 @@ export default function LoginPage() {
     setLoading(true)
     setError('')
 
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: `${window.location.origin}/prospector-app`,
-      },
-    })
+    try {
+      const res = await fetch('/api/accounts/login-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, pin })
+      })
 
-    setLoading(false)
-    if (error) {
-      setError(error.message)
-    } else {
-      setSent(true)
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || 'Erreur de connexion')
+      }
+
+      const data = await res.json()
+      // Store token in sessionStorage
+      sessionStorage.setItem('supabase.auth.token', data.token)
+      sessionStorage.setItem('account_id', data.account_id)
+      sessionStorage.setItem('account_name', data.account_name)
+      sessionStorage.setItem('is_admin', data.is_admin)
+
+      // Call callback to update app state
+      if (onLoginSuccess) {
+        onLoginSuccess(data)
+      }
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
     }
-  }
-
-  if (sent) {
-    return (
-      <div className="login-container">
-        <div className="login-card">
-          <div className="login-logo">🌱 Releaf Carbon</div>
-          <h2>Vérifiez votre email</h2>
-          <p>Un lien de connexion a été envoyé à <strong>{email}</strong>.</p>
-          <p className="hint">Cliquez sur le lien dans l'email pour accéder à l'espace prospection.</p>
-          <button className="btn-secondary" onClick={() => setSent(false)}>
-            ← Retour
-          </button>
-        </div>
-      </div>
-    )
   }
 
   return (
     <div className="login-container">
       <div className="login-card">
         <div className="login-logo">🌱 Releaf Carbon</div>
-        <h2>Connexion</h2>
-        <p>Entrez votre email pour recevoir un lien de connexion.</p>
+        <h2>Connexion Prospector</h2>
+        <p>Entrez votre email et votre code PIN.</p>
         <form onSubmit={handleLogin}>
           <input
             type="email"
@@ -59,9 +57,18 @@ export default function LoginPage() {
             autoFocus
             className="email-input"
           />
+          <input
+            type="password"
+            value={pin}
+            onChange={e => setPin(e.target.value)}
+            placeholder="Code PIN"
+            required
+            className="email-input"
+            maxLength="10"
+          />
           {error && <p className="error-msg">{error}</p>}
           <button type="submit" disabled={loading} className="btn-primary">
-            {loading ? 'Envoi...' : 'Envoyer le lien'}
+            {loading ? 'Connexion...' : 'Se connecter'}
           </button>
         </form>
       </div>

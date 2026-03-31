@@ -3386,6 +3386,48 @@ const accountContext = async (req, res, next) => {
 // ============================================================
 // GET /api/accounts/me — Return the authenticated user's account
 // Requires Bearer token (Supabase Auth)
+// POST /api/accounts/login-pin — Login with email + PIN
+app.post('/api/accounts/login-pin', async (req, res) => {
+  try {
+    const { email, pin } = req.body;
+    if (!email || !pin) {
+      return res.status(400).json({ error: 'Email et PIN requis' });
+    }
+
+    // Find account by email and verify PIN
+    const { data: account, error } = await supabaseAdmin
+      .from('accounts')
+      .select('id, name, email, is_admin, pin')
+      .eq('email', email)
+      .single();
+
+    if (error || !account) {
+      return res.status(401).json({ error: 'Email non trouvé' });
+    }
+
+    if (account.pin !== pin) {
+      return res.status(401).json({ error: 'PIN incorrect' });
+    }
+
+    // Generate JWT token
+    const token = generateSupabaseJWT(account.id);
+    if (!token) {
+      return res.status(500).json({ error: 'Impossible de générer le token' });
+    }
+
+    res.json({
+      token,
+      account_id: account.id,
+      account_name: account.name,
+      is_admin: account.is_admin,
+      expires_in: 86400 // 24h in seconds
+    });
+  } catch (err) {
+    console.error('Erreur POST /api/accounts/login-pin:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/accounts/me', accountContext, (req, res) => {
   res.json({ account: req.account });
 });

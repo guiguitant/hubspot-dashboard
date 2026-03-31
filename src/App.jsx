@@ -1,46 +1,34 @@
 import { useEffect, useState } from 'react'
-import { supabase } from './lib/supabase'
 import { setApiFetchContext } from './lib/apiFetch'
 import LoginPage from './components/LoginPage'
 
 export default function App() {
-  const [session, setSession] = useState(null)
+  const [token, setToken] = useState(null)
   const [authAccount, setAuthAccount] = useState(null) // compte réel de l'utilisateur
   const [activeAccount, setActiveAccount] = useState(null) // compte actif (peut être switché par admin)
   const [allAccounts, setAllAccounts] = useState([]) // liste pour sélecteur admin
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Récupérer la session actuelle
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      if (session) {
-        initAccount(session)
-      } else {
-        setLoading(false)
-      }
-    })
-
-    // Écouter les changements d'authentification
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-      if (session) {
-        initAccount(session)
-      } else {
-        setAuthAccount(null)
-        setActiveAccount(null)
-        sessionStorage.removeItem('activeAccountId')
-        setLoading(false)
-      }
-    })
-
-    return () => subscription?.unsubscribe()
+    // Vérifier si un token existe en sessionStorage
+    const storedToken = sessionStorage.getItem('supabase.auth.token')
+    if (storedToken) {
+      setToken(storedToken)
+      initAccount(storedToken)
+    } else {
+      setLoading(false)
+    }
   }, [])
 
-  const initAccount = async (session) => {
+  const handleLoginSuccess = (data) => {
+    setToken(data.token)
+    initAccount(data.token)
+  }
+
+  const initAccount = async (authToken) => {
     try {
       const res = await fetch('/api/accounts/me', {
-        headers: { 'Authorization': `Bearer ${session.access_token}` },
+        headers: { 'Authorization': `Bearer ${authToken}` },
       })
       if (!res.ok) {
         setLoading(false)
@@ -54,7 +42,7 @@ export default function App() {
       if (account.is_admin) {
         // Charger tous les comptes pour le sélecteur
         const resAll = await fetch('/api/accounts', {
-          headers: { 'Authorization': `Bearer ${session.access_token}` },
+          headers: { 'Authorization': `Bearer ${authToken}` },
         })
         if (resAll.ok) {
           const { accounts } = await resAll.json()
@@ -66,7 +54,7 @@ export default function App() {
         if (savedAccountId) {
           const resSwitched = await fetch('/api/accounts/me', {
             headers: {
-              'Authorization': `Bearer ${session.access_token}`,
+              'Authorization': `Bearer ${authToken}`,
               'X-Switch-Account': savedAccountId,
             },
           })
@@ -95,12 +83,11 @@ export default function App() {
     if (!authAccount?.is_admin) return
 
     sessionStorage.setItem('activeAccountId', targetAccountId)
-    const { data: { session: s } } = await supabase.auth.getSession()
 
     try {
       const res = await fetch('/api/accounts/me', {
         headers: {
-          'Authorization': `Bearer ${s.access_token}`,
+          'Authorization': `Bearer ${token}`,
           'X-Switch-Account': targetAccountId,
         },
       })
@@ -114,16 +101,19 @@ export default function App() {
     }
   }
 
-  const handleLogout = async () => {
+  const handleLogout = () => {
     sessionStorage.removeItem('activeAccountId')
-    await supabase.auth.signOut()
+    sessionStorage.removeItem('supabase.auth.token')
+    sessionStorage.removeItem('account_id')
+    sessionStorage.removeItem('account_name')
+    sessionStorage.removeItem('is_admin')
+    setToken(null)
     setAuthAccount(null)
     setActiveAccount(null)
-    setSession(null)
   }
 
   if (loading) return <div className="loading-screen">Chargement...</div>
-  if (!session) return <LoginPage />
+  if (!token) return <LoginPage onLoginSuccess={handleLoginSuccess} />
   if (!activeAccount) return <div className="error-screen">Compte non autorisé. Contactez Nathan.</div>
 
   return (
