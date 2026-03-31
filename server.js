@@ -3595,7 +3595,7 @@ app.get('/api/prospector/campaigns', accountContext, async (req, res) => {
     if (req.query.status) {
       q = q.eq('status', req.query.status);
     } else if (req.query.active === 'true') {
-      q = q.in('status', ['À lancer', 'En cours', 'En suivi']);
+      q = q.in('status', ['À lancer', 'En cours', 'En suivi', 'Terminée']);
     }
 
     const { data: campaigns, error } = await q;

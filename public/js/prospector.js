@@ -10,8 +10,8 @@ const App = (() => {
     const [page, qs] = hash.split('?');
     const params = new URLSearchParams(qs || '');
 
-    // Update navbar active
-    document.querySelectorAll('.navbar-nav a').forEach(a => {
+    // Update sidebar active link
+    document.querySelectorAll('.sidebar-link').forEach(a => {
       a.classList.toggle('active', a.getAttribute('href') === page || a.dataset.page === page.replace('#', ''));
     });
 
@@ -51,9 +51,9 @@ const App = (() => {
     container.innerHTML = `
       <h1 class="page-title">Dashboard</h1>
       <div class="stat-grid">
-        <div class="stat-card"><span class="stat-icon">👥</span><div><div class="stat-value" id="statWeek">—</div><div class="stat-label">Prospects cette semaine</div></div></div>
         <div class="stat-card"><span class="stat-icon">📤</span><div><div class="stat-value" id="statTotal">—</div><div class="stat-label">Total prospects</div></div></div>
-        <div class="stat-card"><span class="stat-icon">🕐</span><div><div class="stat-value" id="statReminders">—</div><div class="stat-label">Rappels en attente</div></div></div>
+        <div class="stat-card"><span class="stat-icon">👥</span><div><div class="stat-value" id="statWeek">—</div><div class="stat-label">Prospects cette semaine</div></div></div>
+        <div class="stat-card"><span class="stat-icon">🤝</span><div><div class="stat-value" id="statAccepted">—</div><div class="stat-label">Invitations acceptées</div></div></div>
         <div class="stat-card"><span class="stat-icon">📈</span><div><div class="stat-value" id="statCampaigns">—</div><div class="stat-label">Campagnes actives</div></div></div>
       </div>
       <div class="card mb-4" id="quotasCard" style="display:none">
@@ -78,10 +78,9 @@ const App = (() => {
     `;
 
     // Load stats in parallel
-    const [week, total, remCount, campCount, reminders, pipeline, activity, pendingMessages, profilsAValider, chartData] = await Promise.all([
+    const [week, total, campCount, reminders, pipeline, activity, pendingMessages, profilsAValider, chartData] = await Promise.all([
       DB.getProspectsThisWeek(),
       DB.getTotalProspects(),
-      DB.getPendingReminderCount(),
       DB.getActiveCampaignCount(),
       DB.getReminders({ status: 'pending' }),
       DB.getProspectCountsByStatus(),
@@ -90,6 +89,8 @@ const App = (() => {
       DB.getProspects({ status: 'Profil à valider' }),
       APIClient.get('/api/prospector/daily-activity').then(r => r.json()).catch(() => ({ dates: [], series: {} })),
     ]);
+    // Count invitations accepted (from pipeline counts)
+    const acceptedCount = pipeline['Invitation acceptée'] || 0;
 
     // Load quotas
     APIClient.get('/api/prospector/daily-stats').then(r => r.json()).then(stats => {
@@ -110,9 +111,9 @@ const App = (() => {
       msgBar.className = 'quota-fill' + (msgPct >= 100 ? ' quota-red' : msgPct >= 75 ? ' quota-orange' : '');
     }).catch(() => {});
 
-    document.getElementById('statWeek').textContent = week;
     document.getElementById('statTotal').textContent = total;
-    document.getElementById('statReminders').textContent = remCount;
+    document.getElementById('statWeek').textContent = week;
+    document.getElementById('statAccepted').textContent = acceptedCount;
     document.getElementById('statCampaigns').textContent = campCount;
 
     // Actions à faire (rappels + messages à valider)
@@ -1282,26 +1283,33 @@ const App = (() => {
   // ============================================================
   // CAMPAGNES
   // ============================================================
+  let _campTab = 'active'; // 'active' or 'archived'
+
   async function renderCampagnes(container) {
     container.innerHTML = `
       <div class="page-header">
         <h1 class="page-title" style="margin-bottom:0">Campagnes</h1>
-        <div class="flex gap-2">
-          <select id="filterCampStatus" onchange="App.loadCampagnes()" style="font-family:inherit;font-size:13px;padding:6px 10px;border:1px solid var(--color-border);border-radius:6px">
-            <option value="">Tous les statuts</option>
-          </select>
-          <button class="btn btn-primary" onclick="App.openAddCampaign()">+ Nouvelle campagne</button>
-        </div>
+        <button class="btn btn-primary" onclick="App.openAddCampaign()">+ Nouvelle campagne</button>
+      </div>
+      <div class="tab-bar" id="campTabs">
+        <button class="tab-btn tab-active" data-tab="active" onclick="App.switchCampTab('active')">Actives</button>
+        <button class="tab-btn" data-tab="archived" onclick="App.switchCampTab('archived')">Archivées</button>
       </div>
       <div id="campagnesTable">${UI.loader()}</div>
     `;
-    // Populate filter dropdown dynamically
-    const filterSel = document.getElementById('filterCampStatus');
-    UI.CAMP_STATUSES.forEach(s => { const o = document.createElement('option'); o.value = s; o.textContent = s; filterSel.appendChild(o); });
-    // Populate modal selects dynamically
+    // Populate modal selects dynamically (exclude Archivée from create/edit — archiving is done via button)
     document.querySelectorAll('.camp-status-select').forEach(sel => {
       sel.innerHTML = '';
-      UI.CAMP_STATUSES.forEach(s => { const o = document.createElement('option'); o.value = s; o.textContent = s; sel.appendChild(o); });
+      UI.CAMP_STATUSES.filter(s => s !== 'Archivée').forEach(s => { const o = document.createElement('option'); o.value = s; o.textContent = s; sel.appendChild(o); });
+    });
+    _campTab = 'active';
+    loadCampagnes();
+  }
+
+  function switchCampTab(tab) {
+    _campTab = tab;
+    document.querySelectorAll('#campTabs .tab-btn').forEach(b => {
+      b.classList.toggle('tab-active', b.dataset.tab === tab);
     });
     loadCampagnes();
   }
@@ -1309,13 +1317,12 @@ const App = (() => {
   let _campaignsCache = [];
 
   async function loadCampagnes() {
-    const statusFilter = document.getElementById('filterCampStatus')?.value || '';
-    let url = '/api/prospector/campaigns';
-    if (statusFilter) url += `?status=${encodeURIComponent(statusFilter)}`;
+    const url = _campTab === 'archived'
+      ? '/api/prospector/campaigns?status=Archiv%C3%A9e'
+      : '/api/prospector/campaigns?active=true';
     try {
       const resp = await fetch(url);
       if (!resp.ok) {
-        console.error('Failed to load campaigns:', resp.status);
         _campaignsCache = [];
         renderCampaignCards();
         return;
@@ -1547,6 +1554,22 @@ const App = (() => {
     return false;
   }
 
+  async function archiveCampaign(id, archive) {
+    const newStatus = archive ? 'Archivée' : 'À lancer';
+    try {
+      const resp = await APIClient.put(`/api/prospector/campaigns/${id}`, { status: newStatus });
+      if (!resp.ok) throw new Error('Failed');
+      UI.toast(archive ? 'Campagne archivée' : 'Campagne désarchivée');
+      if (archive) {
+        location.hash = '#campagnes';
+      } else {
+        renderCampaignDetail(document.getElementById('app'), id);
+      }
+    } catch (err) {
+      UI.toast('Erreur lors de l\'archivage', 'error');
+    }
+  }
+
   async function renderCampaignDetail(container, id) {
     if (!id) { location.hash = '#campagnes'; return; }
     container.innerHTML = UI.loader();
@@ -1582,6 +1605,10 @@ const App = (() => {
           <div class="flex gap-2 items-center">
             <div class="text-sm text-muted">Quota : ${campaign.daily_quota || 20}/j</div>
             <button class="btn btn-outline btn-sm" onclick="App.openEditCampaign('${id}')">Modifier</button>
+            ${campaign.status !== 'Archivée'
+              ? `<button class="btn btn-ghost btn-sm" onclick="App.archiveCampaign('${id}', true)" title="Archiver">🗄️ Archiver</button>`
+              : `<button class="btn btn-outline btn-sm" onclick="App.archiveCampaign('${id}', false)">♻️ Désarchiver</button>`
+            }
           </div>
         </div>
         <div class="profile-fields mt-4">
@@ -2669,6 +2696,7 @@ const App = (() => {
     quickValidate, quickReject,
     reminderDone, reminderSnooze,
     handleImportFile, setMapping, importBack, importNext, launchImport,
+    switchCampTab, archiveCampaign,
     switchCampaignTab, createSequence, createNewVersion, updateSequenceName,
     addStep, deleteStep, selectStep, _switchMsgTab,
     _updateCharCount, _generateStepMessage, _saveStepConfig, _insertPlaceholder,

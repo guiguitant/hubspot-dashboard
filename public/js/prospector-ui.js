@@ -6,26 +6,28 @@ const UI = (() => {
 
   // ---- Status badge ----
   const STATUS_CLASSES = {
+    // Pipeline visible (quick filters + dashboard)
     'Profil à valider': 'badge-profil-a-valider',
     'Nouveau': 'badge-nouveau',
-    'Profil restreint': 'badge-profil-restreint',
     'Invitation envoyée': 'badge-invitation',
-    'Invitation acceptée': 'badge-acceptee',
     'Message à valider': 'badge-a-valider',
     'Message à envoyer': 'badge-a-envoyer',
     'Message envoyé': 'badge-envoye',
-    'Réponse reçue': 'badge-reponse',
-    'RDV planifié': 'badge-rdv',
+    'Discussion en cours': 'badge-discussion',
     'Gagné': 'badge-gagne',
     'Perdu': 'badge-perdu',
+    // Hidden from dashboard (exist in DB but not shown in filters)
+    'Invitation acceptée': 'badge-acceptee',
+    'Profil restreint': 'badge-profil-restreint',
     'Non pertinent': 'badge-non-pertinent',
   };
 
-  const HIDDEN_STATUSES = ['Invitation acceptée'];
+  // Hidden from quick filters and dashboard
+  const HIDDEN_STATUSES = ['Invitation acceptée', 'Profil restreint', 'Non pertinent'];
   const STATUSES = Object.keys(STATUS_CLASSES).filter(s => !HIDDEN_STATUSES.includes(s));
 
   // Statuts assignés uniquement par l'automatisation — exclus des dropdowns manuels
-  const AUTO_ONLY_STATUSES = ['Profil restreint'];
+  const AUTO_ONLY_STATUSES = ['Profil restreint', 'Invitation acceptée'];
   const DROPDOWN_STATUSES = STATUSES.filter(s => !AUTO_ONLY_STATUSES.includes(s));
 
   const CAMP_STATUS_CLASSES = {
@@ -33,6 +35,7 @@ const UI = (() => {
     'En cours': 'badge-en-cours',
     'En suivi': 'badge-en-suivi',
     'Terminée': 'badge-terminee',
+    'Archivée': 'badge-archivee',
   };
 
   const CAMP_STATUSES = Object.keys(CAMP_STATUS_CLASSES);
