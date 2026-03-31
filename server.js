@@ -3493,10 +3493,7 @@ app.get('/api/task-locks', async (req, res) => {
 
 // Serve prospector.html with injected Supabase env vars (for Dispatch & Dispatch tasks)
 app.get('/prospector', (req, res) => {
-  let html = fs.readFileSync(path.join(__dirname, 'public', 'prospector.html'), 'utf8');
-  html = html.replace('__SUPABASE_URL__', process.env.SUPABASE_URL || '');
-  html = html.replace('__SUPABASE_ANON_KEY__', process.env.SUPABASE_ANON_KEY || '');
-  res.send(html);
+  res.redirect('/prospector-app');
 });
 
 // GET /api/prospector/campaigns — List campaigns sorted by priority
