@@ -80,6 +80,8 @@ app.get('/', (req, res) => {
 });
 
 // Static files (after explicit routes)
+// Serve /dist (React build) and /public (legacy files)
+app.use(express.static(path.join(__dirname, 'dist')));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // --- Utility functions ---
