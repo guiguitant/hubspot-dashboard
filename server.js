@@ -3305,53 +3305,96 @@ app.get('/api/previsionnel-charges', async (req, res) => {
 // ============================================================
 // Middleware to validate account_id from header or query param
 const accountContext = async (req, res, next) => {
-  // Priorité 1: JWT Supabase Auth (utilisateurs connectés via Magic Link)
+  // Priorité 1: JWT Bearer Token (Supabase Auth ou custom PIN JWT)
   const authHeader = req.headers['authorization'];
   if (authHeader?.startsWith('Bearer ')) {
     const token = authHeader.replace('Bearer ', '');
 
     try {
-      // Vérifier le token avec supabaseAdmin
-      const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-      if (error || !user) {
-        return res.status(401).json({ error: 'Token invalide ou expiré' });
+      // Essayer d'abord Supabase Auth (Magic Link)
+      let user = null;
+      const { data: { user: supabaseUser }, error: supabaseError } = await supabaseAdmin.auth.getUser(token);
+
+      if (!supabaseError && supabaseUser) {
+        user = supabaseUser;
+      } else {
+        // Essayer notre JWT custom (PIN auth)
+        try {
+          const decoded = jwt.verify(token, process.env.SUPABASE_JWT_SECRET);
+          // Trouver le compte par ID (custom JWT a la revendication account_id)
+          const { data: account, error: acctError } = await supabaseAdmin
+            .from('accounts')
+            .select('id, name, slug, email, is_admin')
+            .eq('id', decoded.account_id)
+            .single();
+
+          if (acctError || !account) {
+            return res.status(401).json({ error: 'Token invalide ou compte non trouvé' });
+          }
+
+          req.accountId = account.id;
+          req.account = account;
+
+          // Mode admin switching
+          const switchAccountId = req.headers['x-switch-account'];
+          if (account.is_admin && switchAccountId) {
+            const { data: targetAccount, error: switchError } = await supabaseAdmin
+              .from('accounts')
+              .select('id, name, slug, email, is_admin')
+              .eq('id', switchAccountId)
+              .single();
+
+            if (!switchError && targetAccount) {
+              req.accountId = targetAccount.id;
+              req.account = targetAccount;
+              req.adminAccount = account;
+            }
+          }
+
+          return next();
+        } catch (jwtErr) {
+          // Aucun token valide trouvé
+          return res.status(401).json({ error: 'Token invalide ou expiré' });
+        }
       }
 
-      // Récupérer le compte de l'utilisateur connecté
-      const { data: authAccount, error: acctError } = await supabaseAdmin
-        .from('accounts')
-        .select('id, name, slug, email, is_admin')
-        .eq('email', user.email)
-        .single();
-
-      if (acctError || !authAccount) {
-        return res.status(403).json({ error: 'Aucun compte Releaf associé à cet email' });
-      }
-
-      // Mode admin: Nathan peut switcher vers un autre compte via X-Switch-Account
-      const switchAccountId = req.headers['x-switch-account'];
-      if (authAccount.is_admin && switchAccountId) {
-        const { data: targetAccount, error: switchError } = await supabaseAdmin
+      // Si on a un token Supabase Auth valide, continuer
+      if (user) {
+        const { data: authAccount, error: acctError } = await supabaseAdmin
           .from('accounts')
           .select('id, name, slug, email, is_admin')
-          .eq('id', switchAccountId)
+          .eq('email', user.email)
           .single();
 
-        if (switchError || !targetAccount) {
-          return res.status(404).json({ error: 'Compte cible introuvable' });
+        if (acctError || !authAccount) {
+          return res.status(403).json({ error: 'Aucun compte Releaf associé à cet email' });
         }
 
-        req.accountId = targetAccount.id;
-        req.account = targetAccount;
-        req.adminAccount = authAccount; // compte réel de Nathan
+        // Mode admin: Nathan peut switcher vers un autre compte via X-Switch-Account
+        const switchAccountId = req.headers['x-switch-account'];
+        if (authAccount.is_admin && switchAccountId) {
+          const { data: targetAccount, error: switchError } = await supabaseAdmin
+            .from('accounts')
+            .select('id, name, slug, email, is_admin')
+            .eq('id', switchAccountId)
+            .single();
+
+          if (switchError || !targetAccount) {
+            return res.status(404).json({ error: 'Compte cible introuvable' });
+          }
+
+          req.accountId = targetAccount.id;
+          req.account = targetAccount;
+          req.adminAccount = authAccount;
+          return next();
+        }
+
+        req.accountId = authAccount.id;
+        req.account = authAccount;
         return next();
       }
-
-      req.accountId = authAccount.id;
-      req.account = authAccount;
-      return next();
     } catch (err) {
-      console.error('Erreur vérification token:', err);
+      console.error('Erreur vérification token:', err.message);
       return res.status(401).json({ error: 'Erreur de vérification du token' });
     }
   }
