@@ -36,8 +36,14 @@ const IS_PAT = HUBSPOT_API_KEY.startsWith('pat-');
 
 app.use(express.json());
 
-// Middleware: Redirect root to /auth (new React app) or show instructions
+// Middleware: Root route — serve React app in production, instructions in dev
 app.get('/', (req, res) => {
+  // In production, serve the compiled React app from /dist
+  if (process.env.NODE_ENV === 'production' || fs.existsSync(path.join(__dirname, 'dist', 'index.html'))) {
+    return res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+  }
+
+  // In development, show instructions
   res.send(`
     <!DOCTYPE html>
     <html>
