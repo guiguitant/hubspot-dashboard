@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Releaf Prospector</title>
+  <meta name="supabase-url" content="__SUPABASE_URL__">
+  <meta name="supabase-key" content="__SUPABASE_ANON_KEY__">
+  <link rel="stylesheet" href="/css/prospector.css">
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar">
+  <a href="#dashboard" class="navbar-logo">🌿 Releaf Prospector</a>
+  <div class="navbar-nav">
+    <a href="#dashboard" data-page="dashboard">Dashboard</a>
+    <a href="#prospects" data-page="prospects">Prospects</a>
+    <a href="#campagnes" data-page="campagnes">Campagnes</a>
+    <a href="#imports" data-page="imports">Imports</a>
+    <a href="#logs" data-page="logs">Logs</a>
+    <a href="#rappels" data-page="rappels">Rappels</a>
+    <a href="#placeholders" data-page="placeholders">Placeholders</a>
+  </div>
+  <div class="navbar-end">
+    <button class="navbar-account-btn" id="accountSwitchBtn" style="display:none" title="Cliquez pour changer de compte">
+      <span>👤</span>
+      <span class="navbar-account-name" id="currentAccountName"></span>
+    </button>
+    <button class="navbar-bell" id="bellBtn" onclick="location.hash='#rappels'">
+      🔔 <span class="bell-badge" id="bellBadge" style="display:none">0</span>
+    </button>
+  </div>
+</nav>
+
+<!-- Main content (SPA) -->
+<main id="app" class="page"></main>
+
+<!-- ====== MODALS ====== -->
+
+<!-- Modal: Ajouter prospect -->
+<div class="modal-overlay" id="modalAddProspect">
+  <div class="modal" style="position:relative">
+    <button class="modal-close" onclick="UI.closeModal('modalAddProspect')">&times;</button>
+    <div class="modal-title">Ajouter un prospect</div>
+    <form id="formAddProspect" onsubmit="return App.handleAddProspect(event)">
+      <div class="form-row">
+        <div class="form-group"><label>Prénom *</label><input name="first_name" required></div>
+        <div class="form-group"><label>Nom *</label><input name="last_name" required></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Entreprise</label><input name="company"></div>
+        <div class="form-group"><label>Poste</label><input name="job_title"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Email</label><input name="email" type="email"></div>
+        <div class="form-group"><label>Téléphone</label><input name="phone"></div>
+      </div>
+      <div class="form-group"><label>LinkedIn URL</label><input name="linkedin_url" type="url"></div>
+      <div class="form-row">
+        <div class="form-group"><label>Secteur</label><input name="sector"></div>
+        <div class="form-group"><label>Région</label><input name="geography"></div>
+      </div>
+      <div class="form-group"><label>Campagne</label><select name="source_campaign_id" id="selectCampaignAdd"></select></div>
+      <div class="form-group"><label>Notes</label><textarea name="notes" rows="3"></textarea></div>
+      <div id="dupeWarningAdd" style="display:none" class="duplicate-banner"></div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-outline" onclick="UI.closeModal('modalAddProspect')">Annuler</button>
+        <button type="submit" class="btn btn-primary">Ajouter</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: Modifier prospect -->
+<div class="modal-overlay" id="modalEditProspect">
+  <div class="modal" style="position:relative">
+    <button class="modal-close" onclick="UI.closeModal('modalEditProspect')">&times;</button>
+    <div class="modal-title">Modifier le prospect</div>
+    <form id="formEditProspect" onsubmit="return App.handleEditProspect(event)">
+      <input type="hidden" name="id">
+      <div class="form-row">
+        <div class="form-group"><label>Prénom *</label><input name="first_name" required></div>
+        <div class="form-group"><label>Nom *</label><input name="last_name" required></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Entreprise</label><input name="company"></div>
+        <div class="form-group"><label>Poste</label><input name="job_title"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Email</label><input name="email" type="email"></div>
+        <div class="form-group"><label>Téléphone</label><input name="phone"></div>
+      </div>
+      <div class="form-group"><label>LinkedIn URL</label><input name="linkedin_url" type="url"></div>
+      <div class="form-row">
+        <div class="form-group"><label>Secteur</label><input name="sector"></div>
+        <div class="form-group"><label>Région</label><input name="geography"></div>
+      </div>
+      <div class="form-group"><label>Campagne</label><select name="source_campaign_id" id="selectCampaignEdit"></select></div>
+      <div class="form-group"><label>Notes</label><textarea name="notes" rows="3"></textarea></div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-outline" onclick="UI.closeModal('modalEditProspect')">Annuler</button>
+        <button type="submit" class="btn btn-primary">Enregistrer</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: Nouvelle campagne -->
+<div class="modal-overlay" id="modalAddCampaign">
+  <div class="modal" style="position:relative">
+    <button class="modal-close" onclick="UI.closeModal('modalAddCampaign')">&times;</button>
+    <div class="modal-title">Nouvelle campagne</div>
+    <form id="formAddCampaign" onsubmit="return App.handleAddCampaign(event)">
+      <div class="form-group"><label>Nom *</label><input name="name" required></div>
+      <div class="form-row">
+        <div class="form-group"><label>Priorité *</label><input name="priority" type="number" min="1" required placeholder="1 = plus prioritaire"></div>
+        <div class="form-group"><label>Statut</label>
+          <select name="status" class="camp-status-select"></select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Secteur</label><input name="sector"></div>
+        <div class="form-group"><label>Géographie</label><input name="geography"></div>
+      </div>
+      <div class="form-group">
+        <label>Postes ciblés</label>
+        <div class="tags-container" id="addJobTags"></div>
+        <input class="tags-input" id="addJobInput" placeholder="Tapez un poste puis Entrée">
+      </div>
+      <div class="form-group">
+        <label>Objectifs</label>
+        <div class="tags-container" id="addObjTags"></div>
+        <input class="tags-input" id="addObjInput" placeholder="Tapez un objectif puis Entrée (ex: Bilan carbone, ACV...)">
+      </div>
+      <div class="form-group">
+        <label>Postes / mots-clés exclus</label>
+        <div class="tags-container" id="addExclTags"></div>
+        <input class="tags-input" id="addExclInput" placeholder="Tapez un mot-clé à exclure puis Entrée">
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>CA min (€)</label><input name="revenue_min" type="number" min="0" placeholder="Ex: 1000000"></div>
+        <div class="form-group"><label>CA max (€)</label><input name="revenue_max" type="number" min="0" placeholder="Ex: 50000000"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Effectif min</label><input name="employees_min" type="number" min="0" placeholder="Ex: 15"></div>
+        <div class="form-group"><label>Effectif max</label><input name="employees_max" type="number" min="0" placeholder="Ex: 500"></div>
+      </div>
+      <div class="form-group"><label>Détails de la campagne</label><textarea name="details" rows="4" placeholder="Instructions spécifiques pour Claude (ton, approche, contexte, message type...)"></textarea></div>
+      <div id="campaignError" style="display:none;color:#EF4444;font-size:13px;margin-bottom:8px"></div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-outline" onclick="UI.closeModal('modalAddCampaign')">Annuler</button>
+        <button type="submit" class="btn btn-primary">Créer</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: Modifier campagne -->
+<div class="modal-overlay" id="modalEditCampaign">
+  <div class="modal" style="position:relative">
+    <button class="modal-close" onclick="UI.closeModal('modalEditCampaign')">&times;</button>
+    <div class="modal-title">Modifier la campagne</div>
+    <form id="formEditCampaign" onsubmit="return App.handleEditCampaign(event)">
+      <input type="hidden" name="id">
+      <div class="form-group"><label>Nom *</label><input name="name" required></div>
+      <div class="form-row">
+        <div class="form-group"><label>Priorité *</label><input name="priority" type="number" min="1" required></div>
+        <div class="form-group"><label>Statut</label>
+          <select name="status" class="camp-status-select"></select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Secteur</label><input name="sector"></div>
+        <div class="form-group"><label>Géographie</label><input name="geography"></div>
+      </div>
+      <div class="form-group">
+        <label>Postes ciblés</label>
+        <div class="tags-container" id="editJobTags"></div>
+        <input class="tags-input" id="editJobInput" placeholder="Tapez un poste puis Entrée">
+      </div>
+      <div class="form-group">
+        <label>Objectifs</label>
+        <div class="tags-container" id="editObjTags"></div>
+        <input class="tags-input" id="editObjInput" placeholder="Tapez un objectif puis Entrée (ex: Bilan carbone, ACV...)">
+      </div>
+      <div class="form-group">
+        <label>Postes / mots-clés exclus</label>
+        <div class="tags-container" id="editExclTags"></div>
+        <input class="tags-input" id="editExclInput" placeholder="Tapez un mot-clé à exclure puis Entrée">
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>CA min (€)</label><input name="revenue_min" type="number" min="0"></div>
+        <div class="form-group"><label>CA max (€)</label><input name="revenue_max" type="number" min="0"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Effectif min</label><input name="employees_min" type="number" min="0"></div>
+        <div class="form-group"><label>Effectif max</label><input name="employees_max" type="number" min="0"></div>
+      </div>
+      <div class="form-group"><label>Détails de la campagne</label><textarea name="details" rows="4" placeholder="Instructions spécifiques pour Claude..."></textarea></div>
+      <div id="campaignEditError" style="display:none;color:#EF4444;font-size:13px;margin-bottom:8px"></div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-outline" onclick="UI.closeModal('modalEditCampaign')">Annuler</button>
+        <button type="submit" class="btn btn-primary">Enregistrer</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: Ajouter interaction -->
+<div class="modal-overlay" id="modalAddInteraction">
+  <div class="modal" style="position:relative">
+    <button class="modal-close" onclick="UI.closeModal('modalAddInteraction')">&times;</button>
+    <div class="modal-title">Enregistrer une interaction</div>
+    <form id="formAddInteraction" onsubmit="return App.handleAddInteraction(event)">
+      <input type="hidden" name="prospect_id">
+      <div class="form-row">
+        <div class="form-group"><label>Type</label>
+          <select name="type" required>
+            <option value="Ajout LinkedIn">Ajout LinkedIn</option>
+            <option value="Message envoyé">Message envoyé</option>
+            <option value="Email">Email</option>
+            <option value="Appel">Appel</option>
+            <option value="Réunion">Réunion</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Date</label><input name="date" type="date" required></div>
+      </div>
+      <div class="form-group"><label>Notes</label><textarea name="content" rows="3"></textarea></div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-outline" onclick="UI.closeModal('modalAddInteraction')">Annuler</button>
+        <button type="submit" class="btn btn-primary">Enregistrer</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: Ajouter rappel -->
+<div class="modal-overlay" id="modalAddReminder">
+  <div class="modal" style="position:relative">
+    <button class="modal-close" onclick="UI.closeModal('modalAddReminder')">&times;</button>
+    <div class="modal-title">Ajouter un rappel</div>
+    <form id="formAddReminder" onsubmit="return App.handleAddReminder(event)">
+      <input type="hidden" name="prospect_id">
+      <div class="form-row">
+        <div class="form-group"><label>Type d'action</label><input name="type" placeholder="Ex: Relance, Appel, Email..."></div>
+        <div class="form-group"><label>Date *</label><input name="due_date" type="date" required></div>
+      </div>
+      <div class="form-group"><label>Note</label><textarea name="note" rows="3"></textarea></div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-outline" onclick="UI.closeModal('modalAddReminder')">Annuler</button>
+        <button type="submit" class="btn btn-primary">Ajouter</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Scripts -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+
+<!-- Account Context & Selector (Multi-User) -->
+<script src="/js/account-context.js"></script>
+<script src="/js/account-selector.js"></script>
+
+<!-- Global fetch wrapper to inject X-Account-Id header -->
+<script>
+const originalFetch = window.fetch;
+window.fetch = function(url, options = {}) {
+  // Inject header for /api/prospector/* and /api/sequences/* endpoints
+  if (typeof url === 'string' && (url.includes('/api/prospector') || url.includes('/api/sequences'))) {
+    const accountId = accountContext.getAccountId();
+    if (!accountId) {
+      // Account not selected, reject the request
+      return Promise.reject(new Error('No account selected'));
+    }
+    options = {
+      ...options,
+      headers: {
+        ...(options.headers || {}),
+        'X-Account-Id': accountId,
+      }
+    };
+  }
+  return originalFetch.call(this, url, options);
+};
+</script>
+
+<!-- Prospector App -->
+<script src="/js/prospector-ui.js"></script>
+<script src="/js/prospector-db.js"></script>
+<script src="/js/prospector.js"></script>
+
+<!-- Account Switcher Button & Badge Update -->
+<script>
+// Update header when account is selected
+function updateHeaderWithAccount(account) {
+  const btn = document.getElementById('accountSwitchBtn');
+  const name = document.getElementById('currentAccountName');
+  if (account) {
+    name.textContent = account.name;
+    btn.style.display = 'flex';
+  } else {
+    btn.style.display = 'none';
+    name.textContent = '';
+  }
+}
+
+// Listen for account-selected event (from user selection)
+document.addEventListener('account-selected', (e) => {
+  updateHeaderWithAccount(e.detail);
+});
+
+// Listen for account-changed event (from JWT fetch)
+document.addEventListener('account-changed', (e) => {
+  updateHeaderWithAccount(e.detail);
+});
+
+// Account switcher button click handler
+document.addEventListener('DOMContentLoaded', () => {
+  // Check if account is already loaded from sessionStorage (e.g., after hard refresh)
+  if (accountContext.isAccountSelected()) {
+    updateHeaderWithAccount(accountContext.getAccount());
+  }
+
+  const btn = document.getElementById('accountSwitchBtn');
+  if (btn) {
+    btn.addEventListener('click', () => {
+      // Show account selector again
+      const selector = new AccountSelector();
+      selector.show();
+    });
+  }
+});
+</script>
+</body>
+</html>
