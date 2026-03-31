@@ -24,8 +24,8 @@ export default function LoginPage({ onLoginSuccess }) {
       }
 
       const data = await res.json()
-      // Store token in sessionStorage
-      sessionStorage.setItem('supabase.auth.token', data.token)
+      // Store token and account info in sessionStorage (unified keys)
+      sessionStorage.setItem('auth_token', data.token)
       sessionStorage.setItem('account_id', data.account_id)
       sessionStorage.setItem('account_name', data.account_name)
       sessionStorage.setItem('is_admin', data.is_admin)

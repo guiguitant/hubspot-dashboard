@@ -13,12 +13,10 @@ const DB = (() => {
       _sb = supabase.createClient(url, key);
     }
 
-    // If JWT token is available, set it as the session auth token
-    const currentJWT = typeof accountContext !== 'undefined' ? accountContext.getJWTToken() : null;
+    // Set JWT from unified auth_token for RLS filtering
+    const currentJWT = AccountContext.getToken();
     if (currentJWT && currentJWT !== _lastJWT) {
       _lastJWT = currentJWT;
-      // Set the JWT token for RLS filtering
-      // The token format is: { accessToken: token, refreshToken: null, expiresIn: 86400, expiresAt: timestamp, user: { id: account_id } }
       _sb.auth.setSession({
         access_token: currentJWT,
         refresh_token: '',

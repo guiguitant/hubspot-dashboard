@@ -2654,14 +2654,11 @@ const App = (() => {
     router();
   }
 
-  // Call init immediately or when DOM is ready
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
+  // Note: init() is called explicitly from prospector.html AFTER account selection
+  // to ensure accountContext is ready before making API calls
 
   return {
+    init,
     handleAddProspect, handleEditProspect, handleAddCampaign, handleEditCampaign,
     handleAddInteraction, handleAddReminder,
     openAddProspect, openEditProspect, deleteProspect,

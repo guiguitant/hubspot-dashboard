@@ -7,6 +7,12 @@
   <meta name="supabase-url" content="__SUPABASE_URL__">
   <meta name="supabase-key" content="__SUPABASE_ANON_KEY__">
   <link rel="stylesheet" href="/css/prospector.css">
+  <script>
+    // Auth guard: redirect to login if no token
+    if (!sessionStorage.getItem('auth_token')) {
+      window.location.href = '/prospector-login';
+    }
+  </script>
 </head>
 <body>
 
@@ -23,12 +29,15 @@
     <a href="#placeholders" data-page="placeholders">Placeholders</a>
   </div>
   <div class="navbar-end">
-    <button class="navbar-account-btn" id="accountSwitchBtn" style="display:none" title="Cliquez pour changer de compte">
+    <button class="navbar-account-btn" id="accountSwitchBtn" style="display:none" title="Changer de compte (admin)">
       <span>👤</span>
       <span class="navbar-account-name" id="currentAccountName"></span>
     </button>
     <button class="navbar-bell" id="bellBtn" onclick="location.hash='#rappels'">
       🔔 <span class="bell-badge" id="bellBadge" style="display:none">0</span>
+    </button>
+    <button class="navbar-logout-btn" id="logoutBtn" title="Se déconnecter" style="background:none;border:none;color:var(--color-text-muted);cursor:pointer;padding:6px 10px;font-size:14px;">
+      Déconnexion
     </button>
   </div>
 </nav>
@@ -263,26 +272,35 @@
 <script src="/js/account-context.js"></script>
 <script src="/js/account-selector.js"></script>
 
-<!-- Global fetch wrapper to inject X-Account-Id header -->
+<!-- Global fetch wrapper: inject Bearer token + X-Switch-Account on all /api/ calls -->
 <script>
 const originalFetch = window.fetch;
 window.fetch = function(url, options = {}) {
-  // Inject header for /api/prospector/* and /api/sequences/* endpoints
-  if (typeof url === 'string' && (url.includes('/api/prospector') || url.includes('/api/sequences'))) {
-    const accountId = accountContext.getAccountId();
-    if (!accountId) {
-      // Account not selected, reject the request
-      return Promise.reject(new Error('No account selected'));
+  if (typeof url === 'string' && url.includes('/api/')) {
+    const token = AccountContext.getToken();
+    const headers = { ...(options.headers || {}) };
+
+    // Always inject Bearer token
+    if (token && !headers['Authorization']) {
+      headers['Authorization'] = `Bearer ${token}`;
     }
-    options = {
-      ...options,
-      headers: {
-        ...(options.headers || {}),
-        'X-Account-Id': accountId,
-      }
-    };
+
+    // If admin is viewing another account, inject X-Switch-Account
+    const switchId = accountContext.getSwitchAccountId();
+    if (switchId && !headers['X-Switch-Account']) {
+      headers['X-Switch-Account'] = switchId;
+    }
+
+    options = { ...options, headers };
   }
-  return originalFetch.call(this, url, options);
+
+  return originalFetch.call(this, url, options).then(response => {
+    // 401 = token expired/invalid → redirect to login
+    if (response.status === 401) {
+      AccountContext.logout();
+    }
+    return response;
+  });
 };
 </script>
 
@@ -299,38 +317,49 @@ function updateHeaderWithAccount(account) {
   const name = document.getElementById('currentAccountName');
   if (account) {
     name.textContent = account.name;
-    btn.style.display = 'flex';
+    // Only show switch button if user is admin
+    btn.style.display = accountContext.getIsAdmin() ? 'flex' : 'none';
   } else {
     btn.style.display = 'none';
     name.textContent = '';
   }
 }
 
-// Listen for account-selected event (from user selection)
-document.addEventListener('account-selected', (e) => {
-  updateHeaderWithAccount(e.detail);
-});
-
-// Listen for account-changed event (from JWT fetch)
+// Update header on any account change
 document.addEventListener('account-changed', (e) => {
   updateHeaderWithAccount(e.detail);
 });
 
-// Account switcher button click handler
+// Initialization
 document.addEventListener('DOMContentLoaded', () => {
-  // Check if account is already loaded from sessionStorage (e.g., after hard refresh)
-  if (accountContext.isAccountSelected()) {
-    updateHeaderWithAccount(accountContext.getAccount());
+  // Account info comes from sessionStorage (set by LoginPage.jsx after PIN login)
+  // accountContext constructor already reads account_id, account_name, is_admin
+  if (!accountContext.isAccountSelected()) {
+    // No account info → redirect to login
+    AccountContext.logout();
+    return;
   }
 
-  const btn = document.getElementById('accountSwitchBtn');
-  if (btn) {
-    btn.addEventListener('click', () => {
-      // Show account selector again
-      const selector = new AccountSelector();
-      selector.show();
-    });
+  // Clean URL (remove ?account_id= param if present)
+  if (window.location.search.includes('account_id')) {
+    window.history.replaceState({}, '', '/prospector');
   }
+
+  // Show account name + init app
+  updateHeaderWithAccount(accountContext.getAccount());
+  App.init();
+
+  // Logout button
+  document.getElementById('logoutBtn')?.addEventListener('click', () => {
+    AccountContext.logout();
+  });
+
+  // Account switcher button (admin only)
+  document.getElementById('accountSwitchBtn')?.addEventListener('click', () => {
+    if (!accountContext.getIsAdmin()) return;
+    const selector = new AccountSelector();
+    selector.show();
+  });
 });
 </script>
 </body>

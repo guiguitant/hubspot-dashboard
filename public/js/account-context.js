@@ -1,112 +1,111 @@
 /**
  * Account Context Manager
- * Handles account selection, storage, and API header injection
+ * Single source of truth for authentication and account state.
+ *
+ * Keys in sessionStorage:
+ *   auth_token    — JWT Bearer token (never changes after login, even on admin switch)
+ *   account_id    — logged-in user's account ID
+ *   account_name  — logged-in user's account name
+ *   is_admin      — 'true' | 'false'
+ *   switch_account_id   — (admin only) ID of the account currently being viewed
+ *   switch_account_name — (admin only) name of that account
  */
 
 class AccountContext {
   constructor() {
-    this.currentAccount = null;
-    this.currentJWT = null;
-    this.accounts = [];
-    this.loadFromSession();
+    // The "own" account (from login)
+    this.ownAccountId = sessionStorage.getItem('account_id') || null;
+    this.ownAccountName = sessionStorage.getItem('account_name') || null;
+    this.isAdmin = sessionStorage.getItem('is_admin') === 'true';
+
+    // Admin switch state (null = viewing own account)
+    this.switchedAccountId = sessionStorage.getItem('switch_account_id') || null;
+    this.switchedAccountName = sessionStorage.getItem('switch_account_name') || null;
   }
 
-  // Load account and JWT from session storage
-  loadFromSession() {
-    const stored = sessionStorage.getItem('releaf_account');
-    const storedJWT = sessionStorage.getItem('releaf_jwt_token');
-    if (stored) {
-      try {
-        this.currentAccount = JSON.parse(stored);
-        if (storedJWT) {
-          this.currentJWT = storedJWT;
-        }
-      } catch (e) {
-        console.error('Failed to parse stored account:', e);
-        sessionStorage.removeItem('releaf_account');
-        sessionStorage.removeItem('releaf_jwt_token');
-      }
-    }
+  // The account ID used for data queries (own or switched)
+  getAccountId() {
+    return this.switchedAccountId || this.ownAccountId;
   }
 
-  // Save account and JWT to session storage
-  saveToSession() {
-    if (this.currentAccount) {
-      sessionStorage.setItem('releaf_account', JSON.stringify(this.currentAccount));
-    }
-    if (this.currentJWT) {
-      sessionStorage.setItem('releaf_jwt_token', this.currentJWT);
-    }
+  // The display name for the current account
+  getAccountName() {
+    return this.switchedAccountName || this.ownAccountName || '';
   }
 
-  // Fetch JWT token for the current account from the server
-  async fetchJWTToken() {
-    if (!this.currentAccount?.id) {
-      throw new Error('No account selected');
-    }
-
-    try {
-      const response = await fetch(`/api/accounts/${this.currentAccount.id}/jwt`);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch JWT token: ${response.statusText}`);
-      }
-      const data = await response.json();
-      this.currentJWT = data.token;
-      this.saveToSession();
-      return this.currentJWT;
-    } catch (error) {
-      console.error('Error fetching JWT token:', error);
-      throw error;
-    }
+  // The account object (for header display)
+  getAccount() {
+    return {
+      id: this.getAccountId(),
+      name: this.getAccountName(),
+    };
   }
 
-  // Set current account (fetches JWT token automatically)
-  async setAccount(account) {
-    this.currentAccount = account;
-    this.saveToSession();
+  getIsAdmin() {
+    return this.isAdmin;
+  }
 
-    // Fetch JWT token for the new account
-    try {
-      await this.fetchJWTToken();
-    } catch (error) {
-      console.error('Failed to fetch JWT token for account:', error);
-      // Continue even if JWT fetch fails - server endpoints still work with accountContext middleware
-    }
+  isAccountSelected() {
+    return !!this.getAccountId();
+  }
 
+  // Get the X-Switch-Account value (null if viewing own account)
+  getSwitchAccountId() {
+    return this.switchedAccountId;
+  }
+
+  // Called after login to set the own account (no API call needed)
+  setOwnAccount(id, name) {
+    this.ownAccountId = id;
+    this.ownAccountName = name;
+    this.switchedAccountId = null;
+    this.switchedAccountName = null;
+    sessionStorage.removeItem('switch_account_id');
+    sessionStorage.removeItem('switch_account_name');
+    document.dispatchEvent(new CustomEvent('account-changed', { detail: this.getAccount() }));
+  }
+
+  // Admin switches to another account (JWT stays the same!)
+  switchToAccount(account) {
+    if (!this.isAdmin) return;
+    this.switchedAccountId = account.id;
+    this.switchedAccountName = account.name;
+    sessionStorage.setItem('switch_account_id', account.id);
+    sessionStorage.setItem('switch_account_name', account.name);
     document.dispatchEvent(new CustomEvent('account-changed', { detail: account }));
   }
 
-  // Get current account
-  getAccount() {
-    return this.currentAccount;
+  // Admin switches back to own account
+  switchToOwnAccount() {
+    this.switchedAccountId = null;
+    this.switchedAccountName = null;
+    sessionStorage.removeItem('switch_account_id');
+    sessionStorage.removeItem('switch_account_name');
+    document.dispatchEvent(new CustomEvent('account-changed', { detail: this.getAccount() }));
   }
 
-  // Get account ID for API headers
-  getAccountId() {
-    return this.currentAccount?.id || null;
-  }
-
-  // Get JWT token for Supabase authentication
-  getJWTToken() {
-    return this.currentJWT || null;
-  }
-
-  // Fetch all available accounts
+  // Fetch all accounts (admin only — will 403 for non-admin)
   async fetchAccounts() {
     try {
       const response = await fetch('/api/accounts');
-      if (!response.ok) throw new Error('Failed to fetch accounts');
-      this.accounts = await response.json();
-      return this.accounts;
+      if (!response.ok) return [];
+      const data = await response.json();
+      return Array.isArray(data) ? data : (data.accounts || []);
     } catch (error) {
       console.error('Error fetching accounts:', error);
       return [];
     }
   }
 
-  // Check if account is selected
-  isAccountSelected() {
-    return !!this.currentAccount;
+  // Clear everything and redirect to login
+  static logout() {
+    sessionStorage.clear();
+    window.location.href = '/prospector-login';
+  }
+
+  // Get the Bearer token
+  static getToken() {
+    return sessionStorage.getItem('auth_token');
   }
 }
 
@@ -114,62 +113,22 @@ class AccountContext {
 const accountContext = new AccountContext();
 
 /**
- * API Client with automatic account header injection
+ * API Client — thin wrapper around fetch for JSON endpoints.
+ * Auth headers are injected by the global fetch wrapper in prospector.html.
  */
 class APIClient {
   static async fetch(url, options = {}) {
-    const accountId = accountContext.getAccountId();
-
-    if (!accountId) {
-      throw new Error('No account selected. Please select an account first.');
+    if (!accountContext.getAccountId()) {
+      throw new Error('No account selected.');
     }
-
-    const headers = {
-      'Content-Type': 'application/json',
-      'X-Account-Id': accountId,
-      ...(options.headers || {})
-    };
-
-    const fetchOptions = {
-      ...options,
-      headers
-    };
-
-    const response = await fetch(url, fetchOptions);
-
-    // If unauthorized (account mismatch), clear session
-    if (response.status === 400 || response.status === 404) {
-      const json = await response.json();
-      if (json.error && json.error.includes('account')) {
-        accountContext.currentAccount = null;
-        accountContext.saveToSession();
-      }
-    }
-
-    return response;
+    const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+    return fetch(url, { ...options, headers });
   }
 
-  static async get(url) {
-    return this.fetch(url, { method: 'GET' });
-  }
-
-  static async post(url, data) {
-    return this.fetch(url, {
-      method: 'POST',
-      body: JSON.stringify(data)
-    });
-  }
-
-  static async put(url, data) {
-    return this.fetch(url, {
-      method: 'PUT',
-      body: JSON.stringify(data)
-    });
-  }
-
-  static async delete(url) {
-    return this.fetch(url, { method: 'DELETE' });
-  }
+  static get(url) { return this.fetch(url, { method: 'GET' }); }
+  static post(url, data) { return this.fetch(url, { method: 'POST', body: JSON.stringify(data) }); }
+  static put(url, data) { return this.fetch(url, { method: 'PUT', body: JSON.stringify(data) }); }
+  static delete(url) { return this.fetch(url, { method: 'DELETE' }); }
 }
 
 // Export for global use

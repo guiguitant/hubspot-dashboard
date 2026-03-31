@@ -41,9 +41,9 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'pilot.html'));
 });
 
-// Route: /prospector-app — Serve React Prospector app (with Magic Link auth)
+// Route: /prospector-app — Redirect to /prospector (legacy compatibility)
 app.get('/prospector-app', (req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+  res.redirect('/prospector');
 });
 
 // Static files (after explicit routes)
@@ -3322,22 +3322,23 @@ const accountContext = async (req, res, next) => {
         try {
           const decoded = jwt.verify(token, process.env.SUPABASE_JWT_SECRET);
           // Trouver le compte par ID (custom JWT a la revendication account_id)
-          const { data: account, error: acctError } = await supabaseAdmin
+          const { data: userAccount, error: acctError } = await supabaseAdmin
             .from('accounts')
             .select('id, name, slug, email, is_admin')
             .eq('id', decoded.account_id)
             .single();
 
-          if (acctError || !account) {
+          if (acctError || !userAccount) {
             return res.status(401).json({ error: 'Token invalide ou compte non trouvé' });
           }
 
-          req.accountId = account.id;
-          req.account = account;
+          req.accountId = userAccount.id;
+          req.account = userAccount;
+          let targetAccountId = userAccount.id;
 
           // Mode admin switching
           const switchAccountId = req.headers['x-switch-account'];
-          if (account.is_admin && switchAccountId) {
+          if (userAccount.is_admin && switchAccountId) {
             const { data: targetAccount, error: switchError } = await supabaseAdmin
               .from('accounts')
               .select('id, name, slug, email, is_admin')
@@ -3345,10 +3346,14 @@ const accountContext = async (req, res, next) => {
               .single();
 
             if (!switchError && targetAccount) {
+              targetAccountId = targetAccount.id;
               req.accountId = targetAccount.id;
               req.account = targetAccount;
-              req.adminAccount = account;
+              req.adminAccount = userAccount;
             }
+          } else if (!userAccount.is_admin && switchAccountId) {
+            // Non-admin trying to switch accounts
+            return res.status(403).json({ error: 'Accès refusé: seuls les admins peuvent switcher de compte' });
           }
 
           return next();
@@ -3360,19 +3365,19 @@ const accountContext = async (req, res, next) => {
 
       // Si on a un token Supabase Auth valide, continuer
       if (user) {
-        const { data: authAccount, error: acctError } = await supabaseAdmin
+        const { data: userAccount, error: acctError } = await supabaseAdmin
           .from('accounts')
           .select('id, name, slug, email, is_admin')
           .eq('email', user.email)
           .single();
 
-        if (acctError || !authAccount) {
+        if (acctError || !userAccount) {
           return res.status(403).json({ error: 'Aucun compte Releaf associé à cet email' });
         }
 
-        // Mode admin: Nathan peut switcher vers un autre compte via X-Switch-Account
+        // Mode admin: peut switcher vers un autre compte via X-Switch-Account
         const switchAccountId = req.headers['x-switch-account'];
-        if (authAccount.is_admin && switchAccountId) {
+        if (userAccount.is_admin && switchAccountId) {
           const { data: targetAccount, error: switchError } = await supabaseAdmin
             .from('accounts')
             .select('id, name, slug, email, is_admin')
@@ -3385,12 +3390,15 @@ const accountContext = async (req, res, next) => {
 
           req.accountId = targetAccount.id;
           req.account = targetAccount;
-          req.adminAccount = authAccount;
+          req.adminAccount = userAccount;
           return next();
+        } else if (!userAccount.is_admin && switchAccountId) {
+          // Non-admin trying to switch accounts
+          return res.status(403).json({ error: 'Accès refusé: seuls les admins peuvent switcher de compte' });
         }
 
-        req.accountId = authAccount.id;
-        req.account = authAccount;
+        req.accountId = userAccount.id;
+        req.account = userAccount;
         return next();
       }
     } catch (err) {
@@ -3399,29 +3407,8 @@ const accountContext = async (req, res, next) => {
     }
   }
 
-  // Priorité 2: X-Account-Id (pour Dispatch — pas de session utilisateur)
-  const accountId = req.headers['x-account-id'] || req.query.account_id;
-  if (accountId) {
-    try {
-      const { data: account, error } = await supabaseAdmin
-        .from('accounts')
-        .select('id, name, slug, email, is_admin')
-        .eq('id', accountId)
-        .single();
-
-      if (error || !account) {
-        return res.status(404).json({ error: 'Compte non trouvé' });
-      }
-
-      req.accountId = accountId;
-      req.account = account;
-      return next();
-    } catch (err) {
-      return res.status(500).json({ error: 'Erreur validation compte' });
-    }
-  }
-
-  return res.status(401).json({ error: 'Non authentifié. Bearer token ou X-Account-Id requis' });
+  // No valid auth found — reject
+  return res.status(401).json({ error: 'Non authentifié. Bearer token requis.' });
 };
 
 // ============================================================
@@ -3478,8 +3465,9 @@ app.get('/api/accounts/me', accountContext, (req, res) => {
 // GET /api/accounts — List all accounts (admin only)
 // Used for the admin account switcher
 app.get('/api/accounts', accountContext, async (req, res) => {
-  // Check if user is admin
-  if (!req.account.is_admin) {
+  // Check if user is admin (req.adminAccount exists when admin has switched accounts)
+  const isAdmin = req.account?.is_admin || req.adminAccount?.is_admin;
+  if (!isAdmin) {
     return res.status(403).json({ error: 'Accès réservé à l\'admin' });
   }
 
@@ -3513,34 +3501,41 @@ app.get('/api/accounts/:slug', async (req, res) => {
 });
 
 // GET /api/accounts/:id/jwt — Generate a JWT token for RLS policies
-// Client-side Supabase calls use this token for account filtering
-app.get('/api/accounts/:id/jwt', async (req, res) => {
+// PROTECTED: requires valid auth. Only own account or admin can generate.
+app.get('/api/accounts/:id/jwt', accountContext, async (req, res) => {
   try {
-    const accountId = req.params.id;
-    if (!accountId) return res.status(400).json({ error: 'Account ID required' });
+    const targetAccountId = req.params.id;
+    if (!targetAccountId) return res.status(400).json({ error: 'Account ID required' });
 
-    // Verify account exists
-    const { data: account, error: accountErr } = await supabase
+    // Security: only allow JWT generation for own account, or if admin
+    const callerIsOwner = req.accountId === targetAccountId;
+    const callerIsAdmin = req.account?.is_admin || req.adminAccount?.is_admin;
+    if (!callerIsOwner && !callerIsAdmin) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
+
+    // Verify target account exists
+    const { data: account, error: accountErr } = await supabaseAdmin
       .from('accounts')
       .select('id, name')
-      .eq('id', accountId)
+      .eq('id', targetAccountId)
       .single();
 
     if (accountErr || !account) {
       return res.status(404).json({ error: 'Compte non trouvé' });
     }
 
-    // Generate JWT token with account_id claim
-    const token = generateSupabaseJWT(accountId);
+    // Generate JWT token with target account_id claim
+    const token = generateSupabaseJWT(targetAccountId);
     if (!token) {
-      return res.status(500).json({ error: 'Could not generate token - SUPABASE_JWT_SECRET not configured' });
+      return res.status(500).json({ error: 'Could not generate token' });
     }
 
     res.json({
       token,
-      account_id: accountId,
+      account_id: targetAccountId,
       account_name: account.name,
-      expires_in: 86400 // 24h in seconds
+      expires_in: 86400
     });
   } catch (err) {
     console.error('Erreur GET /api/accounts/:id/jwt:', err.message);
@@ -3578,6 +3573,12 @@ app.get('/api/task-locks', async (req, res) => {
 
 // Serve prospector.html with injected Supabase env vars (for Dispatch & Dispatch tasks)
 // GET /prospector — Serve Prospector vanilla JS dashboard (with PIN auth support)
+// Route: /prospector-login — Serve React login page
+app.get('/prospector-login', (req, res) => {
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+});
+
+// Route: /prospector — Serve dashboard
 app.get('/prospector', (req, res) => {
   let html = fs.readFileSync(path.join(__dirname, 'public', 'prospector.html'), 'utf8');
   // Inject Supabase credentials for vanilla JS
