@@ -2677,6 +2677,7 @@ const App = (() => {
     _updateCharCount, _generateStepMessage, _saveStepConfig, _insertPlaceholder,
     _toggleInvitationNote, _updateNoteCharCount,
     _selectReviewProspect, _filterReviewList,
+    enrollProspect,
     openAddPlaceholder, savePlaceholder, deletePlaceholder,
   };
 })();

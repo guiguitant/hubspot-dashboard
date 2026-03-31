@@ -36,47 +36,14 @@ const IS_PAT = HUBSPOT_API_KEY.startsWith('pat-');
 
 app.use(express.json());
 
-// Middleware: Root route — serve React app in production, instructions in dev
+// Route: / — Serve Releaf Pilot (main dashboard)
 app.get('/', (req, res) => {
-  // In production, serve the compiled React app from /dist
-  if (process.env.NODE_ENV === 'production' || fs.existsSync(path.join(__dirname, 'dist', 'index.html'))) {
-    return res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-  }
+  res.sendFile(path.join(__dirname, 'public', 'pilot.html'));
+});
 
-  // In development, show instructions
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <title>Releaf Prospector</title>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-      </head>
-      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);">
-        <div style="text-align: center; background: white; padding: 2.5rem; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); max-width: 450px;">
-          <h1 style="font-size: 2rem; margin: 0 0 0.5rem 0;">🌱 Releaf Prospector</h1>
-          <p style="color: #666; margin: 0 0 1.5rem 0;">Interface de connexion</p>
-
-          <div style="background: #e3f2fd; border: 1px solid #90caf9; border-radius: 6px; padding: 16px; margin: 20px 0; text-align: left; font-size: 14px;">
-            <p style="margin: 0 0 0.5rem 0;"><strong>📌 Pour développer avec la nouvelle interface:</strong></p>
-            <p style="margin: 0 0 8px 0;">Lancez Vite dans un nouveau terminal:</p>
-            <code style="display: block; background: #f5f5f5; padding: 10px; border-radius: 4px; overflow-x: auto; margin: 8px 0; font-family: monospace;">npm run frontend:dev</code>
-            <p style="margin: 8px 0 0 0;">Accédez à <strong>http://localhost:5173</strong></p>
-          </div>
-
-          <div style="background: #fff3e0; border: 1px solid #ffe0b2; border-radius: 6px; padding: 16px; margin: 20px 0; text-align: left; font-size: 14px;">
-            <p style="margin: 0 0 0.5rem 0;"><strong>📌 Routes disponibles:</strong></p>
-            <ul style="margin: 8px 0; padding-left: 20px; line-height: 1.8;">
-              <li><code>/prospector</code> - Interface Dispatch (X-Account-Id)</li>
-              <li><code>http://localhost:5173</code> - Interface Authentification (Magic Link)</li>
-            </ul>
-          </div>
-
-          <p style="color: #999; font-size: 12px; margin-top: 20px;">Nathan doit configurer Supabase — voir AUTH_SETUP.md</p>
-        </div>
-      </body>
-    </html>
-  `);
+// Route: /prospector-app — Serve React Prospector app (with Magic Link auth)
+app.get('/prospector-app', (req, res) => {
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
 // Static files (after explicit routes)
