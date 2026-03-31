@@ -22,7 +22,8 @@ export default function App() {
 
   const handleLoginSuccess = (data) => {
     setToken(data.token)
-    initAccount(data.token)
+    // Redirect to Prospector dashboard (vanilla JS)
+    window.location.href = '/prospector'
   }
 
   const initAccount = async (authToken) => {
