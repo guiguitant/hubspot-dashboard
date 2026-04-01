@@ -8,8 +8,8 @@ export const setApiFetchContext = (activeAccountId, isAdmin) => {
 }
 
 export const apiFetch = async (url, options = {}) => {
-  // Get token from sessionStorage (set by PIN login)
-  const token = sessionStorage.getItem('supabase.auth.token')
+  // Get token from localStorage (shared across tabs)
+  const token = localStorage.getItem('auth_token')
 
   if (!token) {
     throw new Error('No session available')

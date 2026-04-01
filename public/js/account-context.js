@@ -2,7 +2,7 @@
  * Account Context Manager
  * Single source of truth for authentication and account state.
  *
- * Keys in sessionStorage:
+ * Keys in localStorage:
  *   auth_token    — JWT Bearer token (never changes after login, even on admin switch)
  *   account_id    — logged-in user's account ID
  *   account_name  — logged-in user's account name
@@ -14,13 +14,13 @@
 class AccountContext {
   constructor() {
     // The "own" account (from login)
-    this.ownAccountId = sessionStorage.getItem('account_id') || null;
-    this.ownAccountName = sessionStorage.getItem('account_name') || null;
-    this.isAdmin = sessionStorage.getItem('is_admin') === 'true';
+    this.ownAccountId = localStorage.getItem('account_id') || null;
+    this.ownAccountName = localStorage.getItem('account_name') || null;
+    this.isAdmin = localStorage.getItem('is_admin') === 'true';
 
     // Admin switch state (null = viewing own account)
-    this.switchedAccountId = sessionStorage.getItem('switch_account_id') || null;
-    this.switchedAccountName = sessionStorage.getItem('switch_account_name') || null;
+    this.switchedAccountId = localStorage.getItem('switch_account_id') || null;
+    this.switchedAccountName = localStorage.getItem('switch_account_name') || null;
   }
 
   // The account ID used for data queries (own or switched)
@@ -60,8 +60,8 @@ class AccountContext {
     this.ownAccountName = name;
     this.switchedAccountId = null;
     this.switchedAccountName = null;
-    sessionStorage.removeItem('switch_account_id');
-    sessionStorage.removeItem('switch_account_name');
+    localStorage.removeItem('switch_account_id');
+    localStorage.removeItem('switch_account_name');
     document.dispatchEvent(new CustomEvent('account-changed', { detail: this.getAccount() }));
   }
 
@@ -70,8 +70,8 @@ class AccountContext {
     if (!this.isAdmin) return;
     this.switchedAccountId = account.id;
     this.switchedAccountName = account.name;
-    sessionStorage.setItem('switch_account_id', account.id);
-    sessionStorage.setItem('switch_account_name', account.name);
+    localStorage.setItem('switch_account_id', account.id);
+    localStorage.setItem('switch_account_name', account.name);
     document.dispatchEvent(new CustomEvent('account-changed', { detail: account }));
   }
 
@@ -79,8 +79,8 @@ class AccountContext {
   switchToOwnAccount() {
     this.switchedAccountId = null;
     this.switchedAccountName = null;
-    sessionStorage.removeItem('switch_account_id');
-    sessionStorage.removeItem('switch_account_name');
+    localStorage.removeItem('switch_account_id');
+    localStorage.removeItem('switch_account_name');
     document.dispatchEvent(new CustomEvent('account-changed', { detail: this.getAccount() }));
   }
 
@@ -97,15 +97,32 @@ class AccountContext {
     }
   }
 
+  // Check if JWT token is expired (decode payload without verification)
+  static isTokenExpired() {
+    const token = localStorage.getItem('auth_token');
+    if (!token) return true;
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      return payload.exp * 1000 < Date.now();
+    } catch (e) {
+      return true;
+    }
+  }
+
   // Clear everything and redirect to login
   static logout() {
-    sessionStorage.clear();
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('account_id');
+    localStorage.removeItem('account_name');
+    localStorage.removeItem('is_admin');
+    localStorage.removeItem('switch_account_id');
+    localStorage.removeItem('switch_account_name');
     window.location.href = '/prospector-login';
   }
 
   // Get the Bearer token
   static getToken() {
-    return sessionStorage.getItem('auth_token');
+    return localStorage.getItem('auth_token');
   }
 }
 

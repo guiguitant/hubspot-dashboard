@@ -10,8 +10,8 @@ export default function App() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Vérifier si un token existe en sessionStorage
-    const storedToken = sessionStorage.getItem('supabase.auth.token')
+    // Vérifier si un token existe en localStorage
+    const storedToken = localStorage.getItem('auth_token')
     if (storedToken) {
       setToken(storedToken)
       initAccount(storedToken)
@@ -50,8 +50,8 @@ export default function App() {
           setAllAccounts(accounts)
         }
 
-        // Restaurer le compte actif depuis sessionStorage
-        const savedAccountId = sessionStorage.getItem('activeAccountId')
+        // Restaurer le compte actif depuis localStorage
+        const savedAccountId = localStorage.getItem('activeAccountId')
         if (savedAccountId) {
           const resSwitched = await fetch('/api/accounts/me', {
             headers: {
@@ -83,7 +83,7 @@ export default function App() {
   const handleSwitchAccount = async (targetAccountId) => {
     if (!authAccount?.is_admin) return
 
-    sessionStorage.setItem('activeAccountId', targetAccountId)
+    localStorage.setItem('activeAccountId', targetAccountId)
 
     try {
       const res = await fetch('/api/accounts/me', {
@@ -103,11 +103,11 @@ export default function App() {
   }
 
   const handleLogout = () => {
-    sessionStorage.removeItem('activeAccountId')
-    sessionStorage.removeItem('supabase.auth.token')
-    sessionStorage.removeItem('account_id')
-    sessionStorage.removeItem('account_name')
-    sessionStorage.removeItem('is_admin')
+    localStorage.removeItem('activeAccountId')
+    localStorage.removeItem('auth_token')
+    localStorage.removeItem('account_id')
+    localStorage.removeItem('account_name')
+    localStorage.removeItem('is_admin')
     setToken(null)
     setAuthAccount(null)
     setActiveAccount(null)

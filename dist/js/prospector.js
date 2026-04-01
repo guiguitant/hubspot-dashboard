@@ -561,7 +561,7 @@ const App = (() => {
     document.getElementById('undoToast')?.remove();
     if (_lastBulkOp?.timer) clearInterval(_lastBulkOp.timer);
 
-    let secondsLeft = 60;
+    let secondsLeft = 7;
     const toast = document.createElement('div');
     toast.id = 'undoToast';
     toast.className = 'undo-toast';
@@ -1558,15 +1558,16 @@ const App = (() => {
     const newStatus = archive ? 'Archivée' : 'À lancer';
     try {
       const resp = await APIClient.put(`/api/prospector/campaigns/${id}`, { status: newStatus });
-      if (!resp.ok) throw new Error('Failed');
-      UI.toast(archive ? 'Campagne archivée' : 'Campagne désarchivée');
-      if (archive) {
-        location.hash = '#campagnes';
-      } else {
-        renderCampaignDetail(document.getElementById('app'), id);
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        console.error('Archive failed:', resp.status, err);
+        throw new Error(err.error || 'Failed');
       }
+      UI.toast(archive ? 'Campagne archivée' : 'Campagne désarchivée');
+      location.hash = '#campagnes';
     } catch (err) {
-      UI.toast('Erreur lors de l\'archivage', 'error');
+      console.error('archiveCampaign error:', err);
+      UI.toast('Erreur lors de l\'archivage: ' + err.message, 'error');
     }
   }
 

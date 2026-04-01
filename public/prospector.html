@@ -11,10 +11,21 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/prospector.css">
   <script>
-    // Auth guard: redirect to login if no token
-    if (!sessionStorage.getItem('auth_token')) {
-      window.location.href = '/prospector-login';
-    }
+    // Auth guard: redirect to login if no token or expired token
+    (function() {
+      const token = localStorage.getItem('auth_token');
+      if (!token) { window.location.href = '/prospector-login'; return; }
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        if (payload.exp * 1000 < Date.now()) {
+          // Token expired — clean up and redirect
+          ['auth_token','account_id','account_name','is_admin','switch_account_id','switch_account_name'].forEach(k => localStorage.removeItem(k));
+          window.location.href = '/prospector-login';
+        }
+      } catch (e) {
+        window.location.href = '/prospector-login';
+      }
+    })();
   </script>
 </head>
 <body>
@@ -365,7 +376,7 @@ document.addEventListener('account-changed', (e) => {
 
 // Initialization
 document.addEventListener('DOMContentLoaded', () => {
-  // Account info comes from sessionStorage (set by LoginPage.jsx after PIN login)
+  // Account info comes from localStorage (set by LoginPage.jsx after PIN login)
   // accountContext constructor already reads account_id, account_name, is_admin
   if (!accountContext.isAccountSelected()) {
     // No account info → redirect to login

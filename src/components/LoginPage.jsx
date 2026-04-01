@@ -24,11 +24,11 @@ export default function LoginPage({ onLoginSuccess }) {
       }
 
       const data = await res.json()
-      // Store token and account info in sessionStorage (unified keys)
-      sessionStorage.setItem('auth_token', data.token)
-      sessionStorage.setItem('account_id', data.account_id)
-      sessionStorage.setItem('account_name', data.account_name)
-      sessionStorage.setItem('is_admin', data.is_admin)
+      // Store token and account info in localStorage (shared across tabs)
+      localStorage.setItem('auth_token', data.token)
+      localStorage.setItem('account_id', data.account_id)
+      localStorage.setItem('account_name', data.account_name)
+      localStorage.setItem('is_admin', data.is_admin)
 
       // Call callback to update app state
       if (onLoginSuccess) {
