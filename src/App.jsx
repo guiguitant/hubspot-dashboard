@@ -21,8 +21,8 @@ export default function App() {
   }, [])
 
   const handleLoginSuccess = (data) => {
-    setToken(data.token)
-    // Redirect to Prospector dashboard (vanilla JS) with account_id
+    // Redirect immediately — don't setToken (causes flash of "Compte non autorisé")
+    // Token is already in localStorage via LoginPage.jsx
     window.location.href = `/prospector?account_id=${data.account_id}`
   }
 
