@@ -794,14 +794,8 @@ const App = (() => {
         if (hasVersions) {
           return `<div class="message-card">
             <div class="message-card-title" style="justify-content:space-between">
-              <span>✉️ Message LinkedIn à valider — choisissez une version</span>
-              <button class="btn btn-sm btn-outline" id="btnRegenToggle" onclick="App.toggleRegenForm()">Régénérer</button>
-            </div>
-            <div id="regenForm" style="display:none;margin-bottom:16px">
-              <div style="display:flex;gap:8px;align-items:flex-end">
-                <input id="regenInstructions" class="tags-input" style="flex:1" placeholder="Instructions (optionnel) — ex: Ton plus direct, axé sur le DPE">
-                <button class="btn btn-sm btn-primary" id="btnRegenConfirm" onclick="App.regenerateMessages('${id}')">Confirmer</button>
-              </div>
+              <span>✉️ Message LinkedIn à valider</span>
+              <button class="btn btn-sm btn-outline" id="btnRegenConfirm" onclick="App.regenerateMessages('${id}')">Regénérer l'icebreaker</button>
             </div>
             <div class="message-versions" id="messageVersionsContainer">
               ${versions.map((v, i) => `
@@ -905,38 +899,33 @@ const App = (() => {
 
   async function regenerateMessages(id) {
     const btn = document.getElementById('btnRegenConfirm');
-    const instructions = document.getElementById('regenInstructions')?.value || '';
-    if (btn) { btn.disabled = true; btn.textContent = 'Génération en cours...'; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Regénération...'; }
 
     try {
-      const resp = await APIClient.post('/api/prospector/regenerate-messages', { id, instructions: instructions || undefined });
+      const resp = await APIClient.post('/api/prospector/regenerate-icebreaker', { id });
       const result = await resp.json();
       if (!resp.ok) { UI.toast(result.error || 'Erreur', 'error'); return; }
 
-      // Update versions in place
-      const container = document.getElementById('messageVersionsContainer');
-      if (container && result.message_versions) {
-        container.innerHTML = result.message_versions.map((v, i) => `
-          <div class="message-version" id="msgVersion${i}">
-            <div class="message-version-header">
-              <strong>${UI.esc(v.label || 'Version ' + (i+1))}</strong>
-              <button class="btn btn-sm btn-outline" onclick="App.selectMessageVersion('${id}', ${i})">Choisir</button>
-            </div>
-            <div class="message-version-content">${UI.esc(v.content || '')}</div>
-          </div>
-        `).join('');
-        // Reset selection
-        const wrap = document.getElementById('selectedMessageWrap');
-        if (wrap) wrap.style.display = 'none';
+      if (result.needs_scraping) {
+        UI.toast('Aucune donnée LinkedIn en cache. L\'icebreaker sera généré au prochain passage Dispatch.', 'error');
+        return;
       }
-      // Hide regen form
-      const form = document.getElementById('regenForm');
-      if (form) form.style.display = 'none';
-      UI.toast('Messages régénérés');
+
+      if (result.resolved_message) {
+        // Update the pending message textarea if visible
+        const textarea = document.getElementById('pendingMessage');
+        if (textarea) textarea.value = result.resolved_message;
+      }
+
+      const mode = result.is_relevant ? 'personnalisé' : 'générique';
+      UI.toast(`Icebreaker ${mode} regénéré`);
+
+      // Refresh the page to show updated data
+      renderProspectDetail(document.getElementById('app'), id);
     } catch (err) {
       UI.toast('Erreur: ' + err.message, 'error');
     } finally {
-      if (btn) { btn.disabled = false; btn.textContent = 'Confirmer'; }
+      if (btn) { btn.disabled = false; btn.textContent = 'Regénérer'; }
     }
   }
 
@@ -1061,6 +1050,22 @@ const App = (() => {
     } else {
       UI.toast(resp.reason === 'no_active_sequence' ? 'Aucune séquence active' : 'Déjà enrôlé', 'error');
       if (btn) { btn.disabled = false; btn.textContent = '▶ Démarrer la séquence'; }
+    }
+  }
+
+  async function enrollCampaign(campaignId) {
+    if (!confirm('Enrôler tous les prospects de cette campagne dans la séquence selon leur statut actuel ?')) return;
+    try {
+      const resp = await APIClient.post('/api/sequences/enroll-campaign', { campaign_id: campaignId });
+      const data = await resp.json();
+      if (!resp.ok) {
+        UI.toast(data.error || 'Erreur', 'error');
+        return;
+      }
+      const details = Object.entries(data.details || {}).map(([k, v]) => `${k}: ${v}`).join(', ');
+      UI.toast(`${data.enrolled} prospect(s) enrôlé(s)${details ? ' (' + details + ')' : ''}. ${data.skipped_already} déjà enrôlé(s), ${data.skipped_excluded} exclus.`);
+    } catch (err) {
+      UI.toast('Erreur: ' + err.message, 'error');
     }
   }
 
@@ -1726,7 +1731,10 @@ const App = (() => {
           <input class="seq-name-input" value="${UI.esc(sequence.name)}" onblur="App.updateSequenceName('${sequence.id}', this.value)">
           <span class="badge badge-type">v${sequence.version}</span>
         </div>
-        <button class="btn btn-outline btn-sm" onclick="App.createNewVersion('${campaignId}', ${sequence.version})">Nouvelle version</button>
+        <div class="flex gap-2">
+          <button class="btn btn-primary btn-sm" onclick="App.enrollCampaign('${campaignId}')">Enrôler la campagne</button>
+          <button class="btn btn-outline btn-sm" onclick="App.createNewVersion('${campaignId}', ${sequence.version})">Nouvelle version</button>
+        </div>
       </div>
       <div class="seq-split">
         <div class="seq-left" id="seqStepsList">
@@ -2703,7 +2711,7 @@ const App = (() => {
     _updateCharCount, _generateStepMessage, _saveStepConfig, _insertPlaceholder,
     _toggleInvitationNote, _updateNoteCharCount,
     _selectReviewProspect, _filterReviewList,
-    enrollProspect,
+    enrollProspect, enrollCampaign,
     openAddPlaceholder, savePlaceholder, deletePlaceholder,
   };
 })();

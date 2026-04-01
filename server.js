@@ -4427,89 +4427,40 @@ app.get('/api/prospector/status-history/:prospect_id', accountContext, async (re
   }
 });
 
-// POST /api/prospector/regenerate-messages — Regenerate message versions via Claude API
-app.post('/api/prospector/regenerate-messages', accountContext, async (req, res) => {
+// POST /api/prospector/regenerate-icebreaker — Regenerate icebreaker from cached LinkedIn posts via Claude API
+// Then re-resolve the sequence template message with the new icebreaker
+app.post('/api/prospector/regenerate-icebreaker', accountContext, async (req, res) => {
   try {
-    const { linkedin_url, id, instructions } = req.body;
-    let prospectId = id;
-    if (!prospectId && linkedin_url) {
-      const { data } = await supabaseAdmin.from('prospects').select('id').eq('linkedin_url', linkedin_url).limit(1);
-      if (!data?.length) return res.status(404).json({ error: 'Prospect not found' });
-      prospectId = data[0].id;
-    }
-    if (!prospectId) return res.status(400).json({ error: 'id or linkedin_url required' });
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'id required' });
 
-    // Verify prospect belongs to this account and get campaign_id
-    const { data: owns, error: checkErr } = await supabaseAdmin
+    // Verify prospect belongs to this account
+    const { data: pa, error: checkErr } = await supabaseAdmin
       .from('prospect_account')
       .select('prospect_id, campaign_id')
-      .eq('prospect_id', prospectId)
+      .eq('prospect_id', id)
       .eq('account_id', req.accountId)
       .single();
 
-    if (checkErr || !owns) {
+    if (checkErr || !pa) {
       return res.status(403).json({ error: 'Prospect not found in your account' });
     }
 
-    // Fetch prospect
-    const { data: prospect } = await supabaseAdmin.from('prospects')
+    // Fetch cached LinkedIn activity
+    const { data: activity } = await supabaseAdmin.from('prospect_activity')
       .select('*')
-      .eq('id', prospectId).single();
-    if (!prospect) return res.status(404).json({ error: 'Prospect not found' });
+      .eq('prospect_id', id)
+      .single();
 
-    // Fetch campaign if available
-    const { data: campData } = owns?.campaign_id
-      ? await supabaseAdmin.from('campaigns')
-          .select('name, sector, geography, criteria, objectives')
-          .eq('id', owns.campaign_id).single()
-      : { data: null };
-    const camp = campData || {};
-    const criteria = camp.criteria || {};
-    const objectives = (camp.objectives || []).join(', ') || 'non définis';
-    const jobTitles = (criteria.job_titles || []).join(', ') || 'non définis';
+    if (!activity || !activity.raw_posts || activity.raw_posts.length === 0) {
+      return res.json({ success: false, needs_scraping: true, message: 'Aucune donnée LinkedIn en cache. Prochain passage Dispatch nécessaire.' });
+    }
 
-    const systemPrompt = `Tu rédiges deux messages LinkedIn de prospection courts pour Nathan.
-
-Prospect : ${prospect.first_name} ${prospect.last_name}, ${prospect.job_title || 'poste inconnu'} chez ${prospect.company || 'entreprise inconnue'}
-Campagne : secteur ${camp.sector || criteria.sector || 'non défini'}, zone ${camp.geography || criteria.geography || 'non définie'}, postes ciblés ${jobTitles}
-Objectifs de la campagne : ${objectives}
-${instructions ? `Instructions supplémentaires : ${instructions}` : ''}
-
-Règles absolues :
-- Vouvoiement (vous, votre) — jamais de tutoiement
-- ZÉRO ligne vide entre les lignes — le message est un bloc continu
-- La phrase après "Bonjour ${prospect.first_name}," commence par une minuscule
-- Pas de pitch commercial — ne pas mentionner Releaf Carbon ni ses services
-- Ton direct, humain, sans jargon
-- CTA = question ouverte, 5 à 8 mots maximum
-
-VERSION A — Angle "problème" — EXACTEMENT 3 lignes :
-Ligne 1 : "Bonjour ${prospect.first_name},"
-Ligne 2 : observation courte sur une tension ou un enjeu lié à leur rôle / secteur / objectifs
-Ligne 3 : CTA court (5-8 mots) — question ouverte sur leur vécu
-
-Exemple de Version A :
-"Bonjour Claire,
-les directions RSE de votre secteur jonglent souvent entre reporting réglementaire et démarches de fond — deux vitesses difficiles à réconcilier.
-Comment vous organisez-vous face à ça ?"
-
-VERSION B — Angle "opportunité" — EXACTEMENT 4 lignes :
-Ligne 1 : "Bonjour ${prospect.first_name},"
-Ligne 2 : observation sur leur secteur ou leur profil
-Ligne 3 : phrase de contexte ou tension sous-jacente
-Ligne 4 : CTA court (5-8 mots) — question stratégique invitant à prendre du recul
-
-Exemple de Version B :
-"Bonjour Marc,
-votre secteur est en train de basculer vers une exigence carbone plus structurée, au-delà du simple bilan annuel.
-Certaines entreprises avancent déjà sur des trajectoires sectorielles, d'autres attendent d'y être contraintes.
-Où en est votre réflexion sur ce sujet ?"
-
-Retourne uniquement un JSON valide (pas de markdown, pas d'explication) :
-{"version_a": "...", "version_b": "..."}`;
-
+    // Generate new icebreaker via Claude API
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY non configurée' });
+
+    const postsText = activity.raw_posts.map(p => `- "${p.text}" (${p.date || 'date inconnue'})`).join('\n');
 
     const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -4520,8 +4471,8 @@ Retourne uniquement un JSON valide (pas de markdown, pas d'explication) :
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 1024,
-        messages: [{ role: 'user', content: systemPrompt }],
+        max_tokens: 200,
+        messages: [{ role: 'user', content: `Voici les derniers posts LinkedIn d'un prospect :\n${postsText}\n\nCes posts ont-ils un lien avec le développement durable et la transition écologique ?\nThèmes pertinents : bilan carbone, ACV, CSRD, RSE, loi climat, résilience, environnement.\n\nSi pertinent : génère une phrase d'accroche de 10-15 mots basée sur le post le plus pertinent, commençant par une minuscule, sans "j'ai vu que".\nSi aucun lien : réponds exactement "NOT_RELEVANT".\n\nRéponds UNIQUEMENT la phrase d'accroche ou "NOT_RELEVANT".` }],
       }),
     });
 
@@ -4532,27 +4483,78 @@ Retourne uniquement un JSON valide (pas de markdown, pas d'explication) :
     }
 
     const claudeData = await claudeResp.json();
-    const text = claudeData.content?.[0]?.text || '';
+    const icebreakerText = (claudeData.content?.[0]?.text || '').trim();
+    const isRelevant = icebreakerText !== 'NOT_RELEVANT' && icebreakerText.length > 5;
 
-    // Extract JSON from response
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return res.status(502).json({ error: 'Claude did not return valid JSON', raw: text });
+    // Update prospect_activity with new icebreaker
+    await supabaseAdmin.from('prospect_activity').upsert({
+      prospect_id: id,
+      raw_posts: activity.raw_posts,
+      icebreaker_generated: isRelevant ? icebreakerText : null,
+      icebreaker_mode: isRelevant ? 'personalized' : 'generic',
+      is_relevant: isRelevant,
+      scraped_at: activity.scraped_at // Keep original scrape date
+    }, { onConflict: 'prospect_id' });
 
-    const parsed = JSON.parse(jsonMatch[0]);
-    const messageVersions = [
-      { label: 'Angle problème', content: parsed.version_a || '' },
-      { label: 'Angle opportunité', content: parsed.version_b || '' },
-    ];
+    // Now re-resolve the sequence message template with the new icebreaker
+    let resolvedMessage = null;
+    if (pa.campaign_id) {
+      // Get active sequence and its current step for this prospect
+      const { data: seqState } = await supabaseAdmin.from('prospect_sequence_state')
+        .select('sequence_id, current_step_order')
+        .eq('prospect_id', id)
+        .eq('account_id', req.accountId)
+        .eq('status', 'active')
+        .single();
 
-    // Save to prospect
-    await supabaseAdmin.from('prospects').update({
-      message_versions: messageVersions,
-      updated_at: new Date().toISOString(),
-    }).eq('id', prospectId);
+      if (seqState) {
+        const { data: step } = await supabaseAdmin.from('sequence_steps')
+          .select('message_content')
+          .eq('sequence_id', seqState.sequence_id)
+          .eq('step_order', seqState.current_step_order)
+          .single();
 
-    res.json({ success: true, message_versions: messageVersions });
+        if (step?.message_content) {
+          // Fetch prospect + campaign + account for placeholder resolution
+          const [prospResp, campResp, acctResp] = await Promise.all([
+            supabaseAdmin.from('prospects').select('first_name, last_name, company, job_title').eq('id', id).single(),
+            supabaseAdmin.from('campaigns').select('name').eq('id', pa.campaign_id).single(),
+            supabaseAdmin.from('accounts').select('name').eq('id', req.accountId).single(),
+          ]);
+
+          const p = prospResp.data || {};
+          const replacements = {
+            '{{prospect_first_name}}': p.first_name || '',
+            '{{prospect_last_name}}': p.last_name || '',
+            '{{prospect_company}}': p.company || '',
+            '{{prospect_job_title}}': p.job_title || '',
+            '{{user_first_name}}': acctResp.data?.name || '',
+            '{{campaign_name}}': campResp.data?.name || '',
+            '{{icebreaker}}': isRelevant ? icebreakerText : '(icebreaker générique)',
+          };
+
+          resolvedMessage = Object.entries(replacements).reduce(
+            (msg, [key, val]) => msg.replaceAll(key, val), step.message_content
+          );
+
+          // Update pending_message on prospect
+          await supabaseAdmin.from('prospects').update({
+            pending_message: resolvedMessage,
+            updated_at: new Date().toISOString(),
+          }).eq('id', id);
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      icebreaker: isRelevant ? icebreakerText : null,
+      icebreaker_mode: isRelevant ? 'personalized' : 'generic',
+      is_relevant: isRelevant,
+      resolved_message: resolvedMessage,
+    });
   } catch (err) {
-    console.error('Erreur /api/prospector/regenerate-messages:', err.message);
+    console.error('Erreur /api/prospector/regenerate-icebreaker:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -5111,7 +5113,7 @@ app.post('/api/task-locks/release', accountContext, async (req, res) => {
 // POST /api/sequences/enroll — Enroll prospect in active campaign sequence
 app.post('/api/sequences/enroll', accountContext, async (req, res) => {
   try {
-    const { prospect_id, campaign_id } = req.body;
+    const { prospect_id, campaign_id, start_step_order } = req.body;
     if (!prospect_id || !campaign_id) {
       return res.status(400).json({ error: 'prospect_id and campaign_id required' });
     }
@@ -5139,36 +5141,179 @@ app.post('/api/sequences/enroll', accountContext, async (req, res) => {
       return res.json({ enrolled: false, reason: 'already_enrolled' });
     }
 
-    // 3. Insert into prospect_sequence_state
+    // 3. Determine start step
+    const stepOrder = start_step_order || 1;
+
+    // 4. Get the target step to calculate next_action_at
+    const { data: targetStep } = await supabaseAdmin.from('sequence_steps')
+      .select('type, delay_days')
+      .eq('sequence_id', sequence.id)
+      .eq('step_order', stepOrder)
+      .single();
+
+    // Calculate next_action_at with delay if joining mid-sequence
+    const jitter = 0.83 + Math.random() * 0.34;
+    const delayMs = targetStep && stepOrder > 1
+      ? targetStep.delay_days * jitter * 24 * 60 * 60 * 1000
+      : 0;
+    const nextActionAt = new Date(Date.now() + delayMs);
+
+    // 5. Insert into prospect_sequence_state
     const { data: state, error: insertError } = await supabaseAdmin.from('prospect_sequence_state')
       .insert({
         prospect_id,
         sequence_id: sequence.id,
         account_id: req.accountId,
-        current_step_order: 1,
+        current_step_order: stepOrder,
         status: 'active',
-        next_action_at: new Date(),
+        next_action_at: nextActionAt,
         enrolled_at: new Date()
       })
       .select();
 
     if (insertError) throw insertError;
 
-    // 4. Get first step details
-    const { data: firstStep } = await supabaseAdmin.from('sequence_steps')
-      .select('type, delay_days')
-      .eq('sequence_id', sequence.id)
-      .eq('step_order', 1)
-      .single();
-
     res.json({
       enrolled: true,
       sequence_id: sequence.id,
       state_id: state[0].id,
-      first_step: firstStep
+      start_step: targetStep,
+      start_step_order: stepOrder,
+      next_action_at: nextActionAt
     });
   } catch (err) {
     console.error('Erreur POST /api/sequences/enroll:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/sequences/enroll-campaign — Bulk enroll all prospects of a campaign based on their status
+app.post('/api/sequences/enroll-campaign', accountContext, async (req, res) => {
+  try {
+    const { campaign_id } = req.body;
+    if (!campaign_id) return res.status(400).json({ error: 'campaign_id required' });
+
+    // 1. Get active sequence + its steps
+    const { data: sequence } = await supabaseAdmin.from('sequences')
+      .select('id, sequence_steps(step_order, type)')
+      .eq('campaign_id', campaign_id)
+      .eq('account_id', req.accountId)
+      .eq('is_active', true)
+      .single();
+
+    if (!sequence) {
+      return res.status(400).json({ error: 'Aucune séquence active pour cette campagne' });
+    }
+
+    const steps = (sequence.sequence_steps || []).sort((a, b) => a.step_order - b.step_order);
+    if (steps.length === 0) {
+      return res.status(400).json({ error: 'La séquence n\'a aucune étape' });
+    }
+
+    // Find key step positions
+    const firstInvitationStep = steps.find(s => s.type === 'send_invitation');
+    const firstMessageStep = steps.find(s => s.type === 'send_message');
+    const secondMessageStep = steps.filter(s => s.type === 'send_message')[1];
+
+    // 2. Get all prospects of this campaign
+    const { data: prospects } = await supabaseAdmin.from('prospect_account')
+      .select('prospect_id, status')
+      .eq('campaign_id', campaign_id)
+      .eq('account_id', req.accountId);
+
+    // 3. Get already enrolled prospects
+    const { data: enrolled } = await supabaseAdmin.from('prospect_sequence_state')
+      .select('prospect_id')
+      .eq('sequence_id', sequence.id);
+    const enrolledSet = new Set((enrolled || []).map(e => e.prospect_id));
+
+    // 4. Map status to step order
+    //    Nouveau → step 1 (invitation)
+    //    Invitation envoyée → step after invitation (waiting)
+    //    Invitation acceptée / Message à valider / Message à envoyer → first message step
+    //    Message envoyé / Discussion en cours → step after first message (follow-up)
+    //    Excluded: Profil à valider, Gagné, Perdu, Non pertinent, Profil restreint
+    const EXCLUDED = ['Profil à valider', 'Gagné', 'Perdu', 'Non pertinent', 'Profil restreint'];
+
+    const results = { enrolled: 0, skipped_excluded: 0, skipped_already: 0, skipped_no_step: 0, details: {} };
+
+    for (const pa of (prospects || [])) {
+      // Skip excluded statuses
+      if (EXCLUDED.includes(pa.status)) {
+        results.skipped_excluded++;
+        continue;
+      }
+      // Skip already enrolled
+      if (enrolledSet.has(pa.prospect_id)) {
+        results.skipped_already++;
+        continue;
+      }
+
+      // Determine target step based on status
+      let targetStepOrder = null;
+
+      switch (pa.status) {
+        case 'Nouveau':
+          targetStepOrder = firstInvitationStep?.step_order || steps[0].step_order;
+          break;
+        case 'Invitation envoyée':
+          // Place after invitation step (waiting for acceptance)
+          targetStepOrder = firstInvitationStep
+            ? (firstMessageStep?.step_order || firstInvitationStep.step_order)
+            : steps[0].step_order;
+          break;
+        case 'Invitation acceptée':
+        case 'Message à valider':
+        case 'Message à envoyer':
+          targetStepOrder = firstMessageStep?.step_order || steps[0].step_order;
+          break;
+        case 'Message envoyé':
+        case 'Discussion en cours':
+          targetStepOrder = secondMessageStep?.step_order || null;
+          break;
+        default:
+          targetStepOrder = null;
+      }
+
+      if (!targetStepOrder) {
+        results.skipped_no_step++;
+        continue;
+      }
+
+      // Calculate next_action_at
+      const { data: stepData } = await supabaseAdmin.from('sequence_steps')
+        .select('delay_days')
+        .eq('sequence_id', sequence.id)
+        .eq('step_order', targetStepOrder)
+        .single();
+
+      const jitter = 0.83 + Math.random() * 0.34;
+      const delayMs = targetStepOrder > 1 && stepData
+        ? stepData.delay_days * jitter * 24 * 60 * 60 * 1000
+        : 0;
+      const nextActionAt = new Date(Date.now() + delayMs);
+
+      const { error: insertErr } = await supabaseAdmin.from('prospect_sequence_state')
+        .insert({
+          prospect_id: pa.prospect_id,
+          sequence_id: sequence.id,
+          account_id: req.accountId,
+          current_step_order: targetStepOrder,
+          status: 'active',
+          next_action_at: nextActionAt,
+          enrolled_at: new Date()
+        });
+
+      if (!insertErr) {
+        results.enrolled++;
+        const key = `step_${targetStepOrder}`;
+        results.details[key] = (results.details[key] || 0) + 1;
+      }
+    }
+
+    res.json(results);
+  } catch (err) {
+    console.error('Erreur POST /api/sequences/enroll-campaign:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -5296,7 +5441,7 @@ app.get('/api/prospects/:id/linkedin-activity', accountContext, async (req, res)
 
     if (activity) {
       const age = Date.now() - new Date(activity.scraped_at).getTime();
-      if (age < 48 * 3600 * 1000) {
+      if (age < 120 * 3600 * 1000) { // 5 days (≈ 3 business days)
         // Cache is fresh
         return res.json(activity);
       }
