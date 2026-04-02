@@ -141,15 +141,24 @@ Avant de traiter les campagnes, charger en mémoire :
 ```javascript
 // Naviguer vers https://www.linkedin.com/mynetwork/invite-connect/connections/
 // Extraire la liste des connexions récentes (noms + URLs de profil)
-window._linkedinConnections = [...]; // stocker en mémoire
+window._linkedinConnections = [
+  { name: 'Jean Dupont', profileUrl: 'https://www.linkedin.com/in/jean-dupont/' },
+  // ...
+];
 ```
 
 **B) Boîte de réception**
 ```javascript
 // Naviguer vers https://www.linkedin.com/messaging/
-// Extraire les conversations récentes et leur état (lu/non lu, dernier message, auteur)
-window._linkedinMessages = [...]; // stocker en mémoire
+// Extraire les conversations récentes et leur état
+window._linkedinMessages = [
+  { name: 'Jean Dupont', profileUrl: 'https://www.linkedin.com/in/jean-dupont/', lastMessage: '...', isUnread: true, conversationUrl: 'https://www.linkedin.com/messaging/thread/...' },
+  // ...
+];
 ```
+
+**Matching** : Le croisement avec les prospects en base se fait par `profileUrl` ↔ `prospect.linkedin_url`.
+Normaliser les deux URLs avant comparaison (minuscules, retirer le trailing slash).
 
 Ces données sont réutilisées pour **toutes les campagnes** sans recharger ces pages.
 
@@ -166,6 +175,10 @@ const campaigns = await campsResp.json();
 const dueResp = await fetch('/api/sequences/due-actions', { headers });
 const dueData = await dueResp.json();
 const allDueActions = dueData.sequence_actions || [];
+
+// C) États séquences — UNE SEULE FOIS (map prospect_id → { id, status, current_step_order, ... })
+const seqStatesResp = await fetch('/api/sequences/states', { headers });
+const seqStatesMap = await seqStatesResp.json();
 ```
 
 Pour chaque campagne, dans l'ordre de priorité :
@@ -341,11 +354,7 @@ for (const action of followupActions) {
 ```javascript
 const pendingResp = await fetch(`/api/prospector/prospects?campaign_id=${campaign.id}&status=Message à envoyer`, { headers });
 const pendingMessages = await pendingResp.json();
-
-// Charger la map des états séquences pour récupérer le state_id
-// (GET /api/sequences/states retourne { prospect_id → { id, status, current_step_order, ... } })
-const seqStatesResp = await fetch('/api/sequences/states', { headers });
-const seqStatesMap = await seqStatesResp.json();
+// seqStatesMap déjà chargé à l'Étape 3C
 ```
 
 Pour chaque message (si `_stats.messages.remaining > 0`) :
