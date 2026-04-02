@@ -10,6 +10,20 @@ Workflow autonome pour l'exécution des séquences LinkedIn (Tâche 2).
 1. **`fetch()` uniquement** : Tous les appels API vers `localhost:3000` doivent utiliser `fetch()` dans le navigateur. Jamais `curl`, jamais `bash`.
 2. **LinkedIn classique uniquement** : Utiliser uniquement `linkedin.com`. Ne jamais utiliser Sales Navigator.
 3. **LinkedIn doit être connecté** : Si la page LinkedIn redirige vers `/login` ou `/checkpoint` → arrêt immédiat (voir Étape 6 — Session expirée).
+4. **Try/catch par prospect** : Chaque traitement individuel de prospect (Steps 4a, 4b, 4c, 5, 6) doit être enveloppé dans un `try/catch`. Si un prospect plante, loguer l'erreur dans `_errors[]` et continuer au prospect suivant. Ne jamais interrompre la boucle pour une erreur isolée.
+
+```javascript
+// Pattern à appliquer dans toutes les boucles prospect :
+const _errors = []; // déclaré dans les variables globales
+for (const prospect of prospects) {
+  try {
+    // ... traitement du prospect
+  } catch (err) {
+    _errors.push({ step: '4a', prospect_id: prospect.id, message: err.message });
+  }
+}
+// _errors sera passé à _postSummary({ errors: _errors }) en fin de run
+```
 
 ---
 
@@ -47,6 +61,7 @@ http://localhost:3000
 ```javascript
 const _startedAt = Date.now();
 let _stats = null; // alimenté à l'Étape 1, utilisé partout et dans _postSummary
+const _errors = []; // erreurs non-fatales, passé à _postSummary en fin de run
 
 const _summary = {
   invitations_sent: 0,
@@ -138,12 +153,19 @@ window._linkedinMessages = [...]; // stocker en mémoire
 
 Ces données sont réutilisées pour **toutes les campagnes** sans recharger ces pages.
 
-### Étape 3 — Traiter chaque campagne active
+### Étape 3 — Charger les campagnes et les actions dues
 
 ```javascript
+// A) Campagnes actives
 const campsResp = await fetch('/api/prospector/campaigns?active=true', { headers });
 const campaigns = await campsResp.json();
 // Trier par priorité croissante (1 = plus prioritaire)
+
+// B) Actions dues — UNE SEULE FOIS (retourne toutes les campagnes)
+// ⚠️ L'API retourne un objet { sequence_actions: [...], pending_messages: [...] }
+const dueResp = await fetch('/api/sequences/due-actions', { headers });
+const dueData = await dueResp.json();
+const allDueActions = dueData.sequence_actions || [];
 ```
 
 Pour chaque campagne, dans l'ordre de priorité :
@@ -166,17 +188,16 @@ for (const prospect of prospects) {
 }
 ```
 
-**C) Récupérer les actions dues :**
+**C) Filtrer les actions dues pour cette campagne :**
 ```javascript
-const dueResp = await fetch('/api/sequences/due-actions', { headers });
-const dueActions = await dueResp.json();
+const dueActions = allDueActions.filter(a => a.prospect_account.campaign_id === campaign.id);
 ```
 
 ### Étape 4a — send_invitation
 
 **Conditions :**
 - `action.step.type === "send_invitation"`
-- `stats.invitations.remaining > 0`
+- `_stats.invitations.remaining > 0`
 
 **Actions :**
 1. Naviguer vers `linkedin.com/in/{slug}/`
@@ -194,6 +215,8 @@ await fetch('/api/sequences/complete-step', {
   method: 'POST', headers,
   body: JSON.stringify({ state_id: action.state_id, completed_step_order: action.step.step_order })
 });
+_summary.invitations_sent++;
+_stats.invitations.remaining--;
 ```
 
 > Si LinkedIn répond HTTP **429** à n'importe quelle étape → arrêt immédiat (voir Étape 7 — Gestion 429).
@@ -236,7 +259,7 @@ invitedProspects = invitedProspects.filter(p => {
 
 Pour chaque match (prospect présent dans `window._linkedinConnections`) :
 
-1. **Mettre à jour le statut** → `"Invitation acceptée"`
+1. **Mettre à jour le statut** → `"Invitation acceptée"` + `_summary.invitations_accepted++`
 2. **Scraper l'icebreaker** : naviguer vers `linkedin.com/in/{slug}/recent-activity/shares/`
    - Récupérer 3-5 posts récents (texte + date)
    - Appeler Claude API pour évaluer la pertinence :
@@ -255,8 +278,8 @@ Pour chaque match (prospect présent dans `window._linkedinConnections`) :
      ```
 
 3. **Générer le message complet via Claude API** :
-   - Récupérer les `message_params` de l'étape séquence (angle, ton, objectif, max_chars, instructions)
-   - Appeler `POST /api/sequences/generate-message` avec : `campaign`, `message_params`, `prospect`, `icebreaker`
+   - Le champ `step.message_params` (JSONB) contient : `{ angle, tone, objective, context, max_chars, instructions }`
+   - Appeler `POST /api/sequences/generate-message` avec : `{ campaign, message_params: step.message_params, prospect, icebreaker }`
 
 4. **Soumettre à validation** :
    ```javascript
@@ -264,6 +287,7 @@ Pour chaque match (prospect présent dans `window._linkedinConnections`) :
      method: 'POST', headers,
      body: JSON.stringify({ prospect_id: prospect.id, status: 'Message à valider', pending_message: messageGenere })
    });
+   _summary.messages_submitted++;
    ```
 
 **NE PAS appeler `complete-step` ici.** On attend la validation de Nathan.
@@ -273,8 +297,11 @@ Pour chaque match (prospect présent dans `window._linkedinConnections`) :
 Les messages 2, 3... sont des actions `send_message` qui apparaissent dans `dueActions` quand le délai est passé et qu'il n'y a pas eu de réponse.
 
 ```javascript
+// Exclure les prospects déjà en attente (sinon duplication avec Step 4b)
+const SKIP_STATUSES = ['Invitation acceptée', 'Message à valider', 'Message à envoyer'];
 const followupActions = dueActions.filter(a =>
-  a.step.type === 'send_message' && a.campaign_id === campaign.id
+  a.step.type === 'send_message'
+  && !SKIP_STATUSES.includes(a.prospect_account.status)
 );
 
 for (const action of followupActions) {
@@ -365,6 +392,7 @@ await fetch('/api/prospector/update-status', {
     interaction: { type: 'Réponse reçue', content: '[contenu du message]' }
   })
 });
+_summary.replies_detected++;
 ```
 
 Le trigger PostgreSQL arrête automatiquement la séquence.
@@ -401,7 +429,7 @@ await fetch('/api/task-locks/release', {
   method: 'POST', headers,
   body: JSON.stringify({ lock_type: 'linkedin_task2' })
 });
-await _postSummary({ stopped_reason: null });
+await _postSummary({ stopped_reason: null, errors: _errors });
 ```
 
 **Fonction `_postSummary`** à appeler dans tous les cas de fin (normale ou erreur) :
@@ -482,7 +510,8 @@ Mapping automatique :
 | GET | `/api/sequences?campaign_id=...` | Séquence active d'une campagne |
 | POST | `/api/sequences/enroll` | Enrôler un prospect |
 | POST | `/api/sequences/enroll-campaign` | Enrôler toute une campagne |
-| GET | `/api/sequences/due-actions` | Actions prêtes à exécuter |
+| GET | `/api/sequences/due-actions` | Actions prêtes à exécuter (retourne `{ sequence_actions, pending_messages }`) |
+| GET | `/api/sequences/states` | Map `{ prospect_id → { id, status, current_step_order, sequence_id } }` |
 | POST | `/api/sequences/complete-step` | Avancer l'étape |
 | POST | `/api/sequences/stop` | Arrêter une séquence |
 | POST | `/api/prospects/:id/linkedin-activity` | Sauvegarder activité + icebreaker |
@@ -494,5 +523,5 @@ Mapping automatique :
 
 ---
 
-**Version :** Sprint 2 — Génération complète par Claude + résumé Dispatch
+**Version :** Sprint 2 V4 — Corrections review complète (duplication, compteurs, due-actions, try/catch)
 **Mise à jour :** 2026-04-02

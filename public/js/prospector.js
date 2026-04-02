@@ -1279,11 +1279,12 @@ const App = (() => {
 
     try {
       const resp = await fetch(url);
-      const logs = await resp.json();
+      const raw = await resp.json();
+      const logs = Array.isArray(raw) ? raw : [];
       const el = document.getElementById('logsList');
       if (!el) return;
 
-      if (logs.length === 0) {
+      if (!resp.ok || logs.length === 0) {
         el.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:30px;color:var(--color-text-muted)">Aucun log</td></tr>`;
         return;
       }
@@ -1788,7 +1789,7 @@ const App = (() => {
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${iconPath}</svg>
       </div>
       <div class="sfc-info">
-        <div class="sfc-count">${count}</div>
+        <div class="sfc-count">${count ?? 0}</div>
         <div class="sfc-label">${UI.esc(label)}</div>
       </div>
     </div>`;
