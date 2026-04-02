@@ -42,6 +42,23 @@ http://localhost:3000
 
 ---
 
+## Variables globales (déclarer en haut du script Task 2)
+
+```javascript
+const _startedAt = Date.now();
+let _stats = null; // alimenté à l'Étape 1, utilisé partout et dans _postSummary
+
+const _summary = {
+  invitations_sent: 0,
+  invitations_accepted: 0,
+  messages_submitted: 0,
+  messages_sent: 0,
+  replies_detected: 0,
+};
+```
+
+---
+
 ## Statuts des prospects
 
 | Statut | Description | Transition |
@@ -63,8 +80,6 @@ http://localhost:3000
 
 ## Workflow Dispatch (Tâche 2 — 4x/jour)
 
-**Note l'heure exacte de début** (`_startedAt = Date.now()`) — elle sera utilisée dans le résumé final.
-
 ### Étape 0 — Acquérir le lock
 
 ```javascript
@@ -76,14 +91,32 @@ const lock = await lockResp.json();
 
 Si `lock.acquired === false` → STOP.
 
+### Étape 0b — Vérifier le profil Chrome LinkedIn
+
+Naviguer vers `https://www.linkedin.com/feed` et vérifier que le compte connecté est bien Nathan.
+
+```javascript
+// Lire le nom du profil connecté dans le nav LinkedIn
+const profileName = document.querySelector(
+  '.profile-rail-card__actor-link, .feed-identity-module__actor-meta a, [aria-label*="profil"]'
+)?.innerText?.trim() || '';
+
+if (!profileName.toLowerCase().includes('nathan')) {
+  // Notification Windows (ballon) si possible
+  await fetch('/api/task-locks/release', { method: 'POST', headers, body: JSON.stringify({ lock_type: 'linkedin_task2' }) });
+  await _postSummary({ stopped_reason: 'wrong_profile', errors: [{ step: '0b', message: `Profil Chrome incorrect : "${profileName}"` }] });
+  return; // STOP
+}
+```
+
 ### Étape 1 — Vérifier les quotas
 
 ```javascript
 const statsResp = await fetch('/api/prospector/daily-stats', { headers });
-const stats = await statsResp.json();
+_stats = await statsResp.json(); // ← variable globale, réutilisée dans _postSummary
 ```
 
-Si `stats.invitations.remaining === 0` ET `stats.messages.remaining === 0` → relâcher lock et arrêter.
+Si `_stats.invitations.remaining === 0` ET `_stats.messages.remaining === 0` → relâcher lock et arrêter.
 
 ### Étape 2 — Initialisation session LinkedIn (UNE SEULE FOIS)
 
@@ -170,7 +203,35 @@ await fetch('/api/sequences/complete-step', {
 Croiser `window._linkedinConnections` avec les prospects en statut `"Invitation envoyée"` :
 ```javascript
 const invResp = await fetch(`/api/prospector/prospects?campaign_id=${campaign.id}&status=Invitation envoyée`, { headers });
-const invitedProspects = await invResp.json();
+let invitedProspects = await invResp.json();
+```
+
+**Timeout d'invitation (30 jours)** — avant de croiser les connexions, éliminer les invitations expirées :
+```javascript
+const INVITATION_TIMEOUT_DAYS = 30;
+for (const prospect of invitedProspects) {
+  const sentAt = prospect.status_changed_at || prospect.updated_at;
+  const ageDays = Math.floor((Date.now() - new Date(sentAt)) / 86400000);
+  if (ageDays > INVITATION_TIMEOUT_DAYS) {
+    await fetch('/api/prospector/update-status', {
+      method: 'POST', headers,
+      body: JSON.stringify({
+        prospect_id: prospect.id,
+        status: 'Non pertinent',
+        interaction: { type: 'Invitation expirée', content: `Invitation sans réponse après ${ageDays} jours` }
+      })
+    });
+    await fetch('/api/sequences/stop', {
+      method: 'POST', headers,
+      body: JSON.stringify({ prospect_id: prospect.id })
+    });
+  }
+}
+// Retirer les expirés de la liste
+invitedProspects = invitedProspects.filter(p => {
+  const sentAt = p.status_changed_at || p.updated_at;
+  return Math.floor((Date.now() - new Date(sentAt)) / 86400000) <= INVITATION_TIMEOUT_DAYS;
+});
 ```
 
 Pour chaque match (prospect présent dans `window._linkedinConnections`) :
@@ -207,14 +268,60 @@ Pour chaque match (prospect présent dans `window._linkedinConnections`) :
 
 **NE PAS appeler `complete-step` ici.** On attend la validation de Nathan.
 
+### Étape 4c — Générer les messages de follow-up (send_message depuis due-actions)
+
+Les messages 2, 3... sont des actions `send_message` qui apparaissent dans `dueActions` quand le délai est passé et qu'il n'y a pas eu de réponse.
+
+```javascript
+const followupActions = dueActions.filter(a =>
+  a.step.type === 'send_message' && a.campaign_id === campaign.id
+);
+
+for (const action of followupActions) {
+  // Récupérer les données du prospect
+  const prospResp = await fetch(`/api/prospector/prospects/${action.prospect_id}`, { headers });
+  const prospect = await prospResp.json();
+
+  // Récupérer l'icebreaker en cache (120h)
+  const actResp = await fetch(`/api/prospects/${action.prospect_id}/linkedin-activity`, { headers });
+  const activity = actResp.ok ? await actResp.json() : null;
+
+  // Générer le message complet via Claude API
+  const msgResp = await fetch('/api/sequences/generate-message', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      campaign,
+      message_params: action.step.message_params,
+      prospect,
+      icebreaker: activity?.icebreaker_generated
+    })
+  });
+  const { message: messageGenere } = await msgResp.json();
+
+  // Soumettre à validation Nathan
+  await fetch('/api/prospector/update-status', {
+    method: 'POST', headers,
+    body: JSON.stringify({ prospect_id: action.prospect_id, status: 'Message à valider', pending_message: messageGenere })
+  });
+  _summary.messages_submitted++;
+}
+```
+
+**NE PAS appeler `complete-step` ici.** On attend la validation de Nathan.
+
 ### Étape 5 — Envoyer les messages validés
 
 ```javascript
 const pendingResp = await fetch(`/api/prospector/prospects?campaign_id=${campaign.id}&status=Message à envoyer`, { headers });
 const pendingMessages = await pendingResp.json();
+
+// Charger la map des états séquences pour récupérer le state_id
+// (GET /api/sequences/states retourne { prospect_id → { id, status, current_step_order, ... } })
+const seqStatesResp = await fetch('/api/sequences/states', { headers });
+const seqStatesMap = await seqStatesResp.json();
 ```
 
-Pour chaque message (si `stats.messages.remaining > 0`) :
+Pour chaque message (si `_stats.messages.remaining > 0`) :
 1. Chercher la conversation dans `window._linkedinMessages`
 2. Naviguer vers `linkedin.com/messaging/` → ouvrir la conversation
 3. Coller `prospect.pending_message` et soumettre
@@ -224,10 +331,17 @@ await fetch('/api/prospector/message-sent', {
   method: 'POST', headers,
   body: JSON.stringify({ prospect_id: prospect.id, campaign_id: campaign.id })
 });
-await fetch('/api/sequences/complete-step', {
-  method: 'POST', headers,
-  body: JSON.stringify({ state_id: action.state_id, completed_step_order: action.step.step_order })
-});
+
+// Utiliser le state_id depuis la map (et non depuis dueActions)
+const seqState = seqStatesMap[prospect.id];
+if (seqState?.id) {
+  await fetch('/api/sequences/complete-step', {
+    method: 'POST', headers,
+    body: JSON.stringify({ state_id: seqState.id, completed_step_order: seqState.current_step_order })
+  });
+}
+_summary.messages_sent++;
+_stats.messages.remaining--;
 ```
 
 > Si LinkedIn répond HTTP **429** → arrêt immédiat (voir Étape 7 — Gestion 429).
@@ -313,17 +427,6 @@ async function _postSummary({ stopped_reason, errors = [] }) {
     })
   });
 }
-```
-
-Compteurs à incrémenter pendant l'exécution :
-```javascript
-const _summary = {
-  invitations_sent: 0,
-  invitations_accepted: 0,
-  messages_submitted: 0,
-  messages_sent: 0,
-  replies_detected: 0,
-};
 ```
 
 ---

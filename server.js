@@ -5635,7 +5635,7 @@ app.get('/api/sequences/states', accountContext, async (req, res) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('prospect_sequence_state')
-      .select('prospect_id, status, current_step_order, sequence_id')
+      .select('id, prospect_id, status, current_step_order, sequence_id')
       .eq('account_id', req.accountId);
 
     if (error) return res.status(500).json({ error: error.message });
