@@ -1236,12 +1236,13 @@ const App = (() => {
             <option value="">Tous les types</option>
             <option value="status_change">Changement de statut</option>
             <option value="sequence">Séquences</option>
+            <option value="dispatch">Dispatch (Tâche 2)</option>
           </select>
         </div>
       </div>
       <div class="card">
-        <div class="table-wrap">
-          <table><thead><tr><th>Date / Heure</th><th>Prospect</th><th>Action</th><th>Détail</th></tr></thead>
+        <div class="table-wrap" id="logsTableWrap">
+          <table id="logsTable"><thead id="logsTableHead"><tr><th>Date / Heure</th><th>Prospect</th><th>Action</th><th>Détail</th></tr></thead>
           <tbody id="logsList">${UI.loader()}</tbody></table>
         </div>
       </div>`;
@@ -1288,35 +1289,69 @@ const App = (() => {
       }
 
       const isSeq = type === 'sequence';
-      el.innerHTML = logs.map(log => {
-        const prospectName = log.prospect ? `${log.prospect.first_name} ${log.prospect.last_name}` : '—';
-        const prospectCompany = log.prospect?.company ? ` (${log.prospect.company})` : '';
+      const isDispatch = type === 'dispatch';
 
-        let actionText = '—';
-        if (isSeq) {
-          // For sequence logs: status → action label
-          const statusMap = {
-            'active': `Étape ${log.current_step_order} en cours`,
-            'completed': 'Séquence terminée',
-            'stopped_reply': 'Arrêtée — réponse reçue',
-            'paused': 'Mise en pause'
-          };
-          actionText = statusMap[log.status] || log.status;
+      // Adapter le header du tableau selon le type
+      const head = document.getElementById('logsTableHead');
+      if (head) {
+        if (isDispatch) {
+          head.innerHTML = `<tr><th>Date / Heure</th><th>Durée</th><th>Invitations</th><th>Messages</th><th>Réponses</th><th>Quotas restants</th><th>Statut</th></tr>`;
         } else {
-          // For status_change logs
-          actionText = log.new_status ? `Statut : ${log.old_status} → ${log.new_status}` : '—';
+          head.innerHTML = `<tr><th>Date / Heure</th><th>Prospect</th><th>Action</th><th>Détail</th></tr>`;
         }
+      }
 
-        const sourceText = log.source || '—';
-        const dateStr = UI.formatDate(log.created_at);
-
-        return `<tr>
-          <td class="text-sm">${dateStr}</td>
-          <td><strong>${UI.esc(prospectName)}</strong><div class="text-sm text-muted">${UI.esc(prospectCompany)}</div></td>
-          <td>${actionText}</td>
-          <td class="text-sm text-muted">${sourceText}</td>
-        </tr>`;
-      }).join('');
+      if (isDispatch) {
+        const STOP_LABELS = {
+          'rate_limited':    { label: 'Arrêt — rate limit (429)', cls: 'badge-perdu' },
+          'session_expired': { label: 'Arrêt — session expirée', cls: 'badge-a-valider' },
+          'quota_reached':   { label: 'Arrêt — quota atteint', cls: 'badge-non-pertinent' },
+        };
+        el.innerHTML = logs.map(log => {
+          const dur = log.duration_seconds != null ? `${Math.floor(log.duration_seconds / 60)}m ${log.duration_seconds % 60}s` : '—';
+          const stopInfo = log.stopped_reason ? STOP_LABELS[log.stopped_reason] || { label: log.stopped_reason, cls: 'badge-perdu' } : { label: 'Normal', cls: 'badge-gagne' };
+          const quotaInv = log.quota_invitations_remaining != null ? log.quota_invitations_remaining : '—';
+          const quotaMsg = log.quota_messages_remaining != null ? log.quota_messages_remaining : '—';
+          return `<tr>
+            <td class="text-sm">${UI.formatDate(log.ran_at)}</td>
+            <td class="text-sm text-muted">${dur}</td>
+            <td class="text-sm">
+              <div>Envoyées : <strong>${log.invitations_sent}</strong></div>
+              <div class="text-muted">Acceptées : ${log.invitations_accepted}</div>
+            </td>
+            <td class="text-sm">
+              <div>Soumis : <strong>${log.messages_submitted}</strong></div>
+              <div class="text-muted">Envoyés : ${log.messages_sent}</div>
+            </td>
+            <td class="text-sm"><strong>${log.replies_detected}</strong></td>
+            <td class="text-sm text-muted">Inv. : ${quotaInv} — Msg : ${quotaMsg}</td>
+            <td><span class="badge ${stopInfo.cls}">${UI.esc(stopInfo.label)}</span></td>
+          </tr>`;
+        }).join('');
+      } else {
+        el.innerHTML = logs.map(log => {
+          const prospectName = log.prospect ? `${log.prospect.first_name} ${log.prospect.last_name}` : '—';
+          const prospectCompany = log.prospect?.company ? ` (${log.prospect.company})` : '';
+          let actionText = '—';
+          if (isSeq) {
+            const statusMap = {
+              'active': `Étape ${log.current_step_order} en cours`,
+              'completed': 'Séquence terminée',
+              'stopped_reply': 'Arrêtée — réponse reçue',
+              'paused': 'Mise en pause'
+            };
+            actionText = statusMap[log.status] || log.status;
+          } else {
+            actionText = log.new_status ? `${log.old_status} → ${log.new_status}` : '—';
+          }
+          return `<tr>
+            <td class="text-sm">${UI.formatDate(log.created_at)}</td>
+            <td><strong>${UI.esc(prospectName)}</strong><div class="text-sm text-muted">${UI.esc(prospectCompany)}</div></td>
+            <td>${actionText}</td>
+            <td class="text-sm text-muted">${log.source || '—'}</td>
+          </tr>`;
+        }).join('');
+      }
     } catch(e) {
       const el = document.getElementById('logsList');
       if (el) el.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:30px;color:#EF4444">Erreur : ${e.message}</td></tr>`;

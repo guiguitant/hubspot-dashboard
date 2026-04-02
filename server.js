@@ -5543,31 +5543,40 @@ app.get('/api/logs', accountContext, async (req, res) => {
       query = query.lte('created_at', to);
     }
 
-    // Type filter: handle both "status_change" and "sequence" types
+    // Type filter
     if (type === 'sequence') {
-      // Return sequence events from prospect_sequence_state
       let seqQuery = supabaseAdmin.from('prospect_sequence_state')
         .select('updated_at, prospect_id, status, current_step_order, prospects(first_name, last_name, company)')
         .eq('account_id', req.accountId)
         .order('updated_at', { ascending: false })
         .limit(limit);
-
       if (from) seqQuery = seqQuery.gte('updated_at', from);
       if (to) seqQuery = seqQuery.lte('updated_at', to);
-
       const { data: seqData, error: seqError } = await seqQuery;
       if (seqError) throw seqError;
-
-      const normalized = (seqData || []).map(row => ({
+      return res.json((seqData || []).map(row => ({
         created_at: row.updated_at,
         prospect: row.prospects,
         action_category: 'sequence',
         status: row.status,
         current_step_order: row.current_step_order,
-      }));
-      return res.json(normalized);
-    } else if (type && type !== 'status_change') {
-      // Only status_change and sequence are supported
+      })));
+    }
+
+    if (type === 'dispatch') {
+      let dQuery = supabaseAdmin.from('dispatch_summaries')
+        .select('*')
+        .eq('account_id', req.accountId)
+        .order('ran_at', { ascending: false })
+        .limit(limit);
+      if (from) dQuery = dQuery.gte('ran_at', from);
+      if (to) dQuery = dQuery.lte('ran_at', to);
+      const { data: dData, error: dError } = await dQuery;
+      if (dError) throw dError;
+      return res.json(dData || []);
+    }
+
+    if (type && type !== 'status_change') {
       return res.json([]);
     }
 
@@ -5579,6 +5588,42 @@ app.get('/api/logs', accountContext, async (req, res) => {
     res.json(data || []);
   } catch (err) {
     console.error('Erreur GET /api/logs:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/dispatch/summary — Store a Task 2 execution report
+app.post('/api/dispatch/summary', accountContext, async (req, res) => {
+  try {
+    const {
+      ran_at, duration_seconds,
+      invitations_sent = 0, invitations_accepted = 0,
+      messages_submitted = 0, messages_sent = 0,
+      replies_detected = 0,
+      quota_invitations_remaining, quota_messages_remaining,
+      stopped_reason = null, errors = [],
+    } = req.body;
+
+    const { data, error } = await supabaseAdmin
+      .from('dispatch_summaries')
+      .insert({
+        account_id: req.accountId,
+        ran_at: ran_at || new Date().toISOString(),
+        duration_seconds: duration_seconds || null,
+        invitations_sent, invitations_accepted,
+        messages_submitted, messages_sent, replies_detected,
+        quota_invitations_remaining: quota_invitations_remaining ?? null,
+        quota_messages_remaining: quota_messages_remaining ?? null,
+        stopped_reason,
+        errors,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.error('Erreur POST /api/dispatch/summary:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

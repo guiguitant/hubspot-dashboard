@@ -3,21 +3,34 @@
 Workflow autonome pour l'exécution des séquences LinkedIn (Tâche 2).
 **La séquence est la source de vérité du workflow. Dispatch est l'exécuteur.**
 
+---
+
+## Règles absolues d'exécution
+
+1. **`fetch()` uniquement** : Tous les appels API vers `localhost:3000` doivent utiliser `fetch()` dans le navigateur. Jamais `curl`, jamais `bash`.
+2. **LinkedIn classique uniquement** : Utiliser uniquement `linkedin.com`. Ne jamais utiliser Sales Navigator.
+3. **LinkedIn doit être connecté** : Si la page LinkedIn redirige vers `/login` ou `/checkpoint` → arrêt immédiat (voir Étape 6 — Session expirée).
+
+---
+
 ## Principes fondamentaux
 
 1. **Séquence obligatoire** : Dispatch n'exécute AUCUNE action LinkedIn (invitation, message) sur une campagne sans séquence active.
-2. **Scrapping OK sans séquence** : La Tâche 1 (scrapping Sales Nav) continue normalement même sans séquence.
-3. **Un seul message** : Le message vient du template de la séquence (avec placeholders). Plus de génération de 2 versions.
-4. **Icebreaker** : Scrapé lors de la détection d'acceptation. Résolu dans le template via `{{icebreaker}}`.
+2. **Pas de séquence = pas d'action** : Si une campagne n'a pas de séquence active, cette tâche la skip entièrement.
+3. **Génération complète par Claude** : Le message est généré entièrement par Claude API à partir des paramètres de l'étape + données prospect + icebreaker. Plus de template, plus de placeholders.
+4. **Contexte LinkedIn** : Posts récents scrapés lors de la détection d'acceptation. Claude intègre ce contexte naturellement dans le message.
 5. **Validation Nathan** : Tout message doit être validé par Nathan avant envoi. Jamais d'envoi automatique.
+6. **Profil Chrome** : La Tâche 2 doit vérifier qu'un onglet LinkedIn est ouvert sur le profil Chrome "Nathan". Si ce n'est pas le cas, notification Windows et arrêt.
+
+---
 
 ## Account ID
 
-```bash
-export RELEAF_ACCOUNT_ID="[uuid]"
+```javascript
+const ACCOUNT_ID = "[uuid]";
+// Inclure dans TOUS les appels API :
+headers: { 'Content-Type': 'application/json', 'X-Account-Id': ACCOUNT_ID }
 ```
-
-Inclure le header `Authorization: Bearer [token]` dans **TOUS** les appels API.
 
 ---
 
@@ -50,82 +63,119 @@ http://localhost:3000
 
 ## Workflow Dispatch (Tâche 2 — 4x/jour)
 
+**Note l'heure exacte de début** (`_startedAt = Date.now()`) — elle sera utilisée dans le résumé final.
+
 ### Étape 0 — Acquérir le lock
 
-```bash
-POST /api/task-locks/acquire
-{"lock_type": "linkedin_task2", "task_name": "task2"}
+```javascript
+const lockResp = await fetch('/api/task-locks/acquire', {
+  method: 'POST', headers, body: JSON.stringify({ lock_type: 'linkedin_task2', task_name: 'task2' })
+});
+const lock = await lockResp.json();
 ```
 
-Si `acquired: false` → STOP.
+Si `lock.acquired === false` → STOP.
 
 ### Étape 1 — Vérifier les quotas
 
-```bash
-GET /api/prospector/daily-stats
+```javascript
+const statsResp = await fetch('/api/prospector/daily-stats', { headers });
+const stats = await statsResp.json();
 ```
 
-Si `remaining: 0` pour invitations ET messages → relâcher lock et arrêter.
+Si `stats.invitations.remaining === 0` ET `stats.messages.remaining === 0` → relâcher lock et arrêter.
 
-### Étape 2 — Traiter chaque campagne active
+### Étape 2 — Initialisation session LinkedIn (UNE SEULE FOIS)
 
-```bash
-GET /api/prospector/campaigns?active=true
+Avant de traiter les campagnes, charger en mémoire :
+
+**A) Connexions récentes**
+```javascript
+// Naviguer vers https://www.linkedin.com/mynetwork/invite-connect/connections/
+// Extraire la liste des connexions récentes (noms + URLs de profil)
+window._linkedinConnections = [...]; // stocker en mémoire
+```
+
+**B) Boîte de réception**
+```javascript
+// Naviguer vers https://www.linkedin.com/messaging/
+// Extraire les conversations récentes et leur état (lu/non lu, dernier message, auteur)
+window._linkedinMessages = [...]; // stocker en mémoire
+```
+
+Ces données sont réutilisées pour **toutes les campagnes** sans recharger ces pages.
+
+### Étape 3 — Traiter chaque campagne active
+
+```javascript
+const campsResp = await fetch('/api/prospector/campaigns?active=true', { headers });
+const campaigns = await campsResp.json();
+// Trier par priorité croissante (1 = plus prioritaire)
 ```
 
 Pour chaque campagne, dans l'ordre de priorité :
 
 **A) Vérifier qu'une séquence active existe :**
-```bash
-GET /api/sequences?campaign_id={campaign_id}
+```javascript
+const seqResp = await fetch(`/api/sequences?campaign_id=${campaign.id}`, { headers });
+const sequence = await seqResp.json();
 ```
 Si `null` → **SKIP cette campagne**. Aucune action LinkedIn.
 
 **B) Enrôler les nouveaux prospects :**
-```bash
-GET /api/prospector/prospects?campaign_id={id}&status=Nouveau
-```
-Pour chaque prospect :
-```bash
-POST /api/sequences/enroll
-{"prospect_id": "...", "campaign_id": "..."}
+```javascript
+const prospectsResp = await fetch(`/api/prospector/prospects?campaign_id=${campaign.id}&status=Nouveau`, { headers });
+const prospects = await prospectsResp.json();
+for (const prospect of prospects) {
+  await fetch('/api/sequences/enroll', {
+    method: 'POST', headers, body: JSON.stringify({ prospect_id: prospect.id, campaign_id: campaign.id })
+  });
+}
 ```
 
 **C) Récupérer les actions dues :**
-```bash
-GET /api/sequences/due-actions
+```javascript
+const dueResp = await fetch('/api/sequences/due-actions', { headers });
+const dueActions = await dueResp.json();
 ```
 
-### Étape 3a — send_invitation
+### Étape 4a — send_invitation
 
 **Conditions :**
-- `step.type === "send_invitation"`
-- `quotas.invitations.remaining > 0`
+- `action.step.type === "send_invitation"`
+- `stats.invitations.remaining > 0`
 
 **Actions :**
 1. Naviguer vers `linkedin.com/in/{slug}/`
 2. Cliquer "Se connecter" / "Connect"
-3. Si `step.has_note === true` → ajouter `step.note_content` comme note d'invitation
+3. Si `action.step.has_note === true` → ajouter `action.step.note_content` comme note d'invitation
 4. Soumettre
 
 **Mise à jour :**
-```bash
-POST /api/prospector/update-status
-{"prospect_id": "...", "status": "Invitation envoyée"}
-
-POST /api/sequences/complete-step
-{"state_id": "...", "completed_step_order": 1}
+```javascript
+await fetch('/api/prospector/update-status', {
+  method: 'POST', headers,
+  body: JSON.stringify({ prospect_id: action.prospect_id, status: 'Invitation envoyée' })
+});
+await fetch('/api/sequences/complete-step', {
+  method: 'POST', headers,
+  body: JSON.stringify({ state_id: action.state_id, completed_step_order: action.step.step_order })
+});
 ```
 
-### Étape 3b — Détecter les invitations acceptées + scraper l'icebreaker
+> Si LinkedIn répond HTTP **429** à n'importe quelle étape → arrêt immédiat (voir Étape 7 — Gestion 429).
 
-**Actions :**
-1. Naviguer vers `linkedin.com/mynetwork/invite-connect/connections/`
-2. Récupérer la liste des connexions récentes
-3. Croiser avec prospects en statut "Invitation envoyée"
+### Étape 4b — Détecter les invitations acceptées + scraper l'activité LinkedIn
 
-Pour chaque match :
-1. **Mettre à jour le statut** → "Invitation acceptée"
+Croiser `window._linkedinConnections` avec les prospects en statut `"Invitation envoyée"` :
+```javascript
+const invResp = await fetch(`/api/prospector/prospects?campaign_id=${campaign.id}&status=Invitation envoyée`, { headers });
+const invitedProspects = await invResp.json();
+```
+
+Pour chaque match (prospect présent dans `window._linkedinConnections`) :
+
+1. **Mettre à jour le statut** → `"Invitation acceptée"`
 2. **Scraper l'icebreaker** : naviguer vers `linkedin.com/in/{slug}/recent-activity/shares/`
    - Récupérer 3-5 posts récents (texte + date)
    - Appeler Claude API pour évaluer la pertinence :
@@ -136,77 +186,154 @@ Pour chaque match :
      Si non → NOT_RELEVANT"
      ```
    - Sauvegarder :
-     ```bash
-     POST /api/prospects/{id}/linkedin-activity
-     {"raw_posts": [...], "icebreaker_generated": "...", "icebreaker_mode": "personalized|generic", "is_relevant": true|false}
+     ```javascript
+     await fetch(`/api/prospects/${prospect.id}/linkedin-activity`, {
+       method: 'POST', headers,
+       body: JSON.stringify({ raw_posts: [...], icebreaker_generated: '...', icebreaker_mode: 'personalized|generic', is_relevant: true|false })
+     });
      ```
 
-3. **Résoudre le message séquence** : le template de l'étape `send_message` est résolu avec les placeholders (y compris `{{icebreaker}}`)
+3. **Générer le message complet via Claude API** :
+   - Récupérer les `message_params` de l'étape séquence (angle, ton, objectif, max_chars, instructions)
+   - Appeler `POST /api/sequences/generate-message` avec : `campaign`, `message_params`, `prospect`, `icebreaker`
+
 4. **Soumettre à validation** :
-   ```bash
-   POST /api/prospector/update-status
-   {"prospect_id": "...", "status": "Message à valider", "pending_message": "[message_résolu]"}
+   ```javascript
+   await fetch('/api/prospector/update-status', {
+     method: 'POST', headers,
+     body: JSON.stringify({ prospect_id: prospect.id, status: 'Message à valider', pending_message: messageGenere })
+   });
    ```
 
-**NE PAS appeler complete-step ici.** On attend la validation de Nathan.
+**NE PAS appeler `complete-step` ici.** On attend la validation de Nathan.
 
-### Étape 4 — Envoyer les messages validés
+### Étape 5 — Envoyer les messages validés
 
-Filtrer `pending_messages` avec `status === "Message à envoyer"`.
-
-Pour chaque message :
-1. Naviguer vers `linkedin.com/messaging/`
-2. Chercher la conversation avec le prospect
-3. Coller `prospect.pending_message`
-4. Soumettre
-
-```bash
-POST /api/prospector/message-sent
-{"prospect_id": "...", "campaign_id": "..."}
-
-POST /api/sequences/complete-step
-{"state_id": "...", "completed_step_order": 2}
+```javascript
+const pendingResp = await fetch(`/api/prospector/prospects?campaign_id=${campaign.id}&status=Message à envoyer`, { headers });
+const pendingMessages = await pendingResp.json();
 ```
 
-### Étape 5 — Détecter les réponses
+Pour chaque message (si `stats.messages.remaining > 0`) :
+1. Chercher la conversation dans `window._linkedinMessages`
+2. Naviguer vers `linkedin.com/messaging/` → ouvrir la conversation
+3. Coller `prospect.pending_message` et soumettre
 
-Naviguer vers `linkedin.com/messaging/`
+```javascript
+await fetch('/api/prospector/message-sent', {
+  method: 'POST', headers,
+  body: JSON.stringify({ prospect_id: prospect.id, campaign_id: campaign.id })
+});
+await fetch('/api/sequences/complete-step', {
+  method: 'POST', headers,
+  body: JSON.stringify({ state_id: action.state_id, completed_step_order: action.step.step_order })
+});
+```
 
-Pour chaque nouveau message d'un prospect en "Message envoyé" :
-```bash
-POST /api/prospector/update-status
-{"prospect_id": "...", "status": "Discussion en cours", "interaction": {"type": "Réponse reçue", "content": "[contenu]"}}
+> Si LinkedIn répond HTTP **429** → arrêt immédiat (voir Étape 7 — Gestion 429).
+
+### Étape 6 — Détecter les réponses
+
+Croiser `window._linkedinMessages` avec les prospects en statut `"Message envoyé"` :
+
+```javascript
+const sentResp = await fetch(`/api/prospector/prospects?campaign_id=${campaign.id}&status=Message envoyé`, { headers });
+const sentProspects = await sentResp.json();
+```
+
+Pour chaque nouveau message détecté d'un prospect en "Message envoyé" :
+```javascript
+await fetch('/api/prospector/update-status', {
+  method: 'POST', headers,
+  body: JSON.stringify({
+    prospect_id: prospect.id,
+    status: 'Discussion en cours',
+    interaction: { type: 'Réponse reçue', content: '[contenu du message]' }
+  })
+});
 ```
 
 Le trigger PostgreSQL arrête automatiquement la séquence.
 
-### Étape 6 — Session expirée
+### Étape 7 — Gestion 429 (rate limiting LinkedIn)
 
-Si URL `linkedin.com/login` ou `checkpoint` détectée :
+Si LinkedIn retourne HTTP 429 à n'importe quel moment :
+
+1. Arrêter immédiatement tout traitement
+2. Relâcher le lock
+3. Enregistrer le résumé avec `stopped_reason: "rate_limited"`
+
+```javascript
+await fetch('/api/task-locks/release', { method: 'POST', headers, body: JSON.stringify({ lock_type: 'linkedin_task2' }) });
+await _postSummary({ stopped_reason: 'rate_limited', errors: [{ step: '...', message: 'HTTP 429 reçu' }] });
+```
+
+### Étape 8 — Session LinkedIn expirée
+
+Si URL `linkedin.com/login` ou `linkedin.com/checkpoint` détectée :
 - Notification Windows (ballon)
-- Pauser toutes les séquences actives :
-```bash
-POST /api/sequences/stop
-{"prospect_id": "...", "reason": "error"}
+- Relâcher le lock
+- Enregistrer le résumé avec `stopped_reason: "session_expired"`
+
+```javascript
+await fetch('/api/task-locks/release', { method: 'POST', headers, body: JSON.stringify({ lock_type: 'linkedin_task2' }) });
+await _postSummary({ stopped_reason: 'session_expired' });
 ```
 
-### Étape 7 — Relâcher le lock + résumé
+### Étape 9 — Relâcher le lock + résumé final
 
-```bash
-POST /api/task-locks/release
-{"lock_type": "linkedin_task2"}
+```javascript
+await fetch('/api/task-locks/release', {
+  method: 'POST', headers,
+  body: JSON.stringify({ lock_type: 'linkedin_task2' })
+});
+await _postSummary({ stopped_reason: null });
 ```
 
-Résumé : invitations envoyées/acceptées, messages soumis/envoyés, réponses, quotas restants.
+**Fonction `_postSummary`** à appeler dans tous les cas de fin (normale ou erreur) :
+
+```javascript
+async function _postSummary({ stopped_reason, errors = [] }) {
+  const duration = Math.round((Date.now() - _startedAt) / 1000);
+  await fetch('/api/dispatch/summary', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      ran_at: new Date(_startedAt).toISOString(),
+      duration_seconds: duration,
+      invitations_sent:        _summary.invitations_sent,
+      invitations_accepted:    _summary.invitations_accepted,
+      messages_submitted:      _summary.messages_submitted,
+      messages_sent:           _summary.messages_sent,
+      replies_detected:        _summary.replies_detected,
+      quota_invitations_remaining: _stats?.invitations?.remaining ?? null,
+      quota_messages_remaining:    _stats?.messages?.remaining ?? null,
+      stopped_reason,
+      errors,
+    })
+  });
+}
+```
+
+Compteurs à incrémenter pendant l'exécution :
+```javascript
+const _summary = {
+  invitations_sent: 0,
+  invitations_accepted: 0,
+  messages_submitted: 0,
+  messages_sent: 0,
+  replies_detected: 0,
+};
+```
 
 ---
 
-## Cache icebreaker
+## Cache contexte LinkedIn
 
 - Durée : **120h (5 jours calendaires ≈ 3 jours ouvrés)**
 - Si cache frais → utiliser directement
 - Si cache expiré ou absent → `needs_scraping: true` → Dispatch scrape au prochain passage
-- Regénération manuelle : Nathan clique "Regénérer l'icebreaker" → Claude re-génère à partir des posts en cache
+- Regénération manuelle : Nathan clique "Regénérer" dans la Review → Claude génère un nouveau message complet
 
 ---
 
@@ -214,7 +341,7 @@ Résumé : invitations envoyées/acceptées, messages soumis/envoyés, réponses
 
 Si la séquence a plusieurs étapes `send_message` :
 - Après envoi du Message 1 + `complete-step`, le `next_action_at` est calculé avec le délai de l'étape suivante (+ jitter ±17%)
-- Au prochain passage Dispatch, si `next_action_at` est passé et pas de réponse → résoudre le template Message 2 → "Message à valider"
+- Au prochain passage Dispatch, si `next_action_at` est passé et pas de réponse → Claude génère le Message 2 (avec les paramètres de l'étape 2) → "Message à valider"
 - Même flow : validation Nathan → envoi → complete-step
 
 ---
@@ -222,9 +349,11 @@ Si la séquence a plusieurs étapes `send_message` :
 ## Enrôlement en masse d'une campagne existante
 
 Pour les campagnes avec des prospects à différents stades :
-```bash
-POST /api/sequences/enroll-campaign
-{"campaign_id": "..."}
+```javascript
+await fetch('/api/sequences/enroll-campaign', {
+  method: 'POST', headers,
+  body: JSON.stringify({ campaign_id: '...' })
+});
 ```
 
 Mapping automatique :
@@ -257,9 +386,10 @@ Mapping automatique :
 | GET | `/api/prospects/:id/linkedin-activity` | Récupérer activité (cache 120h) |
 | POST | `/api/prospector/update-status` | Mettre à jour statut |
 | POST | `/api/prospector/message-sent` | Marquer message comme envoyé |
-| POST | `/api/prospector/regenerate-icebreaker` | Regénérer l'icebreaker via Claude |
+| POST | `/api/sequences/generate-message` | Générer un message complet via Claude |
+| POST | `/api/dispatch/summary` | Enregistrer le résumé d'exécution |
 
 ---
 
-**Version :** Sprint 2 — Unification Séquences + Dispatch
-**Mise à jour :** 2026-04-01
+**Version :** Sprint 2 — Génération complète par Claude + résumé Dispatch
+**Mise à jour :** 2026-04-02
