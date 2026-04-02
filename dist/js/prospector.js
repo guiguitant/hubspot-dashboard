@@ -26,7 +26,7 @@ const App = (() => {
       case '#imports':         renderImports(app); break;
       case '#logs':            renderLogs(app); break;
       case '#rappels':         renderRappels(app); break;
-      case '#placeholders':    renderPlaceholders(app); break;
+      case '#placeholders':    location.hash = '#campagnes'; break;
       default:                 renderDashboard(app);
     }
 
@@ -51,10 +51,30 @@ const App = (() => {
     container.innerHTML = `
       <h1 class="page-title">Dashboard</h1>
       <div class="stat-grid">
-        <div class="stat-card"><span class="stat-icon">📤</span><div><div class="stat-value" id="statTotal">—</div><div class="stat-label">Total prospects</div></div></div>
-        <div class="stat-card"><span class="stat-icon">👥</span><div><div class="stat-value" id="statWeek">—</div><div class="stat-label">Prospects cette semaine</div></div></div>
-        <div class="stat-card"><span class="stat-icon">🤝</span><div><div class="stat-value" id="statAccepted">—</div><div class="stat-label">Invitations acceptées</div></div></div>
-        <div class="stat-card"><span class="stat-icon">📈</span><div><div class="stat-value" id="statCampaigns">—</div><div class="stat-label">Campagnes actives</div></div></div>
+        <div class="stat-card">
+          <div class="sfc-icon-wrap" style="background:#DBEAFE;color:#2563EB">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="5.5" cy="4.5" r="2.5"/><path d="M1 13c0-2.5 2-4.5 4.5-4.5"/><circle cx="11.5" cy="5.5" r="2"/><path d="M15 13c0-2 1.5-3.5-3.5-3.5H10"/></svg>
+          </div>
+          <div><div class="stat-value" id="statTotal">—</div><div class="stat-label">Total prospects</div></div>
+        </div>
+        <div class="stat-card">
+          <div class="sfc-icon-wrap" style="background:#FCE7F3;color:#BE185D">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="5.5" cy="4.5" r="2.5"/><path d="M1 13c0-2.5 2-4.5 4.5-4.5"/><circle cx="11.5" cy="5.5" r="2"/><path d="M15 13c0-2-1.5-3.5-3.5-3.5H10"/></svg>
+          </div>
+          <div><div class="stat-value" id="statWeek">—</div><div class="stat-label">Prospects cette semaine</div></div>
+        </div>
+        <div class="stat-card">
+          <div class="sfc-icon-wrap" style="background:#D1FAE5;color:#065F46">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M5.5 8l2 2L11 6"/></svg>
+          </div>
+          <div><div class="stat-value" id="statAccepted">—</div><div class="stat-label">Invitations acceptées</div></div>
+        </div>
+        <div class="stat-card">
+          <div class="sfc-icon-wrap" style="background:#FFEDD5;color:#EA580C">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 13.5l11-5.5-11-5.5v4l7.5 1.5-7.5 1.5z"/></svg>
+          </div>
+          <div><div class="stat-value" id="statCampaigns">—</div><div class="stat-label">Campagnes actives</div></div>
+        </div>
       </div>
       <div class="card mb-4" id="quotasCard" style="display:none">
         <div class="card-title">📊 Quotas du jour</div>
@@ -170,20 +190,22 @@ const App = (() => {
 
     // Pipeline list
     const statuses = UI.STATUSES;
-    document.getElementById('dashPipeline').innerHTML = statuses.map(s =>
-      `<li class="pipeline-item" style="cursor:pointer" onclick="location.hash='#prospects?status=${encodeURIComponent(s)}'">${UI.statusBadge(s)} <span class="pipeline-count">${pipeline[s] || 0}</span></li>`
-    ).join('');
+    document.getElementById('dashPipeline').innerHTML = statuses.map(s => {
+      const count = pipeline[s] || 0;
+      const countCls = count > 0 ? 'pipeline-count' : 'pipeline-count pipeline-count-zero';
+      return `<li class="pipeline-item" onclick="location.hash='#prospects?status=${encodeURIComponent(s)}'">${UI.statusBadge(s)} <span class="${countCls}">${count}</span></li>`;
+    }).join('');
 
     // Daily activity chart
     const FR_MONTHS = ['jan', 'fév', 'mar', 'avr', 'mai', 'juin', 'juil', 'aoû', 'sep', 'oct', 'nov', 'déc'];
     const fmtDate = iso => { const d = new Date(iso + 'T00:00:00'); return `${d.getDate()} ${FR_MONTHS[d.getMonth()]}`; };
 
     const ACTIVITY_SERIES = {
-      prospect_validated:  { label: 'Profils validés',         color: '#8b5cf6' },
-      invitation_sent:     { label: 'Invitations envoyées',    color: '#f59e0b' },
-      invitation_accepted: { label: 'Invitations acceptées',   color: '#3b82f6' },
-      message_sent:        { label: 'Messages envoyés',        color: '#10b981' },
-      response_received:   { label: 'Réponses reçues',         color: '#ec4899' },
+      prospect_validated:  { label: 'Profils validés',         color: '#EA580C' },
+      invitation_sent:     { label: 'Invitations envoyées',    color: '#7C3AED' },
+      invitation_accepted: { label: 'Invitations acceptées',   color: '#065F46' },
+      message_sent:        { label: 'Messages envoyés',        color: '#0F766E' },
+      response_received:   { label: 'Réponses reçues',         color: '#BE185D' },
     };
 
     const chartDates = chartData.dates || [];
@@ -313,20 +335,31 @@ const App = (() => {
       <div class="page-header">
         <h1 class="page-title" style="margin-bottom:0">Prospects</h1>
         <div class="flex gap-2">
-          <button class="btn btn-outline" onclick="location.hash='#imports'">Importer</button>
-          <button class="btn btn-primary" onclick="App.openAddProspect()">+ Ajouter</button>
+          <button class="btn btn-outline" onclick="location.hash='#imports'" style="display:flex;align-items:center;gap:6px">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 2v8M4 6l4-4 4 4"/><path d="M2 11v2a1 1 0 001 1h10a1 1 0 001-1v-2"/></svg>
+            Importer
+          </button>
+          <button class="btn btn-primary" onclick="App.openAddProspect()" style="display:flex;align-items:center;gap:6px">+ Ajouter</button>
         </div>
       </div>
       <div class="quick-filters" id="quickFilters">
         <button class="qf-btn qf-active" data-filter="" onclick="App.quickFilter(this, '')">Tous <span class="qf-count" id="qfCount-all"></span></button>
         ${UI.STATUSES.map(s => {
-          const isAValider = s === 'Profil à valider';
-          const label = isAValider ? 'À valider' : s;
+          const LABELS = {
+            'Profil à valider':    'À valider',
+            'Message à valider':   'À valider',
+            'Message à envoyer':   'À envoyer',
+            'Discussion en cours': 'En cours',
+          };
+          const label = LABELS[s] || s;
           return `<button class="qf-btn" data-filter="${s}" onclick="App.quickFilter(this, '${s}')">${label} <span class="qf-count" id="qfCount-${s.replace(/\s/g, '_')}"></span></button>`;
         }).join('')}
       </div>
       <div class="filter-bar">
-        <input id="filterSearch" placeholder="Rechercher nom, entreprise, fonction..." oninput="App.filterProspects()">
+        <div class="search-wrap">
+          <svg class="search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8.5" cy="8.5" r="5.5"/><line x1="13.5" y1="13.5" x2="18" y2="18"/></svg>
+          <input id="filterSearch" placeholder="Rechercher nom, entreprise, fonction..." oninput="App.filterProspects()">
+        </div>
         <select id="filterStatus" onchange="App.filterProspects()" style="display:none"><option value="">Tous les statuts</option></select>
         <select id="filterCampaign" onchange="App.filterProspects()"><option value="">Toutes les campagnes</option><option value="none">Non défini</option></select>
       </div>
@@ -351,52 +384,46 @@ const App = (() => {
     if (presetStatus) {
       statusSel.value = presetStatus;
       // Highlight the matching quick filter
-      document.querySelectorAll('.qf-btn').forEach(b => b.classList.remove('qf-active'));
+      document.querySelectorAll('.qf-btn').forEach(b => { b.classList.remove('qf-active'); b.style.background = ''; b.style.color = ''; b.style.borderColor = ''; });
       const match = document.querySelector(`.qf-btn[data-filter="${presetStatus}"]`);
-      if (match) match.classList.add('qf-active');
+      if (match) { match.classList.add('qf-active'); _applyQfActiveStyle(match, presetStatus); }
     }
 
     // Load counts for all quick filters
     loadQuickFilterCounts();
 
-    // Load sequence states for badge display (asynchronous)
-    _seqStatesCache = null;
-    APIClient.get('/api/sequences/states')
-      .then(map => {
-        _seqStatesCache = map;
-        // Update badges if table is already rendered
-        document.querySelectorAll('[data-seq-badge]').forEach(el => {
-          const pid = el.dataset.seqBadge;
-          el.innerHTML = _seqBadgeHtml(_seqStatesCache[pid]);
-        });
-      })
-      .catch(() => {});
-
     filterProspects();
   }
 
+  function _applyQfActiveStyle(btn, status) {
+    btn.style.background = '';
+    btn.style.color = '';
+    btn.style.borderColor = '';
+    const countEl = btn.querySelector('.qf-count');
+    if (countEl) { countEl.style.background = ''; countEl.style.color = ''; }
+    if (status && UI.STATUS_COLORS[status]) {
+      const sc = UI.STATUS_COLORS[status];
+      btn.style.background = sc.bg;
+      btn.style.color = sc.color;
+      btn.style.borderColor = sc.color;
+      if (countEl) { countEl.style.background = 'rgba(255,255,255,0.65)'; countEl.style.color = sc.color; }
+    }
+  }
+
   function quickFilter(btn, status) {
-    document.querySelectorAll('.qf-btn').forEach(b => b.classList.remove('qf-active'));
+    document.querySelectorAll('.qf-btn').forEach(b => {
+      b.classList.remove('qf-active');
+      b.style.background = '';
+      b.style.color = '';
+      b.style.borderColor = '';
+    });
     btn.classList.add('qf-active');
+    _applyQfActiveStyle(btn, status);
     const statusSel = document.getElementById('filterStatus');
     if (statusSel) statusSel.value = status;
     clearSelection();
     filterProspects();
   }
-
-  const QF_COLORS = {
-    'Profil à valider': '#D97706',
-    'Nouveau': '#3B82F6',
-    'Invitation envoyée': '#7C3AED',
-    'Message à valider': '#92400E',
-    'Message à envoyer': '#C2410C',
-    'Message envoyé': '#1D4ED8',
-    'Réponse reçue': '#BE185D',
-    'RDV planifié': '#1D4ED8',
-    'Gagné': '#2D6A4F',
-    'Perdu': '#EF4444',
-    'Non pertinent': '#9CA3AF',
-  };
 
   async function loadQuickFilterCounts() {
     const counts = await DB.getProspectCountsByStatus();
@@ -407,7 +434,18 @@ const App = (() => {
       const el = document.getElementById(`qfCount-${s.replace(/\s/g, '_')}`);
       if (el) {
         el.textContent = count > 0 ? count : '';
-        if (QF_COLORS[s]) el.style.background = QF_COLORS[s];
+        const sc = UI.STATUS_COLORS[s];
+        if (sc) {
+          const btn = el.closest('.qf-btn');
+          const isActive = btn?.classList.contains('qf-active');
+          if (isActive) {
+            el.style.background = 'rgba(255,255,255,0.65)';
+            el.style.color = sc.color;
+          } else {
+            el.style.background = sc.color;
+            el.style.color = '#fff';
+          }
+        }
       }
     }
     const hiddenCount = Object.entries(counts).filter(([k]) => !UI.STATUSES.includes(k) && k !== '').reduce((a, [, v]) => a + v, 0);
@@ -416,6 +454,7 @@ const App = (() => {
     if (allEl) {
       allEl.textContent = total > 0 ? total : '';
       allEl.style.background = 'var(--color-primary)';
+      allEl.style.color = '#fff';
     }
   }
 
@@ -637,11 +676,11 @@ const App = (() => {
 
     const prospects = await DB.getProspects(opts);
     const hasValidatable = prospects.some(p => p.status === 'Profil à valider');
+    const svgOpen = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h10a1 1 0 001-1v-3"/><path d="M10 2h4v4"/><path d="M7 9L14 2"/></svg>`;
     const tbody = prospects.length === 0
       ? `<tr><td colspan="8">${UI.emptyState('Aucun prospect trouvé')}</td></tr>`
       : prospects.map(p => {
-          const campName = p.status === 'Non pertinent' ? 'Non pertinent' : (p.campaigns?.name || 'Non défini');
-          const campClass = p.status === 'Non pertinent' ? 'badge-non-pertinent' : (p.campaigns?.name ? 'badge-type' : 'badge-non-pertinent');
+          const campName = p.campaigns?.name || 'Non défini';
           const isAValider = p.status === 'Profil à valider';
           const checked = _selectedProspects.has(p.id) ? 'checked' : '';
           const href = `#prospect-detail?id=${p.id}`;
@@ -649,14 +688,13 @@ const App = (() => {
           <td onclick="event.stopPropagation()"><input type="checkbox" class="prospect-cb" data-id="${p.id}" ${checked} onchange="App.toggleSelect('${p.id}', this.checked)"></td>
           <td><a href="${href}" class="row-link"><strong>${UI.esc(p.first_name)} ${UI.esc(p.last_name)}</strong></a></td>
           <td class="text-sm text-muted"><a href="${href}" class="row-link">${UI.esc(p.job_title || '')}</a></td>
-          <td><a href="${href}" class="row-link">${UI.esc(p.company || '')}</a></td>
-          <td><a href="${href}" class="row-link"><span class="badge ${campClass}">${UI.esc(campName)}</span></a></td>
+          <td><a href="${href}" class="row-link"><strong>${UI.esc(p.company || '')}</strong></a></td>
+          <td class="text-sm text-muted"><a href="${href}" class="row-link">${UI.esc(campName)}</a></td>
           <td><a href="${href}" class="row-link">${UI.statusBadge(p.status)}</a></td>
-          <td data-seq-badge="${p.id}">${_seqBadgeHtml(_seqStatesCache?.[p.id])}</td>
           <td class="text-muted text-sm"><a href="${href}" class="row-link">${UI.formatDate(p.updated_at)}</a></td>
           <td class="action-btns" onclick="event.stopPropagation()">
             ${isAValider ? `<button class="btn-icon btn-validate" onclick="App.quickValidate('${p.id}')" title="Valider">✓</button><button class="btn-icon btn-reject" onclick="App.quickReject('${p.id}')" title="Non pertinent">✕</button>` : ''}
-            ${p.linkedin_url ? `<a href="${UI.esc(p.linkedin_url)}" target="_blank" title="Voir LinkedIn">🔗</a>` : ''}
+            <a href="${href}" class="row-link-icon" title="Voir la fiche">${svgOpen}</a>
           </td>
         </tr>`;
         }).join('');
@@ -664,7 +702,7 @@ const App = (() => {
     document.getElementById('prospectsTable').innerHTML = `
       <table><thead><tr>
         <th style="width:30px"><input type="checkbox" id="selectAll" onchange="App.toggleSelectAll(this.checked)"></th>
-        <th>Nom</th><th>Fonction</th><th>Entreprise</th><th>Campagne</th><th>Statut</th><th>Séquence</th><th>Dernier contact</th><th></th>
+        <th>Nom</th><th>Fonction</th><th>Entreprise</th><th>Campagne</th><th>Statut</th><th>Dernier contact</th><th></th>
       </tr></thead>
       <tbody>${tbody}</tbody></table>`;
 
@@ -754,7 +792,7 @@ const App = (() => {
               ${seqResp?.activity ? (() => {
                 const a = seqResp.activity;
                 const cls = a.is_relevant ? 'badge-gagne' : 'badge-non-pertinent';
-                const label = a.is_relevant ? '🌱 Icebreaker personnalisé' : 'Icebreaker générique';
+                const label = a.is_relevant ? '🌱 Contexte LinkedIn personnalisé' : 'Contexte LinkedIn générique';
                 const tooltip = a.icebreaker_generated ? `title="${UI.esc(a.icebreaker_generated)}"` : '';
                 return `<span class="badge ${cls}" ${tooltip} style="cursor:help">${label}</span>`;
               })() : ''}
@@ -795,7 +833,7 @@ const App = (() => {
           return `<div class="message-card">
             <div class="message-card-title" style="justify-content:space-between">
               <span>✉️ Message LinkedIn à valider</span>
-              <button class="btn btn-sm btn-outline" id="btnRegenConfirm" onclick="App.regenerateMessages('${id}')">Regénérer l'icebreaker</button>
+              <button class="btn btn-sm btn-outline" id="btnRegenConfirm" onclick="App.regenerateMessages('${id}')">Regénérer le message</button>
             </div>
             <div class="message-versions" id="messageVersionsContainer">
               ${versions.map((v, i) => `
@@ -907,7 +945,7 @@ const App = (() => {
       if (!resp.ok) { UI.toast(result.error || 'Erreur', 'error'); return; }
 
       if (result.needs_scraping) {
-        UI.toast('Aucune donnée LinkedIn en cache. L\'icebreaker sera généré au prochain passage Dispatch.', 'error');
+        UI.toast('Aucune donnée LinkedIn en cache. Le message sera généré au prochain passage Dispatch.', 'error');
         return;
       }
 
@@ -918,7 +956,7 @@ const App = (() => {
       }
 
       const mode = result.is_relevant ? 'personnalisé' : 'générique';
-      UI.toast(`Icebreaker ${mode} regénéré`);
+      UI.toast('Message regénéré');
 
       // Refresh the page to show updated data
       renderProspectDetail(document.getElementById('app'), id);
@@ -1177,31 +1215,31 @@ const App = (() => {
       <div class="page-header">
         <h1 class="page-title" style="margin-bottom:0">Journal d'activité</h1>
       </div>
-      <div class="card">
-        <div style="padding:16px;border-bottom:1px solid var(--color-border);display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px">
-          <div>
-            <label style="font-size:12px;color:var(--color-text-muted);font-weight:600;display:block;margin-bottom:4px">Campagne</label>
-            <select id="logsCampaignFilter" onchange="App.loadLogs()">
-              <option value="">Toutes les campagnes</option>
-            </select>
-          </div>
-          <div>
-            <label style="font-size:12px;color:var(--color-text-muted);font-weight:600;display:block;margin-bottom:4px">Du</label>
-            <input type="date" id="logsFromFilter" onchange="App.loadLogs()">
-          </div>
-          <div>
-            <label style="font-size:12px;color:var(--color-text-muted);font-weight:600;display:block;margin-bottom:4px">Au</label>
-            <input type="date" id="logsToFilter" onchange="App.loadLogs()">
-          </div>
-          <div>
-            <label style="font-size:12px;color:var(--color-text-muted);font-weight:600;display:block;margin-bottom:4px">Type</label>
-            <select id="logsTypeFilter" onchange="App.loadLogs()">
-              <option value="">Tous les types</option>
-              <option value="status_change">Changement de statut</option>
-              <option value="sequence">Séquences</option>
-            </select>
-          </div>
+      <div class="filter-grid">
+        <div class="filter-group">
+          <label>Campagne</label>
+          <select id="logsCampaignFilter" onchange="App.loadLogs()">
+            <option value="">Toutes les campagnes</option>
+          </select>
         </div>
+        <div class="filter-group">
+          <label>Du</label>
+          <input type="date" id="logsFromFilter" onchange="App.loadLogs()">
+        </div>
+        <div class="filter-group">
+          <label>Au</label>
+          <input type="date" id="logsToFilter" onchange="App.loadLogs()">
+        </div>
+        <div class="filter-group">
+          <label>Type</label>
+          <select id="logsTypeFilter" onchange="App.loadLogs()">
+            <option value="">Tous les types</option>
+            <option value="status_change">Changement de statut</option>
+            <option value="sequence">Séquences</option>
+          </select>
+        </div>
+      </div>
+      <div class="card">
         <div class="table-wrap">
           <table><thead><tr><th>Date / Heure</th><th>Prospect</th><th>Action</th><th>Détail</th></tr></thead>
           <tbody id="logsList">${UI.loader()}</tbody></table>
@@ -1291,10 +1329,14 @@ const App = (() => {
   let _campTab = 'active'; // 'active' or 'archived'
 
   async function renderCampagnes(container) {
+    const svgLink = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2D6A4F" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>`;
     container.innerHTML = `
       <div class="page-header">
-        <h1 class="page-title" style="margin-bottom:0">Campagnes</h1>
-        <button class="btn btn-primary" onclick="App.openAddCampaign()">+ Nouvelle campagne</button>
+        <div class="flex items-center gap-3">
+          <div class="sfc-icon-wrap" style="background:var(--color-primary-light);color:var(--color-primary)">${svgLink}</div>
+          <h1 class="page-title" style="margin-bottom:0">Mes campagnes LinkedIn</h1>
+        </div>
+        <button class="btn btn-primary" onclick="App.openAddCampaign()">+ Créer une nouvelle campagne</button>
       </div>
       <div class="tab-bar" id="campTabs">
         <button class="tab-btn tab-active" data-tab="active" onclick="App.switchCampTab('active')">Actives</button>
@@ -1302,7 +1344,6 @@ const App = (() => {
       </div>
       <div id="campagnesTable">${UI.loader()}</div>
     `;
-    // Populate modal selects dynamically (exclude Archivée from create/edit — archiving is done via button)
     document.querySelectorAll('.camp-status-select').forEach(sel => {
       sel.innerHTML = '';
       UI.CAMP_STATUSES.filter(s => s !== 'Archivée').forEach(s => { const o = document.createElement('option'); o.value = s; o.textContent = s; sel.appendChild(o); });
@@ -1351,40 +1392,42 @@ const App = (() => {
       return;
     }
 
-    el.innerHTML = `<div class="camp-cards" id="campCardsList">${_campaignsCache.map((c, i) => campCardHtml(c, i)).join('')}</div>`;
-    initCardDrag();
-  }
+    const svgInv = `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="5.5" cy="4.5" r="2.5"/><path d="M1 13c0-2.5 2-4.5 4.5-4.5"/><circle cx="11.5" cy="5.5" r="2"/><path d="M15 13c0-2-1.5-3.5-3.5-3.5H10"/></svg>`;
+    const svgAcc = `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M5.5 8l2 2L11 6"/></svg>`;
+    const svgMsg = `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h10a1 1 0 011 1v6a1 1 0 01-1 1H9l-3 2.5V11H3a1 1 0 01-1-1V4a1 1 0 011-1z"/></svg>`;
+    const svgReply = `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 3h9a1 1 0 011 1v5a1 1 0 01-1 1H8l-3 2v-2H3a1 1 0 01-1-1V4a1 1 0 011-1z"/></svg>`;
 
-  function campCardHtml(c, i) {
-    const criteria = c.criteria || {};
-    const jobs = (criteria.job_titles || []).map(j => `<span class="badge badge-type">${UI.esc(j)}</span>`).join('');
-    const excl = (c.excluded_keywords || []).length;
-    const revMin = criteria.revenue_min ? new Intl.NumberFormat('fr-FR', {notation:'compact'}).format(criteria.revenue_min) + '€' : null;
-    const revMax = criteria.revenue_max ? new Intl.NumberFormat('fr-FR', {notation:'compact'}).format(criteria.revenue_max) + '€' : null;
-    const empMin = criteria.employees_min;
-    const empMax = criteria.employees_max;
-
-    return `<div class="camp-card" draggable="true" data-id="${c.id}" data-idx="${i}">
-      <div class="camp-card-header">
-        <span class="camp-card-prio">${i + 1}</span>
-        <span class="camp-card-name">${UI.esc(c.name)}</span>
-        ${UI.campStatusBadge(c.status)}
-      </div>
-      <div class="camp-card-meta">
-        ${c.sector || criteria.sector ? `<span class="camp-chip">📍 ${UI.esc(c.sector || criteria.sector)}</span>` : ''}
-        ${c.geography || criteria.geography ? `<span class="camp-chip">🌍 ${UI.esc(c.geography || criteria.geography)}</span>` : ''}
-        ${c.daily_quota ? `<span class="camp-chip">📊 ${c.daily_quota}/j</span>` : ''}
-        <span class="camp-chip">👥 ${c.prospects_count || 0}</span>
-      </div>
-      ${jobs ? `<div class="camp-card-tags">${jobs}</div>` : ''}
-      ${(revMin || revMax || empMin || empMax) ? `<div class="camp-card-criteria">
-        ${revMin || revMax ? `<span class="text-sm text-muted">CA : ${revMin || '—'} → ${revMax || '—'}</span>` : ''}
-        ${empMin || empMax ? `<span class="text-sm text-muted">Effectif : ${empMin || '—'} → ${empMax || '—'}</span>` : ''}
-      </div>` : ''}
-      ${excl ? `<div class="camp-card-excl"><span class="text-sm text-muted">${excl} exclusion(s)</span></div>` : ''}
-      <div class="camp-card-footer">
-        <span class="text-sm text-muted">${UI.formatDate(c.created_at)}</span>
-        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();App.openEditCampaign('${c.id}')">✏️</button>
+    el.innerHTML = `<div class="card" style="padding:0;overflow:hidden">
+      <div class="table-wrap">
+        <table class="camp-table">
+          <thead><tr>
+            <th>Status</th>
+            <th>Nom</th>
+            <th class="text-center"><span class="th-icon">${svgInv}</span> Invitations</th>
+            <th class="text-center"><span class="th-icon">${svgAcc}</span> Acceptées</th>
+            <th class="text-center"><span class="th-icon">${svgMsg}</span> Envoyés</th>
+            <th class="text-center"><span class="th-icon">${svgReply}</span> Réponses</th>
+          </tr></thead>
+          <tbody>${_campaignsCache.map(c => {
+            const sc = c.status_counts || {};
+            const inv = (sc['Invitation envoyée'] || 0) + (sc['Invitation acceptée'] || 0) + (sc['Message à valider'] || 0) + (sc['Message à envoyer'] || 0) + (sc['Message envoyé'] || 0) + (sc['Discussion en cours'] || 0) + (sc['Gagné'] || 0);
+            const acc = (sc['Invitation acceptée'] || 0) + (sc['Message à valider'] || 0) + (sc['Message à envoyer'] || 0) + (sc['Message envoyé'] || 0) + (sc['Discussion en cours'] || 0) + (sc['Gagné'] || 0);
+            const msg = (sc['Message envoyé'] || 0) + (sc['Discussion en cours'] || 0) + (sc['Gagné'] || 0);
+            const rep = (sc['Discussion en cours'] || 0) + (sc['Gagné'] || 0);
+            const cellCls = n => n > 0 ? 'camp-stat' : 'camp-stat camp-stat-zero';
+            return `<tr class="clickable" onclick="location.hash='#campaign-detail?id=${c.id}'">
+              <td>${UI.campStatusBadge(c.status)}</td>
+              <td>
+                <div class="camp-row-name">${UI.esc(c.name)}</div>
+                <div class="text-sm text-muted">Créée le ${UI.formatDate(c.created_at)}</div>
+              </td>
+              <td class="${cellCls(inv)}">${inv}</td>
+              <td class="${cellCls(acc)}">${acc}</td>
+              <td class="${cellCls(msg)}">${msg}</td>
+              <td class="${cellCls(rep)}">${rep}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
       </div>
     </div>`;
   }
@@ -1591,37 +1634,75 @@ const App = (() => {
       statusCounts[p.status] = (statusCounts[p.status] || 0) + 1;
     }
 
+    // Format CA range (compact notation)
+    const fmtRev = n => n ? new Intl.NumberFormat('fr-FR', { notation: 'compact', maximumSignificantDigits: 2 }).format(n) + '€' : null;
+    const caMin = fmtRev(criteria.revenue_min), caMax = fmtRev(criteria.revenue_max);
+    const caStr = caMin || caMax ? (caMin && caMax ? `${caMin} — ${caMax}` : caMin ? `${caMin}+` : `< ${caMax}`) : null;
+
+    // Format effectif range
+    const empMin = criteria.employees_min, empMax = criteria.employees_max;
+    const empStr = empMin || empMax ? (empMin && empMax ? `${empMin} — ${empMax}` : empMin ? `${empMin}+` : `< ${empMax}`) : null;
+
+    // SVG icons for meta chips
+    const svgQuota = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M9 2L6 9h4l-3 5"/></svg>`;
+    const svgCa    = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><path d="M5.5 9.5a2.5 2.5 0 005 0c0-1.5-1-2.5-2.5-2.5S5.5 6 5.5 5a2.5 2.5 0 015 0M8 3v1M8 12v1"/></svg>`;
+    const svgEmp   = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="5.5" cy="4.5" r="2.5"/><path d="M1 13c0-2.5 2-4.5 4.5-4.5"/><circle cx="11.5" cy="5.5" r="2"/><path d="M15 13c0-2-1.5-3.5-3.5-3.5H10"/></svg>`;
+    const svgEdit  = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 2.5a1.4 1.4 0 012 2L5 13H2v-3L11.5 2.5z"/></svg>`;
+    const svgArch  = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="12" height="8" rx="1"/><path d="M1 6h14M6 10h4"/><path d="M5 6V4h6v2"/></svg>`;
+    const svgTarget = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="2.5"/><path d="M8 2v2M8 12v2M2 8h2M12 8h2"/></svg>`;
+
+    // Ciblage content
+    const hasCiblage = !!(criteria.sector || campaign.sector || criteria.geography || campaign.geography
+      || (criteria.job_titles || []).length || (campaign.excluded_keywords || []).length);
+
     container.innerHTML = `
-      <div class="flex items-center gap-2 mb-4">
-        <a class="inline-link" href="#campagnes">← Campagnes</a>
-      </div>
-      <div class="profile-card">
-        <div class="profile-header">
-          <div>
-            <div class="profile-name">${UI.esc(campaign.name)}</div>
-            <div class="profile-badges mt-4">
-              ${UI.campStatusBadge(campaign.status)}
-              <span class="badge badge-type">Priorité ${campaign.priority || '—'}</span>
-              ${campaign.sector || criteria.sector ? `<span class="badge badge-type">${UI.esc(campaign.sector || criteria.sector)}</span>` : ''}
-              ${campaign.geography || criteria.geography ? `<span class="badge badge-type">${UI.esc(campaign.geography || criteria.geography)}</span>` : ''}
-              ${(criteria.job_titles || []).map(j => `<span class="badge badge-type">${UI.esc(j)}</span>`).join('')}
-            </div>
-            ${(campaign.excluded_keywords || []).length ? `<div style="margin-top:8px"><span class="text-sm text-muted">Exclusions :</span> ${campaign.excluded_keywords.map(k => `<span class="badge tag-excl" style="margin-left:4px">${UI.esc(k)}</span>`).join('')}</div>` : ''}
+      <a class="inline-link camp-back" href="#campagnes">← Campagnes</a>
+
+      <div class="camp-header">
+        <div class="camp-title-row">
+          <div class="camp-title-block">
+            <h1 class="camp-title">${UI.esc(campaign.name)}</h1>
+            ${UI.campStatusBadge(campaign.status)}
           </div>
           <div class="flex gap-2 items-center">
-            <div class="text-sm text-muted">Quota : ${campaign.daily_quota || 20}/j</div>
-            <button class="btn btn-outline btn-sm" onclick="App.openEditCampaign('${id}')">Modifier</button>
+            <button class="btn btn-outline" onclick="App.openEditCampaign('${id}')" style="display:flex;align-items:center;gap:6px">
+              ${svgEdit} Modifier
+            </button>
             ${campaign.status !== 'Archivée'
-              ? `<button class="btn btn-ghost btn-sm" onclick="App.archiveCampaign('${id}', true)" title="Archiver">🗄️ Archiver</button>`
-              : `<button class="btn btn-outline btn-sm" onclick="App.archiveCampaign('${id}', false)">♻️ Désarchiver</button>`
+              ? `<button class="btn btn-ghost" onclick="App.archiveCampaign('${id}', true)" style="display:flex;align-items:center;gap:6px">${svgArch} Archiver</button>`
+              : `<button class="btn btn-outline" onclick="App.archiveCampaign('${id}', false)">Désarchiver</button>`
             }
           </div>
         </div>
-        <div class="profile-fields mt-4">
-          ${criteria.revenue_min || criteria.revenue_max ? `<div><div class="profile-field-label">Chiffre d'affaires</div><div class="profile-field-value">${criteria.revenue_min ? new Intl.NumberFormat('fr-FR').format(criteria.revenue_min) + ' €' : '—'} → ${criteria.revenue_max ? new Intl.NumberFormat('fr-FR').format(criteria.revenue_max) + ' €' : '—'}</div></div>` : ''}
-          ${criteria.employees_min || criteria.employees_max ? `<div><div class="profile-field-label">Effectif</div><div class="profile-field-value">${criteria.employees_min || '—'} → ${criteria.employees_max || '—'} salariés</div></div>` : ''}
+
+        <div class="camp-meta-chips">
+          <span class="camp-meta-chip">${svgQuota} ${campaign.daily_quota || 20}/j quota</span>
+          ${caStr ? `<span class="camp-meta-chip">${svgCa} ${caStr} CA</span>` : ''}
+          ${empStr ? `<span class="camp-meta-chip">${svgEmp} ${empStr} salariés</span>` : ''}
         </div>
-        ${campaign.details ? `<div class="mt-4"><div class="profile-field-label">Détails de la campagne</div><div class="text-sm" style="white-space:pre-wrap;margin-top:4px">${UI.esc(campaign.details)}</div></div>` : ''}
+
+        ${hasCiblage ? `<details class="camp-ciblage">
+          <summary>${svgTarget} Voir ciblage et exclusions</summary>
+          <div class="camp-ciblage-body">
+            <div class="camp-ciblage-section">
+              <div class="camp-ciblage-label">CIBLAGE</div>
+              <div class="camp-ciblage-tags">
+                <span class="badge badge-type">Priorité ${campaign.priority || '—'}</span>
+                ${criteria.sector || campaign.sector ? `<span class="badge badge-type">${UI.esc(criteria.sector || campaign.sector)}</span>` : ''}
+                ${criteria.geography || campaign.geography ? `<span class="badge badge-type">${UI.esc(criteria.geography || campaign.geography)}</span>` : ''}
+                ${(criteria.job_titles || []).map(j => `<span class="badge badge-type">${UI.esc(j)}</span>`).join('')}
+              </div>
+            </div>
+            ${(campaign.excluded_keywords || []).length ? `<div class="camp-ciblage-section">
+              <div class="camp-ciblage-label">EXCLUSIONS</div>
+              <div class="camp-ciblage-tags">
+                ${campaign.excluded_keywords.map(k => `<span class="badge tag-excl">${UI.esc(k)}</span>`).join('')}
+              </div>
+            </div>` : ''}
+          </div>
+        </details>` : ''}
+
+        ${campaign.details ? `<p class="text-sm text-muted" style="white-space:pre-wrap;margin-top:12px">${UI.esc(campaign.details)}</p>` : ''}
       </div>
 
       <div class="tab-bar mt-6">
@@ -1632,37 +1713,101 @@ const App = (() => {
       <div id="campaignTabContent"></div>
     `;
 
-    // Save cache for tab switching
     _campDetailCache[id] = { prospects, statusCounts };
-
-    // Render default tab (prospects)
     renderProspectsTab(id, prospects, statusCounts);
   }
 
+  let _campActiveStatus = null;
+
   function renderProspectsTab(id, prospects, statusCounts) {
+    _campActiveStatus = null;
     const el = document.getElementById('campaignTabContent');
     if (!el) return;
+
+    const total = prospects.length;
+    // Show all main statuses (even 0) + hidden only if they have prospects
+    const orderedStatuses = [
+      ...UI.STATUSES,
+      ...['Invitation acceptée', 'Non pertinent', 'Profil restreint'].filter(s => statusCounts[s]),
+    ];
+
     el.innerHTML = `
-      <div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-top:20px">
-        ${UI.STATUSES.filter(s => statusCounts[s]).map(s =>
-          `<div class="stat-card">${UI.statusBadge(s)} <span class="stat-value" style="font-size:20px;margin-left:8px">${statusCounts[s]}</span></div>`
-        ).join('')}
+      <div class="sfc-grid mt-6" id="sfcGrid">
+        ${_sfcCard(null, total, 'Tous', true)}
+        ${orderedStatuses.map(s => _sfcCard(s, statusCounts[s], s, false)).join('')}
       </div>
-      <div class="card mt-6">
-        <div class="card-title">Prospects de cette campagne</div>
+      <div class="card" id="campProspectsCard">
         <div class="table-wrap">
-        ${prospects.length === 0 ? UI.emptyState('Aucun prospect dans cette campagne') : `
-          <table><thead><tr><th>Nom</th><th>Entreprise</th><th>Poste</th><th>Statut</th><th>Dernier contact</th></tr></thead>
-          <tbody>${prospects.map(p => `<tr class="clickable" onclick="location.hash='#prospect-detail?id=${p.id}'">
-            <td><strong>${UI.esc(p.first_name)} ${UI.esc(p.last_name)}</strong></td>
-            <td>${UI.esc(p.company || '')}</td>
-            <td class="text-sm text-muted">${UI.esc(p.job_title || '')}</td>
-            <td>${UI.statusBadge(p.status)}</td>
-            <td class="text-muted text-sm">${UI.formatDate(p.updated_at)}</td>
-          </tr>`).join('')}</tbody></table>`}
+          ${_renderCampTable(prospects, null)}
         </div>
       </div>
     `;
+  }
+
+  function _sfcCard(status, count, label, active) {
+    const meta = status ? (UI.STATUS_COLORS[status] || { color: '#64748B', bg: '#F1F5F9' }) : { color: '#1E293B', bg: '#E2E8F0' };
+    const iconPath = UI.STATUS_ICONS[status || '_tous'] || '';
+    const activeStyle = active ? `style="background:${meta.bg};border-color:${meta.color}"` : '';
+    return `<div class="sfc${active ? ' sfc-active' : ''}" data-status="${UI.esc(status || '')}" data-color="${meta.color}" data-bg="${meta.bg}" onclick="App._filterCampByStatus(this)" ${activeStyle}>
+      <div class="sfc-icon-wrap" style="background:${meta.bg};color:${meta.color}">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${iconPath}</svg>
+      </div>
+      <div class="sfc-info">
+        <div class="sfc-count">${count}</div>
+        <div class="sfc-label">${UI.esc(label)}</div>
+      </div>
+    </div>`;
+  }
+
+  function _filterCampByStatus(el) {
+    const status = el.dataset.status || null;
+    const grid = document.getElementById('sfcGrid');
+    if (!grid) return;
+
+    const wasActive = el.classList.contains('sfc-active');
+
+    // Reset all cards
+    grid.querySelectorAll('.sfc').forEach(card => {
+      card.classList.remove('sfc-active');
+      card.style.background = '';
+      card.style.borderColor = '';
+    });
+
+    if (!wasActive) {
+      // Activate clicked card
+      el.classList.add('sfc-active');
+      el.style.background = el.dataset.bg;
+      el.style.borderColor = el.dataset.color;
+      _campActiveStatus = status;
+    } else {
+      // Re-click → back to "Tous"
+      const tousCard = grid.querySelector('[data-status=""]');
+      if (tousCard) {
+        tousCard.classList.add('sfc-active');
+        tousCard.style.background = tousCard.dataset.bg;
+        tousCard.style.borderColor = tousCard.dataset.color;
+      }
+      _campActiveStatus = null;
+    }
+
+    const campId = new URLSearchParams((location.hash.split('?')[1] || '')).get('id');
+    if (!campId || !_campDetailCache[campId]) return;
+    const card = document.getElementById('campProspectsCard');
+    if (!card) return;
+    card.querySelector('.table-wrap').innerHTML = _renderCampTable(_campDetailCache[campId].prospects, _campActiveStatus);
+  }
+
+  function _renderCampTable(prospects, statusFilter) {
+    const rows = statusFilter ? prospects.filter(p => p.status === statusFilter) : prospects;
+    if (rows.length === 0) return UI.emptyState(statusFilter ? `Aucun prospect avec le statut "${statusFilter}"` : 'Aucun prospect dans cette campagne');
+    return `<table><thead><tr><th>Nom</th><th>Entreprise</th><th>Poste</th><th>Statut</th><th>Dernier contact</th></tr></thead>
+      <tbody>${rows.map(p => `<tr class="clickable" onclick="location.hash='#prospect-detail?id=${p.id}'">
+        <td><strong>${UI.esc(p.first_name)} ${UI.esc(p.last_name)}</strong></td>
+        <td>${UI.esc(p.company || '')}</td>
+        <td class="text-sm text-muted">${UI.esc(p.job_title || '')}</td>
+        <td>${UI.statusBadge(p.status)}</td>
+        <td class="text-muted text-sm">${UI.formatDate(p.updated_at)}</td>
+      </tr>`).join('')}</tbody></table>`;
   }
 
   // Cache for tab data so we don't refetch when switching back
@@ -1710,6 +1855,7 @@ const App = (() => {
 
     const resp = await fetch(`/api/sequences?campaign_id=${campaignId}`);
     const sequence = await resp.json();
+    _seqCache = sequence; // Cache for instant step switching
 
     if (!sequence) {
       el.innerHTML = `
@@ -1775,21 +1921,18 @@ const App = (() => {
   // Determine step completion status for color coding
   function _getStepStatus(step) {
     if (step.type === 'send_invitation') {
-      // send_invitation is always complete once saved
-      return 'complete'; // green
+      return 'complete'; // green — invitation is always ready
     }
     if (step.type === 'send_message') {
-      // Check if message_content is set
-      const content = (step.message_content || '').trim();
-      if (step.message_content === null || step.message_content === undefined) {
-        return 'new'; // gray - never saved
+      // Check if message_params are configured (new system: params-based, no template)
+      const params = step.message_params || {};
+      const hasParams = params.angle || params.tone || params.objective;
+      if (!hasParams) {
+        return 'new'; // gray — never configured
       }
-      if (content === '') {
-        return 'incomplete'; // orange - saved but empty
-      }
-      return 'complete'; // green - has content
+      return 'complete'; // green — params saved
     }
-    return 'complete'; // default to green for other types
+    return 'complete';
   }
 
   function _delayHtml(days) {
@@ -1801,12 +1944,22 @@ const App = (() => {
     return `<div class="seq-delay-divider"${tooltip}><span class="seq-delay-line"></span><span class="seq-delay-text">${text}</span><span class="seq-delay-line"></span></div>`;
   }
 
+  let _seqCache = null; // Cache sequence data to avoid re-fetching on each step click
+
   function selectStep(stepId, campaignId) {
     _seqActiveStepId = stepId;
     document.querySelectorAll('.seq-step-card').forEach(c => c.classList.remove('seq-step-active'));
     document.querySelector(`.seq-step-card[data-step-id="${stepId}"]`)?.classList.add('seq-step-active');
-    // Fetch step data from current sequence
+
+    // Use cached sequence data if available (instant)
+    if (_seqCache) {
+      const step = (_seqCache.sequence_steps || []).find(s => s.id === stepId);
+      if (step) { renderStepConfig(step, _seqCache.id, campaignId); return; }
+    }
+
+    // Fallback: fetch from API
     fetch(`/api/sequences?campaign_id=${campaignId}`).then(r => r.json()).then(seq => {
+      _seqCache = seq;
       const step = (seq?.sequence_steps || []).find(s => s.id === stepId);
       if (step) renderStepConfig(step, seq.id, campaignId);
     });
@@ -1862,68 +2015,46 @@ const App = (() => {
       return;
     }
 
-    // send_message
-    const phGroups = {};
-    for (const ph of (_placeholdersCache || [])) {
-      if (!phGroups[ph.source]) phGroups[ph.source] = [];
-      phGroups[ph.source].push(ph);
-    }
-    const phBarHtml = Object.entries(phGroups).map(([src, phs]) =>
-      `<div class="ph-group"><span class="ph-group-label">${src}</span>${phs.map(p => `<button class="ph-btn" onclick="App._insertPlaceholder('{{${p.key}}}')" title="${UI.esc(p.description || p.label)}">${UI.esc(p.label)}</button>`).join('')}</div>`
-    ).join('');
-
+    // send_message — parameter-based config (Claude generates full message at execution)
     el.innerHTML = `
       <div class="seq-config-inner">
-        <h3>${meta.icon} ${UI.esc(step.message_label || 'Message')}</h3>
-        <div class="form-group"><label>Libellé de l'étape</label><input id="cfgLabel" value="${UI.esc(step.message_label || '')}" placeholder="Ex: Message 1 — Premier contact"></div>
-        <div class="form-group"><label>Délai (jours)</label><input type="number" id="cfgDelay" min="1" value="${step.delay_days}"><div class="text-sm text-muted" style="margin-top:4px">Minimum 1 jour</div></div>
+        <h3>${meta.icon} Message</h3>
+        <div class="form-group"><label>Délai (jours)</label><input type="number" id="cfgDelay" min="1" value="${step.delay_days}"><div class="text-sm text-muted" style="margin-top:4px">Délai après l'étape précédente. Minimum 1 jour.</div></div>
 
-        <div class="msg-zone-selector">
-          <label class="checkbox-inline" style="margin-bottom:12px">
-            <input type="radio" name="msgMode" value="manual" ${mode === 'manual' ? 'checked' : ''} onchange="App._switchMsgTab('manual')">
-            <span style="font-weight:500">Message manuel</span>
-          </label>
-          <label class="checkbox-inline">
-            <input type="radio" name="msgMode" value="claude" ${mode === 'ai_generated' ? 'checked' : ''} onchange="App._switchMsgTab('ai')">
-            <span style="font-weight:500">Message Claude</span>
-          </label>
-        </div>
+        <div style="padding:16px;background:var(--color-bg);border-radius:var(--radius);border:1px solid var(--color-border-light);margin-bottom:16px">
+          <div style="font-weight:600;margin-bottom:12px">Paramètres de génération Claude</div>
+          <div class="text-sm text-muted" style="margin-bottom:16px">Ces paramètres guident Claude pour générer un message personnalisé pour chaque prospect. Le message sera créé avec les données du prospect et son contexte LinkedIn (posts récents).</div>
 
-        <div id="msgTabManual" class="msg-zone ${mode === 'manual' ? 'msg-zone-active' : 'msg-zone-inactive'}" style="display:${mode === 'manual' ? 'block' : 'none'}">
-          <div class="msg-zone-badge">✓ Sera envoyé</div>
-          <div class="ph-bar">${phBarHtml}</div>
-          <div class="form-group">
-            <textarea id="stepContent" class="msg-textarea" placeholder="Votre message LinkedIn…" oninput="App._updateCharCount()">${UI.esc(step.message_content || '')}</textarea>
-            <div id="charCountContainer" class="char-counter"><span id="charCount">${(step.message_content || '').length}</span> caractères</div>
-          </div>
-        </div>
-
-        <div id="msgTabAI" class="msg-zone ${mode === 'ai_generated' ? 'msg-zone-active' : 'msg-zone-inactive'}" style="display:${mode === 'ai_generated' ? 'block' : 'none'}">
-          <div class="msg-zone-badge">✓ Sera envoyé</div>
           <div class="form-row">
-            <div class="form-group"><label>Angle</label><input id="aiAngle" value="${UI.esc(params.angle || '')}" placeholder="ex: pression réglementaire..."></div>
-            <div class="form-group"><label>Ton</label><input id="aiTone" value="${UI.esc(params.tone || '')}" placeholder="ex: chaleureux et direct..."></div>
-          </div>
-          <div class="form-row">
-            <div class="form-group"><label>Thématique</label><input id="aiObjective" value="${UI.esc(params.objective || '')}" placeholder="ex: Bilan carbone, RSE..."></div>
-            <div class="form-group"><label>Contexte (optionnel)</label><input id="aiContext" value="${UI.esc(params.context || '')}" placeholder="Précisions…"></div>
-          </div>
-          <div class="flex gap-2">
-            <button class="btn btn-outline btn-sm" id="btnGenerate" onclick="App._generateStepMessage('${sequenceId}')">✨ Générer avec Claude</button>
-            <button class="btn btn-ghost btn-sm" id="btnRegenerate" onclick="App._generateStepMessage('${sequenceId}')" style="display:none">↺ Régénérer</button>
-          </div>
-          <div class="text-sm text-muted" style="margin-top:6px">Claude utilisera automatiquement les placeholders de votre bibliothèque.</div>
-          <div id="aiResult" style="margin-top:12px;display:${step.message_content && mode === 'ai_generated' ? 'block' : 'none'}">
-            <div class="ph-bar" style="margin-bottom:12px">${phBarHtml}</div>
-            <div class="form-group">
-              <textarea id="aiResultContent" class="msg-textarea msg-textarea-large" oninput="App._updateCharCount()">${mode === 'ai_generated' ? UI.esc(step.message_content || '') : ''}</textarea>
-              <div id="charCountContainerAI" class="char-counter"><span id="charCountAI">${mode === 'ai_generated' ? (step.message_content || '').length : 0}</span> caractères</div>
+            <div class="form-group"><label>Angle</label>
+              <select id="aiAngle">
+                <option value="problème" ${(params.angle || '') === 'problème' ? 'selected' : ''}>Problème</option>
+                <option value="opportunité" ${params.angle === 'opportunité' ? 'selected' : ''}>Opportunité</option>
+                <option value="curiosité" ${params.angle === 'curiosité' ? 'selected' : ''}>Curiosité</option>
+              </select>
             </div>
+            <div class="form-group"><label>Ton</label><input id="aiTone" value="${UI.esc(params.tone || '')}" placeholder="ex: conversationnel, direct, chaleureux..."></div>
           </div>
+          <div class="form-row">
+            <div class="form-group"><label>Objectif du message</label><input id="aiObjective" value="${UI.esc(params.objective || '')}" placeholder="ex: Décrocher un call de 15 min"></div>
+            <div class="form-group"><label>Max caractères</label><input type="number" id="aiMaxChars" min="50" max="1000" value="${params.max_chars || 300}" placeholder="300"></div>
+          </div>
+          <div class="form-group"><label>Contexte / thématique</label><input id="aiContext" value="${UI.esc(params.context || '')}" placeholder="ex: Réglementation CSRD, bilan carbone BTP..."></div>
+          <div class="form-group"><label>Instructions libres (optionnel)</label><textarea id="aiInstructions" rows="3" placeholder="Instructions spécifiques pour Claude : points à mentionner, à éviter, structure souhaitée...">${UI.esc(params.instructions || '')}</textarea></div>
+        </div>
+
+        <div class="flex gap-2" style="margin-top:16px">
+          <button class="btn btn-primary" onclick="App._saveStepConfig('${sequenceId}','${step.id}')">Sauvegarder</button>
+          <button class="btn btn-outline btn-sm" id="btnGenerate" onclick="App._generateStepMessage('${sequenceId}')">✨ Prévisualiser un message</button>
+        </div>
+        <div class="text-sm text-muted" style="margin-top:8px">La prévisualisation génère un exemple de message avec des données fictives. Le vrai message sera généré par Dispatch avec les données réelles de chaque prospect.</div>
+
+        <div id="aiResult" style="margin-top:16px;display:none">
+          <div style="font-weight:600;margin-bottom:8px">Exemple de message généré</div>
+          <div id="aiResultContent" class="review-msg-preview" style="min-height:80px"></div>
         </div>
 
         <div style="margin-top:16px">
-          <button class="btn btn-primary" onclick="App._saveStepConfig('${sequenceId}','${step.id}')">Sauvegarder</button>
         </div>
       </div>`;
   }
@@ -2113,17 +2244,18 @@ const App = (() => {
 
   async function _generateStepMessage() {
     const btn = document.getElementById('btnGenerate');
-    const regenBtn = document.getElementById('btnRegenerate');
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ Génération…'; }
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Génération en cours...'; }
 
     let campaign = {};
     try { campaign = await DB.getCampaign(_currentCampaignId()); } catch(e) {}
 
     const message_params = {
-      angle: document.getElementById('aiAngle')?.value || '',
-      tone: document.getElementById('aiTone')?.value || '',
+      angle: document.getElementById('aiAngle')?.value || 'problème',
+      tone: document.getElementById('aiTone')?.value || 'conversationnel',
       objective: document.getElementById('aiObjective')?.value || '',
       context: document.getElementById('aiContext')?.value || '',
+      max_chars: parseInt(document.getElementById('aiMaxChars')?.value) || 300,
+      instructions: document.getElementById('aiInstructions')?.value || '',
     };
 
     try {
@@ -2134,33 +2266,26 @@ const App = (() => {
       const result = await resp.json();
       if (result.content) {
         document.getElementById('aiResult').style.display = 'block';
-        document.getElementById('aiResultContent').value = result.content;
-        if (regenBtn) regenBtn.style.display = '';
-
-        // Auto-switch to Claude tab
-        document.querySelector('input[name="msgMode"][value="claude"]').checked = true;
-        App._switchMsgTab('ai');
-        UI.toast('Message Claude sélectionné');
-
-        _updateCharCount();
+        document.getElementById('aiResultContent').textContent = result.content;
+        UI.toast('Exemple de message généré');
       } else {
-        UI.toast(result.error || 'Erreur de génération');
+        UI.toast(result.error || 'Erreur de génération', 'error');
       }
     } catch(e) {
-      UI.toast('Erreur réseau');
+      UI.toast('Erreur réseau', 'error');
     }
-    if (btn) { btn.disabled = false; btn.textContent = '✨ Générer avec Claude'; }
+    if (btn) { btn.disabled = false; btn.textContent = '✨ Prévisualiser un message'; }
   }
 
   async function _saveStepConfig(sequenceId, stepId) {
     const delay_days = parseInt(document.getElementById('cfgDelay')?.value) || 0;
-    const label = document.getElementById('cfgLabel')?.value || '';
 
-    const body = { delay_days, message_label: label };
+    const body = { delay_days };
 
     // Check if this is a send_invitation step (has note panel)
     const hasNoteCheckbox = document.getElementById('cfgHasNote');
     if (hasNoteCheckbox) {
+      body.message_label = document.getElementById('cfgLabel')?.value || 'Invitation LinkedIn';
       body.has_note = hasNoteCheckbox.checked;
       if (hasNoteCheckbox.checked) {
         const noteContent = document.getElementById('cfgNoteContent')?.value || '';
@@ -2174,23 +2299,18 @@ const App = (() => {
       }
     }
 
-    // Determine if this is a message step
-    const manualTab = document.getElementById('msgTabManual');
-    if (manualTab) {
-      const isAI = document.getElementById('msgTabAI')?.style.display !== 'none';
-      if (isAI) {
-        body.message_mode = 'ai_generated';
-        body.message_content = document.getElementById('aiResultContent')?.value || '';
-        body.message_params = {
-          angle: document.getElementById('aiAngle')?.value || '',
-          tone: document.getElementById('aiTone')?.value || '',
-          objective: document.getElementById('aiObjective')?.value || '',
-          context: document.getElementById('aiContext')?.value || '',
-        };
-      } else {
-        body.message_mode = 'manual';
-        body.message_content = document.getElementById('stepContent')?.value || '';
-      }
+    // Message step — save params (Claude generates full message at execution)
+    const angleEl = document.getElementById('aiAngle');
+    if (angleEl) {
+      body.message_mode = 'ai_generated';
+      body.message_params = {
+        angle: angleEl.value || 'problème',
+        tone: document.getElementById('aiTone')?.value || 'conversationnel',
+        objective: document.getElementById('aiObjective')?.value || '',
+        context: document.getElementById('aiContext')?.value || '',
+        max_chars: parseInt(document.getElementById('aiMaxChars')?.value) || 300,
+        instructions: document.getElementById('aiInstructions')?.value || '',
+      };
 
       if (delay_days < 1) {
         UI.toast('Délai minimum 1 jour pour un message');
@@ -2211,6 +2331,7 @@ const App = (() => {
     }
 
     UI.toast('Étape sauvegardée');
+    _seqCache = null; // Invalidate cache
     renderSequenceTab(_currentCampaignId());
   }
 
@@ -2228,7 +2349,10 @@ const App = (() => {
     el.innerHTML = `
       <div class="seq-split mt-6">
         <div class="seq-left">
-          <input class="input" id="reviewSearch" placeholder="Rechercher…" oninput="App._filterReviewList()" style="margin-bottom:10px">
+          <div class="search-wrap" style="margin-bottom:10px">
+            <svg class="search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8.5" cy="8.5" r="5.5"/><line x1="13.5" y1="13.5" x2="18" y2="18"/></svg>
+            <input id="reviewSearch" placeholder="Rechercher…" oninput="App._filterReviewList()">
+          </div>
           <div id="reviewList" class="review-prospect-list">
             ${prospects.map((p, i) => `<div class="review-prospect-item ${i === 0 ? 'review-active' : ''}" data-id="${p.id}" onclick="App._selectReviewProspect('${p.id}', '${campaignId}')">
               <strong>${UI.esc(p.first_name)} ${UI.esc(p.last_name)}</strong>
@@ -2302,6 +2426,14 @@ const App = (() => {
       return '🔒';
     }
 
+    // Fetch prospect's pending_message and status
+    const paResp = await fetch(`/api/prospector/prospects?campaign_id=${campaignId}`);
+    const allProspects = await paResp.json();
+    const prospectData = allProspects.find(p => p.id === prospectId) || {};
+    const prospectStatus = prospectData.status || '';
+    const pendingMsg = prospectData.pending_message || '';
+    const isEditable = ['Message à valider', 'Message à envoyer'].includes(prospectStatus);
+
     panel.innerHTML = `
       <div class="seq-config-inner">
         <h3>Prévisualisation pour ${UI.esc(name)}</h3>
@@ -2313,10 +2445,141 @@ const App = (() => {
           const icon = _stepIcon(stepOrder, seqState);
           const cls = _stepStateCls(stepOrder, seqState);
           const delayHtml = i > 0 ? `<div class="review-delay">${s.delay_days === 0 ? 'Immédiatement' : `Attendre ${s.delay_days} jour${s.delay_days > 1 ? 's' : ''}`}</div>` : '';
-          const previewHtml = s.message_preview ? `<div class="review-msg-preview">${UI.esc(s.message_preview).replace(/⚠️\{\{(\w+)\}\}/g, '<span class="ph-missing">{{$1}}</span>')}</div>` : '';
-          return `${delayHtml}<div class="review-step ${cls}"><div class="review-step-header">${icon} Étape ${stepOrder} — ${UI.esc(label)}</div>${previewHtml}</div>`;
+
+          let contentHtml = '';
+          if (s.type === 'send_message') {
+            if (pendingMsg && stepOrder === (seqState?.current_step_order || 0)) {
+              // Message already generated — show it with edit/regen options
+              contentHtml = `
+                <div class="review-msg-preview" id="reviewMsgPreview">${UI.esc(pendingMsg)}</div>
+                ${isEditable ? `
+                  <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+                    <button class="btn btn-outline btn-sm" onclick="App._editReviewMessage('${prospectId}')">Modifier</button>
+                    <button class="btn btn-outline btn-sm" id="btnReviewRegen" onclick="App._regenReviewMessage('${prospectId}', '${campaignId}')">Regénérer</button>
+                  </div>
+                  <div id="reviewEditPanel" style="display:none;margin-top:10px">
+                    <textarea id="reviewEditText" class="msg-textarea" rows="5">${UI.esc(pendingMsg)}</textarea>
+                    <div style="display:flex;gap:8px;margin-top:8px">
+                      <button class="btn btn-primary btn-sm" onclick="App._saveReviewMessage('${prospectId}', '${campaignId}')">Enregistrer</button>
+                      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('reviewEditPanel').style.display='none'">Annuler</button>
+                    </div>
+                  </div>
+                  <div id="reviewRegenPanel" style="display:none;margin-top:10px">
+                    <textarea id="reviewRegenInstructions" class="msg-textarea" rows="2" placeholder="Instructions pour Claude (ex: ton plus direct, mentionner la CSRD...)"></textarea>
+                    <div style="display:flex;gap:8px;margin-top:8px">
+                      <button class="btn btn-primary btn-sm" id="btnRegenConfirm" onclick="App._confirmRegenReview('${prospectId}', '${campaignId}')">Regénérer</button>
+                      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('reviewRegenPanel').style.display='none'">Annuler</button>
+                    </div>
+                  </div>
+                ` : ''}`;
+            } else if (s.message_preview) {
+              contentHtml = `<div class="review-msg-preview">${UI.esc(s.message_preview).replace(/⚠️\{\{(\w+)\}\}/g, '<span class="ph-missing">{{$1}}</span>')}</div>`;
+            } else {
+              const params = s.message_params || {};
+              contentHtml = `<div class="review-msg-preview" style="color:var(--color-text-muted);font-style:italic">
+                Le message sera généré par Claude au moment de l'exécution.<br>
+                Paramètres : ${params.angle || 'problème'} / ${params.tone || 'conversationnel'}${params.max_chars ? ' / max ' + params.max_chars + ' car.' : ''}
+              </div>`;
+            }
+          } else if (s.type === 'send_invitation') {
+            if (s.has_note && s.note_content) {
+              contentHtml = `<div class="review-msg-preview">${UI.esc(s.note_content)}</div>`;
+            }
+          }
+
+          return `${delayHtml}<div class="review-step ${cls}"><div class="review-step-header">${icon} Etape ${stepOrder} — ${UI.esc(label)}</div>${contentHtml}</div>`;
         }).join('')}
       </div>`;
+  }
+
+  function _editReviewMessage(prospectId) {
+    document.getElementById('reviewEditPanel').style.display = 'block';
+    document.getElementById('reviewRegenPanel').style.display = 'none';
+  }
+
+  function _regenReviewMessage(prospectId, campaignId) {
+    document.getElementById('reviewRegenPanel').style.display = 'block';
+    document.getElementById('reviewEditPanel').style.display = 'none';
+  }
+
+  async function _saveReviewMessage(prospectId, campaignId) {
+    const text = document.getElementById('reviewEditText')?.value || '';
+    try {
+      await fetch('/api/prospector/update-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prospect_id: prospectId, status: 'Message à valider', pending_message: text })
+      });
+      UI.toast('Message modifié');
+      _selectReviewProspect(prospectId, campaignId);
+    } catch (err) {
+      UI.toast('Erreur: ' + err.message, 'error');
+    }
+  }
+
+  async function _confirmRegenReview(prospectId, campaignId) {
+    const btn = document.getElementById('btnRegenConfirm');
+    if (btn) { btn.disabled = true; btn.textContent = 'Génération...'; }
+
+    const instructions = document.getElementById('reviewRegenInstructions')?.value || '';
+
+    // Get the sequence step params for this campaign
+    let stepParams = {};
+    try {
+      const seqResp = await fetch(`/api/sequences?campaign_id=${campaignId}`);
+      const seq = await seqResp.json();
+      if (seq) {
+        const msgStep = (seq.sequence_steps || []).find(s => s.type === 'send_message');
+        if (msgStep) stepParams = msgStep.message_params || {};
+      }
+    } catch(e) {}
+
+    // Get prospect data
+    let prospect = {};
+    try {
+      const pResp = await fetch(`/api/prospector/prospects?campaign_id=${campaignId}`);
+      const all = await pResp.json();
+      prospect = all.find(p => p.id === prospectId) || {};
+    } catch(e) {}
+
+    // Get icebreaker
+    let icebreaker = null;
+    try {
+      const actResp = await APIClient.get(`/api/prospects/${prospectId}/linkedin-activity`);
+      const act = await actResp.json();
+      if (act?.icebreaker_generated) icebreaker = act.icebreaker_generated;
+    } catch(e) {}
+
+    // Get campaign
+    let campaign = {};
+    try { campaign = await DB.getCampaign(campaignId); } catch(e) {}
+
+    try {
+      const resp = await APIClient.post('/api/sequences/generate-message', {
+        campaign,
+        message_params: stepParams,
+        prospect: { first_name: prospect.first_name, last_name: prospect.last_name, job_title: prospect.job_title, company: prospect.company },
+        icebreaker,
+        regen_instructions: instructions,
+      });
+      const result = await resp.json();
+
+      if (result.content) {
+        // Save as pending message
+        await fetch('/api/prospector/update-status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prospect_id: prospectId, status: 'Message à valider', pending_message: result.content })
+        });
+        UI.toast('Message regénéré');
+        _selectReviewProspect(prospectId, campaignId);
+      } else {
+        UI.toast(result.error || 'Erreur', 'error');
+      }
+    } catch (err) {
+      UI.toast('Erreur: ' + err.message, 'error');
+    }
+    if (btn) { btn.disabled = false; btn.textContent = 'Regénérer'; }
   }
 
   function _filterReviewList() {
@@ -2710,8 +2973,9 @@ const App = (() => {
     addStep, deleteStep, selectStep, _switchMsgTab,
     _updateCharCount, _generateStepMessage, _saveStepConfig, _insertPlaceholder,
     _toggleInvitationNote, _updateNoteCharCount,
-    _selectReviewProspect, _filterReviewList,
+    _selectReviewProspect, _filterReviewList, _editReviewMessage, _regenReviewMessage, _saveReviewMessage, _confirmRegenReview,
     enrollProspect, enrollCampaign,
     openAddPlaceholder, savePlaceholder, deletePlaceholder,
+    _filterCampByStatus,
   };
 })();

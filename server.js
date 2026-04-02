@@ -3601,16 +3601,26 @@ app.get('/api/prospector/campaigns', accountContext, async (req, res) => {
     const { data: campaigns, error } = await q;
     if (error) throw error;
 
-    // Attach prospect counts
-    const result = [];
-    for (const c of campaigns) {
-      const { count } = await supabaseAdmin
+    // Attach prospect counts + status breakdown in one query
+    const campIds = campaigns.map(c => c.id);
+    let statusMap = {};
+    if (campIds.length > 0) {
+      const { data: rows } = await supabaseAdmin
         .from('prospect_account')
-        .select('id', { count: 'exact', head: true })
-        .eq('campaign_id', c.id)
-        .eq('account_id', req.accountId);
-      result.push({ ...c, prospects_count: count || 0 });
+        .select('campaign_id, status')
+        .eq('account_id', req.accountId)
+        .in('campaign_id', campIds);
+      for (const r of (rows || [])) {
+        if (!statusMap[r.campaign_id]) statusMap[r.campaign_id] = {};
+        statusMap[r.campaign_id][r.status] = (statusMap[r.campaign_id][r.status] || 0) + 1;
+      }
     }
+
+    const result = campaigns.map(c => {
+      const sc = statusMap[c.id] || {};
+      const total = Object.values(sc).reduce((a, v) => a + v, 0);
+      return { ...c, prospects_count: total, status_counts: sc };
+    });
 
     res.json(result);
   } catch (err) {
@@ -4831,7 +4841,8 @@ app.post('/api/sequences/:sid/steps/reorder', accountContext, async (req, res) =
   }
 });
 
-// POST /api/sequences/generate-message — Generate message via Claude API with placeholders
+// POST /api/sequences/generate-message — Generate full personalized message via Claude API
+// Used for: (1) preview in sequence editor (with fake data), (2) Dispatch execution (with real data)
 app.post('/api/sequences/generate-message', accountContext, async (req, res) => {
   try {
     const ip = req.ip || req.connection.remoteAddress;
@@ -4840,43 +4851,41 @@ app.post('/api/sequences/generate-message', accountContext, async (req, res) => 
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY non configurée' });
 
-    const { campaign, message_params } = req.body;
+    const { campaign, message_params, prospect, icebreaker, regen_instructions } = req.body;
     if (!message_params) return res.status(400).json({ error: 'message_params required' });
 
-    // Fetch placeholders for prompt
-    const { data: placeholders } = await supabaseAdmin.from('placeholders').select('key, label, description').order('source');
-    const placeholderList = (placeholders || []).map(p => `{{${p.key}}} → ${p.label}${p.description ? ` (${p.description})` : ''}`).join('\n');
+    const maxChars = message_params.max_chars || 300;
 
-    const systemPrompt = `Tu es un expert en prospection LinkedIn pour Releaf Carbon, une entreprise qui accompagne les entreprises du BTP et de l'industrie sur les sujets RSE et carbone.
+    // Build prospect context (real data from Dispatch, or fake data for preview)
+    const prospectInfo = prospect
+      ? `Prospect : ${prospect.first_name} ${prospect.last_name}, ${prospect.job_title || 'poste inconnu'} chez ${prospect.company || 'entreprise inconnue'}`
+      : `Prospect : [Prénom] [Nom], [Poste] chez [Entreprise] (données fictives pour prévisualisation)`;
 
-PLACEHOLDERS DISPONIBLES — utilise-les dans le message au lieu des vraies valeurs :
-${placeholderList}
+    const icebreakerInfo = icebreaker
+      ? `Icebreaker disponible (phrase d'accroche personnalisée basée sur l'activité LinkedIn) : "${icebreaker}"\nIntègre cet icebreaker naturellement dans le message.`
+      : 'Pas d\'icebreaker disponible. Utilise une accroche générique liée au secteur/poste du prospect.';
 
-Règles ABSOLUES de rédaction :
-- Vouvoiement obligatoire (vous, votre, vos)
-- Pas de ligne vide entre les paragraphes — tout est collé
-- La phrase après "Bonjour {{prospect_first_name}}," commence par une minuscule
-- Jamais de pitch commercial, jamais de mention de Releaf Carbon
-- Ton selon les paramètres fournis
-- CTA : 5 à 8 mots maximum, une question directe
-- Maximum 5 lignes au total`;
+    const systemPrompt = `Tu es un expert en prospection LinkedIn. Tu génères un message de prospection personnalisé.
 
-    const userPrompt = `Rédige un message LinkedIn de prospection.
+${prospectInfo}
+Campagne : secteur ${campaign?.sector || campaign?.criteria?.sector || 'non défini'}, zone ${campaign?.geography || campaign?.criteria?.geography || 'non définie'}
+${icebreakerInfo}
 
-Paramètres :
+Contraintes :
+- Maximum ${maxChars} caractères
 - Angle : ${message_params.angle || 'problème'}
 - Ton : ${message_params.tone || 'conversationnel'}
-- Thématique : ${message_params.objective || ''}
-${message_params.context ? `- Contexte : ${message_params.context}` : ''}
-- Secteur de la campagne : ${campaign?.criteria?.sector || campaign?.sector || ''}
-- Zone géographique : ${campaign?.criteria?.geography || campaign?.geography || ''}
+${message_params.objective ? `- Objectif : ${message_params.objective}` : ''}
+${message_params.context ? `- Contexte/thématique : ${message_params.context}` : ''}
+${message_params.instructions ? `- Instructions spécifiques : ${message_params.instructions}` : ''}
+${regen_instructions ? `- Feedback utilisateur (à intégrer pour cette regénération) : ${regen_instructions}` : ''}
 
-Commence par "Bonjour {{prospect_first_name}}," et utilise les placeholders disponibles.`;
+Retourne UNIQUEMENT le message, rien d'autre. Pas de guillemets autour, pas d'explication.`;
 
     const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 300, system: systemPrompt, messages: [{ role: 'user', content: userPrompt }] }),
+      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: Math.min(1024, Math.ceil(maxChars / 2)), system: systemPrompt, messages: [{ role: 'user', content: 'Génère le message.' }] }),
     });
 
     if (!claudeResp.ok) {
@@ -4886,8 +4895,8 @@ Commence par "Bonjour {{prospect_first_name}}," et utilise les placeholders disp
     }
 
     const claudeData = await claudeResp.json();
-    const text = claudeData.content?.[0]?.text || '';
-    res.json({ content: text });
+    const text = (claudeData.content?.[0]?.text || '').trim();
+    res.json({ content: text, char_count: text.length });
   } catch (err) {
     console.error('Erreur POST /api/sequences/generate-message:', err.message);
     res.status(500).json({ error: err.message });
