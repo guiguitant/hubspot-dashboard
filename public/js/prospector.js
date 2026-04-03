@@ -680,7 +680,7 @@ const App = (() => {
     const tbody = prospects.length === 0
       ? `<tr><td colspan="8">${UI.emptyState('Aucun prospect trouvé')}</td></tr>`
       : prospects.map(p => {
-          const campName = p.campaigns?.name || 'Non défini';
+          const campName = p.campaign_name || 'Non défini';
           const isAValider = p.status === 'Profil à valider';
           const checked = _selectedProspects.has(p.id) ? 'checked' : '';
           const href = `#prospect-detail?id=${p.id}`;
@@ -766,15 +766,24 @@ const App = (() => {
       DB.getCampaigns(),
     ]);
 
+    // Enrich prospect with campaign info from prospect_account (source of truth)
+    const allProspects = await DB.getProspects();
+    const paData = allProspects.find(p => p.id === id);
+    if (paData) {
+      prospect.campaign_id = paData.campaign_id;
+      prospect.campaign_name = paData.campaign_name;
+      prospect.status = paData.status;
+    }
+
     // Fetch sequence preview if prospect has a campaign
-    const seqResp = prospect.source_campaign_id
-      ? await APIClient.get(`/api/sequences/preview?campaign_id=${prospect.source_campaign_id}&prospect_id=${id}`).catch(() => null)
+    const seqResp = prospect.campaign_id
+      ? await APIClient.get(`/api/sequences/preview?campaign_id=${prospect.campaign_id}&prospect_id=${id}`).catch(() => null)
       : null;
 
     // Check duplicates
     const dupes = await DB.checkDuplicates(prospect, id);
 
-    const campName = prospect.campaigns?.name || '—';
+    const campName = prospect.campaign_name || '—';
 
     container.innerHTML = `
       ${dupes.length > 0 ? `<div class="duplicate-banner">⚠️ Doublon potentiel détecté — ${dupes.map(d =>
@@ -1661,7 +1670,7 @@ const App = (() => {
 
     const [campaign, prospects] = await Promise.all([
       DB.getCampaign(id),
-      DB.getCampaignProspects(id),
+      DB.getProspects({ campaign_id: id }),
     ]);
 
     const criteria = campaign.criteria || {};
@@ -2199,7 +2208,7 @@ const App = (() => {
 
   async function addStep(sequenceId, type) {
     const body = { type, delay_days: type === 'send_message' ? 1 : 0 };
-    if (type === 'send_message') { body.message_mode = 'manual'; body.message_label = ''; }
+    if (type === 'send_message') { body.message_mode = null; body.message_label = ''; }
     const resp = await fetch(`/api/sequences/${sequenceId}/steps`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const result = await resp.json();
     if (resp.ok) {
@@ -2380,7 +2389,7 @@ const App = (() => {
     if (!el) return;
     el.innerHTML = UI.loader();
 
-    const prospects = await DB.getCampaignProspects(campaignId);
+    const prospects = await DB.getProspects({ campaign_id: campaignId });
 
     el.innerHTML = `
       <div class="seq-split mt-6">

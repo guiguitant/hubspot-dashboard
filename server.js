@@ -3641,7 +3641,8 @@ app.get('/api/prospector/prospects', accountContext, async (req, res) => {
         notes,
         last_contacted_at,
         added_at,
-        prospects!inner(id, first_name, last_name, linkedin_url, company, job_title, email, phone, sector, geography, created_at, updated_at)
+        prospects!inner(id, first_name, last_name, linkedin_url, company, job_title, email, phone, sector, geography, created_at, updated_at),
+        campaigns(id, name)
       `)
       .eq('account_id', req.accountId)
       .order('added_at', { ascending: false });
@@ -3658,6 +3659,7 @@ app.get('/api/prospector/prospects', accountContext, async (req, res) => {
       prospect_account_id: pa.id,
       status: pa.status,
       campaign_id: pa.campaign_id,
+      campaign_name: pa.campaigns?.name || null,
       notes: pa.notes,
       last_contacted_at: pa.last_contacted_at,
       added_at: pa.added_at
