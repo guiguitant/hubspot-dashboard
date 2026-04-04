@@ -3641,7 +3641,7 @@ app.get('/api/prospector/prospects', accountContext, async (req, res) => {
         notes,
         last_contacted_at,
         added_at,
-        prospects!inner(id, first_name, last_name, linkedin_url, company, job_title, email, phone, sector, geography, created_at, updated_at),
+        prospects!inner(id, first_name, last_name, linkedin_url, company, job_title, email, phone, sector, geography, pending_message, message_versions, created_at, updated_at),
         campaigns(id, name)
       `)
       .eq('account_id', req.accountId)

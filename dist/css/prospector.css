@@ -790,6 +790,25 @@ tbody td { padding: 14px 16px; font-size: var(--font-base); vertical-align: midd
   box-shadow: 0 0 0 3px rgba(45,106,79,0.08);
 }
 .form-group textarea { resize: vertical; min-height: 120px; line-height: 1.5; }
+textarea.msg-textarea {
+  width: 100%;
+  font-family: inherit;
+  font-size: var(--font-sm);
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  resize: vertical;
+  min-height: 80px;
+  line-height: 1.5;
+  box-sizing: border-box;
+}
+textarea.msg-textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(45,106,79,0.08);
+}
 .form-group textarea.msg-textarea { min-height: 120px; }
 .form-group textarea.msg-textarea-large { min-height: 280px; }
 .form-group textarea.msg-textarea-error { border-color: #EF4444; border-width: 2px; }
@@ -980,13 +999,43 @@ tbody td { padding: 14px 16px; font-size: var(--font-base); vertical-align: midd
 .msg-zone-badge { position: absolute; top: 8px; right: 12px; background: var(--color-success); color: #fff; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: var(--radius-sm); }
 
 /* ---- Review tab ---- */
-.review-prospect-list { max-height: 450px; overflow-y: auto; }
+.review-progress-card {
+  background: var(--color-surface); border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg); padding: 16px 20px; margin-bottom: 16px;
+}
+.review-progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: var(--font-sm); font-weight: 600; }
+.review-progress-bar { height: 6px; background: var(--color-border-light); border-radius: 3px; overflow: hidden; }
+.review-progress-fill { height: 100%; background: var(--color-primary); border-radius: 3px; transition: width 0.3s; }
+
+.review-section-label {
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+  color: #D97706; padding: 10px 14px 4px; border-top: 1px solid var(--color-border-light);
+}
+.review-section-label:first-child { border-top: none; }
+.review-section-label.review-section-done { color: var(--color-primary); }
+
+.review-prospect-list { max-height: 500px; overflow-y: auto; }
 .review-prospect-item {
   padding: 10px 14px; border-radius: var(--radius); cursor: pointer;
-  display: flex; flex-direction: column; gap: 2px; transition: all .15s;
+  transition: all .15s;
 }
+.review-item-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.review-item-row > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.review-item-row > div > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.review-dot-orange { background: #F59E0B; }
+.review-dot-green { background: #22C55E; }
+.review-empty { padding: 30px 20px; text-align: center; color: var(--color-text-muted); font-size: var(--font-sm); }
+
 .review-prospect-item:hover { background: var(--color-bg); }
 .review-prospect-item.review-active { background: var(--color-primary-light); }
+
+.tab-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 6px;
+  background: #F59E0B; color: #fff; font-size: 11px; font-weight: 700;
+  border-radius: 10px; margin-left: 6px;
+}
 .review-delay { font-size: 12px; color: var(--color-text-muted); padding: 8px 0; text-align: center; }
 .review-step { margin-bottom: 12px; }
 .review-step-header { font-weight: 600; font-size: var(--font-sm); margin-bottom: 6px; }
@@ -1359,7 +1408,7 @@ select:focus {
   padding-bottom: 4px;
 }
 .sfc-grid > .sfc {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
 }
 
 .sfc {

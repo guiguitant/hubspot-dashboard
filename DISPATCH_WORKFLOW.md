@@ -259,7 +259,7 @@ for (const prospect of invitedProspects) {
     });
     await fetch('/api/sequences/stop', {
       method: 'POST', headers,
-      body: JSON.stringify({ prospect_id: prospect.id })
+      body: JSON.stringify({ prospect_id: prospect.id, reason: 'manual' })
     });
   }
 }
@@ -290,8 +290,9 @@ Pour chaque match (prospect présent dans `window._linkedinConnections`) :
      });
      ```
 
-3. **Générer le message complet via Claude API** :
+3. **Générer le message complet via Claude API** (seulement si `step.message_params` est renseigné) :
    - Le champ `step.message_params` (JSONB) contient : `{ angle, tone, objective, context, max_chars, instructions }`
+   - Si `message_params` est vide/null → **skip ce prospect**, loguer dans `_errors` ("Étape message non configurée")
    - Appeler `POST /api/sequences/generate-message` avec : `{ campaign, message_params: step.message_params, prospect, icebreaker }`
 
 4. **Soumettre à validation** :
@@ -318,6 +319,13 @@ const followupActions = dueActions.filter(a =>
 );
 
 for (const action of followupActions) {
+  // Skip si l'étape n'a pas de message_params (non configurée)
+  const mp = action.step.message_params;
+  if (!mp || (!mp.angle && !mp.tone && !mp.objective)) {
+    _errors.push({ step: '4c', prospect_id: action.prospect_id, message: 'Étape message non configurée (message_params vide)' });
+    continue;
+  }
+
   // Récupérer les données du prospect
   const prospResp = await fetch(`/api/prospector/prospects/${action.prospect_id}`, { headers });
   const prospect = await prospResp.json();

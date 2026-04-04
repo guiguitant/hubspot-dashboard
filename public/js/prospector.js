@@ -347,8 +347,10 @@ const App = (() => {
         ${UI.STATUSES.map(s => {
           const LABELS = {
             'Profil à valider':    'À valider',
-            'Message à valider':   'À valider',
-            'Message à envoyer':   'À envoyer',
+            'Invitation envoyée':  'Envoyée',
+            'Message à valider':   'Msg à valider',
+            'Message à envoyer':   'Msg à envoyer',
+            'Message envoyé':      'Msg envoyé',
             'Discussion en cours': 'En cours',
           };
           const label = LABELS[s] || s;
@@ -786,6 +788,8 @@ const App = (() => {
     const campName = prospect.campaign_name || '—';
 
     container.innerHTML = `
+      <a class="inline-link camp-back" href="javascript:history.back()">← Retour</a>
+
       ${dupes.length > 0 ? `<div class="duplicate-banner">⚠️ Doublon potentiel détecté — ${dupes.map(d =>
         `<a class="inline-link" href="#prospect-detail?id=${d.id}">${UI.esc(d.first_name)} ${UI.esc(d.last_name)}</a>`).join(', ')}</div>` : ''}
 
@@ -1753,7 +1757,7 @@ const App = (() => {
       <div class="tab-bar mt-6">
         <button class="tab-btn tab-active" data-tab="prospects" onclick="App.switchCampaignTab(this, 'prospects', '${id}')">Prospects</button>
         <button class="tab-btn" data-tab="sequence" onclick="App.switchCampaignTab(this, 'sequence', '${id}')">Séquence</button>
-        <button class="tab-btn" data-tab="review" onclick="App.switchCampaignTab(this, 'review', '${id}')">Review</button>
+        <button class="tab-btn" data-tab="review" onclick="App.switchCampaignTab(this, 'review', '${id}')" id="tabBtnReview">Review</button>
       </div>
       <div id="campaignTabContent"></div>
     `;
@@ -1770,16 +1774,26 @@ const App = (() => {
     if (!el) return;
 
     const total = prospects.length;
-    // Show all main statuses (even 0) + hidden only if they have prospects
+
+    const SFC_LABELS = {
+      'Profil à valider':    'À valider',
+      'Invitation envoyée':  'Envoyée',
+      'Message à valider':   'Msg à valider',
+      'Message à envoyer':   'Msg à envoyer',
+      'Message envoyé':      'Msg envoyé',
+      'Discussion en cours': 'En cours',
+    };
+
+    // Show main statuses + hidden only if they have prospects (exclude Non pertinent by default)
     const orderedStatuses = [
       ...UI.STATUSES,
-      ...['Invitation acceptée', 'Non pertinent', 'Profil restreint'].filter(s => statusCounts[s]),
+      ...['Invitation acceptée', 'Profil restreint'].filter(s => statusCounts[s]),
     ];
 
     el.innerHTML = `
       <div class="sfc-grid mt-6" id="sfcGrid">
         ${_sfcCard(null, total, 'Tous', true)}
-        ${orderedStatuses.map(s => _sfcCard(s, statusCounts[s], s, false)).join('')}
+        ${orderedStatuses.map(s => _sfcCard(s, statusCounts[s], SFC_LABELS[s] || s, false)).join('')}
       </div>
       <div class="card" id="campProspectsCard">
         <div class="table-wrap">
@@ -2389,27 +2403,71 @@ const App = (() => {
     if (!el) return;
     el.innerHTML = UI.loader();
 
-    const prospects = await DB.getProspects({ campaign_id: campaignId });
+    const allProspects = await DB.getProspects({ campaign_id: campaignId });
+
+    // Split into actionable groups
+    const toReview = allProspects.filter(p => p.status === 'Message à valider');
+    const reviewed = allProspects.filter(p => p.status === 'Message à envoyer');
+    const totalActionable = toReview.length + reviewed.length;
+
+    // Update badge on Review tab
+    const tabBtn = document.getElementById('tabBtnReview');
+    if (tabBtn) {
+      tabBtn.innerHTML = toReview.length > 0
+        ? `Review <span class="tab-badge">${toReview.length}</span>`
+        : 'Review';
+    }
+
+    // Progress bar
+    const progressPct = totalActionable > 0 ? Math.round((reviewed.length / totalActionable) * 100) : 100;
+
+    // Render prospect item helper
+    function _reviewItem(p, type) {
+      const dotCls = type === 'to-review' ? 'review-dot-orange' : 'review-dot-green';
+      return `<div class="review-prospect-item" data-id="${p.id}" data-type="${type}" onclick="App._selectReviewProspect('${p.id}', '${campaignId}')">
+        <div class="review-item-row">
+          <div>
+            <strong>${UI.esc(p.first_name)} ${UI.esc(p.last_name)}</strong>
+            <span class="text-sm text-muted">${UI.esc(p.company || '')}</span>
+          </div>
+          <span class="review-dot ${dotCls}"></span>
+        </div>
+      </div>`;
+    }
+
+    const hasWork = totalActionable > 0;
+    const firstProspect = toReview[0] || reviewed[0];
 
     el.innerHTML = `
-      <div class="seq-split mt-6">
+      ${hasWork ? `<div class="review-progress-card mt-6">
+        <div class="review-progress-header">
+          <span>${toReview.length} message${toReview.length !== 1 ? 's' : ''} à valider</span>
+          <span class="text-sm text-muted">${reviewed.length}/${totalActionable} validé${reviewed.length !== 1 ? 's' : ''}</span>
+        </div>
+        <div class="review-progress-bar"><div class="review-progress-fill" style="width:${progressPct}%"></div></div>
+      </div>` : ''}
+      <div class="seq-split${hasWork ? '' : ' mt-6'}">
         <div class="seq-left">
           <div class="search-wrap" style="margin-bottom:10px">
             <svg class="search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8.5" cy="8.5" r="5.5"/><line x1="13.5" y1="13.5" x2="18" y2="18"/></svg>
             <input id="reviewSearch" placeholder="Rechercher…" oninput="App._filterReviewList()">
           </div>
           <div id="reviewList" class="review-prospect-list">
-            ${prospects.map((p, i) => `<div class="review-prospect-item ${i === 0 ? 'review-active' : ''}" data-id="${p.id}" onclick="App._selectReviewProspect('${p.id}', '${campaignId}')">
-              <strong>${UI.esc(p.first_name)} ${UI.esc(p.last_name)}</strong>
-              <span class="text-sm text-muted">${UI.esc(p.company || '')}</span>
-            </div>`).join('')}
-            ${prospects.length === 0 ? '<div class="text-sm text-muted" style="padding:20px;text-align:center">Aucun prospect</div>' : ''}
+            ${toReview.length > 0 ? `
+              <div class="review-section-label">À valider</div>
+              ${toReview.map(p => _reviewItem(p, 'to-review')).join('')}
+            ` : ''}
+            ${reviewed.length > 0 ? `
+              <div class="review-section-label review-section-done">Validés — en attente d'envoi</div>
+              ${reviewed.map(p => _reviewItem(p, 'reviewed')).join('')}
+            ` : ''}
+            ${totalActionable === 0 ? '<div class="review-empty">Aucun message en attente de validation</div>' : ''}
           </div>
         </div>
-        <div class="seq-right" id="reviewPreview">${prospects.length > 0 ? UI.loader() : ''}</div>
+        <div class="seq-right" id="reviewPreview">${firstProspect ? UI.loader() : ''}</div>
       </div>`;
 
-    if (prospects.length > 0) _selectReviewProspect(prospects[0].id, campaignId);
+    if (firstProspect) _selectReviewProspect(firstProspect.id, campaignId);
   }
 
   async function _selectReviewProspect(prospectId, campaignId) {
