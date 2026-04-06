@@ -170,6 +170,39 @@ function hubspotSearch(body) {
   });
 }
 
+function hubspotWrite(method, endpoint, body) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    let reqPath = endpoint;
+    const options = {
+      hostname: HUBSPOT_HOST,
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    };
+    reqPath = addAuth(options, reqPath);
+    options.path = reqPath;
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => (data += chunk));
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          try { resolve(JSON.parse(data)); }
+          catch (e) { resolve({}); }
+        } else {
+          reject(new Error(`HubSpot ${method} ${res.statusCode}: ${data.substring(0, 300)}`));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
 // --- Fetch all closed-won deals with pagination ---
 async function fetchClosedWonDeals() {
   const allDeals = [];
@@ -268,7 +301,7 @@ async function fetchOpenDeals() {
           ],
         },
       ],
-      properties: ['dealname', 'amount', 'dealstage', 'closedate'],
+      properties: ['dealname', 'amount', 'dealstage', 'closedate', 'createdate', 'hs_date_entered_qualifiedtobuy', 'hs_date_entered_presentationscheduled', 'hs_date_entered_decisionmakerboughtin', 'hs_date_entered_contractsent'],
       limit: 100,
     };
     if (after) body.after = after;
@@ -294,11 +327,14 @@ async function fetchOpenDeals() {
     const stageInfo = KANBAN_STAGES.find(s => s.id === stageId);
     if (!stageInfo) continue;
 
+    const stageEnteredKey = `hs_date_entered_${stageInfo.id}`;
     pipelineDeals[stageInfo.label].push({
       id: deal.id,
       name: deal.properties.dealname || 'Sans nom',
       amount: parseFloat(deal.properties.amount) || 0,
       probability: stageInfo.probability,
+      createdate: deal.properties.createdate || null,
+      stageEnteredAt: deal.properties[stageEnteredKey] || null,
     });
   }
 
@@ -334,6 +370,53 @@ function aggregateByMonth(deals) {
 }
 
 // --- Main dashboard endpoint ---
+// --- Deal mutations ---
+const STAGE_ID_MAP = {
+  'RDV Qualif':     'qualifiedtobuy',
+  'RDV Propale':    'presentationscheduled',
+  'Négociation':    'decisionmakerboughtin',
+  'Contrat envoyé': 'contractsent',
+};
+
+app.post('/api/deals', async (req, res) => {
+  const { name, amount, stage, closedate } = req.body;
+  if (!name || !stage) return res.status(400).json({ error: 'Nom et stage requis' });
+  const stageId = STAGE_ID_MAP[stage];
+  if (!stageId) return res.status(400).json({ error: 'Stage invalide' });
+  const properties = {
+    dealname: name,
+    dealstage: stageId,
+    pipeline: 'default',
+  };
+  if (amount) properties.amount = String(parseFloat(amount));
+  if (closedate) properties.closedate = closedate;
+  try {
+    const result = await hubspotWrite('POST', '/crm/v3/objects/deals', { properties });
+    res.json({ ok: true, id: result.id });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.patch('/api/deals/:id', async (req, res) => {
+  const { id } = req.params;
+  const { amount, stage } = req.body;
+  const properties = {};
+  if (amount !== undefined) properties.amount = String(parseFloat(amount));
+  if (stage !== undefined) {
+    const stageId = STAGE_ID_MAP[stage];
+    if (!stageId) return res.status(400).json({ error: 'Stage invalide' });
+    properties.dealstage = stageId;
+  }
+  if (!Object.keys(properties).length) return res.status(400).json({ error: 'Rien à modifier' });
+  try {
+    await hubspotWrite('PATCH', `/crm/v3/objects/deals/${id}`, { properties });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/dashboard', async (req, res) => {
   try {
     const currentYear = new Date().getFullYear();
