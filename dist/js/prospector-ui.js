@@ -59,9 +59,9 @@ const UI = (() => {
   // SVG icon paths for status filter cards (16×16 viewBox, stroke-based)
   const STATUS_ICONS = {
     '_tous':               '<rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/>',
-    'Profil à valider':    '<circle cx="8" cy="5" r="2.5"/><path d="M2 14c0-3 2.7-5.5 6-5.5s6 2.5 6 5.5"/>',
+    'Profil à valider':    '<circle cx="7" cy="5.5" r="2.5"/><path d="M1 14c0-3 2.7-5.5 6-5.5s6 2.5 6 5.5"/><path d="M11.5 2l1.5 1.5L11.5 5"/><path d="M15 2l-1.5 1.5L15 5"/>',
     'Nouveau':             '<circle cx="8" cy="5" r="2.5"/><path d="M2 14c0-3 2.7-5.5 6-5.5s6 2.5 6 5.5"/><path d="M13 1v4M11 3h4"/>',
-    'Invitation envoyée':  '<rect x="2" y="4" width="12" height="9" rx="1"/><path d="M2 5l6 5 6-5"/>',
+    'Invitation envoyée':  '<circle cx="8" cy="5" r="2.5"/><path d="M2 14c0-3 2.7-5.5 6-5.5s6 2.5 6 5.5"/><path d="M11 8l3-3M11 5l3 3"/>',
     'Invitation acceptée': '<circle cx="8" cy="8" r="6"/><path d="M5.5 8l2 2L11 6"/>',
     'Message à valider':   '<circle cx="8" cy="8" r="6"/><path d="M8 5v3.5l2.5 1.5"/>',
     'Message à envoyer':   '<path d="M2.5 13.5l11-5.5-11-5.5v4l7.5 1.5-7.5 1.5z"/>',
