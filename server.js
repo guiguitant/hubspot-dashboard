@@ -4226,12 +4226,12 @@ app.post('/api/prospector/sync', accountContext, async (req, res) => {
 // POST /api/prospector/update-status — Update a prospect's status (by linkedin_url or id)
 app.post('/api/prospector/update-status', accountContext, async (req, res) => {
   try {
-    const { linkedin_url, id, status, pending_message, message_versions } = req.body;
+    const { linkedin_url, id, prospect_id, status, pending_message, message_versions } = req.body;
     if (!status || !VALID_PROSPECT_STATUSES.includes(status)) {
       return res.status(400).json({ error: 'Invalid status. Valid: ' + VALID_PROSPECT_STATUSES.join(', ') });
     }
 
-    let prospectId = id;
+    let prospectId = id || prospect_id;
     if (!prospectId && linkedin_url) {
       const normalizedUrl = normalizeLinkedinUrl(linkedin_url);
       const { data } = await supabaseAdmin.from('prospects').select('id').eq('linkedin_url', normalizedUrl).limit(1);
@@ -5740,6 +5740,104 @@ app.get('/api/sequences/states', accountContext, async (req, res) => {
     res.json(map);
   } catch (err) {
     console.error('Erreur GET /api/sequences/states:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/sequences/bulk-generate-messages — Generate messages for multiple prospects in one request
+// Avoids CDP timeout caused by many sequential JS calls from the browser
+// Body: { prospects: [{ id, first_name, last_name, job_title, company, campaign_id, icebreaker? }], step_order: 2 }
+app.post('/api/sequences/bulk-generate-messages', accountContext, async (req, res) => {
+  try {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY non configurée' });
+
+    const { prospects, step_order } = req.body;
+    if (!prospects?.length) return res.status(400).json({ error: 'prospects[] required' });
+    if (!step_order) return res.status(400).json({ error: 'step_order required' });
+
+    // Load account style prompt once
+    const { data: accountData } = await supabaseAdmin
+      .from('accounts').select('style_prompt').eq('id', req.accountId).single();
+    const stylePrompt = accountData?.style_prompt || null;
+
+    // Collect unique campaign_ids to load campaigns + steps in bulk
+    const campaignIds = [...new Set(prospects.map(p => p.campaign_id).filter(Boolean))];
+
+    const [{ data: campaigns }, { data: sequences }] = await Promise.all([
+      supabaseAdmin.from('campaigns').select('id, sector, geography, criteria').in('id', campaignIds),
+      supabaseAdmin.from('sequences')
+        .select('id, campaign_id, sequence_steps!inner(step_order, message_params, message_mode, icebreaker_mode)')
+        .in('campaign_id', campaignIds)
+        .eq('account_id', req.accountId)
+        .eq('is_active', true),
+    ]);
+
+    const campaignMap = Object.fromEntries((campaigns || []).map(c => [c.id, c]));
+    // Map campaign_id → step at step_order
+    const stepMap = {};
+    for (const seq of (sequences || [])) {
+      const step = seq.sequence_steps?.find(s => s.step_order === step_order);
+      if (step) stepMap[seq.campaign_id] = step;
+    }
+
+    const results = [];
+
+    for (const prospect of prospects) {
+      try {
+        const campaign = campaignMap[prospect.campaign_id] || {};
+        const step = stepMap[prospect.campaign_id];
+        if (!step?.message_params) {
+          results.push({ prospect_id: prospect.id, error: 'no_step_params' });
+          continue;
+        }
+
+        const message_params = step.message_params;
+        const maxChars = message_params.max_chars || 300;
+        const icebreaker = prospect.icebreaker || null;
+
+        const prospectInfo = `Prospect : ${prospect.first_name} ${prospect.last_name}, ${prospect.job_title || 'poste inconnu'} chez ${prospect.company || 'entreprise inconnue'}`;
+        const icebreakerInfo = icebreaker
+          ? `Icebreaker disponible (phrase d'accroche personnalisée basée sur l'activité LinkedIn) : "${icebreaker}"\nIntègre cet icebreaker naturellement dans le message.`
+          : 'Pas d\'icebreaker disponible. Utilise une accroche générique liée au secteur/poste du prospect.';
+
+        const systemPrompt = `Tu es un expert en prospection LinkedIn. Tu génères un message de prospection personnalisé.
+
+${prospectInfo}${stylePrompt ? '\n\n' + stylePrompt : ''}
+Campagne : secteur ${campaign.sector || campaign.criteria?.sector || 'non défini'}, zone ${campaign.geography || campaign.criteria?.geography || 'non définie'}
+${icebreakerInfo}
+
+Contraintes :
+- Maximum ${maxChars} caractères
+- Angle : ${message_params.angle || 'problème'}
+${message_params.objective ? `- Objectif : ${message_params.objective}` : ''}
+${message_params.context ? `- Contexte/thématique : ${message_params.context}` : ''}
+${message_params.instructions ? `- Instructions spécifiques : ${message_params.instructions}` : ''}
+
+Retourne UNIQUEMENT le message, rien d'autre. Pas de guillemets autour, pas d'explication.`;
+
+        const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+          body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: Math.min(1024, maxChars), system: systemPrompt, messages: [{ role: 'user', content: 'Génère le message.' }] }),
+        });
+
+        if (!claudeResp.ok) {
+          results.push({ prospect_id: prospect.id, error: `claude_error_${claudeResp.status}` });
+          continue;
+        }
+
+        const claudeData = await claudeResp.json();
+        const text = (claudeData.content?.[0]?.text || '').trim();
+        results.push({ prospect_id: prospect.id, content: text, char_count: text.length });
+      } catch (err) {
+        results.push({ prospect_id: prospect.id, error: err.message });
+      }
+    }
+
+    res.json({ results, total: prospects.length, generated: results.filter(r => r.content).length });
+  } catch (err) {
+    console.error('Erreur POST /api/sequences/bulk-generate-messages:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
