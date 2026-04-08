@@ -4241,12 +4241,14 @@ app.post('/api/prospector/update-status', accountContext, async (req, res) => {
     if (!prospectId) return res.status(400).json({ error: 'id or linkedin_url required' });
 
     // Fetch previous status + campaign_id from prospect_account (for this account only)
+    // Use limit(1)+maybeSingle to handle prospects enrolled in multiple campaigns
     const { data: prev } = await supabaseAdmin
       .from('prospect_account')
       .select('status, campaign_id')
       .eq('prospect_id', prospectId)
       .eq('account_id', req.accountId)
-      .single();
+      .limit(1)
+      .maybeSingle();
 
     if (!prev) {
       return res.status(404).json({ error: 'Prospect not found in your account' });
@@ -4263,13 +4265,11 @@ app.post('/api/prospector/update-status', accountContext, async (req, res) => {
       await supabaseAdmin.from('prospects').update({ message_versions }).eq('id', prospectId);
     }
 
-    const { data: updated, error } = await supabaseAdmin
+    const { error } = await supabaseAdmin
       .from('prospect_account')
       .update(updates)
       .eq('prospect_id', prospectId)
-      .eq('account_id', req.accountId)
-      .select()
-      .single();
+      .eq('account_id', req.accountId);
 
     if (error) throw error;
 
@@ -4941,6 +4941,14 @@ app.post('/api/sequences/generate-message', accountContext, async (req, res) => 
 
     const maxChars = message_params.max_chars || 300;
 
+    // Load account style prompt if configured
+    const { data: accountData } = await supabaseAdmin
+      .from('accounts')
+      .select('style_prompt')
+      .eq('id', req.accountId)
+      .single();
+    const stylePrompt = accountData?.style_prompt || null;
+
     // Build prospect context (real data from Dispatch, or fake data for preview)
     const prospectInfo = prospect
       ? `Prospect : ${prospect.first_name} ${prospect.last_name}, ${prospect.job_title || 'poste inconnu'} chez ${prospect.company || 'entreprise inconnue'}`
@@ -4952,14 +4960,13 @@ app.post('/api/sequences/generate-message', accountContext, async (req, res) => 
 
     const systemPrompt = `Tu es un expert en prospection LinkedIn. Tu génères un message de prospection personnalisé.
 
-${prospectInfo}
+${prospectInfo}${stylePrompt ? '\n\n' + stylePrompt : ''}
 Campagne : secteur ${campaign?.sector || campaign?.criteria?.sector || 'non défini'}, zone ${campaign?.geography || campaign?.criteria?.geography || 'non définie'}
 ${icebreakerInfo}
 
 Contraintes :
 - Maximum ${maxChars} caractères
 - Angle : ${message_params.angle || 'problème'}
-- Ton : ${message_params.tone || 'conversationnel'}
 ${message_params.objective ? `- Objectif : ${message_params.objective}` : ''}
 ${message_params.context ? `- Contexte/thématique : ${message_params.context}` : ''}
 ${message_params.instructions ? `- Instructions spécifiques : ${message_params.instructions}` : ''}
@@ -4970,7 +4977,7 @@ Retourne UNIQUEMENT le message, rien d'autre. Pas de guillemets autour, pas d'ex
     const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: Math.min(1024, Math.ceil(maxChars / 2)), system: systemPrompt, messages: [{ role: 'user', content: 'Génère le message.' }] }),
+      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: Math.min(1024, maxChars), system: systemPrompt, messages: [{ role: 'user', content: 'Génère le message.' }] }),
     });
 
     if (!claudeResp.ok) {
