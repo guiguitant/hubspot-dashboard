@@ -24,11 +24,14 @@ try {
 
 ---
 
-## Account ID
+## Authentification
 
 ```javascript
-const ACCOUNT_ID = "[uuid]";
-const headers = { 'Content-Type': 'application/json', 'X-Account-Id': ACCOUNT_ID };
+const token = localStorage.getItem('auth_token');
+const headers = {
+  'Content-Type': 'application/json',
+  'Authorization': `Bearer ${token}`
+};
 ```
 
 ---
@@ -304,6 +307,22 @@ await _postSummary();
 async function _postSummary() {
   const duration = Math.round((Date.now() - _startedAt) / 1000);
 
+  // Persister le résumé en base
+  await fetch('/api/scraping/summary', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      ran_at: new Date(_startedAt).toISOString(),
+      duration_seconds: duration,
+      campaigns_processed: _summary.campaigns_processed,
+      profiles_found: _summary.profiles_found,
+      profiles_rejected_duplicates: _summary.profiles_rejected_duplicates,
+      profiles_rejected_excluded: _summary.profiles_rejected_excluded,
+      profiles_submitted: _summary.profiles_submitted,
+      stopped_reason: _stopped_reason,
+      errors: _errors,
+    })
+  });
+
   // Afficher le résumé dans la conversation
   console.log(`
 📋 RÉSUMÉ TÂCHE 1 — Scraping Sales Navigator
@@ -325,8 +344,6 @@ Les nouveaux profils sont visibles dans Prospector (filtre "Profil à valider").
 }
 ```
 
-> **TODO** : Créer une table `scraping_summaries` et un endpoint `POST /api/scraping/summary` pour persister les résumés (comme `dispatch_summaries` pour la Tâche 2). En attendant, le résumé est affiché dans la conversation uniquement.
-
 ---
 
 ## Endpoints récapitulatifs
@@ -338,8 +355,9 @@ Les nouveaux profils sont visibles dans Prospector (filtre "Profil à valider").
 | GET | `/api/prospector/campaigns?active=true` | Campagnes actives |
 | GET | `/api/prospector/prospects?campaign_id=...` | Profils existants d'une campagne |
 | POST | `/api/prospector/sync` | Synchroniser les profils extraits |
+| POST | `/api/scraping/summary` | Persister le résumé d'exécution |
 
 ---
 
-**Version :** V2 — Alignement architecture multi-tenant, spécification complète Sales Nav, limites par run
-**Mise à jour :** 2026-04-02
+**Version :** V3 — Persistance résumés (scraping_summaries), auth Bearer token
+**Mise à jour :** 2026-04-09

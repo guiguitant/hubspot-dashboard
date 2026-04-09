@@ -5720,6 +5720,45 @@ app.post('/api/dispatch/summary', accountContext, async (req, res) => {
   }
 });
 
+// POST /api/scraping/summary — Store a Task 1 execution report
+app.post('/api/scraping/summary', accountContext, async (req, res) => {
+  try {
+    const {
+      ran_at, duration_seconds,
+      campaigns_processed = 0,
+      profiles_found = 0,
+      profiles_rejected_duplicates = 0,
+      profiles_rejected_excluded = 0,
+      profiles_submitted = 0,
+      stopped_reason = null,
+      errors = [],
+    } = req.body;
+
+    const { data, error } = await supabaseAdmin
+      .from('scraping_summaries')
+      .insert({
+        account_id: req.accountId,
+        ran_at: ran_at || new Date().toISOString(),
+        duration_seconds: duration_seconds || null,
+        campaigns_processed,
+        profiles_found,
+        profiles_rejected_duplicates,
+        profiles_rejected_excluded,
+        profiles_submitted,
+        stopped_reason,
+        errors,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.error('Erreur POST /api/scraping/summary:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ============================================================
 // GET /api/sequences/states — Sequence states for all prospects
 // ============================================================
