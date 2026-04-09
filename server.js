@@ -4055,6 +4055,9 @@ app.post('/api/prospector/sync', accountContext, async (req, res) => {
     if (!prospects || !Array.isArray(prospects)) {
       return res.status(400).json({ error: 'prospects array required' });
     }
+    if (!campaign_id) {
+      return res.status(400).json({ error: 'campaign_id required at root level (not inside prospects[])' });
+    }
 
     // Quota check: count new invitations in this batch
     const newInvitations = prospects.filter(p => p.status === 'Invitation envoyée').length;
