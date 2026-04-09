@@ -5,6 +5,19 @@ Workflow autonome pour l'extraction de prospects LinkedIn (Tâche 1).
 
 ---
 
+## Architecture deux onglets (obligatoire)
+
+Sales Navigator tourne en **HTTPS** — appeler `localhost:3000` (HTTP) depuis ce contexte est bloqué par la politique Mixed Content du navigateur. Le workflow s'exécute donc obligatoirement avec **deux onglets ouverts simultanément** :
+
+| Onglet | URL | Rôle |
+|--------|-----|------|
+| **Onglet 1** | `https://www.linkedin.com/sales/...` | Navigation, scraping DOM, extraction des profils |
+| **Onglet 2** | `http://localhost:3000/prospector.html` | Exécution du code — tous les `fetch()` vers l'API |
+
+**Règle** : tout le code JavaScript (lock, appels API, sync) s'exécute dans la console de l'**onglet 2**. L'onglet 1 est piloté via `chrome.tabs` ou manuellement pour la navigation Sales Navigator.
+
+---
+
 ## Règles absolues d'exécution
 
 1. **`fetch()` uniquement** : Tous les appels API vers `localhost:3000` doivent utiliser `fetch()` dans le navigateur. Jamais `curl`, jamais `bash`.
@@ -359,5 +372,5 @@ Les nouveaux profils sont visibles dans Prospector (filtre "Profil à valider").
 
 ---
 
-**Version :** V3 — Persistance résumés (scraping_summaries), auth Bearer token
+**Version :** V4 — Architecture deux onglets documentée
 **Mise à jour :** 2026-04-09
