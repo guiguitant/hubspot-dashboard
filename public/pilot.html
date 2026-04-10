@@ -397,6 +397,20 @@
       font-weight: 600;
       color: var(--text);
       outline: none;
+      padding: 0.45rem 0.6rem 0.45rem 0;
+      border-radius: var(--radius);
+      margin: 0 -0.6rem;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    details.section > summary:hover {
+      background: var(--primary-bg);
+      color: var(--primary);
+    }
+    details.section > summary:hover::before {
+      transform: scaleY(1.25);
+    }
+    details.section > summary:active {
+      background: rgba(0,61,46,0.08);
     }
     details.section > summary::-webkit-details-marker { display: none; }
     details.section > summary::before {
@@ -407,26 +421,34 @@
       background: var(--primary);
       border-radius: 2px;
       flex-shrink: 0;
+      margin-left: 0.6rem;
+      transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+      transform-origin: center;
     }
     details.section > summary::after {
       content: '';
       margin-left: auto;
-      width: 0.5rem;
-      height: 0.5rem;
+      margin-right: 0.6rem;
+      width: 0.55rem;
+      height: 0.55rem;
       border-right: 2px solid var(--text-secondary);
       border-bottom: 2px solid var(--text-secondary);
-      transform: rotate(-45deg);
-      transition: transform 0.25s ease;
+      transform: rotate(-45deg) translate(-1px, 1px);
+      transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), border-color 0.15s ease;
       flex-shrink: 0;
     }
-    details.section[open] > summary::after {
-      transform: rotate(45deg);
+    details.section > summary:hover::after {
+      border-color: var(--primary);
     }
-    /* Smooth open/close via grid trick */
+    details.section[open] > summary::after {
+      transform: rotate(45deg) translate(-1px, 1px);
+    }
+    /* Smooth open/close — grid trick + fade-slide */
     details.section > .accordion-body {
       display: grid;
       grid-template-rows: 0fr;
-      transition: grid-template-rows 0.28s ease, margin-top 0.28s ease;
+      transition: grid-template-rows 0.38s cubic-bezier(0.4, 0, 0.2, 1),
+                  margin-top 0.38s cubic-bezier(0.4, 0, 0.2, 1);
       margin-top: 0;
     }
     details.section[open] > .accordion-body {
@@ -435,6 +457,13 @@
     }
     details.section > .accordion-body > .accordion-inner {
       overflow: hidden;
+      opacity: 0;
+      transform: translateY(-8px);
+      transition: opacity 0.3s ease 0.08s, transform 0.35s cubic-bezier(0.34, 1.1, 0.64, 1) 0.06s;
+    }
+    details.section[open] > .accordion-body > .accordion-inner {
+      opacity: 1;
+      transform: translateY(0);
     }
 
     .section-title::before {
@@ -1031,116 +1060,7 @@
     }
 
     /* --- Reconciliation --- */
-    .recon-stats {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-      gap: 0.75rem;
-      margin-bottom: 1.25rem;
-    }
-
-    .recon-stat {
-      background: var(--bg-secondary);
-      border-radius: var(--radius);
-      padding: 0.75rem;
-      text-align: center;
-    }
-
-    .recon-stat-value {
-      font-size: 1.3rem;
-      font-weight: 700;
-      color: var(--text);
-    }
-
-    .recon-stat-label {
-      font-size: 0.72rem;
-      color: var(--text-secondary);
-      margin-top: 0.15rem;
-    }
-
-    .recon-tabs {
-      display: flex;
-      gap: 0.25rem;
-      margin-bottom: 1rem;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .recon-tab {
-      padding: 0.5rem 1rem;
-      font-size: 0.8rem;
-      font-weight: 500;
-      color: var(--text-secondary);
-      cursor: pointer;
-      border: none;
-      background: none;
-      border-bottom: 2px solid transparent;
-      font-family: inherit;
-      transition: color 0.12s, border-color 0.12s;
-    }
-
-    .recon-tab:hover { color: var(--text); }
-    .recon-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
-
-    .recon-tab .recon-tab-count {
-      display: inline-block;
-      background: var(--bg-secondary);
-      border-radius: 10px;
-      padding: 0.1rem 0.4rem;
-      font-size: 0.7rem;
-      margin-left: 0.3rem;
-      font-weight: 600;
-    }
-
-    .recon-table {
-      width: 100%;
-      font-size: 0.8rem;
-      border-collapse: collapse;
-    }
-
-    .recon-table th {
-      text-align: left;
-      padding: 0.5rem 0.75rem;
-      font-size: 0.7rem;
-      font-weight: 600;
-      color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
-      border-bottom: 1px solid var(--border);
-      white-space: nowrap;
-    }
-
-    .recon-table td {
-      padding: 0.55rem 0.75rem;
-      border-bottom: 1px solid var(--border);
-      vertical-align: middle;
-    }
-
-    .recon-table tr:hover { background: var(--hover); }
-
-    .recon-match-score {
-      display: inline-block;
-      padding: 0.1rem 0.35rem;
-      border-radius: 3px;
-      font-size: 0.7rem;
-      font-weight: 600;
-    }
-
-    .recon-match-score.score-high { background: var(--success-bg); color: var(--success); }
-    .recon-match-score.score-mid { background: var(--warning-bg); color: var(--warning); }
-    .recon-match-score.score-low { background: var(--danger-bg); color: var(--danger); }
-
-    .recon-amount-ok { color: var(--success); }
-    .recon-amount-diff { color: var(--danger); font-weight: 600; }
-
-    .recon-source-tag {
-      display: inline-block;
-      padding: 0.1rem 0.4rem;
-      border-radius: 3px;
-      font-size: 0.68rem;
-      font-weight: 600;
-    }
-
-    .recon-source-tag.tag-hs { background: var(--warning-bg); color: var(--warning); }
-    .recon-source-tag.tag-notion { background: var(--purple-bg); color: var(--purple); }
+    /* recon styles removed */
 
     /* --- Divider --- */
     .divider {
@@ -1669,10 +1589,34 @@
 
     <hr class="divider">
 
+    <!-- Analyse des tags -->
+    <details class="section" id="accordionTagsAnalyse" ontoggle="if(this.open) renderTagsAnalyse()">
+      <summary>Analyse par tags</summary>
+      <div class="accordion-body"><div class="accordion-inner">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem">
+          <!-- Donut 1 : nombre de deals -->
+          <div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem">
+            <div style="font-size:0.72rem;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:1rem">Deals par tag</div>
+            <div style="position:relative;height:200px"><canvas id="tagCountChart"></canvas></div>
+            <div id="tagCountLegend" style="margin-top:1rem;display:flex;flex-direction:column;gap:0.45rem"></div>
+          </div>
+          <!-- Donut 2 : montants -->
+          <div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem">
+            <div style="font-size:0.72rem;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:1rem">Montant par tag</div>
+            <div style="position:relative;height:200px"><canvas id="tagAmountChart"></canvas></div>
+            <div id="tagAmountLegend" style="margin-top:1rem;display:flex;flex-direction:column;gap:0.45rem"></div>
+          </div>
+        </div>
+      </div></div>
+    </details>
+
+    <hr class="divider">
+
     <!-- Analyse des dernières campagnes Emelia -->
     <details class="section" id="accordionEmelia">
       <summary>Analyse des derni&egrave;res campagnes</summary>
       <div class="accordion-body"><div class="accordion-inner">
+        <div id="emeliaCampaignSelector" style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:1.25rem"></div>
         <div id="emeliaCampaign">
           <p style="color:var(--text-secondary);font-size:0.85rem">Chargement...</p>
         </div>
@@ -1704,25 +1648,6 @@
       </div></div>
     </details>
 
-    <hr class="divider">
-
-    <!-- Reconciliation HubSpot / Notion -->
-    <details class="section" id="accordionRecon">
-      <summary>Réconciliation HubSpot &harr; Notion &mdash; <span id="reconYear"></span></summary>
-      <div class="accordion-body"><div class="accordion-inner">
-        <div class="recon-stats" id="reconStats"></div>
-        <div class="recon-tabs" id="reconTabs">
-          <button class="recon-tab active" data-tab="matched" onclick="switchReconTab('matched')">Matchés <span class="recon-tab-count" id="reconCountMatched">0</span></button>
-          <button class="recon-tab" data-tab="hsOnly" onclick="switchReconTab('hsOnly')">HubSpot seul <span class="recon-tab-count" id="reconCountHs">0</span></button>
-          <button class="recon-tab" data-tab="notionOnly" onclick="switchReconTab('notionOnly')">Notion seul <span class="recon-tab-count" id="reconCountNotion">0</span></button>
-        </div>
-        <div class="table-wrapper">
-          <div id="reconContent">
-            <p style="color:var(--text-secondary);font-size:0.85rem">Chargement de la réconciliation...</p>
-          </div>
-        </div>
-      </div></div>
-    </details>
   </div>
   </div>
   <!-- end page-dashboard -->
@@ -2805,7 +2730,7 @@
       }
 
       if (page === 'cockpit') refreshCockpit();
-      if (page === 'dashboard') { fetchDealMetadata().then(() => renderKanban()); if (dashboardData) render(); else { refreshData(); refreshReconData(); } refreshEmeliaCampaign(); }
+      if (page === 'dashboard') { fetchDealMetadata().then(() => renderKanban()); if (dashboardData) render(); else { refreshData(); } refreshEmeliaCampaign(); }
       if (page === 'facturation') { if (factData) { loadFactOverrides().then(() => { renderFactAlerts(); renderFactKpis(); renderFactTable(); }); } else refreshFactData(); }
       if (page === 'tresorerie') { if (tresoData) { renderTresoKpis(); renderTresoChart(); renderChargesChart(); renderChargesDetail(); renderMasseSalariale(); } else refreshTresoData(); }
       if (page === 'masse-salariale') refreshMasseSalarialePage();
@@ -3592,6 +3517,151 @@
       updateForecastBar();
     }
 
+    // --- Analyse des tags (donuts) ---
+    const TAG_COLORS = ['#2E7D32', '#1565C0', '#E65100', '#6A1B9A'];
+    const TAG_BG     = ['#E8F5E9', '#E3F2FD', '#FFF3E0', '#F3E5F5'];
+    let tagCountChartInst = null;
+    let tagAmountChartInst = null;
+
+    // Plugin Chart.js : texte centré dans le donut
+    const centerTextPlugin = {
+      id: 'centerText',
+      beforeDraw(chart) {
+        const { ctx, chartArea: { top, bottom, left, right } } = chart;
+        const cx = (left + right) / 2;
+        const cy = (top + bottom) / 2;
+        const meta = chart.options.plugins.centerText || {};
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = meta.color || '#111';
+        ctx.font = `700 ${meta.fontSize || 22}px system-ui, sans-serif`;
+        ctx.fillText(meta.value || '', cx, cy - 9);
+        ctx.font = `400 11px system-ui, sans-serif`;
+        ctx.fillStyle = meta.subColor || '#888';
+        ctx.fillText(meta.sub || '', cx, cy + 11);
+        ctx.restore();
+      }
+    };
+
+    function computeTagStats() {
+      const counts  = Object.fromEntries(DEAL_TAGS.map(t => [t, 0]));
+      const amounts = Object.fromEntries(DEAL_TAGS.map(t => [t, 0]));
+      if (!dashboardData) return { counts, amounts };
+      for (const stage of KANBAN_STAGES_ORDER) {
+        for (const deal of (dashboardData.pipelineDeals[stage] || [])) {
+          const tags = (dealMetadata[deal.id] || {}).tags || [];
+          for (const tag of tags) {
+            if (counts[tag] !== undefined) {
+              counts[tag]++;
+              amounts[tag] += deal.amount;
+            }
+          }
+        }
+      }
+      return { counts, amounts };
+    }
+
+    function buildTagLegend(containerId, labels, values, formatFn) {
+      const total = values.reduce((s, v) => s + v, 0);
+      const el = document.getElementById(containerId);
+      el.innerHTML = labels.map((label, i) => {
+        const pct = total > 0 ? Math.round(values[i] / total * 100) : 0;
+        return `<div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem">
+          <div style="display:flex;align-items:center;gap:0.5rem;min-width:0">
+            <span style="width:10px;height:10px;border-radius:2px;background:${TAG_COLORS[i]};flex-shrink:0"></span>
+            <span style="font-size:0.78rem;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${label}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:0.5rem;flex-shrink:0">
+            <span style="font-size:0.78rem;font-weight:600;color:var(--text)">${formatFn(values[i])}</span>
+            <span style="font-size:0.68rem;color:var(--text-secondary);background:var(--bg-secondary);padding:0.05rem 0.3rem;border-radius:3px">${pct}%</span>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    function fmtKeur(v) {
+      if (v <= 0) return '';
+      return v >= 1000 ? Math.round(v / 1000) + 'k€' : Math.round(v) + '€';
+    }
+
+    function makeDonut(canvasId, labels, data, centerValue, centerSub, datalabelFmt) {
+      const hasData = data.some(v => v > 0);
+      const displayData   = hasData ? data : [1];
+      const displayColors = hasData ? TAG_COLORS : ['#e5e7eb'];
+      const total = data.reduce((s, v) => s + v, 0);
+
+      const chart = new Chart(document.getElementById(canvasId), {
+        type: 'doughnut',
+        plugins: [ChartDataLabels, centerTextPlugin],
+        data: {
+          labels: hasData ? labels : ['Aucune donnée'],
+          datasets: [{ data: displayData, backgroundColor: displayColors, borderWidth: hasData ? 3 : 0, borderColor: '#fff', hoverOffset: hasData ? 6 : 0 }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '70%',
+          animation: { animateRotate: true, duration: 600 },
+          onHover: (event, elements, ch) => {
+            if (!hasData) return;
+            const ct = ch.options.plugins.centerText;
+            if (elements.length > 0) {
+              const idx = elements[0].index;
+              const val = ch.data.datasets[0].data[idx];
+              const pct = total > 0 ? Math.round(val / total * 100) : 0;
+              ct.value = pct + '%';
+              ct.sub   = ch.data.labels[idx];
+              ct.fontSize = 18;
+            } else {
+              ct.value    = centerValue;
+              ct.sub      = centerSub;
+              ct.fontSize = 20;
+            }
+            ch.update('none');
+          },
+          plugins: {
+            legend: { display: false },
+            centerText: { value: centerValue, sub: centerSub, fontSize: 20, color: 'var(--text)', subColor: '#888' },
+            datalabels: {
+              display: hasData,
+              color: '#fff',
+              font: { size: 10, weight: '700' },
+              formatter: datalabelFmt,
+            },
+            tooltip: { enabled: false },
+          },
+        },
+      });
+      return chart;
+    }
+
+    function renderTagsAnalyse() {
+      const { counts, amounts } = computeTagStats();
+      const labels      = DEAL_TAGS;
+      const countData   = labels.map(t => counts[t]);
+      const amountData  = labels.map(t => amounts[t]);
+      const totalCount  = countData.reduce((s, v) => s + v, 0);
+      const totalAmount = amountData.reduce((s, v) => s + v, 0);
+
+      if (tagCountChartInst)  tagCountChartInst.destroy();
+      if (tagAmountChartInst) tagAmountChartInst.destroy();
+
+      tagCountChartInst = makeDonut(
+        'tagCountChart', labels, countData,
+        String(totalCount), totalCount !== 1 ? 'deals' : 'deal',
+        (v) => v > 0 ? v : ''
+      );
+      tagAmountChartInst = makeDonut(
+        'tagAmountChart', labels, amountData,
+        fmtKeur(totalAmount), 'pipeline',
+        (v) => fmtKeur(v)
+      );
+
+      buildTagLegend('tagCountLegend',  labels, countData,  v => `${v} deal${v !== 1 ? 's' : ''}`);
+      buildTagLegend('tagAmountLegend', labels, amountData, v => formatEuro(v));
+    }
+
     function openPipelineModal(type) {
       const deals = type === 'new' ? pipelineNewDeals : pipelineMovedDeals;
       const title = type === 'new' ? 'Nouveaux leads' : 'Progressions';
@@ -3945,133 +4015,6 @@
     }
 
     // --- Reconciliation HubSpot <-> Notion ---
-    let reconData = null;
-    let currentReconTab = 'matched';
-
-    async function fetchReconciliation() {
-      const res = await fetch('/api/reconciliation');
-      if (!res.ok) throw new Error('Erreur chargement réconciliation');
-      return res.json();
-    }
-
-    function switchReconTab(tab) {
-      currentReconTab = tab;
-      document.querySelectorAll('.recon-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
-      renderReconContent();
-    }
-
-    function renderReconStats(stats) {
-      document.getElementById('reconStats').innerHTML = `
-        <div class="recon-stat">
-          <div class="recon-stat-value">${stats.totalHubspot}</div>
-          <div class="recon-stat-label">Deals HubSpot</div>
-        </div>
-        <div class="recon-stat">
-          <div class="recon-stat-value">${stats.totalNotion}</div>
-          <div class="recon-stat-label">Missions Notion</div>
-        </div>
-        <div class="recon-stat">
-          <div class="recon-stat-value" style="color:var(--success)">${stats.matched}</div>
-          <div class="recon-stat-label">Matchés</div>
-        </div>
-        <div class="recon-stat">
-          <div class="recon-stat-value" style="color:var(--warning)">${stats.hubspotOnly}</div>
-          <div class="recon-stat-label">HubSpot seul</div>
-        </div>
-        <div class="recon-stat">
-          <div class="recon-stat-value" style="color:var(--purple)">${stats.notionOnly}</div>
-          <div class="recon-stat-label">Notion seul</div>
-        </div>
-        <div class="recon-stat">
-          <div class="recon-stat-value" style="color:var(--danger)">${stats.amountMismatches}</div>
-          <div class="recon-stat-label">Écarts montant</div>
-        </div>
-      `;
-      document.getElementById('reconCountMatched').textContent = stats.matched;
-      document.getElementById('reconCountHs').textContent = stats.hubspotOnly;
-      document.getElementById('reconCountNotion').textContent = stats.notionOnly;
-    }
-
-    function scoreClass(score) {
-      if (score >= 80) return 'score-high';
-      if (score >= 60) return 'score-mid';
-      return 'score-low';
-    }
-
-    function renderReconContent() {
-      if (!reconData) return;
-      const el = document.getElementById('reconContent');
-      let html = '';
-
-      if (currentReconTab === 'matched') {
-        html = `<table class="recon-table">
-          <thead><tr>
-            <th>HubSpot</th><th>Montant HS</th><th>Notion</th><th>Montant Notion</th><th>Écart</th><th>Score</th>
-          </tr></thead><tbody>`;
-        for (const m of reconData.matched) {
-          const diff = m.amountDiff;
-          const diffStr = m.notion.ca > 0
-            ? (Math.abs(diff) < 1 ? '<span class="recon-amount-ok">OK</span>' : `<span class="recon-amount-diff">${diff > 0 ? '+' : ''}${formatEuro(diff)}</span>`)
-            : '<span style="color:var(--text-light)">--</span>';
-          html += `<tr>
-            <td>${m.hubspot.name}</td>
-            <td style="font-weight:600">${formatEuro(m.hubspot.amount)}</td>
-            <td>${m.notion.nom}${m.notion.client ? ' <span style="color:var(--text-light);font-size:0.72rem">(' + m.notion.client + ')</span>' : ''}</td>
-            <td style="font-weight:600">${m.notion.ca > 0 ? formatEuro(m.notion.ca) : '<span style="color:var(--text-light)">--</span>'}</td>
-            <td>${diffStr}</td>
-            <td><span class="recon-match-score ${scoreClass(m.score)}">${m.score}%</span></td>
-          </tr>`;
-        }
-        html += '</tbody></table>';
-      }
-
-      if (currentReconTab === 'hsOnly') {
-        html = `<table class="recon-table">
-          <thead><tr><th>Deal HubSpot</th><th>Montant</th><th>Date closing</th><th>Source</th></tr></thead><tbody>`;
-        for (const d of reconData.hubspotOnly) {
-          const date = d.closedate ? new Date(d.closedate).toLocaleDateString('fr-FR') : '--';
-          html += `<tr>
-            <td>${d.name}</td>
-            <td style="font-weight:600">${formatEuro(d.amount)}</td>
-            <td>${date}</td>
-            <td><span class="recon-source-tag tag-hs">HubSpot</span></td>
-          </tr>`;
-        }
-        html += '</tbody></table>';
-        if (reconData.hubspotOnly.length === 0) html = '<p style="color:var(--success);font-size:0.85rem;padding:1rem">Tous les deals HubSpot ont un match Notion.</p>';
-      }
-
-      if (currentReconTab === 'notionOnly') {
-        html = `<table class="recon-table">
-          <thead><tr><th>Mission Notion</th><th>Client</th><th>CA</th><th>État</th><th>Source</th></tr></thead><tbody>`;
-        for (const m of reconData.notionOnly) {
-          html += `<tr>
-            <td>${m.nom}</td>
-            <td>${m.client}</td>
-            <td style="font-weight:600">${m.ca > 0 ? formatEuro(m.ca) : '--'}</td>
-            <td>${m.etat}</td>
-            <td><span class="recon-source-tag tag-notion">Notion</span></td>
-          </tr>`;
-        }
-        html += '</tbody></table>';
-        if (reconData.notionOnly.length === 0) html = '<p style="color:var(--success);font-size:0.85rem;padding:1rem">Toutes les missions Notion ont un match HubSpot.</p>';
-      }
-
-      el.innerHTML = html;
-    }
-
-    async function refreshReconData() {
-      try {
-        reconData = await fetchReconciliation();
-        document.getElementById('reconYear').textContent = reconData.year || '';
-        renderReconStats(reconData.stats);
-        renderReconContent();
-      } catch (err) {
-        console.error('Erreur réconciliation:', err);
-        document.getElementById('reconContent').innerHTML =
-          '<p style="color:var(--danger);font-size:0.85rem">Erreur de chargement de la réconciliation.</p>';
-      }
-    }
 
     function openEmeliaStepsModal() {
       const steps = window._emeliSteps || [];
@@ -4146,8 +4089,19 @@
     });
 
     // --- Emelia Campaign ---
-    async function fetchEmeliaCampaign() {
-      const res = await fetch('/api/emelia-campaign');
+    let emeliaCampaignList = [];
+    let selectedEmeliaCampaignId = null;
+
+    async function fetchEmeliaCampaignList() {
+      const res = await fetch('/api/emelia-campaigns');
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.campaigns || [];
+    }
+
+    async function fetchEmeliaCampaign(id) {
+      const url = id ? `/api/emelia-campaign?id=${id}` : '/api/emelia-campaign';
+      const res = await fetch(url);
       if (!res.ok) throw new Error('Erreur Emelia');
       return res.json();
     }
@@ -4156,6 +4110,39 @@
       const res = await fetch('/api/emelia-labels');
       if (!res.ok) return { labels: [] };
       return res.json();
+    }
+
+    function renderEmeliaCampaignSelector(campaigns, selectedId) {
+      const el = document.getElementById('emeliaCampaignSelector');
+      if (!el || !campaigns.length) return;
+      const STATUS_LABEL = { RUNNING: 'En cours', PAUSED: 'En pause', FINISHED: 'Terminée', DRAFT: 'Brouillon' };
+      const STATUS_COLOR = { RUNNING: '#22c55e', PAUSED: '#f59e0b', FINISHED: '#94a3b8', DRAFT: '#94a3b8' };
+      el.innerHTML = campaigns.map(c => {
+        const active = c._id === selectedId;
+        const color = STATUS_COLOR[c.status] || '#94a3b8';
+        return `<button onclick="selectEmeliaCampaign('${c._id}')"
+          style="display:flex;flex-direction:column;align-items:flex-start;gap:0.2rem;
+            padding:0.5rem 0.85rem;border-radius:var(--radius);border:2px solid ${active ? 'var(--primary)' : 'var(--border)'};
+            background:${active ? 'var(--primary-bg)' : 'var(--bg)'};cursor:pointer;transition:all 0.15s;
+            font-family:inherit;text-align:left;min-width:140px;max-width:200px">
+          <span style="font-size:0.78rem;font-weight:600;color:${active ? 'var(--primary)' : 'var(--text)'};
+            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%">${c.name}</span>
+          <span style="font-size:0.65rem;font-weight:600;color:${color}">${STATUS_LABEL[c.status] || c.status}</span>
+        </button>`;
+      }).join('');
+    }
+
+    async function selectEmeliaCampaign(id) {
+      selectedEmeliaCampaignId = id;
+      renderEmeliaCampaignSelector(emeliaCampaignList, id);
+      const el = document.getElementById('emeliaCampaign');
+      el.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem">Chargement...</p>';
+      try {
+        const [campaignData, labelsData] = await Promise.all([fetchEmeliaCampaign(id), fetchEmeliaLabels()]);
+        renderEmeliaCampaign(campaignData, labelsData.labels || []);
+      } catch (err) {
+        el.innerHTML = '<p style="color:var(--danger);font-size:0.85rem">Erreur de chargement.</p>';
+      }
     }
 
     const LABEL_CONFIG = [
@@ -4250,7 +4237,20 @@
 
     async function refreshEmeliaCampaign() {
       try {
-        const [campaignData, labelsData] = await Promise.all([fetchEmeliaCampaign(), fetchEmeliaLabels()]);
+        emeliaCampaignList = await fetchEmeliaCampaignList();
+        if (!emeliaCampaignList.length) {
+          document.getElementById('emeliaCampaign').innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem">Aucune campagne trouvée.</p>';
+          return;
+        }
+        // Garder la campagne sélectionnée si encore dans la liste, sinon prendre la première
+        if (!selectedEmeliaCampaignId || !emeliaCampaignList.find(c => c._id === selectedEmeliaCampaignId)) {
+          selectedEmeliaCampaignId = emeliaCampaignList[0]._id;
+        }
+        renderEmeliaCampaignSelector(emeliaCampaignList, selectedEmeliaCampaignId);
+        const [campaignData, labelsData] = await Promise.all([
+          fetchEmeliaCampaign(selectedEmeliaCampaignId),
+          fetchEmeliaLabels(),
+        ]);
         renderEmeliaCampaign(campaignData, labelsData.labels || []);
       } catch (err) {
         console.error('Erreur Emelia:', err);
@@ -4260,7 +4260,7 @@
     }
 
     refreshCockpit();
-    refreshTimer = setInterval(function() { if (currentPage === 'cockpit') refreshCockpit(); else if (currentPage === 'dashboard') { refreshData(); refreshReconData(); refreshEmeliaCampaign(); } }, 5 * 60 * 1000);
+    refreshTimer = setInterval(function() { if (currentPage === 'cockpit') refreshCockpit(); else if (currentPage === 'dashboard') { refreshData(); refreshEmeliaCampaign(); } }, 5 * 60 * 1000);
 
     // --- Analytics ---
     let analyticsCurrentPreset = 'exercice-courant';

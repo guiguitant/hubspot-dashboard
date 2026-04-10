@@ -5925,6 +5925,283 @@ Retourne UNIQUEMENT le message, rien d'autre. Pas de guillemets autour, pas d'ex
   }
 });
 
+// --- Emelia API ---
+const EMELIA_API_KEY = process.env.EMELIA_API_KEY;
+
+// Cache simple en mémoire { value, expiresAt }
+const _cache = {};
+function cacheGet(key) {
+  const e = _cache[key];
+  return e && e.expiresAt > Date.now() ? e.value : null;
+}
+function cacheSet(key, value, ttlMs) {
+  _cache[key] = { value, expiresAt: Date.now() + ttlMs };
+}
+
+function createImapConnection() {
+  return new Imap({
+    user: GMAIL_USER,
+    password: GMAIL_APP_PASSWORD,
+    host: 'imap.gmail.com',
+    port: 993,
+    tls: true,
+    tlsOptions: { rejectUnauthorized: false },
+  });
+}
+
+function emeliRequest(body) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    const options = {
+      hostname: 'api.emelia.io',
+      path: '/graphql',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': EMELIA_API_KEY,
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    };
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => (data += chunk));
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          if (json.errors) reject(new Error(json.errors[0].message));
+          else resolve(json.data);
+        } catch (e) { reject(new Error('Réponse Emelia invalide')); }
+      });
+    });
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
+function emeliRestRequest(path) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'api.emelia.io',
+      path,
+      method: 'GET',
+      headers: { 'Authorization': EMELIA_API_KEY },
+    };
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => (data += chunk));
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch (e) { reject(new Error('Réponse Emelia invalide')); }
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+async function fetchEmeliaCampaignList() {
+  const listData = await emeliRequest({
+    operationName: 'GetCampaignsStat',
+    query: `query GetCampaignsStat($options: JSON) {
+      all_campaigns(options: $options) { _id name status createdAt }
+    }`,
+    variables: { options: { withArchived: false } },
+  });
+  const campaigns = (listData && listData.all_campaigns) || [];
+  const active = campaigns.filter(c => c.status !== 'DRAFT');
+  active.sort((a, b) => {
+    const parse = s => { const [d, m, y] = s.split('/'); return new Date(y, m - 1, d); };
+    return parse(b.createdAt) - parse(a.createdAt);
+  });
+  return active.slice(0, 5);
+}
+
+async function fetchEmeliaCampaignById(campaignId) {
+  const [statsData, detailData] = await Promise.all([
+    emeliRestRequest(`/stats?campaignId=${campaignId}&detailed=true`),
+    emeliRequest({
+      operationName: 'GetCampaignData',
+      query: `query GetCampaignData($id: ID!) {
+        campaign(id: $id) {
+          _id name status createdAt
+          steps { delay { amount unit } versions { subject disabled } }
+        }
+      }`,
+      variables: { id: campaignId },
+    }),
+  ]);
+
+  const c = detailData.campaign;
+  const steps = (c.steps || []).map((step, i) => {
+    const v = step.versions.find(v => !v.disabled) || step.versions[0] || {};
+    return {
+      index: i + 1,
+      subject: v.subject || '',
+      delay: step.delay,
+      ...(statsData.steps && statsData.steps[i] && statsData.steps[i][0] ? {
+        sent: statsData.steps[i][0].sent,
+        first_open: statsData.steps[i][0].first_open,
+        first_open_percent: statsData.steps[i][0].first_open_percent,
+        replied: statsData.steps[i][0].replied,
+        replied_percent: statsData.steps[i][0].replied_percent,
+        bounced: statsData.steps[i][0].bounced,
+      } : {}),
+    };
+  });
+
+  return { ...c, steps, stats: statsData.global };
+}
+
+// GET /api/emelia-campaigns — liste des 5 dernières campagnes (cache 3 min)
+app.get('/api/emelia-campaigns', async (req, res) => {
+  try {
+    const cached = cacheGet('emelia-campaigns');
+    if (cached) return res.json({ campaigns: cached });
+    const list = await fetchEmeliaCampaignList();
+    cacheSet('emelia-campaigns', list, 3 * 60 * 1000);
+    res.json({ campaigns: list });
+  } catch (err) {
+    console.error('Erreur Emelia list:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/emelia-campaign?id=xxx — stats d'une campagne (cache 2 min par id)
+app.get('/api/emelia-campaign', async (req, res) => {
+  try {
+    let campaignId = req.query.id;
+    if (!campaignId) {
+      const cached = cacheGet('emelia-campaigns');
+      const list = cached || await fetchEmeliaCampaignList();
+      if (!cached) cacheSet('emelia-campaigns', list, 3 * 60 * 1000);
+      if (!list.length) return res.json({ campaign: null });
+      campaignId = list[0]._id;
+    }
+    const cacheKey = `emelia-campaign-${campaignId}`;
+    const cached = cacheGet(cacheKey);
+    if (cached) return res.json({ campaign: cached });
+    const campaign = await fetchEmeliaCampaignById(campaignId);
+    cacheSet(cacheKey, campaign, 2 * 60 * 1000);
+    res.json({ campaign });
+  } catch (err) {
+    console.error('Erreur Emelia:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/emelia-labels', async (req, res) => {
+  if (!GMAIL_USER || !GMAIL_APP_PASSWORD) return res.status(500).json({ error: 'GMAIL non configuré' });
+  const cached = cacheGet('emelia-labels');
+  if (cached) return res.json({ labels: cached });
+  const imap = createImapConnection();
+  const SYSTEM_SKIP = ['inbox', 'sent', 'drafts', 'trash', 'spam', 'all mail', 'important',
+    'starred', '[gmail]', 'sent mail', 'bin', 'junk', 'notes', 'brouillons', 'corbeille',
+    'messages envoyés', 'suivis', 'tous les messages'];
+  try {
+    const labels = await new Promise((resolve, reject) => {
+      imap.once('ready', () => {
+        imap.getBoxes((err, boxes) => {
+          if (err) { imap.end(); return reject(err); }
+          const candidates = [];
+          const walk = (obj, prefix = '') => {
+            for (const [name, box] of Object.entries(obj)) {
+              const fullName = prefix ? `${prefix}/${name}` : name;
+              if (!SYSTEM_SKIP.includes(name.toLowerCase())) candidates.push({ name, fullName });
+              if (box.children) walk(box.children, fullName);
+            }
+          };
+          walk(boxes);
+          const results = [];
+          let i = 0;
+          const next = () => {
+            if (i >= candidates.length) { imap.end(); return resolve(results); }
+            const { name, fullName } = candidates[i++];
+            imap.openBox(fullName, true, (err, box) => {
+              if (err || !box.messages.total) { results.push({ name, fullName, count: 0 }); return next(); }
+              imap.search(['ALL'], (err, uids) => {
+                if (err || !uids.length) { results.push({ name, fullName, count: 0 }); return next(); }
+                const f = imap.fetch(uids, { bodies: 'HEADER.FIELDS (FROM)', struct: false });
+                const senders = new Set();
+                f.on('message', (msg) => {
+                  msg.on('body', (stream) => {
+                    let raw = '';
+                    stream.on('data', d => raw += d);
+                    stream.on('end', () => {
+                      const match = raw.match(/From:\s*.*?([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/i);
+                      if (match) senders.add(match[1].toLowerCase());
+                    });
+                  });
+                });
+                f.once('error', () => { results.push({ name, fullName, count: 0 }); next(); });
+                f.once('end', () => { results.push({ name, fullName, count: senders.size }); next(); });
+              });
+            });
+          };
+          next();
+        });
+      });
+      imap.once('error', reject);
+      imap.connect();
+    });
+    cacheSet('emelia-labels', labels, 10 * 60 * 1000); // cache 10 min
+    res.json({ labels });
+  } catch (err) {
+    console.error('Erreur IMAP labels:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/emelia-label-contacts', async (req, res) => {
+  const labelName = req.query.label;
+  if (!labelName) return res.status(400).json({ error: 'label requis' });
+  if (!GMAIL_USER || !GMAIL_APP_PASSWORD) return res.status(500).json({ error: 'GMAIL non configuré' });
+  const imap = createImapConnection();
+  try {
+    const contacts = await new Promise((resolve, reject) => {
+      imap.once('ready', () => {
+        imap.openBox(labelName, true, (err) => {
+          if (err) { imap.end(); return reject(err); }
+          imap.search(['ALL'], (err, uids) => {
+            if (err || !uids.length) { imap.end(); return resolve([]); }
+            const f = imap.fetch(uids, { bodies: 'HEADER.FIELDS (FROM)', struct: false });
+            const seen = new Map();
+            f.on('message', (msg) => {
+              msg.on('body', (stream) => {
+                let raw = '';
+                stream.on('data', d => raw += d);
+                stream.on('end', () => {
+                  const match = raw.match(/From:\s*(.*)/i);
+                  if (!match) return;
+                  const full = match[1].trim();
+                  const detailed = full.match(/^"?([^"<]+)"?\s*<([^>]+)>/);
+                  let name, email;
+                  if (detailed) { name = detailed[1].trim(); email = detailed[2].trim().toLowerCase(); }
+                  else { email = full.replace(/[<>]/g, '').trim().toLowerCase(); name = email; }
+                  if (!seen.has(email)) {
+                    const domain = email.split('@')[1] || '';
+                    const company = domain.replace(/\.(com|fr|io|net|org|co\.uk|eu)$/i, '').replace(/[-_]/g, ' ');
+                    seen.set(email, { name, email, company });
+                  }
+                });
+              });
+            });
+            f.once('error', () => { imap.end(); resolve([]); });
+            f.once('end', () => { imap.end(); resolve([...seen.values()]); });
+          });
+        });
+      });
+      imap.once('error', reject);
+      imap.connect();
+    });
+    contacts.sort((a, b) => a.name.localeCompare(b.name));
+    res.json({ contacts });
+  } catch (err) {
+    console.error('Erreur IMAP contacts:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Releaf Pilot démarré sur http://localhost:${PORT}`);
 });
