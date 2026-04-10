@@ -541,7 +541,9 @@
       background: var(--bg-secondary);
       border-radius: var(--radius);
       border: 1px solid var(--border);
-      min-height: 120px;
+      min-height: 80px;
+      display: flex;
+      flex-direction: column;
     }
 
     .kanban-header {
@@ -573,13 +575,26 @@
       display: flex;
       flex-direction: column;
       gap: 0.4rem;
+      max-height: 340px;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .kanban-cards::-webkit-scrollbar {
+      width: 4px;
+    }
+    .kanban-cards::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .kanban-cards::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 2px;
     }
 
     .kanban-card {
       background: white;
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      padding: 0.55rem 0.65rem;
+      padding: 0.4rem 0.55rem;
       cursor: pointer;
       transition: all 0.12s;
       user-select: none;
@@ -594,10 +609,10 @@
     }
 
     .kanban-card-name {
-      font-size: 0.8rem;
+      font-size: 0.78rem;
       font-weight: 500;
       color: var(--text);
-      margin-bottom: 0.25rem;
+      margin-bottom: 0.2rem;
       line-height: 1.3;
     }
 
@@ -623,6 +638,281 @@
     .proba-high { background: var(--success-bg); color: var(--success); }
     .proba-mid { background: var(--warning-bg); color: var(--warning); }
     .proba-low { background: var(--purple-bg); color: var(--purple); }
+
+    .kanban-card-amount-edit {
+      font-size: 0.8rem;
+      font-weight: 600;
+      width: 80px;
+      padding: 0.1rem 0.3rem;
+      border: 1px solid var(--primary);
+      border-radius: 3px;
+      outline: none;
+      background: var(--bg);
+      color: var(--text);
+      box-shadow: 0 0 0 2px rgba(0,61,46,0.12);
+    }
+    .kanban-card.dragging {
+      opacity: 0.45;
+      transform: rotate(1.5deg);
+    }
+    .kanban-column.drag-over .kanban-cards {
+      background: var(--primary-bg);
+      border-radius: var(--radius);
+      outline: 2px dashed rgba(0,61,46,0.3);
+    }
+    .kanban-card-amount:hover {
+      text-decoration: underline;
+      cursor: text;
+    }
+    .kanban-saving {
+      opacity: 0.5;
+      pointer-events: none;
+    }
+
+    .pipeline-activity {
+      display: flex;
+      gap: 0.6rem;
+      margin-bottom: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .pipeline-activity-badge {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.3rem 0.65rem;
+      border-radius: 20px;
+      font-size: 0.78rem;
+      font-weight: 500;
+    }
+    .pipeline-activity-badge.new {
+      background: var(--primary-bg);
+      color: var(--primary);
+      border: 1px solid rgba(0,61,46,0.15);
+      transition: background 0.15s, box-shadow 0.15s, transform 0.15s;
+    }
+    .pipeline-activity-badge.new:hover {
+      background: rgba(0,61,46,0.14);
+      box-shadow: 0 2px 8px rgba(0,61,46,0.15);
+      transform: translateY(-1px);
+    }
+    .pipeline-activity-badge.moved {
+      background: var(--warning-bg);
+      color: var(--warning);
+      border: 1px solid rgba(217,115,13,0.15);
+      transition: background 0.15s, box-shadow 0.15s, transform 0.15s;
+    }
+    .pipeline-activity-badge.moved:hover {
+      background: rgba(217,115,13,0.14);
+      box-shadow: 0 2px 8px rgba(217,115,13,0.15);
+      transform: translateY(-1px);
+    }
+
+    /* Modal pipeline activity */
+    .pa-deal-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.65rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .pa-deal-row:last-child { border-bottom: none; }
+    .pa-deal-icon {
+      width: 32px; height: 32px;
+      border-radius: 8px;
+      background: var(--primary-bg);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.85rem;
+      flex-shrink: 0;
+    }
+    .pa-deal-info { flex: 1; min-width: 0; }
+    .pa-deal-name {
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .pa-deal-meta {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      margin-top: 0.15rem;
+    }
+    .pa-stage-tag {
+      font-size: 0.68rem;
+      font-weight: 600;
+      padding: 0.1rem 0.4rem;
+      border-radius: 3px;
+      background: var(--primary-bg);
+      color: var(--primary);
+    }
+    .pa-date {
+      font-size: 0.7rem;
+      color: var(--text-light);
+    }
+    .pa-deal-amount {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text);
+      white-space: nowrap;
+    }
+    .pa-total-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.6rem 0 0;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--primary);
+    }
+
+    .new-deal-btn {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.3rem 0.75rem;
+      border-radius: 20px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      background: var(--primary);
+      color: white;
+      border: none;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.15s;
+    }
+    .new-deal-btn:hover {
+      background: var(--primary-hover);
+      transform: translateY(-1px);
+    }
+    .stage-selector {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.4rem;
+      margin-top: 0.25rem;
+    }
+    .stage-option {
+      padding: 0.45rem 0.6rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.78rem;
+      font-weight: 500;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.12s;
+      color: var(--text-secondary);
+      background: var(--bg);
+    }
+    .stage-option:hover { border-color: var(--primary); color: var(--primary); }
+    .stage-option.selected {
+      border-color: var(--primary);
+      background: var(--primary-bg);
+      color: var(--primary);
+    }
+    .kanban-card-badge {
+      font-size: 0.62rem;
+      font-weight: 600;
+      padding: 0.08rem 0.3rem;
+      border-radius: 3px;
+      display: inline-block;
+      margin-left: 0.3rem;
+      vertical-align: middle;
+    }
+    .kanban-card-badge.badge-new {
+      background: var(--primary-bg);
+      color: var(--primary);
+    }
+    .kanban-card-badge.badge-moved {
+      background: var(--warning-bg);
+      color: var(--warning);
+    }
+
+    /* Deal tags */
+    .kanban-card-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem;
+      margin-top: 0.25rem;
+    }
+    .deal-tag {
+      font-size: 0.6rem;
+      font-weight: 600;
+      padding: 0.08rem 0.3rem;
+      border-radius: 3px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.15rem;
+      transition: opacity 0.1s;
+    }
+    .deal-tag:hover { opacity: 0.75; }
+    .deal-tag-add {
+      font-size: 0.65rem;
+      font-weight: 700;
+      padding: 0.06rem 0.28rem;
+      border-radius: 3px;
+      cursor: pointer;
+      border: 1px dashed var(--border);
+      color: var(--text-secondary);
+      background: transparent;
+      transition: all 0.1s;
+      line-height: 1.4;
+    }
+    .deal-tag-add:hover { border-color: var(--primary); color: var(--primary); }
+
+    /* Tag dropdown */
+    .tag-menu {
+      position: fixed;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+      z-index: 1000;
+      min-width: 140px;
+      padding: 0.25rem 0;
+    }
+    [data-theme="dark"] .tag-menu { background: #1e1e1e; border-color: #333; }
+    .tag-menu-item {
+      padding: 0.3rem 0.7rem;
+      font-size: 0.78rem;
+      cursor: pointer;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .tag-menu-item:hover { background: var(--primary-bg); }
+    .tag-menu-item.active { font-weight: 600; color: var(--primary); }
+    .tag-menu-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    /* Proposal chip — inline dans la row tags */
+    .deal-proposal-chip {
+      font-size: 0.6rem;
+      font-weight: 600;
+      padding: 0.06rem 0.28rem;
+      border-radius: 3px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.15rem;
+      transition: opacity 0.1s;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .deal-proposal-chip:hover { opacity: 0.7; }
+    .deal-proposal-chip.sent {
+      background: #E3F2FD;
+      color: #1565C0;
+    }
+    [data-theme="dark"] .deal-proposal-chip.sent { background: #1a3a5c; color: #90CAF9; }
+    .deal-proposal-chip.unsent {
+      color: var(--border);
+    }
+    .deal-proposal-chip.unsent:hover { color: #1565C0; }
 
     .forecast-bar {
       display: none;
@@ -1357,7 +1647,19 @@
 
     <!-- Pipeline Kanban -->
     <div class="section">
-      <div class="section-title">Pipeline &mdash; Deals en cours</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.75rem">
+        <div style="display:flex;align-items:center;gap:0.75rem">
+          <div class="section-title" style="margin-bottom:0">Pipeline &mdash; Deals en cours</div>
+          <button class="new-deal-btn" onclick="openNewDealModal()">&#43; Nouveau deal</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.5rem;font-size:0.8rem;color:var(--text-secondary)">
+          <span>Activité du</span>
+          <input type="date" id="pipelineFrom" oninput="renderKanban()" style="font-size:0.78rem;padding:0.2rem 0.4rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text)">
+          <span>au</span>
+          <input type="date" id="pipelineTo" oninput="renderKanban()" style="font-size:0.78rem;padding:0.2rem 0.4rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text)">
+        </div>
+      </div>
+      <div class="pipeline-activity" id="pipelineActivity"></div>
       <div class="forecast-bar" id="forecastBar">
         <span><strong id="forecastCount">0</strong> deal(s) selectionne(s) &mdash; Forecast : <strong id="forecastAmount">0 €</strong></span>
         <button class="btn" onclick="clearForecast()">Tout deselectionner</button>
@@ -2001,6 +2303,57 @@
     </div>
   </div>
 
+  <!-- Modal Nouveau Deal -->
+  <div class="modal-overlay" id="newDealModalOverlay">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
+        <h2>Nouveau deal</h2>
+        <button onclick="closeNewDealModal()" style="background:none;border:none;cursor:pointer;font-size:1.1rem;color:var(--text-secondary);padding:0.2rem">&#10005;</button>
+      </div>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:1rem">
+        <div class="modal-field">
+          <label>Nom du deal *</label>
+          <input type="text" id="newDealName" placeholder="Ex: Wienerberger — EPD béton" autocomplete="off">
+        </div>
+        <div class="modal-field">
+          <label>Montant (€)</label>
+          <input type="number" id="newDealAmount" placeholder="0" min="0">
+        </div>
+        <div class="modal-field">
+          <label>Stage *</label>
+          <div class="stage-selector">
+            <div class="stage-option" data-stage="RDV Qualif" onclick="selectStage(this)">RDV Qualif</div>
+            <div class="stage-option" data-stage="RDV Propale" onclick="selectStage(this)">RDV Propale</div>
+            <div class="stage-option" data-stage="Négociation" onclick="selectStage(this)">Négociation</div>
+            <div class="stage-option" data-stage="Contrat envoyé" onclick="selectStage(this)">Contrat envoyé</div>
+          </div>
+        </div>
+        <div class="modal-field">
+          <label>Date de closing estimée</label>
+          <input type="date" id="newDealClosedate">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeNewDealModal()">Annuler</button>
+        <button class="btn" id="newDealSubmit" onclick="submitNewDeal()">Créer le deal</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Pipeline Activity -->
+  <div class="modal-overlay" id="paModalOverlay">
+    <div class="modal" style="max-width:440px">
+      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <h2 id="paModalTitle">Nouveaux deals</h2>
+          <div id="paModalSubtitle" style="font-size:0.75rem;color:var(--text-secondary);margin-top:0.1rem"></div>
+        </div>
+        <button onclick="document.getElementById('paModalOverlay').classList.remove('active')" style="background:none;border:none;cursor:pointer;font-size:1.1rem;color:var(--text-secondary);padding:0.2rem">&#10005;</button>
+      </div>
+      <div class="modal-body" id="paModalBody"></div>
+    </div>
+  </div>
+
   <!-- Modal Emelia Steps -->
   <div class="modal-overlay" id="emeliStepsModalOverlay">
     <div class="modal" style="max-width:680px">
@@ -2452,7 +2805,7 @@
       }
 
       if (page === 'cockpit') refreshCockpit();
-      if (page === 'dashboard') { if (dashboardData) render(); else { refreshData(); refreshReconData(); } refreshEmeliaCampaign(); }
+      if (page === 'dashboard') { fetchDealMetadata().then(() => renderKanban()); if (dashboardData) render(); else { refreshData(); refreshReconData(); } refreshEmeliaCampaign(); }
       if (page === 'facturation') { if (factData) { loadFactOverrides().then(() => { renderFactAlerts(); renderFactKpis(); renderFactTable(); }); } else refreshFactData(); }
       if (page === 'tresorerie') { if (tresoData) { renderTresoKpis(); renderTresoChart(); renderChargesChart(); renderChargesDetail(); renderMasseSalariale(); } else refreshTresoData(); }
       if (page === 'masse-salariale') refreshMasseSalarialePage();
@@ -2551,6 +2904,114 @@
     let refreshTimer = null;
     let selectedDealIds = new Set();
     const KANBAN_STAGES_ORDER = ['RDV Qualif', 'RDV Propale', 'Négociation', 'Contrat envoyé'];
+
+    // --- Deal metadata (tags + proposal) ---
+    let dealMetadata = {}; // map: deal_id -> { tags, proposal_sent_at }
+
+    const DEAL_TAGS = ['Bilan carbone', 'ACV', 'EPD', 'Web app'];
+    const TAG_STYLES = {
+      'Bilan carbone': { bg: '#E8F5E9', color: '#2E7D32' },
+      'ACV':           { bg: '#E3F2FD', color: '#1565C0' },
+      'EPD':           { bg: '#FFF3E0', color: '#E65100' },
+      'Web app':       { bg: '#F3E5F5', color: '#6A1B9A' },
+    };
+
+    async function fetchDealMetadata() {
+      try {
+        const res = await fetch('/api/deals/metadata');
+        if (res.ok) dealMetadata = await res.json();
+      } catch (e) { /* non-bloquant */ }
+    }
+
+    async function saveDealMetadata(dealId, patch) {
+      dealMetadata[dealId] = { ...(dealMetadata[dealId] || {}), ...patch };
+      await fetch(`/api/deals/${dealId}/metadata`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      renderKanban();
+    }
+
+    // Tag menu (floating dropdown)
+    let tagMenuDealId = null;
+    function openTagMenu(e, dealId) {
+      e.stopPropagation();
+      closeTagMenu();
+      tagMenuDealId = dealId;
+      const meta = dealMetadata[dealId] || {};
+      const currentTags = meta.tags || [];
+      const rect = e.target.getBoundingClientRect();
+      const menu = document.createElement('div');
+      menu.className = 'tag-menu';
+      menu.id = 'tagMenu';
+      menu.style.top = (rect.bottom + 4) + 'px';
+      menu.style.left = rect.left + 'px';
+      for (const tag of DEAL_TAGS) {
+        const style = TAG_STYLES[tag];
+        const active = currentTags.includes(tag);
+        const item = document.createElement('div');
+        item.className = 'tag-menu-item' + (active ? ' active' : '');
+        item.innerHTML = `<span class="tag-menu-dot" style="background:${style.color}"></span>${tag}${active ? ' ✓' : ''}`;
+        item.onclick = (ev) => { ev.stopPropagation(); toggleTag(dealId, tag); closeTagMenu(); };
+        menu.appendChild(item);
+      }
+      document.body.appendChild(menu);
+      setTimeout(() => document.addEventListener('click', closeTagMenu, { once: true }), 0);
+    }
+
+    function closeTagMenu() {
+      const m = document.getElementById('tagMenu');
+      if (m) m.remove();
+      tagMenuDealId = null;
+    }
+
+    function toggleTag(dealId, tag) {
+      const meta = dealMetadata[dealId] || {};
+      const tags = [...(meta.tags || [])];
+      const idx = tags.indexOf(tag);
+      if (idx >= 0) tags.splice(idx, 1); else tags.push(tag);
+      saveDealMetadata(dealId, { tags });
+    }
+
+    // Proposal date
+    function setProposalDate(e, dealId) {
+      e.stopPropagation();
+      closeProposalPicker();
+      const rect = e.target.getBoundingClientRect();
+      const picker = document.createElement('div');
+      picker.id = '_proposalPicker';
+      picker.style.cssText = `position:fixed;top:${rect.bottom + 4}px;left:${rect.left}px;
+        background:white;border:1px solid var(--border);border-radius:var(--radius);
+        box-shadow:0 4px 16px rgba(0,0,0,0.12);padding:0.5rem;z-index:1001;display:flex;gap:0.4rem;align-items:center;`;
+      const todayStr = new Date().toISOString().slice(0, 10);
+      picker.innerHTML = `<input type="date" id="_proposalDateVal" value="${todayStr}" style="font-size:0.78rem;padding:0.2rem 0.4rem;border:1px solid var(--border);border-radius:3px;outline:none;color:var(--text);background:white">
+        <button style="font-size:0.75rem;padding:0.2rem 0.5rem;background:var(--primary);color:white;border:none;border-radius:3px;cursor:pointer" onclick="confirmProposalDate('${dealId}')">OK</button>`;
+      document.body.appendChild(picker);
+      document.getElementById('_proposalDateVal').focus();
+      setTimeout(() => document.addEventListener('click', closeProposalPicker, { once: true }), 0);
+    }
+
+    function confirmProposalDate(dealId) {
+      const val = document.getElementById('_proposalDateVal')?.value;
+      if (val) saveDealMetadata(dealId, { proposal_sent_at: val });
+      closeProposalPicker();
+    }
+
+    function closeProposalPicker() {
+      document.getElementById('_proposalPicker')?.remove();
+    }
+
+    function clearProposal(e, dealId) {
+      e.stopPropagation();
+      saveDealMetadata(dealId, { proposal_sent_at: null });
+    }
+
+    function formatShortDate(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit' });
+    }
 
     // --- LocalStorage objectives ---
     function getObjectives(year) {
@@ -2667,6 +3128,7 @@
 
       renderChart(data, prevData, objectives);
       renderTable(data, prevData, objectives);
+      initPipelinePeriod();
       renderKanban();
     }
 
@@ -3018,16 +3480,45 @@
     });
 
     // --- Kanban ---
+    function initPipelinePeriod() {
+      const now = new Date();
+      const from = new Date(now);
+      from.setDate(now.getDate() - 14);
+      document.getElementById('pipelineFrom').value = from.toISOString().slice(0, 10);
+      document.getElementById('pipelineTo').value = now.toISOString().slice(0, 10);
+    }
+
+    function isInPeriod(dateStr) {
+      if (!dateStr) return false;
+      const d = new Date(dateStr);
+      const fromVal = document.getElementById('pipelineFrom').value;
+      const toVal = document.getElementById('pipelineTo').value;
+      if (!fromVal || !toVal) return false;
+      const from = new Date(fromVal);
+      from.setHours(0, 0, 0, 0);
+      const to = new Date(toVal);
+      to.setHours(23, 59, 59, 999);
+      return d >= from && d <= to;
+    }
+
+    let pipelineNewDeals = [];
+    let pipelineMovedDeals = [];
+
     function renderKanban() {
       if (!dashboardData || !dashboardData.pipelineDeals) return;
       const board = document.getElementById('kanbanBoard');
       let html = '';
+      pipelineNewDeals = [];
+      pipelineMovedDeals = [];
 
       for (const stageName of KANBAN_STAGES_ORDER) {
         const deals = dashboardData.pipelineDeals[stageName] || [];
         const total = deals.reduce((s, d) => s + d.amount, 0);
 
-        html += `<div class="kanban-column">
+        html += `<div class="kanban-column" data-stage="${stageName}"
+            ondragover="event.preventDefault();this.classList.add('drag-over')"
+            ondragleave="this.classList.remove('drag-over')"
+            ondrop="onDropStage(event, '${stageName}')">
           <div class="kanban-header">
             <span class="kanban-header-label">${stageName}</span>
             <span class="kanban-header-count">${deals.length} &middot; ${formatEuro(total)}</span>
@@ -3040,10 +3531,43 @@
           if (deal.probability >= 70) probaClass = 'proba-high';
           else if (deal.probability >= 50) probaClass = 'proba-mid';
 
-          html += `<div class="kanban-card${selected}" data-deal-id="${deal.id}" data-deal-amount="${deal.amount}" onclick="toggleDeal(this)">
-            <div class="kanban-card-name">${deal.name}</div>
+          const isNew = isInPeriod(deal.createdate);
+          const isMoved = !isNew && isInPeriod(deal.stageEnteredAt);
+          if (isNew) pipelineNewDeals.push({ ...deal, stage: stageName });
+          if (isMoved) pipelineMovedDeals.push({ ...deal, stage: stageName });
+
+          let badge = '';
+          if (isNew) badge = `<span class="kanban-card-badge badge-new">nouveau</span>`;
+          else if (isMoved) badge = `<span class="kanban-card-badge badge-moved">&#8599; avancé</span>`;
+
+          const meta = dealMetadata[deal.id] || {};
+          const tags = meta.tags || [];
+          const proposalSentAt = meta.proposal_sent_at || null;
+
+          // Tags + proposal — même ligne
+          const proposalChip = proposalSentAt
+            ? `<span class="deal-proposal-chip sent" onclick="clearProposal(event,'${deal.id}')" title="Propale envoyée le ${formatShortDate(proposalSentAt)} — cliquer pour supprimer">&#9993; ${formatShortDate(proposalSentAt)}</span>`
+            : `<span class="deal-proposal-chip unsent" onclick="setProposalDate(event,'${deal.id}')" title="Définir date d\'envoi propale">&#9993;</span>`;
+
+          const tagsHtml = `<div class="kanban-card-tags" onclick="event.stopPropagation()">${
+            tags.map(t => {
+              const s = TAG_STYLES[t] || { bg: '#eee', color: '#555' };
+              return `<span class="deal-tag" style="background:${s.bg};color:${s.color}" onclick="toggleTag('${deal.id}','${t}')">${t} ×</span>`;
+            }).join('')
+          }<span class="deal-tag-add" onclick="openTagMenu(event,'${deal.id}')">+</span><span style="flex:1"></span>${proposalChip}</div>`;
+
+          html += `<div class="kanban-card${selected}"
+              draggable="true"
+              data-deal-id="${deal.id}"
+              data-deal-amount="${deal.amount}"
+              data-deal-stage="${stageName}"
+              ondragstart="onDragStart(event)"
+              ondragend="onDragEnd(event)"
+              onclick="toggleDeal(this)">
+            <div class="kanban-card-name">${deal.name}${badge}</div>
+            ${tagsHtml}
             <div class="kanban-card-meta">
-              <span class="kanban-card-amount">${formatEuro(deal.amount)}</span>
+              <span class="kanban-card-amount" onclick="startEditAmount(event, this, '${deal.id}', ${deal.amount})" title="Cliquer pour modifier">${formatEuro(deal.amount)}</span>
               <span class="kanban-card-proba ${probaClass}">${deal.probability}%</span>
             </div>
           </div>`;
@@ -3053,8 +3577,136 @@
       }
 
       board.innerHTML = html;
+
+      // Activity summary
+      const activityEl = document.getElementById('pipelineActivity');
+      let activityHtml = '';
+      if (pipelineNewDeals.length > 0) {
+        activityHtml += `<span class="pipeline-activity-badge new" style="cursor:pointer" onclick="openPipelineModal('new')">&#43; ${pipelineNewDeals.length} nouveau${pipelineNewDeals.length > 1 ? 'x' : ''}</span>`;
+      }
+      if (pipelineMovedDeals.length > 0) {
+        activityHtml += `<span class="pipeline-activity-badge moved" style="cursor:pointer" onclick="openPipelineModal('moved')">&#8599; ${pipelineMovedDeals.length} progression${pipelineMovedDeals.length > 1 ? 's' : ''}</span>`;
+      }
+      activityEl.innerHTML = activityHtml;
+
       updateForecastBar();
     }
+
+    function openPipelineModal(type) {
+      const deals = type === 'new' ? pipelineNewDeals : pipelineMovedDeals;
+      const title = type === 'new' ? 'Nouveaux leads' : 'Progressions';
+      const fromVal = document.getElementById('pipelineFrom').value;
+      const toVal = document.getElementById('pipelineTo').value;
+      const fmtDate = s => s ? new Date(s).toLocaleDateString('fr-FR', { day:'numeric', month:'short' }) : '';
+      const subtitle = `${fmtDate(fromVal)} → ${fmtDate(toVal)} · ${deals.length} deal${deals.length > 1 ? 's' : ''}`;
+      const total = deals.reduce((s, d) => s + d.amount, 0);
+
+      const stageColors = {
+        'RDV Qualif':       { bg: 'rgba(105,64,165,0.1)',  color: '#6940a5' },
+        'RDV Propale':      { bg: 'rgba(217,115,13,0.1)',  color: '#d9730d' },
+        'Négociation':      { bg: 'rgba(15,123,108,0.1)',  color: '#0f7b6c' },
+        'Contrat envoyé':   { bg: 'rgba(0,61,46,0.1)',     color: '#003D2E' },
+      };
+
+      const icons = { 'new': '✦', 'moved': '↗' };
+
+      let rows = deals.map(d => {
+        const sc = stageColors[d.stage] || { bg: 'var(--primary-bg)', color: 'var(--primary)' };
+        const dateStr = type === 'new'
+          ? (d.createdate ? fmtDate(d.createdate) : '')
+          : (d.stageEnteredAt ? fmtDate(d.stageEnteredAt) : '');
+        return `<div class="pa-deal-row">
+          <div class="pa-deal-icon">${icons[type]}</div>
+          <div class="pa-deal-info">
+            <div class="pa-deal-name">${d.name}</div>
+            <div class="pa-deal-meta">
+              <span class="pa-stage-tag" style="background:${sc.bg};color:${sc.color}">${d.stage}</span>
+              ${dateStr ? `<span class="pa-date">${dateStr}</span>` : ''}
+            </div>
+          </div>
+          <div class="pa-deal-amount">${formatEuro(d.amount)}</div>
+        </div>`;
+      }).join('');
+
+      rows += `<div class="pa-total-row">
+        <span>Total pipeline</span>
+        <span>${formatEuro(total)}</span>
+      </div>`;
+
+      document.getElementById('paModalTitle').textContent = title;
+      document.getElementById('paModalSubtitle').textContent = subtitle;
+      document.getElementById('paModalBody').innerHTML = rows;
+      document.getElementById('paModalOverlay').classList.add('active');
+    }
+
+    document.getElementById('paModalOverlay').addEventListener('click', e => {
+      if (e.target === e.currentTarget) e.currentTarget.classList.remove('active');
+    });
+
+    // --- Nouveau deal ---
+    let selectedStage = null;
+
+    function openNewDealModal() {
+      selectedStage = null;
+      document.getElementById('newDealName').value = '';
+      document.getElementById('newDealAmount').value = '';
+      document.getElementById('newDealClosedate').value = '';
+      document.querySelectorAll('.stage-option').forEach(el => el.classList.remove('selected'));
+      document.getElementById('newDealSubmit').disabled = false;
+      document.getElementById('newDealSubmit').textContent = 'Créer le deal';
+      document.getElementById('newDealModalOverlay').classList.add('active');
+      setTimeout(() => document.getElementById('newDealName').focus(), 50);
+    }
+
+    function closeNewDealModal() {
+      document.getElementById('newDealModalOverlay').classList.remove('active');
+    }
+
+    function selectStage(el) {
+      document.querySelectorAll('.stage-option').forEach(o => o.classList.remove('selected'));
+      el.classList.add('selected');
+      selectedStage = el.dataset.stage;
+    }
+
+    async function submitNewDeal() {
+      const name = document.getElementById('newDealName').value.trim();
+      const amount = document.getElementById('newDealAmount').value;
+      const closedate = document.getElementById('newDealClosedate').value;
+      if (!name) { document.getElementById('newDealName').focus(); return; }
+      if (!selectedStage) { document.querySelector('.stage-selector').style.outline = '2px solid var(--danger)'; return; }
+      document.querySelector('.stage-selector').style.outline = '';
+      const btn = document.getElementById('newDealSubmit');
+      btn.disabled = true;
+      btn.textContent = 'Création...';
+      try {
+        const res = await fetch('/api/deals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, amount: amount || undefined, stage: selectedStage, closedate: closedate || undefined }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        // Ajout local immédiat
+        dashboardData.pipelineDeals[selectedStage].unshift({
+          id: data.id,
+          name,
+          amount: parseFloat(amount) || 0,
+          probability: { 'RDV Qualif': 30, 'RDV Propale': 50, 'Négociation': 60, 'Contrat envoyé': 80 }[selectedStage],
+          createdate: new Date().toISOString(),
+          stageEnteredAt: new Date().toISOString(),
+        });
+        closeNewDealModal();
+        renderKanban();
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = 'Créer le deal';
+        alert('Erreur : ' + e.message);
+      }
+    }
+
+    document.getElementById('newDealModalOverlay').addEventListener('click', e => {
+      if (e.target === e.currentTarget) closeNewDealModal();
+    });
 
     function toggleDeal(el) {
       const id = el.dataset.dealId;
@@ -3074,6 +3726,95 @@
       document.querySelectorAll('.kanban-card.selected').forEach(el => el.classList.remove('selected'));
       updateForecastBar();
       render();
+    }
+
+    // --- Drag & drop stage ---
+    let dragDealId = null;
+    let dragDealStage = null;
+
+    function onDragStart(e) {
+      const card = e.currentTarget;
+      dragDealId = card.dataset.dealId;
+      dragDealStage = card.dataset.dealStage;
+      card.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    }
+
+    function onDragEnd(e) {
+      e.currentTarget.classList.remove('dragging');
+      document.querySelectorAll('.kanban-column').forEach(c => c.classList.remove('drag-over'));
+    }
+
+    async function onDropStage(e, targetStage) {
+      e.preventDefault();
+      const col = e.currentTarget;
+      col.classList.remove('drag-over');
+      if (!dragDealId || dragDealStage === targetStage) return;
+      const id = dragDealId;
+      const card = document.querySelector(`[data-deal-id="${id}"]`);
+      if (card) card.classList.add('kanban-saving');
+      try {
+        await fetch(`/api/deals/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stage: targetStage }),
+        }).then(r => { if (!r.ok) throw new Error(); });
+        // Mettre à jour localement sans refetch
+        for (const [stage, deals] of Object.entries(dashboardData.pipelineDeals)) {
+          const idx = deals.findIndex(d => d.id === id);
+          if (idx !== -1) {
+            const [deal] = deals.splice(idx, 1);
+            deal.stageEnteredAt = new Date().toISOString();
+            dashboardData.pipelineDeals[targetStage].push(deal);
+            break;
+          }
+        }
+        renderKanban();
+      } catch {
+        if (card) card.classList.remove('kanban-saving');
+        alert('Erreur lors du changement de stage');
+      }
+    }
+
+    // --- Édition montant inline ---
+    function startEditAmount(e, el, dealId, currentAmount) {
+      e.stopPropagation();
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.className = 'kanban-card-amount-edit';
+      input.value = currentAmount;
+      el.replaceWith(input);
+      input.focus();
+      input.select();
+
+      async function saveAmount() {
+        const newAmount = parseFloat(input.value);
+        if (isNaN(newAmount) || newAmount < 0) { input.replaceWith(el); return; }
+        if (newAmount === currentAmount) { input.replaceWith(el); return; }
+        input.disabled = true;
+        try {
+          await fetch(`/api/deals/${dealId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ amount: newAmount }),
+          }).then(r => { if (!r.ok) throw new Error(); });
+          // Mettre à jour localement
+          for (const deals of Object.values(dashboardData.pipelineDeals)) {
+            const deal = deals.find(d => d.id === dealId);
+            if (deal) { deal.amount = newAmount; break; }
+          }
+          renderKanban();
+        } catch {
+          alert('Erreur lors de la mise à jour du montant');
+          input.replaceWith(el);
+        }
+      }
+
+      input.addEventListener('blur', saveAmount);
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') input.blur();
+        if (e.key === 'Escape') { input.removeEventListener('blur', saveAmount); input.replaceWith(el); }
+      });
     }
 
     function getForecastTotal() {
@@ -3190,7 +3931,7 @@
       errorBanner.style.display = 'none';
 
       try {
-        dashboardData = await fetchDashboard();
+        [dashboardData] = await Promise.all([fetchDashboard(), fetchDealMetadata()]);
         render();
 
         const now = new Date();

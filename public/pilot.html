@@ -889,32 +889,30 @@
       flex-shrink: 0;
     }
 
-    /* Proposal badge */
-    .kanban-card-proposal {
-      margin-top: 0.25rem;
-    }
-    .deal-proposal-badge {
-      font-size: 0.62rem;
+    /* Proposal chip — inline dans la row tags */
+    .deal-proposal-chip {
+      font-size: 0.6rem;
       font-weight: 600;
-      padding: 0.08rem 0.35rem;
+      padding: 0.06rem 0.28rem;
       border-radius: 3px;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
-      gap: 0.2rem;
+      gap: 0.15rem;
       transition: opacity 0.1s;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
-    .deal-proposal-badge:hover { opacity: 0.75; }
-    .deal-proposal-badge.sent {
+    .deal-proposal-chip:hover { opacity: 0.7; }
+    .deal-proposal-chip.sent {
       background: #E3F2FD;
       color: #1565C0;
     }
-    [data-theme="dark"] .deal-proposal-badge.sent { background: #1a3a5c; color: #90CAF9; }
-    .deal-proposal-badge.unsent {
-      background: var(--bg);
-      border: 1px dashed var(--border);
-      color: var(--text-secondary);
+    [data-theme="dark"] .deal-proposal-chip.sent { background: #1a3a5c; color: #90CAF9; }
+    .deal-proposal-chip.unsent {
+      color: var(--border);
     }
+    .deal-proposal-chip.unsent:hover { color: #1565C0; }
 
     .forecast-bar {
       display: none;
@@ -2807,7 +2805,7 @@
       }
 
       if (page === 'cockpit') refreshCockpit();
-      if (page === 'dashboard') { if (dashboardData) render(); else { refreshData(); refreshReconData(); } refreshEmeliaCampaign(); }
+      if (page === 'dashboard') { fetchDealMetadata().then(() => renderKanban()); if (dashboardData) render(); else { refreshData(); refreshReconData(); } refreshEmeliaCampaign(); }
       if (page === 'facturation') { if (factData) { loadFactOverrides().then(() => { renderFactAlerts(); renderFactKpis(); renderFactTable(); }); } else refreshFactData(); }
       if (page === 'tresorerie') { if (tresoData) { renderTresoKpis(); renderTresoChart(); renderChargesChart(); renderChargesDetail(); renderMasseSalariale(); } else refreshTresoData(); }
       if (page === 'masse-salariale') refreshMasseSalarialePage();
@@ -2979,20 +2977,29 @@
     // Proposal date
     function setProposalDate(e, dealId) {
       e.stopPropagation();
-      // Use a hidden date input
-      let inp = document.getElementById('_proposalDateInput');
-      if (!inp) {
-        inp = document.createElement('input');
-        inp.type = 'date';
-        inp.id = '_proposalDateInput';
-        inp.style.cssText = 'position:fixed;opacity:0;pointer-events:none;top:0;left:0;';
-        document.body.appendChild(inp);
-      }
-      inp.value = '';
-      inp.onchange = () => {
-        if (inp.value) saveDealMetadata(dealId, { proposal_sent_at: inp.value });
-      };
-      inp.click();
+      closeProposalPicker();
+      const rect = e.target.getBoundingClientRect();
+      const picker = document.createElement('div');
+      picker.id = '_proposalPicker';
+      picker.style.cssText = `position:fixed;top:${rect.bottom + 4}px;left:${rect.left}px;
+        background:white;border:1px solid var(--border);border-radius:var(--radius);
+        box-shadow:0 4px 16px rgba(0,0,0,0.12);padding:0.5rem;z-index:1001;display:flex;gap:0.4rem;align-items:center;`;
+      const todayStr = new Date().toISOString().slice(0, 10);
+      picker.innerHTML = `<input type="date" id="_proposalDateVal" value="${todayStr}" style="font-size:0.78rem;padding:0.2rem 0.4rem;border:1px solid var(--border);border-radius:3px;outline:none;color:var(--text);background:white">
+        <button style="font-size:0.75rem;padding:0.2rem 0.5rem;background:var(--primary);color:white;border:none;border-radius:3px;cursor:pointer" onclick="confirmProposalDate('${dealId}')">OK</button>`;
+      document.body.appendChild(picker);
+      document.getElementById('_proposalDateVal').focus();
+      setTimeout(() => document.addEventListener('click', closeProposalPicker, { once: true }), 0);
+    }
+
+    function confirmProposalDate(dealId) {
+      const val = document.getElementById('_proposalDateVal')?.value;
+      if (val) saveDealMetadata(dealId, { proposal_sent_at: val });
+      closeProposalPicker();
+    }
+
+    function closeProposalPicker() {
+      document.getElementById('_proposalPicker')?.remove();
     }
 
     function clearProposal(e, dealId) {
@@ -3537,20 +3544,17 @@
           const tags = meta.tags || [];
           const proposalSentAt = meta.proposal_sent_at || null;
 
-          // Tags HTML
+          // Tags + proposal — même ligne
+          const proposalChip = proposalSentAt
+            ? `<span class="deal-proposal-chip sent" onclick="clearProposal(event,'${deal.id}')" title="Propale envoyée le ${formatShortDate(proposalSentAt)} — cliquer pour supprimer">&#9993; ${formatShortDate(proposalSentAt)}</span>`
+            : `<span class="deal-proposal-chip unsent" onclick="setProposalDate(event,'${deal.id}')" title="Définir date d\'envoi propale">&#9993;</span>`;
+
           const tagsHtml = `<div class="kanban-card-tags" onclick="event.stopPropagation()">${
             tags.map(t => {
               const s = TAG_STYLES[t] || { bg: '#eee', color: '#555' };
               return `<span class="deal-tag" style="background:${s.bg};color:${s.color}" onclick="toggleTag('${deal.id}','${t}')">${t} ×</span>`;
             }).join('')
-          }<span class="deal-tag-add" onclick="openTagMenu(event,'${deal.id}')">+</span></div>`;
-
-          // Proposal badge HTML
-          const proposalHtml = `<div class="kanban-card-proposal" onclick="event.stopPropagation()">${
-            proposalSentAt
-              ? `<span class="deal-proposal-badge sent" onclick="clearProposal(event,'${deal.id}')" title="Cliquer pour supprimer">&#10003; Propale · ${formatShortDate(proposalSentAt)}</span>`
-              : `<span class="deal-proposal-badge unsent" onclick="setProposalDate(event,'${deal.id}')" title="Définir date d\'envoi propale">Propale ?</span>`
-          }</div>`;
+          }<span class="deal-tag-add" onclick="openTagMenu(event,'${deal.id}')">+</span><span style="flex:1"></span>${proposalChip}</div>`;
 
           html += `<div class="kanban-card${selected}"
               draggable="true"
@@ -3562,7 +3566,6 @@
               onclick="toggleDeal(this)">
             <div class="kanban-card-name">${deal.name}${badge}</div>
             ${tagsHtml}
-            ${proposalHtml}
             <div class="kanban-card-meta">
               <span class="kanban-card-amount" onclick="startEditAmount(event, this, '${deal.id}', ${deal.amount})" title="Cliquer pour modifier">${formatEuro(deal.amount)}</span>
               <span class="kanban-card-proba ${probaClass}">${deal.probability}%</span>

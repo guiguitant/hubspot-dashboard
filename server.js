@@ -46,6 +46,15 @@ app.get('/prospector-app', (req, res) => {
   res.redirect('/prospector');
 });
 
+// Sync legacy HTML files from public/ → dist/ at startup (public/ is source of truth)
+['pilot.html', 'prospector.html'].forEach(file => {
+  const src = path.join(__dirname, 'public', file);
+  const dst = path.join(__dirname, 'dist', file);
+  if (fs.existsSync(src) && fs.existsSync(path.dirname(dst))) {
+    fs.copyFileSync(src, dst);
+  }
+});
+
 // Static files (after explicit routes)
 // Serve /dist (React build) and /public (legacy files)
 app.use(express.static(path.join(__dirname, 'dist')));
