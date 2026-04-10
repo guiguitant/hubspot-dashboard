@@ -5816,10 +5816,11 @@ app.post('/api/sequences/bulk-generate-messages', accountContext, async (req, re
     ]);
 
     const campaignMap = Object.fromEntries((campaigns || []).map(c => [c.id, c]));
-    // Map campaign_id → step at step_order
+    // Map campaign_id → step at step_order (cast to int to avoid string === int mismatch)
+    const stepOrderInt = parseInt(step_order, 10);
     const stepMap = {};
     for (const seq of (sequences || [])) {
-      const step = seq.sequence_steps?.find(s => s.step_order === step_order);
+      const step = seq.sequence_steps?.find(s => s.step_order === stepOrderInt);
       if (step) stepMap[seq.campaign_id] = step;
     }
 
