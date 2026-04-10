@@ -417,6 +417,37 @@ app.patch('/api/deals/:id', async (req, res) => {
   }
 });
 
+// --- Deal metadata (tags + proposal date, stored locally in Supabase) ---
+
+app.get('/api/deals/metadata', async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin.from('deal_metadata').select('*');
+    if (error) return res.status(500).json({ error: error.message });
+    const map = {};
+    for (const row of data) map[row.deal_id] = row;
+    res.json(map);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/api/deals/:id/metadata', async (req, res) => {
+  const { id } = req.params;
+  const { tags, proposal_sent_at } = req.body;
+  const update = { deal_id: id, updated_at: new Date().toISOString() };
+  if (tags !== undefined) update.tags = tags;
+  if (proposal_sent_at !== undefined) update.proposal_sent_at = proposal_sent_at;
+  try {
+    const { error } = await supabaseAdmin
+      .from('deal_metadata')
+      .upsert(update, { onConflict: 'deal_id' });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/dashboard', async (req, res) => {
   try {
     const currentYear = new Date().getFullYear();

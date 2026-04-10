@@ -826,6 +826,96 @@
       color: var(--warning);
     }
 
+    /* Deal tags */
+    .kanban-card-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem;
+      margin-top: 0.25rem;
+    }
+    .deal-tag {
+      font-size: 0.6rem;
+      font-weight: 600;
+      padding: 0.08rem 0.3rem;
+      border-radius: 3px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.15rem;
+      transition: opacity 0.1s;
+    }
+    .deal-tag:hover { opacity: 0.75; }
+    .deal-tag-add {
+      font-size: 0.65rem;
+      font-weight: 700;
+      padding: 0.06rem 0.28rem;
+      border-radius: 3px;
+      cursor: pointer;
+      border: 1px dashed var(--border);
+      color: var(--text-secondary);
+      background: transparent;
+      transition: all 0.1s;
+      line-height: 1.4;
+    }
+    .deal-tag-add:hover { border-color: var(--primary); color: var(--primary); }
+
+    /* Tag dropdown */
+    .tag-menu {
+      position: fixed;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+      z-index: 1000;
+      min-width: 140px;
+      padding: 0.25rem 0;
+    }
+    [data-theme="dark"] .tag-menu { background: #1e1e1e; border-color: #333; }
+    .tag-menu-item {
+      padding: 0.3rem 0.7rem;
+      font-size: 0.78rem;
+      cursor: pointer;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .tag-menu-item:hover { background: var(--primary-bg); }
+    .tag-menu-item.active { font-weight: 600; color: var(--primary); }
+    .tag-menu-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    /* Proposal badge */
+    .kanban-card-proposal {
+      margin-top: 0.25rem;
+    }
+    .deal-proposal-badge {
+      font-size: 0.62rem;
+      font-weight: 600;
+      padding: 0.08rem 0.35rem;
+      border-radius: 3px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.2rem;
+      transition: opacity 0.1s;
+    }
+    .deal-proposal-badge:hover { opacity: 0.75; }
+    .deal-proposal-badge.sent {
+      background: #E3F2FD;
+      color: #1565C0;
+    }
+    [data-theme="dark"] .deal-proposal-badge.sent { background: #1a3a5c; color: #90CAF9; }
+    .deal-proposal-badge.unsent {
+      background: var(--bg);
+      border: 1px dashed var(--border);
+      color: var(--text-secondary);
+    }
+
     .forecast-bar {
       display: none;
       background: var(--primary-bg);
@@ -2817,6 +2907,105 @@
     let selectedDealIds = new Set();
     const KANBAN_STAGES_ORDER = ['RDV Qualif', 'RDV Propale', 'Négociation', 'Contrat envoyé'];
 
+    // --- Deal metadata (tags + proposal) ---
+    let dealMetadata = {}; // map: deal_id -> { tags, proposal_sent_at }
+
+    const DEAL_TAGS = ['Bilan carbone', 'ACV', 'EPD', 'Web app'];
+    const TAG_STYLES = {
+      'Bilan carbone': { bg: '#E8F5E9', color: '#2E7D32' },
+      'ACV':           { bg: '#E3F2FD', color: '#1565C0' },
+      'EPD':           { bg: '#FFF3E0', color: '#E65100' },
+      'Web app':       { bg: '#F3E5F5', color: '#6A1B9A' },
+    };
+
+    async function fetchDealMetadata() {
+      try {
+        const res = await fetch('/api/deals/metadata');
+        if (res.ok) dealMetadata = await res.json();
+      } catch (e) { /* non-bloquant */ }
+    }
+
+    async function saveDealMetadata(dealId, patch) {
+      dealMetadata[dealId] = { ...(dealMetadata[dealId] || {}), ...patch };
+      await fetch(`/api/deals/${dealId}/metadata`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      renderKanban();
+    }
+
+    // Tag menu (floating dropdown)
+    let tagMenuDealId = null;
+    function openTagMenu(e, dealId) {
+      e.stopPropagation();
+      closeTagMenu();
+      tagMenuDealId = dealId;
+      const meta = dealMetadata[dealId] || {};
+      const currentTags = meta.tags || [];
+      const rect = e.target.getBoundingClientRect();
+      const menu = document.createElement('div');
+      menu.className = 'tag-menu';
+      menu.id = 'tagMenu';
+      menu.style.top = (rect.bottom + 4) + 'px';
+      menu.style.left = rect.left + 'px';
+      for (const tag of DEAL_TAGS) {
+        const style = TAG_STYLES[tag];
+        const active = currentTags.includes(tag);
+        const item = document.createElement('div');
+        item.className = 'tag-menu-item' + (active ? ' active' : '');
+        item.innerHTML = `<span class="tag-menu-dot" style="background:${style.color}"></span>${tag}${active ? ' ✓' : ''}`;
+        item.onclick = (ev) => { ev.stopPropagation(); toggleTag(dealId, tag); closeTagMenu(); };
+        menu.appendChild(item);
+      }
+      document.body.appendChild(menu);
+      setTimeout(() => document.addEventListener('click', closeTagMenu, { once: true }), 0);
+    }
+
+    function closeTagMenu() {
+      const m = document.getElementById('tagMenu');
+      if (m) m.remove();
+      tagMenuDealId = null;
+    }
+
+    function toggleTag(dealId, tag) {
+      const meta = dealMetadata[dealId] || {};
+      const tags = [...(meta.tags || [])];
+      const idx = tags.indexOf(tag);
+      if (idx >= 0) tags.splice(idx, 1); else tags.push(tag);
+      saveDealMetadata(dealId, { tags });
+    }
+
+    // Proposal date
+    function setProposalDate(e, dealId) {
+      e.stopPropagation();
+      // Use a hidden date input
+      let inp = document.getElementById('_proposalDateInput');
+      if (!inp) {
+        inp = document.createElement('input');
+        inp.type = 'date';
+        inp.id = '_proposalDateInput';
+        inp.style.cssText = 'position:fixed;opacity:0;pointer-events:none;top:0;left:0;';
+        document.body.appendChild(inp);
+      }
+      inp.value = '';
+      inp.onchange = () => {
+        if (inp.value) saveDealMetadata(dealId, { proposal_sent_at: inp.value });
+      };
+      inp.click();
+    }
+
+    function clearProposal(e, dealId) {
+      e.stopPropagation();
+      saveDealMetadata(dealId, { proposal_sent_at: null });
+    }
+
+    function formatShortDate(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit' });
+    }
+
     // --- LocalStorage objectives ---
     function getObjectives(year) {
       try {
@@ -3344,6 +3533,25 @@
           if (isNew) badge = `<span class="kanban-card-badge badge-new">nouveau</span>`;
           else if (isMoved) badge = `<span class="kanban-card-badge badge-moved">&#8599; avancé</span>`;
 
+          const meta = dealMetadata[deal.id] || {};
+          const tags = meta.tags || [];
+          const proposalSentAt = meta.proposal_sent_at || null;
+
+          // Tags HTML
+          const tagsHtml = `<div class="kanban-card-tags" onclick="event.stopPropagation()">${
+            tags.map(t => {
+              const s = TAG_STYLES[t] || { bg: '#eee', color: '#555' };
+              return `<span class="deal-tag" style="background:${s.bg};color:${s.color}" onclick="toggleTag('${deal.id}','${t}')">${t} ×</span>`;
+            }).join('')
+          }<span class="deal-tag-add" onclick="openTagMenu(event,'${deal.id}')">+</span></div>`;
+
+          // Proposal badge HTML
+          const proposalHtml = `<div class="kanban-card-proposal" onclick="event.stopPropagation()">${
+            proposalSentAt
+              ? `<span class="deal-proposal-badge sent" onclick="clearProposal(event,'${deal.id}')" title="Cliquer pour supprimer">&#10003; Propale · ${formatShortDate(proposalSentAt)}</span>`
+              : `<span class="deal-proposal-badge unsent" onclick="setProposalDate(event,'${deal.id}')" title="Définir date d\'envoi propale">Propale ?</span>`
+          }</div>`;
+
           html += `<div class="kanban-card${selected}"
               draggable="true"
               data-deal-id="${deal.id}"
@@ -3353,6 +3561,8 @@
               ondragend="onDragEnd(event)"
               onclick="toggleDeal(this)">
             <div class="kanban-card-name">${deal.name}${badge}</div>
+            ${tagsHtml}
+            ${proposalHtml}
             <div class="kanban-card-meta">
               <span class="kanban-card-amount" onclick="startEditAmount(event, this, '${deal.id}', ${deal.amount})" title="Cliquer pour modifier">${formatEuro(deal.amount)}</span>
               <span class="kanban-card-proba ${probaClass}">${deal.probability}%</span>
@@ -3718,7 +3928,7 @@
       errorBanner.style.display = 'none';
 
       try {
-        dashboardData = await fetchDashboard();
+        [dashboardData] = await Promise.all([fetchDashboard(), fetchDealMetadata()]);
         render();
 
         const now = new Date();
