@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Proposal Engine – Releaf Carbon</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:         #0f1117;
+      --surface:    #1a1d27;
+      --surface2:   #22263a;
+      --border:     #2e3347;
+      --primary:    #22c55e;
+      --primary-h:  #16a34a;
+      --text:       #f1f5f9;
+      --text-sec:   #94a3b8;
+      --text-muted: #64748b;
+      --radius:     12px;
+      --red:        #ef4444;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 2.5rem 2.25rem;
+      width: 100%;
+      max-width: 520px;
+      box-shadow: 0 8px 40px rgba(0,0,0,.4);
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 2rem;
+    }
+
+    .card-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #16a34a, #22c55e);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .card-title {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .card-subtitle {
+      font-size: 0.78rem;
+      color: var(--text-sec);
+      margin-top: 0.1rem;
+    }
+
+    .form-group {
+      margin-bottom: 1.25rem;
+    }
+
+    label {
+      display: block;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-sec);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.4rem;
+    }
+
+    input[type="text"], select {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.65rem 0.9rem;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color .15s;
+      appearance: none;
+    }
+
+    input[type="text"]:focus, select:focus {
+      border-color: var(--primary);
+    }
+
+    input[type="text"]::placeholder {
+      color: var(--text-muted);
+    }
+
+    select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2394a3b8' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 0.75rem center;
+      padding-right: 2.25rem;
+      cursor: pointer;
+    }
+
+    select option {
+      background: #1a1d27;
+    }
+
+    .logo-upload {
+      position: relative;
+    }
+
+    .logo-upload input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+      z-index: 2;
+    }
+
+    .logo-upload-btn {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      background: var(--surface2);
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      padding: 0.65rem 0.9rem;
+      color: var(--text-sec);
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: border-color .15s, color .15s;
+      user-select: none;
+    }
+
+    .logo-upload:hover .logo-upload-btn {
+      border-color: var(--primary);
+      color: var(--text);
+    }
+
+    .logo-upload-btn svg { flex-shrink: 0; }
+
+    #logoName {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .logo-hint {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      margin-top: 0.35rem;
+    }
+
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 1.75rem 0;
+    }
+
+    .btn-generate {
+      width: 100%;
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 0.8rem 1.25rem;
+      font-family: inherit;
+      font-size: 0.92rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      transition: background .15s, transform .1s;
+    }
+
+    .btn-generate:hover:not(:disabled) { background: var(--primary-h); }
+    .btn-generate:active:not(:disabled) { transform: scale(0.98); }
+    .btn-generate:disabled { opacity: 0.55; cursor: not-allowed; }
+
+    .spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255,255,255,.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      display: none;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error-box {
+      background: rgba(239,68,68,.1);
+      border: 1px solid rgba(239,68,68,.35);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      color: #fca5a5;
+      font-size: 0.83rem;
+      margin-top: 1rem;
+      display: none;
+    }
+
+    .success-box {
+      background: rgba(34,197,94,.1);
+      border: 1px solid rgba(34,197,94,.35);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      color: #86efac;
+      font-size: 0.83rem;
+      margin-top: 1rem;
+      display: none;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    #subventionGroup { transition: opacity .2s; }
+    #subventionGroup.hidden { opacity: 0; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
+          <polyline points="13 2 13 9 20 9"/>
+          <line x1="8" y1="13" x2="16" y2="13"/>
+          <line x1="8" y1="17" x2="12" y2="17"/>
+        </svg>
+      </div>
+      <div>
+        <div class="card-title">Proposal Engine</div>
+        <div class="card-subtitle">Générer une proposition commerciale PPTX</div>
+      </div>
+    </div>
+
+    <form id="proposalForm">
+      <div class="form-group">
+        <label for="nom">Nom de l'entreprise</label>
+        <input type="text" id="nom" name="nom_entreprise" placeholder="Ex : Groupe Leclerc" required autocomplete="off">
+      </div>
+
+      <div class="form-group">
+        <label for="mission">Type de mission</label>
+        <select id="mission" name="mission" required>
+          <option value="" disabled selected>Sélectionner une mission…</option>
+        </select>
+      </div>
+
+      <div class="form-group" id="subventionGroup">
+        <label for="subvention">Subvention</label>
+        <select id="subvention" name="subvention">
+          <option value="standard">Chargement…</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Logo client <span style="color:var(--text-muted);font-weight:400;text-transform:none">(optionnel)</span></label>
+        <div class="logo-upload">
+          <input type="file" id="logo" name="logo" accept="image/png,image/jpeg,image/svg+xml" onchange="handleLogoChange(this)">
+          <div class="logo-upload-btn">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            <span id="logoName">Choisir un fichier…</span>
+          </div>
+        </div>
+        <div class="logo-hint">PNG, JPG ou SVG — remplace le logo sur le slide de couverture</div>
+      </div>
+
+      <hr class="divider">
+
+      <button type="submit" class="btn-generate" id="generateBtn">
+        <div class="spinner" id="spinner"></div>
+        <svg id="btnIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+        </svg>
+        <span id="btnText">Générer la proposition</span>
+      </button>
+
+      <div class="error-box" id="errorBox"></div>
+      <div class="success-box" id="successBox">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+        <span id="successMsg">Fichier téléchargé avec succès !</span>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    let configData = {};
+
+    // Charger la configuration au démarrage
+    async function loadConfig() {
+      try {
+        const res = await fetch('config');
+        if (!res.ok) throw new Error('Impossible de charger la config');
+        configData = await res.json();
+
+        const missionSelect = document.getElementById('mission');
+        missionSelect.innerHTML = '<option value="" disabled selected>Sélectionner une mission…</option>';
+        Object.keys(configData).forEach(mission => {
+          const opt = document.createElement('option');
+          opt.value = mission;
+          opt.textContent = mission;
+          missionSelect.appendChild(opt);
+        });
+      } catch (e) {
+        showError('Erreur de configuration : ' + e.message);
+      }
+    }
+
+    function updateSubventions() {
+      const mission = document.getElementById('mission').value;
+      const subSelect = document.getElementById('subvention');
+      const subGroup = document.getElementById('subventionGroup');
+
+      if (!mission || !configData[mission]) {
+        subSelect.innerHTML = '<option value="standard">Standard</option>';
+        return;
+      }
+
+      const subs = configData[mission];
+      subSelect.innerHTML = '';
+      subs.forEach(({ key, label }) => {
+        const opt = document.createElement('option');
+        opt.value = key;
+        opt.textContent = label;
+        subSelect.appendChild(opt);
+      });
+
+      // Masquer le groupe subvention pour FDES/EPD (seul "Standard" disponible)
+      const isSingle = subs.length === 1 && subs[0].key === 'standard';
+      subGroup.classList.toggle('hidden', isSingle);
+    }
+
+    function handleLogoChange(input) {
+      const nameEl = document.getElementById('logoName');
+      nameEl.textContent = input.files[0] ? input.files[0].name : 'Choisir un fichier…';
+    }
+
+    function showError(msg) {
+      const el = document.getElementById('errorBox');
+      el.textContent = msg;
+      el.style.display = 'block';
+      document.getElementById('successBox').style.display = 'none';
+    }
+
+    function showSuccess(msg) {
+      const el = document.getElementById('successBox');
+      document.getElementById('successMsg').textContent = msg;
+      el.style.display = 'flex';
+      document.getElementById('errorBox').style.display = 'none';
+    }
+
+    function setLoading(loading) {
+      const btn  = document.getElementById('generateBtn');
+      const spin = document.getElementById('spinner');
+      const icon = document.getElementById('btnIcon');
+      const txt  = document.getElementById('btnText');
+      btn.disabled  = loading;
+      spin.style.display = loading ? 'block' : 'none';
+      icon.style.display = loading ? 'none'  : 'block';
+      txt.textContent    = loading ? 'Génération en cours…' : 'Générer la proposition';
+    }
+
+    document.getElementById('mission').addEventListener('change', updateSubventions);
+
+    document.getElementById('proposalForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      document.getElementById('errorBox').style.display  = 'none';
+      document.getElementById('successBox').style.display = 'none';
+      setLoading(true);
+
+      try {
+        const formData = new FormData(e.target);
+        const response = await fetch('generate', { method: 'POST', body: formData });
+
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({ error: 'Erreur serveur' }));
+          throw new Error(err.error || 'Erreur ' + response.status);
+        }
+
+        // Déclencher le téléchargement via blob
+        const blob = await response.blob();
+        const disposition = response.headers.get('Content-Disposition') || '';
+        const fnMatch = disposition.match(/filename="?([^";\n]+)"?/);
+        const filename = fnMatch ? fnMatch[1] : 'Proposition.pptx';
+
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+
+        showSuccess(`"${filename}" téléchargé avec succès !`);
+      } catch (err) {
+        showError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    });
+
+    loadConfig();
+  </script>
+</body>
+</html>

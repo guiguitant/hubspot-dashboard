@@ -1,7 +1,9 @@
 require('dotenv').config();
 const express = require('express');
 const https = require('https');
+const http = require('http');
 const path = require('path');
+const AdmZip = require('adm-zip');
 const fs = require('fs');
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
@@ -6334,6 +6336,179 @@ app.get('/api/emelia-label-contacts', async (req, res) => {
   } catch (err) {
     console.error('Erreur IMAP contacts:', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// =============================================================================
+// PROPOSAL ENGINE — génération PPTX en Node.js (adm-zip)
+// =============================================================================
+
+const PROPOSAL_TEMPLATE_PATH = process.env.PROPOSAL_TEMPLATE_PATH ||
+  path.join(__dirname, 'proposal_engine', 'Template master proposition v3.pptx');
+const PROPOSAL_CONFIG_PATH = path.join(__dirname, 'proposal_engine', 'slide_config.json');
+
+const PROPOSAL_MISSION_MAP = {
+  'Bilan Carbone': { section: 'Bilan_Carbone', cal: 'Bilan Carbone', fin: 'Bilan_Carbone', intitule: "Mesure de l'empreinte carbone" },
+  'ACV':           { section: 'ACV',           cal: 'ACV',           fin: 'ACV',           intitule: 'Analyse de Cycle de Vie' },
+  'FDES / PEP':    { section: 'FDES_PEP',      cal: 'FDES_PEP',      fin: 'FDES_PEP',      intitule: 'FDES / PEP' },
+  'EPD':           { section: 'EPD',            cal: 'EPD',           fin: 'EPD',            intitule: 'Environmental Product Declaration' },
+};
+
+const PROPOSAL_SUBVENTION = {
+  Rev3_50pct: { label: 'Booster Transformation – Rev3 (50%)',       programme: 'Booster Transformation',  operateur: 'Rev3',      pct: '50%' },
+  BPI_40pct:  { label: "Diag Décarbon'Action – Bpifrance (40%)",   programme: "Diag Décarbon'Action",    operateur: 'Bpifrance', pct: '40%' },
+  Rev3_30pct: { label: 'Booster Transformation – Rev3 (30%)',       programme: 'Booster Transformation',  operateur: 'Rev3',      pct: '30%' },
+  BPI_70pct:  { label: 'Diag Ecoconception – Bpifrance (70%)',      programme: 'Diag Ecoconception',      operateur: 'Bpifrance', pct: '70%' },
+  BPI_60pct:  { label: 'Diag Ecoconception – Bpifrance (60%)',      programme: 'Diag Ecoconception',      operateur: 'Bpifrance', pct: '60%' },
+  standard:   { label: 'Sans subvention',                           programme: '',                        operateur: '',          pct: '' },
+};
+
+function proposalSlidesToKeep(mission, subKey, config) {
+  const m = PROPOSAL_MISSION_MAP[mission];
+  const keep = new Set();
+  config.sections.introduction.slides.forEach(s => keep.add(s - 1));
+  config.sections[m.section].slides.forEach(s => keep.add(s - 1));
+  keep.add(config.sections.calendrier.section_header_slide - 1);
+  keep.add(config.sections.calendrier.slides_per_mission[m.cal] - 1);
+  keep.add(config.sections.proposition_financiere.section_header_slide - 1);
+  const finEntry = config.sections.proposition_financiere.slides_per_mission[m.fin];
+  if (typeof finEntry === 'number') {
+    keep.add(finEntry - 1);
+  } else if (finEntry && finEntry.options) {
+    const slideNum = finEntry.options[subKey] || Object.values(finEntry.options)[0];
+    keep.add(slideNum - 1);
+  }
+  return keep;
+}
+
+function proposalDeleteSlides(zip, keepIndices) {
+  const presXml    = zip.readAsText('ppt/presentation.xml');
+  const presRels   = zip.readAsText('ppt/_rels/presentation.xml.rels');
+  let   ctypes     = zip.readAsText('[Content_Types].xml');
+
+  // Ordered rIds from sldIdLst
+  const listMatch = presXml.match(/<p:sldIdLst>([\s\S]*?)<\/p:sldIdLst>/);
+  if (!listMatch) return;
+  const rIds = [], sldEntries = [];
+  const sldPat = /<p:sldId\b[^>]*\/>/g;
+  let m;
+  while ((m = sldPat.exec(listMatch[1])) !== null) {
+    const rIdM = m[0].match(/r:id="([^"]+)"/);
+    if (rIdM) { rIds.push(rIdM[1]); sldEntries.push(m[0]); }
+  }
+
+  // rId → slide file target
+  const rIdToTarget = {};
+  const relPat = /<Relationship\b[^>]*\/>/g;
+  while ((m = relPat.exec(presRels)) !== null) {
+    const rel = m[0];
+    const id  = (rel.match(/\bId="([^"]+)"/) || [])[1];
+    const tgt = (rel.match(/\bTarget="([^"]+)"/) || [])[1];
+    const typ = (rel.match(/\bType="([^"]+)"/) || [])[1];
+    if (id && tgt && typ && typ.endsWith('/slide')) rIdToTarget[id] = tgt;
+  }
+
+  let newPres = presXml, newRels = presRels;
+  rIds.forEach((rId, idx) => {
+    if (keepIndices.has(idx)) return;
+    const tgt = rIdToTarget[rId];
+    if (!tgt) return;
+    const slidePath = `ppt/${tgt}`;
+    const slideName = tgt.split('/').pop();
+    const relsPath  = `ppt/slides/_rels/${slideName}.rels`;
+    try { zip.deleteFile(slidePath); }  catch(_) {}
+    try { zip.deleteFile(relsPath); }   catch(_) {}
+    newPres = newPres.replace(sldEntries[idx], '');
+    newRels = newRels.replace(new RegExp(`<Relationship\\b[^>]*\\bId="${rId}"[^>]*\\/>`, 'g'), '');
+    ctypes  = ctypes.replace(new RegExp(`<Override[^>]*PartName="/ppt/slides/${slideName.replace('.', '\\.')}"[^>]*\\/>`, 'g'), '');
+  });
+
+  zip.updateFile('ppt/presentation.xml',          Buffer.from(newPres,  'utf8'));
+  zip.updateFile('ppt/_rels/presentation.xml.rels', Buffer.from(newRels, 'utf8'));
+  zip.updateFile('[Content_Types].xml',            Buffer.from(ctypes,   'utf8'));
+}
+
+function proposalReplaceText(zip, replacements) {
+  zip.getEntries().forEach(entry => {
+    const name = entry.entryName;
+    if (!name.endsWith('.xml') && !name.endsWith('.rels')) return;
+    let content = zip.readAsText(name), changed = false;
+    for (const [k, v] of Object.entries(replacements)) {
+      if (content.includes(k)) { content = content.split(k).join(v || ''); changed = true; }
+    }
+    if (changed) zip.updateFile(name, Buffer.from(content, 'utf8'));
+  });
+}
+
+function proposalReplaceLogo(zip, logoBuffer) {
+  try {
+    const slide1Xml  = zip.readAsText('ppt/slides/slide1.xml');
+    const slide1Rels = zip.readAsText('ppt/slides/_rels/slide1.xml.rels');
+    const blipPat    = /<a:blip\b[^>]*r:embed="([^"]+)"/g;
+    let bm, lastRId;
+    while ((bm = blipPat.exec(slide1Xml)) !== null) lastRId = bm[1];
+    if (!lastRId) return;
+    const relMatch = slide1Rels.match(new RegExp(`Id="${lastRId}"[^>]*Target="([^"]+)"`));
+    if (!relMatch) return;
+    const mediaPath = `ppt/${relMatch[1].replace(/^\.\.\//, '')}`;
+    zip.updateFile(mediaPath, logoBuffer);
+  } catch(e) { console.warn('[Proposal] Logo:', e.message); }
+}
+
+// GET /api/proposal/config
+app.get('/api/proposal/config', (req, res) => {
+  try {
+    const config = JSON.parse(fs.readFileSync(PROPOSAL_CONFIG_PATH, 'utf8'));
+    const result = {};
+    for (const mission of Object.keys(PROPOSAL_MISSION_MAP)) {
+      const finEntry = config.sections.proposition_financiere.slides_per_mission[PROPOSAL_MISSION_MAP[mission].fin];
+      const subKeys = (finEntry && typeof finEntry === 'object' && finEntry.options)
+        ? Object.keys(finEntry.options)
+        : ['standard'];
+      result[mission] = subKeys.map(k => ({ key: k, label: (PROPOSAL_SUBVENTION[k] || {}).label || k }));
+    }
+    res.json(result);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/proposal/generate
+app.post('/api/proposal/generate', express.json({ limit: '20mb' }), (req, res) => {
+  try {
+    const { nom_entreprise, mission, subvention = 'standard', logo_base64 } = req.body || {};
+    if (!nom_entreprise?.trim()) return res.status(400).json({ error: "Nom de l'entreprise requis" });
+    if (!PROPOSAL_MISSION_MAP[mission]) return res.status(400).json({ error: `Mission inconnue : ${mission}` });
+    if (!fs.existsSync(PROPOSAL_TEMPLATE_PATH))
+      return res.status(500).json({ error: `Template PPTX introuvable. Définir PROPOSAL_TEMPLATE_PATH dans .env` });
+
+    const config = JSON.parse(fs.readFileSync(PROPOSAL_CONFIG_PATH, 'utf8'));
+    const keep   = proposalSlidesToKeep(mission, subvention, config);
+    const zip    = new AdmZip(PROPOSAL_TEMPLATE_PATH);
+
+    proposalDeleteSlides(zip, keep);
+
+    const sub  = PROPOSAL_SUBVENTION[subvention] || PROPOSAL_SUBVENTION.standard;
+    const mInf = PROPOSAL_MISSION_MAP[mission];
+    proposalReplaceText(zip, {
+      '{{NOM_ENTREPRISE}}':         nom_entreprise.trim(),
+      '{{TYPE_MISSION}}':           mission,
+      '{{PROGRAMME_SUBVENTION}}':   sub.programme,
+      '{{OPERATEUR_SUBVENTION}}':   sub.operateur,
+      '{{POURCENTAGE_SUBVENTION}}': sub.pct,
+      '{{MONTANT_SUBVENTION}}':     '',
+      '{{PRIX_APRES_SUBVENTION}}':  '',
+      '{{INTITULE_MISSION}}':       mInf.intitule,
+    });
+
+    if (logo_base64) proposalReplaceLogo(zip, Buffer.from(logo_base64, 'base64'));
+
+    const safeName = nom_entreprise.trim().replace(/[^a-zA-Z0-9 _\-éèêëàâùûüôîïç]/gi, '').trim();
+    const buf = zip.toBuffer();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+    res.setHeader('Content-Disposition', `attachment; filename="Proposition_${safeName}.pptx"`);
+    res.send(buf);
+  } catch(e) {
+    console.error('[Proposal]', e);
+    res.status(500).json({ error: e.message });
   }
 });
 

@@ -1290,47 +1290,6 @@
     }
     @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
-    /* --- Prospection Gmail --- */
-    .prosp-layout { display: grid; grid-template-columns: 40% 1fr; gap: 0; height: calc(100vh - 200px); min-height: 500px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin: 0 1.5rem 1.5rem; }
-    .prosp-list-col { overflow-y: auto; border-right: 1px solid var(--border); background: var(--bg); }
-    .prosp-panel-col { overflow-y: auto; background: var(--bg-secondary); }
-    .prosp-mail-card { padding: 0.85rem 1rem; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.15s; }
-    .prosp-mail-card:hover { background: var(--bg-secondary); }
-    .prosp-mail-card.active { background: rgba(15,123,108,0.1); border-left: 3px solid var(--success); }
-    .prosp-mail-card.analyzed::after { content: '✓'; float: right; font-size: 0.7rem; color: var(--success); margin-top: 2px; }
-    .prosp-mail-from { font-size: 0.82rem; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .prosp-mail-subject { font-size: 0.8rem; color: var(--text); margin: 0.15rem 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .prosp-mail-meta { font-size: 0.72rem; color: var(--text-secondary); display: flex; justify-content: space-between; }
-    .prosp-mail-snippet { font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-    .prosp-empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 1rem; color: var(--text-secondary); font-size: 0.85rem; text-align: center; padding: 2rem; }
-    .prosp-panel-inner { padding: 1.25rem; }
-    .prosp-panel-header { margin-bottom: 1rem; }
-    .prosp-panel-from { font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.25rem; }
-    .prosp-panel-subject { font-size: 1rem; font-weight: 600; color: var(--text); }
-    .prosp-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 1rem; }
-    .prosp-tab { padding: 0.5rem 1rem; font-size: 0.82rem; font-weight: 500; cursor: pointer; border: none; background: none; color: var(--text-secondary); border-bottom: 2px solid transparent; transition: all 0.15s; }
-    .prosp-tab.active { color: var(--success); border-bottom-color: var(--success); }
-    .prosp-tab-content { display: none; }
-    .prosp-tab-content.active { display: block; }
-    .prosp-score { display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; }
-    .prosp-score-dots { display: flex; gap: 4px; }
-    .prosp-score-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--border); }
-    .prosp-score-dot.filled { background: var(--success); }
-    .prosp-kv { font-size: 0.82rem; margin-bottom: 0.5rem; }
-    .prosp-kv-label { font-weight: 600; color: var(--text); margin-bottom: 0.2rem; }
-    .prosp-kv-val { color: var(--text-secondary); }
-    .prosp-list-ul { list-style: none; padding: 0; margin: 0.25rem 0; }
-    .prosp-list-ul li::before { content: '• '; color: var(--success); }
-    .prosp-list-ul li { font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 0.2rem; }
-    .prosp-red-flag { font-size: 0.8rem; color: #ef4444; background: rgba(239,68,68,0.08); padding: 0.3rem 0.6rem; border-radius: var(--radius); margin-bottom: 0.3rem; }
-    .prosp-reply-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 0.85rem; margin-bottom: 0.75rem; background: var(--bg); }
-    .prosp-reply-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); margin-bottom: 0.35rem; }
-    .prosp-reply-subject { font-size: 0.82rem; font-weight: 600; color: var(--text); margin-bottom: 0.35rem; }
-    .prosp-reply-body { font-size: 0.8rem; color: var(--text-secondary); white-space: pre-wrap; line-height: 1.5; max-height: 140px; overflow-y: auto; margin-bottom: 0.5rem; }
-    .prosp-copy-btn { font-size: 0.72rem; padding: 0.25rem 0.6rem; }
-    .prosp-context-area { width: 100%; padding: 0.5rem; font-size: 0.82rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); resize: vertical; min-height: 60px; margin-bottom: 0.5rem; }
-    .prosp-loading { display: flex; align-items: center; gap: 0.5rem; color: var(--text-secondary); font-size: 0.82rem; padding: 1rem 0; }
-    .prosp-loading-spinner { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--success); border-radius: 50%; animation: spin 0.7s linear infinite; }
   </style>
 </head>
 <body>
@@ -1358,12 +1317,12 @@
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="5" r="3"/><path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6"/></svg>
               Analyse clients
             </button>
-            <button class="sidebar-link" onclick="navigateTo('prospection')" data-page="prospection">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 2h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H9l-3 2-3-2H2a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><path d="M5 6h6M5 9h4"/></svg>
-              Prospection
-            </button>
           </div>
         </div>
+        <button class="sidebar-link" onclick="navigateTo('proposal-engine')" data-page="proposal-engine">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 1h10a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z"/><path d="M5 5h6M5 8h6M5 11h3"/><path d="M11 10l1.5 1.5L15 9"/></svg>
+          Proposal Engine
+        </button>
         <button class="sidebar-link" onclick="navigateTo('facturation')" data-page="facturation">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 1h8a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z"/><path d="M6 5h4M6 8h4M6 11h2"/></svg>
           Facturation
@@ -1786,68 +1745,6 @@
   </div>
   <!-- end page-analyse-clients -->
 
-  <!-- PAGE: Prospection Gmail -->
-  <div class="app-page" id="page-prospection">
-    <!-- État : non connecté -->
-    <div id="prospGmailConnect" class="page" style="display:none;align-items:center;justify-content:center;min-height:60vh;flex-direction:column;gap:1.5rem;text-align:center">
-      <div class="page-icon">&#128236;</div>
-      <h1 class="page-title">Prospection</h1>
-      <p class="page-desc" style="max-width:420px">Connecte ton compte Gmail pour analyser tes mails de prospection avec Claude.</p>
-      <button class="btn" onclick="connectGmail()" style="display:flex;align-items:center;gap:0.6rem;padding:0.75rem 1.5rem;font-size:0.95rem">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
-        Connecter Gmail
-      </button>
-      <p id="prospConnectError" style="color:#ef4444;font-size:0.8rem;display:none"></p>
-    </div>
-
-    <!-- État : connecté -->
-    <div id="prospGmailMain" style="display:none">
-      <div class="page" style="padding-bottom:0">
-        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.75rem;margin-bottom:1rem">
-          <div>
-            <div class="page-icon" style="display:inline;font-size:1.4rem;margin-right:0.5rem">&#128236;</div>
-            <span class="page-title" style="font-size:1.3rem">Prospection</span>
-            <span id="prospGmailBadge" style="margin-left:0.75rem;font-size:0.75rem;color:var(--text-secondary);background:var(--bg-secondary);padding:0.2rem 0.6rem;border-radius:99px;border:1px solid var(--border)"></span>
-          </div>
-          <div style="display:flex;align-items:center;gap:0.75rem">
-            <button class="btn" onclick="refreshGmailMessages()" id="prospRefreshBtn" style="font-size:0.8rem;padding:0.35rem 0.8rem;display:flex;align-items:center;gap:0.4rem">
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 8a6 6 0 0 1 10.47-4"/><path d="M14 8a6 6 0 0 1-10.47 4"/><path d="M12.47 1v3h-3"/><path d="M3.53 15v-3h3"/></svg>
-              Actualiser
-            </button>
-            <button onclick="disconnectGmail()" style="background:none;border:none;cursor:pointer;font-size:0.75rem;color:var(--text-secondary);text-decoration:underline">Déconnecter</button>
-          </div>
-        </div>
-
-        <!-- Filtres -->
-        <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem;flex-wrap:wrap">
-          <input type="text" id="prospSearch" placeholder="Rechercher..." oninput="filterGmailMessages()" style="padding:0.35rem 0.7rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.82rem;background:var(--bg);color:var(--text);min-width:180px">
-          <select class="notion-select" id="prospPeriodFilter" onchange="filterGmailMessages()">
-            <option value="all">Toutes périodes</option>
-            <option value="today">Aujourd'hui</option>
-            <option value="week">Cette semaine</option>
-            <option value="month">Ce mois</option>
-          </select>
-        </div>
-      </div>
-
-      <!-- Layout 2 colonnes -->
-      <div class="prosp-layout">
-        <!-- Colonne gauche : liste mails -->
-        <div class="prosp-list-col">
-          <div id="prospMailList"><p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p></div>
-        </div>
-
-        <!-- Colonne droite : panneau analyse -->
-        <div class="prosp-panel-col" id="prospPanel">
-          <div class="prosp-empty-state">
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            <p>Sélectionne un mail<br>pour l'analyser avec Claude</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-  <!-- end page-prospection -->
 
 
   <!-- PAGE: Tresorerie -->
@@ -2179,6 +2076,70 @@
   </div>
   </div>
   <!-- end page-frais-km -->
+
+  <!-- PAGE: Proposal Engine -->
+  <div class="app-page" id="page-proposal-engine">
+  <div class="page">
+    <div class="page-icon">&#128196;</div>
+    <h1 class="page-title">Proposal Engine</h1>
+    <p class="page-desc">Générer une proposition commerciale PowerPoint personnalisée</p>
+
+    <div style="max-width:520px;margin:2rem auto 0">
+      <div class="section-card">
+        <form id="proposalForm" onsubmit="submitProposal(event)">
+
+          <div style="margin-bottom:1.25rem">
+            <label style="display:block;font-size:0.78rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.4rem">Nom de l'entreprise</label>
+            <input type="text" id="propNom" placeholder="Ex : Groupe Leclerc" autocomplete="off"
+              style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.65rem .9rem;color:var(--text);font-family:inherit;font-size:.9rem;outline:none;transition:border-color .15s"
+              onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor='var(--border)'" required>
+          </div>
+
+          <div style="margin-bottom:1.25rem">
+            <label style="display:block;font-size:0.78rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.4rem">Type de mission</label>
+            <select id="propMission" onchange="updatePropSubventions()"
+              style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.65rem .9rem;color:var(--text);font-family:inherit;font-size:.9rem;outline:none;appearance:none;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2394a3b8' d='M6 8L1 3h10z'/%3E%3C/svg%3E\");background-repeat:no-repeat;background-position:right .75rem center;padding-right:2.25rem;cursor:pointer" required>
+              <option value="" disabled selected>Sélectionner une mission…</option>
+            </select>
+          </div>
+
+          <div style="margin-bottom:1.25rem" id="propSubGroup">
+            <label style="display:block;font-size:0.78rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.4rem">Subvention</label>
+            <select id="propSubvention"
+              style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.65rem .9rem;color:var(--text);font-family:inherit;font-size:.9rem;outline:none;appearance:none;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2394a3b8' d='M6 8L1 3h10z'/%3E%3C/svg%3E\");background-repeat:no-repeat;background-position:right .75rem center;padding-right:2.25rem;cursor:pointer">
+              <option value="standard">Sans subvention</option>
+            </select>
+          </div>
+
+          <div style="margin-bottom:1.75rem">
+            <label style="display:block;font-size:0.78rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.4rem">
+              Logo client <span style="color:var(--text-light);font-weight:400;text-transform:none">(optionnel)</span>
+            </label>
+            <div style="position:relative">
+              <input type="file" id="propLogo" accept="image/png,image/jpeg,image/svg+xml"
+                onchange="handlePropLogoChange(this)"
+                style="position:absolute;inset:0;opacity:0;cursor:pointer;z-index:2;width:100%;height:100%">
+              <div id="propLogoBtn" style="display:flex;align-items:center;gap:.6rem;background:var(--bg);border:1px dashed var(--border);border-radius:8px;padding:.65rem .9rem;color:var(--text-secondary);font-size:.9rem;user-select:none;transition:border-color .15s,color .15s">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <span id="propLogoName">Choisir un fichier…</span>
+              </div>
+            </div>
+            <div style="font-size:.72rem;color:var(--text-light);margin-top:.3rem">PNG, JPG ou SVG — remplace le logo sur le slide de couverture</div>
+          </div>
+
+          <button type="submit" id="propGenBtn"
+            style="width:100%;background:var(--primary);color:#fff;border:none;border-radius:8px;padding:.8rem 1.25rem;font-family:inherit;font-size:.92rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:.5rem;transition:opacity .15s">
+            <svg id="propBtnIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            <span id="propBtnText">Générer la proposition</span>
+          </button>
+
+          <div id="propError" style="display:none;margin-top:1rem;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.35);border-radius:8px;padding:.75rem 1rem;color:#fca5a5;font-size:.83rem"></div>
+          <div id="propSuccess" style="display:none;margin-top:1rem;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.35);border-radius:8px;padding:.75rem 1rem;color:#86efac;font-size:.83rem"></div>
+        </form>
+      </div>
+    </div>
+  </div>
+  </div>
 
   </div><!-- end app-main -->
   </div><!-- end app-layout -->
@@ -2701,7 +2662,7 @@
     // --- Navigation ---
     let currentPage = 'cockpit';
 
-    const PAGE_NAMES = { cockpit: 'Cockpit', dashboard: 'Commercial', 'analyse-clients': 'Analyse clients', prospection: 'Prospection', facturation: 'Facturation', 'frais-km': 'Frais KM', tresorerie: 'Tresorerie', 'masse-salariale': 'Masse salariale', scenarios: 'Scenarios', analytics: 'Analytics' };
+    const PAGE_NAMES = { cockpit: 'Cockpit', dashboard: 'Commercial', 'analyse-clients': 'Analyse clients', facturation: 'Facturation', 'frais-km': 'Frais KM', tresorerie: 'Tresorerie', 'masse-salariale': 'Masse salariale', scenarios: 'Scenarios', analytics: 'Analytics', 'proposal-engine': 'Proposal Engine' };
 
     function navigateTo(page) {
       currentPage = page;
@@ -2712,13 +2673,13 @@
       document.getElementById('btnObjectifs').style.display = (page === 'dashboard' || page === 'cockpit') ? '' : 'none';
 
       // Gestion des groupes : ouvrir/fermer + fond englobant
-      const isComPage = (page === 'dashboard' || page === 'analyse-clients' || page === 'prospection');
+      const isComPage = (page === 'dashboard' || page === 'analyse-clients');
       const isTresoPage = (page === 'tresorerie' || page === 'masse-salariale' || page === 'scenarios');
 
       // Commercial
       toggleComSubnav(isComPage);
       document.getElementById('comGroup').classList.toggle('group-active', isComPage);
-      if (page === 'analyse-clients' || page === 'prospection') {
+      if (page === 'analyse-clients') {
         document.querySelector('[data-page="dashboard"]').classList.add('active');
       }
 
@@ -2736,9 +2697,9 @@
       if (page === 'masse-salariale') refreshMasseSalarialePage();
       if (page === 'scenarios') refreshScenariosPage();
       if (page === 'analytics') initAnalytics();
+      if (page === 'proposal-engine') loadProposalConfig();
       if (page === 'frais-km' && !fraisKmData) refreshFraisKmClients();
       if (page === 'analyse-clients' && !analyseClientsData) refreshAnalyseClients();
-      if (page === 'prospection') initProspectionGmail();
     }
 
     // --- Auth masse salariale ---
@@ -7505,294 +7466,99 @@
       doc.save(fileName);
     }
 
-    // --- Prospection Gmail + Claude ---
-    let gmailMessages = [];
-    let gmailMessagesFiltered = [];
-    let gmailCache = {}; // id -> full message data
-    let analysisCache = {}; // id -> { analysis, reply, followup }
-    let selectedMailId = null;
 
-    async function initProspectionGmail() {
+    // --- Proposal Engine ---
+    let proposalConfig = null;
+
+    async function loadProposalConfig() {
+      if (proposalConfig) return;
       try {
-        const res = await fetch('/auth/google/status');
-        const { connected, email } = await res.json();
-        document.getElementById('prospGmailConnect').style.display = connected ? 'none' : 'flex';
-        document.getElementById('prospGmailMain').style.display = connected ? 'block' : 'none';
-        if (connected) {
-          document.getElementById('prospGmailBadge').textContent = email || '';
-          if (gmailMessages.length === 0) refreshGmailMessages();
-        }
-        // Handle OAuth redirect params
-        const params = new URLSearchParams(window.location.search);
-        if (params.get('gmail_connected')) {
-          history.replaceState({}, '', '/');
-          initProspectionGmail();
-        }
-        if (params.get('gmail_error')) {
-          document.getElementById('prospConnectError').textContent = 'Erreur : ' + params.get('gmail_error');
-          document.getElementById('prospConnectError').style.display = 'block';
-          history.replaceState({}, '', '/');
-        }
-      } catch(err) {
-        console.error('Gmail status error:', err);
-      }
-    }
-
-    function connectGmail() {
-      window.location.href = '/auth/google';
-    }
-
-    async function disconnectGmail() {
-      await fetch('/auth/google/logout', { method: 'POST' });
-      gmailMessages = []; gmailMessagesFiltered = []; gmailCache = {}; analysisCache = {}; selectedMailId = null;
-      initProspectionGmail();
-    }
-
-    async function refreshGmailMessages() {
-      const btn = document.getElementById('prospRefreshBtn');
-      if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
-      document.getElementById('prospMailList').innerHTML = '<div class="prosp-loading"><div class="prosp-loading-spinner"></div> Chargement des mails...</div>';
-      try {
-        const res = await fetch('/api/gmail/messages');
-        if (res.status === 401) { initProspectionGmail(); return; }
+        const res = await fetch('/api/proposal/config');
         if (!res.ok) throw new Error('Erreur ' + res.status);
-        gmailMessages = await res.json();
-        filterGmailMessages();
+        proposalConfig = await res.json();
+        const sel = document.getElementById('propMission');
+        sel.innerHTML = '<option value="" disabled selected>Sélectionner une mission…</option>';
+        Object.keys(proposalConfig).forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = opt.textContent = m;
+          sel.appendChild(opt);
+        });
+      } catch(e) {
+        document.getElementById('propError').textContent = 'Erreur chargement config : ' + e.message;
+        document.getElementById('propError').style.display = 'block';
+      }
+    }
+
+    function updatePropSubventions() {
+      const mission = document.getElementById('propMission').value;
+      const subSel  = document.getElementById('propSubvention');
+      const subGrp  = document.getElementById('propSubGroup');
+      if (!mission || !proposalConfig?.[mission]) return;
+      const subs = proposalConfig[mission];
+      subSel.innerHTML = subs.map(({ key, label }) => `<option value="${key}">${label}</option>`).join('');
+      subGrp.style.display = (subs.length === 1 && subs[0].key === 'standard') ? 'none' : '';
+    }
+
+    function handlePropLogoChange(input) {
+      document.getElementById('propLogoName').textContent = input.files[0] ? input.files[0].name : 'Choisir un fichier…';
+    }
+
+    async function submitProposal(e) {
+      e.preventDefault();
+      const errEl  = document.getElementById('propError');
+      const okEl   = document.getElementById('propSuccess');
+      const btn    = document.getElementById('propGenBtn');
+      const btnTxt = document.getElementById('propBtnText');
+      errEl.style.display = 'none'; okEl.style.display = 'none';
+      btn.disabled = true; btn.style.opacity = '.6';
+      btnTxt.textContent = 'Génération en cours…';
+
+      try {
+        const nom       = document.getElementById('propNom').value.trim();
+        const mission   = document.getElementById('propMission').value;
+        const subvention= document.getElementById('propSubvention').value;
+        const logoFile  = document.getElementById('propLogo').files[0];
+
+        let logo_base64 = null;
+        if (logoFile) {
+          logo_base64 = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result.split(',')[1]);
+            reader.onerror = reject;
+            reader.readAsDataURL(logoFile);
+          });
+        }
+
+        const res = await fetch('/api/proposal/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nom_entreprise: nom, mission, subvention, logo_base64 }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: 'Erreur serveur' }));
+          throw new Error(err.error || 'Erreur ' + res.status);
+        }
+
+        const blob = await res.blob();
+        const disposition = res.headers.get('Content-Disposition') || '';
+        const fnMatch = disposition.match(/filename="?([^";\n]+)"?/);
+        const filename = fnMatch ? fnMatch[1] : `Proposition_${nom}.pptx`;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+
+        okEl.textContent = `"${filename}" téléchargé avec succès !`;
+        okEl.style.display = 'block';
       } catch(err) {
-        document.getElementById('prospMailList').innerHTML = '<p style="color:#ef4444;padding:1rem;font-size:0.82rem">' + err.message + '</p>';
+        errEl.textContent = err.message;
+        errEl.style.display = 'block';
       } finally {
-        if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+        btn.disabled = false; btn.style.opacity = '1';
+        btnTxt.textContent = 'Générer la proposition';
       }
-    }
-
-    function filterGmailMessages() {
-      const search = (document.getElementById('prospSearch')?.value || '').toLowerCase();
-      const period = document.getElementById('prospPeriodFilter')?.value || 'all';
-      const now = new Date();
-
-      gmailMessagesFiltered = gmailMessages.filter(m => {
-        const matchSearch = !search || m.from.toLowerCase().includes(search) || m.subject.toLowerCase().includes(search);
-        let matchPeriod = true;
-        if (period !== 'all') {
-          const date = new Date(m.date);
-          if (period === 'today') matchPeriod = date.toDateString() === now.toDateString();
-          else if (period === 'week') { const d = new Date(now); d.setDate(d.getDate() - 7); matchPeriod = date >= d; }
-          else if (period === 'month') matchPeriod = date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
-        }
-        return matchSearch && matchPeriod;
-      });
-      renderGmailList();
-    }
-
-    function renderGmailList() {
-      const el = document.getElementById('prospMailList');
-      if (!gmailMessagesFiltered.length) {
-        el.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Aucun mail trouvé.</p>';
-        return;
-      }
-      let html = '';
-      for (const m of gmailMessagesFiltered) {
-        const from = m.from.replace(/<.*>/, '').trim() || m.from;
-        const date = new Date(m.date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
-        const analyzed = !!analysisCache[m.id];
-        html += `<div class="prosp-mail-card${m.id === selectedMailId ? ' active' : ''}${analyzed ? ' analyzed' : ''}" onclick="selectGmailMail('${m.id}')">
-          <div class="prosp-mail-from">${escapeHtml(from)}</div>
-          <div class="prosp-mail-subject">${escapeHtml(m.subject || '(sans objet)')}</div>
-          <div class="prosp-mail-meta"><span>${escapeHtml(m.from.match(/<(.+)>/)?.[1] || '')}</span><span>${date}</span></div>
-          <div class="prosp-mail-snippet">${escapeHtml(m.snippet)}</div>
-        </div>`;
-      }
-      el.innerHTML = html;
-    }
-
-    async function selectGmailMail(id) {
-      selectedMailId = id;
-      renderGmailList();
-      const panel = document.getElementById('prospPanel');
-      panel.innerHTML = '<div class="prosp-panel-inner"><div class="prosp-loading"><div class="prosp-loading-spinner"></div> Chargement du mail...</div></div>';
-
-      try {
-        if (!gmailCache[id]) {
-          const res = await fetch('/api/gmail/message/' + id);
-          if (!res.ok) throw new Error('Erreur ' + res.status);
-          gmailCache[id] = await res.json();
-        }
-        renderMailPanel(gmailCache[id]);
-      } catch(err) {
-        panel.innerHTML = '<div class="prosp-panel-inner"><p style="color:#ef4444;font-size:0.82rem">' + err.message + '</p></div>';
-      }
-    }
-
-    function renderMailPanel(mail) {
-      const panel = document.getElementById('prospPanel');
-      const cached = analysisCache[mail.id] || {};
-      panel.innerHTML = `
-        <div class="prosp-panel-inner">
-          <div class="prosp-panel-header">
-            <div class="prosp-panel-from">${escapeHtml(mail.from)}</div>
-            <div class="prosp-panel-subject">${escapeHtml(mail.subject || '(sans objet)')}</div>
-          </div>
-          <div class="prosp-tabs">
-            <button class="prosp-tab active" onclick="showProspTab('analyse')">Analyse</button>
-            <button class="prosp-tab" onclick="showProspTab('repondre')">Répondre</button>
-            ${mail.isThread ? '<button class="prosp-tab" onclick="showProspTab(\'relance\')">Relance</button>' : ''}
-          </div>
-          <div id="prosp-tab-analyse" class="prosp-tab-content active">
-            ${cached.analysis ? renderAnalysisContent(cached.analysis) : `
-              <button class="btn" onclick="analyzeGmailMail('${mail.id}')" style="margin-bottom:1rem">
-                ✦ Analyser avec Claude
-              </button>
-              <div id="prosp-analyze-result"></div>
-            `}
-          </div>
-          <div id="prosp-tab-repondre" class="prosp-tab-content">
-            ${cached.reply ? renderReplyContent(cached.reply) : `
-              <div style="margin-bottom:0.5rem">
-                <label style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:0.25rem">Contexte (optionnel)</label>
-                <textarea class="prosp-context-area" id="prosp-context-input" placeholder="Ex: on a déjà échangé sur ce sujet en janvier..."></textarea>
-              </div>
-              <button class="btn" onclick="generateGmailReply('${mail.id}')" style="margin-bottom:1rem">
-                ✦ Générer des réponses
-              </button>
-              <div id="prosp-reply-result"></div>
-            `}
-          </div>
-          ${mail.isThread ? `<div id="prosp-tab-relance" class="prosp-tab-content">
-            ${cached.followup ? renderFollowupContent(cached.followup) : `
-              <button class="btn" onclick="generateGmailFollowup('${mail.id}')" style="margin-bottom:1rem">
-                ✦ Générer des relances
-              </button>
-              <div id="prosp-followup-result"></div>
-            `}
-          </div>` : ''}
-        </div>`;
-    }
-
-    function showProspTab(tab) {
-      document.querySelectorAll('.prosp-tab').forEach((t, i) => {
-        const tabs = ['analyse', 'repondre', 'relance'];
-        t.classList.toggle('active', t.textContent.toLowerCase().includes(tab) || (tab === 'repondre' && t.textContent.includes('pondre')) || (tab === 'relance' && t.textContent.includes('lance')));
-      });
-      document.querySelectorAll('.prosp-tab-content').forEach(c => c.classList.remove('active'));
-      const target = document.getElementById('prosp-tab-' + tab);
-      if (target) target.classList.add('active');
-    }
-
-    function renderAnalysisContent(a) {
-      const dots = Array.from({length: 5}, (_, i) => `<div class="prosp-score-dot${i < a.interest_score ? ' filled' : ''}"></div>`).join('');
-      const flags = (a.red_flags || []).map(f => `<div class="prosp-red-flag">⚠ ${escapeHtml(f)}</div>`).join('');
-      const points = (a.key_points || []).map(p => `<li>${escapeHtml(p)}</li>`).join('');
-      return `
-        <div class="prosp-kv"><div class="prosp-kv-label">Résumé</div><div class="prosp-kv-val">${escapeHtml(a.summary || '')}</div></div>
-        <div class="prosp-kv">
-          <div class="prosp-kv-label">Intérêt</div>
-          <div class="prosp-score"><div class="prosp-score-dots">${dots}</div><span style="font-size:0.8rem;color:var(--text-secondary)">${a.interest_score}/5 — ${escapeHtml(a.interest_reason || '')}</span></div>
-        </div>
-        <div class="prosp-kv"><div class="prosp-kv-label">Points clés</div><ul class="prosp-list-ul">${points}</ul></div>
-        ${flags ? `<div class="prosp-kv"><div class="prosp-kv-label">Alertes</div>${flags}</div>` : ''}`;
-    }
-
-    function renderReplyContent(r) {
-      return `
-        <div class="prosp-reply-card">
-          <div class="prosp-reply-label">Refus poli</div>
-          <div class="prosp-reply-subject">Objet : ${escapeHtml(r.refusal?.subject || '')}</div>
-          <div class="prosp-reply-body">${escapeHtml(r.refusal?.body || '')}</div>
-          <button class="btn prosp-copy-btn" onclick="copyToClipboard(${JSON.stringify(r.refusal?.body || '')}, this)">Copier</button>
-        </div>
-        <div class="prosp-reply-card">
-          <div class="prosp-reply-label" style="color:var(--success)">Réponse d'intérêt</div>
-          <div class="prosp-reply-subject">Objet : ${escapeHtml(r.interest?.subject || '')}</div>
-          <div class="prosp-reply-body">${escapeHtml(r.interest?.body || '')}</div>
-          <button class="btn prosp-copy-btn" onclick="copyToClipboard(${JSON.stringify(r.interest?.body || '')}, this)">Copier</button>
-        </div>`;
-    }
-
-    function renderFollowupContent(f) {
-      return `
-        <div class="prosp-reply-card">
-          <div class="prosp-reply-label">Relance douce</div>
-          <div class="prosp-reply-subject">Objet : ${escapeHtml(f.soft?.subject || '')}</div>
-          <div class="prosp-reply-body">${escapeHtml(f.soft?.body || '')}</div>
-          <button class="btn prosp-copy-btn" onclick="copyToClipboard(${JSON.stringify(f.soft?.body || '')}, this)">Copier</button>
-        </div>
-        <div class="prosp-reply-card">
-          <div class="prosp-reply-label" style="color:var(--primary)">Relance directe</div>
-          <div class="prosp-reply-subject">Objet : ${escapeHtml(f.direct?.subject || '')}</div>
-          <div class="prosp-reply-body">${escapeHtml(f.direct?.body || '')}</div>
-          <button class="btn prosp-copy-btn" onclick="copyToClipboard(${JSON.stringify(f.direct?.body || '')}, this)">Copier</button>
-        </div>`;
-    }
-
-    async function analyzeGmailMail(id) {
-      const resultEl = document.getElementById('prosp-analyze-result');
-      resultEl.innerHTML = '<div class="prosp-loading"><div class="prosp-loading-spinner"></div> Analyse en cours...</div>';
-      const mail = gmailCache[id];
-      try {
-        const res = await fetch('/api/gmail/analyze', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mailContent: mail.body, subject: mail.subject, from: mail.from })
-        });
-        if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Erreur ' + res.status); }
-        const analysis = await res.json();
-        if (!analysisCache[id]) analysisCache[id] = {};
-        analysisCache[id].analysis = analysis;
-        renderGmailList();
-        const tabContent = document.getElementById('prosp-tab-analyse');
-        if (tabContent) tabContent.innerHTML = renderAnalysisContent(analysis);
-      } catch(err) {
-        resultEl.innerHTML = '<p style="color:#ef4444;font-size:0.82rem">' + err.message + '</p>';
-      }
-    }
-
-    async function generateGmailReply(id) {
-      const resultEl = document.getElementById('prosp-reply-result');
-      const context = document.getElementById('prosp-context-input')?.value || '';
-      resultEl.innerHTML = '<div class="prosp-loading"><div class="prosp-loading-spinner"></div> Génération en cours...</div>';
-      const mail = gmailCache[id];
-      try {
-        const res = await fetch('/api/gmail/reply', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mailContent: mail.body, subject: mail.subject, from: mail.from, context })
-        });
-        if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Erreur ' + res.status); }
-        const reply = await res.json();
-        if (!analysisCache[id]) analysisCache[id] = {};
-        analysisCache[id].reply = reply;
-        const tabContent = document.getElementById('prosp-tab-repondre');
-        if (tabContent) tabContent.innerHTML = renderReplyContent(reply);
-      } catch(err) {
-        resultEl.innerHTML = '<p style="color:#ef4444;font-size:0.82rem">' + err.message + '</p>';
-      }
-    }
-
-    async function generateGmailFollowup(id) {
-      const resultEl = document.getElementById('prosp-followup-result');
-      resultEl.innerHTML = '<div class="prosp-loading"><div class="prosp-loading-spinner"></div> Génération en cours...</div>';
-      const mail = gmailCache[id];
-      try {
-        const res = await fetch('/api/gmail/followup', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mailContent: mail.body, subject: mail.subject, from: mail.from })
-        });
-        if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Erreur ' + res.status); }
-        const followup = await res.json();
-        if (!analysisCache[id]) analysisCache[id] = {};
-        analysisCache[id].followup = followup;
-        const tabContent = document.getElementById('prosp-tab-relance');
-        if (tabContent) tabContent.innerHTML = renderFollowupContent(followup);
-      } catch(err) {
-        resultEl.innerHTML = '<p style="color:#ef4444;font-size:0.82rem">' + err.message + '</p>';
-      }
-    }
-
-    function copyToClipboard(text, btn) {
-      navigator.clipboard.writeText(text).then(() => {
-        const orig = btn.textContent;
-        btn.textContent = 'Copié ✓';
-        btn.style.background = 'var(--success)';
-        setTimeout(() => { btn.textContent = orig; btn.style.background = ''; }, 2000);
-      });
     }
 
     function escapeHtml(str) {

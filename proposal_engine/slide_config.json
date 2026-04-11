@@ -1,0 +1,198 @@
+{
+  "_description": "Configuration pour la génération automatique de propositions commerciales Releaf Carbon",
+  "_version": "3.0",
+  "_usage": "Lire ce fichier dans votre app Python pour savoir quels slides inclure selon la mission et quelles variables remplacer.",
+
+  "variables": {
+    "{{NOM_ENTREPRISE}}": {
+      "description": "Nom de l'entreprise cliente",
+      "example": "Alliance Emploi",
+      "required": true,
+      "appears_in": "Tous les footers et en-têtes de tableau"
+    },
+    "{{TYPE_MISSION}}": {
+      "description": "Type de mission affiché sur le slide de couverture",
+      "values": ["Bilan Carbone", "ACV", "FDES / PEP", "EPD"],
+      "required": true,
+      "appears_in": "Slide 1 (couverture)"
+    },
+    "{{LOGO_ENTREPRISE}}": {
+      "description": "Logo de l'entreprise cliente. Sur le slide 1, remplacer l'image nommée 'logo_client' (dernière image du slide) par le logo client.",
+      "format": "PNG ou JPG",
+      "required": false,
+      "appears_in": "Slide 1 (couverture) — à remplacer programmatiquement via python-pptx Shape.image"
+    },
+    "{{PROGRAMME_SUBVENTION}}": {
+      "description": "Nom du programme de subvention",
+      "example": "Booster Transformation",
+      "values": ["Booster Transformation", "Diag Décarbon'Action", "Diag Ecoconception", "Sans subvention"],
+      "required": false,
+      "appears_in": "Slides de proposition financière (slides 49–55)"
+    },
+    "{{OPERATEUR_SUBVENTION}}": {
+      "description": "Opérateur du programme de subvention",
+      "example": "Rev3",
+      "values": ["Rev3", "Bpifrance", ""],
+      "required": false,
+      "appears_in": "Slides de proposition financière"
+    },
+    "{{POURCENTAGE_SUBVENTION}}": {
+      "description": "Pourcentage de prise en charge de la subvention",
+      "example": "50%",
+      "required": false,
+      "appears_in": "Slides de proposition financière"
+    },
+    "{{MONTANT_SUBVENTION}}": {
+      "description": "Montant remboursé par la subvention",
+      "example": "5 000 €",
+      "required": false,
+      "appears_in": "Slides de proposition financière"
+    },
+    "{{PRIX_APRES_SUBVENTION}}": {
+      "description": "Prix final H.T. après déduction de la subvention",
+      "example": "5 000 €",
+      "required": false,
+      "appears_in": "Slides de proposition financière"
+    },
+    "{{INTITULE_MISSION}}": {
+      "description": "Intitulé de la ligne mission dans le tableau financier",
+      "example": "Mesure de l'empreinte carbone",
+      "required": false,
+      "appears_in": "Slides de proposition financière BC (slides 49–51)"
+    }
+  },
+
+  "sections": {
+    "introduction": {
+      "label": "Introduction Releaf Carbon",
+      "always_include": true,
+      "slides": [1, 2, 3, 4, 5, 6, 7, 8, 9],
+      "description": "Slides de présentation de Releaf (toujours inclus)"
+    },
+    "ACV": {
+      "label": "Approche méthodologique ACV",
+      "mission_key": "ACV",
+      "slides": [10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+      "description": "Section ACV (Analyse de Cycle de Vie) — inclure uniquement si mission = ACV"
+    },
+    "Bilan_Carbone": {
+      "label": "Approche méthodologique Bilan Carbone",
+      "mission_key": "Bilan Carbone",
+      "slides": [20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30],
+      "description": "Section Bilan Carbone — inclure uniquement si mission = Bilan Carbone"
+    },
+    "FDES_PEP": {
+      "label": "Approche méthodologique FDES / PEP",
+      "mission_key": "FDES_PEP",
+      "slides": [31, 32, 33, 34, 35, 36],
+      "description": "Section FDES / PEP (français) — inclure si mission = FDES/PEP"
+    },
+    "EPD": {
+      "label": "EPD Methodology",
+      "mission_key": "EPD",
+      "slides": [37, 38, 39, 40, 41, 42],
+      "description": "EPD section (English) — include if mission = EPD"
+    },
+    "calendrier": {
+      "label": "Calendrier prévisionnel",
+      "always_include": true,
+      "section_header_slide": 43,
+      "slides_per_mission": {
+        "Bilan Carbone": 44,
+        "ACV": 45,
+        "FDES_PEP": 46,
+        "EPD": 47
+      },
+      "description": "Toujours inclure le header + le calendrier correspondant à la mission choisie"
+    },
+    "proposition_financiere": {
+      "label": "Proposition financière",
+      "always_include": true,
+      "section_header_slide": 48,
+      "slides_per_mission": {
+        "Bilan_Carbone": {
+          "options": {
+            "Rev3_50pct": 49,
+            "BPI_40pct": 50,
+            "Rev3_30pct": 51
+          },
+          "description": "3 options de subvention pour Bilan Carbone"
+        },
+        "ACV": {
+          "options": {
+            "BPI_70pct": 52,
+            "BPI_60pct": 53
+          },
+          "description": "2 options de subvention pour ACV/Ecoconception"
+        },
+        "FDES_PEP": 54,
+        "EPD": 55
+      }
+    }
+  },
+
+  "logo_replacement": {
+    "instructions": "Pour remplacer le logo client sur le slide 1, utiliser python-pptx :",
+    "python_code": [
+      "from pptx import Presentation",
+      "from pptx.util import Inches",
+      "import io",
+      "prs = Presentation('Template master proposition v3.pptx')",
+      "slide = prs.slides[0]  # Slide 1 (index 0)",
+      "# Trouver le placeholder du logo (dernière image du slide)",
+      "for shape in slide.shapes:",
+      "    if shape.shape_type == 13:  # MSO_SHAPE_TYPE.PICTURE",
+      "        # shape.name contient le nom — vérifier lequel est le logo client",
+      "        pass",
+      "prs.save('proposition_client.pptx')"
+    ]
+  },
+
+  "python_replacement_example": {
+    "description": "Exemple de code Python pour remplacer les placeholders dans le PPTX",
+    "code": [
+      "import zipfile, shutil, os, re",
+      "",
+      "def generate_proposal(template_path, output_path, variables):",
+      "    '''",
+      "    template_path: chemin vers Template master proposition v3.pptx",
+      "    output_path: chemin du fichier généré",
+      "    variables: dict avec les valeurs des placeholders",
+      "    '''",
+      "    shutil.copy(template_path, output_path)",
+      "    ",
+      "    # Lire et modifier le PPTX (qui est un ZIP)",
+      "    with zipfile.ZipFile(output_path, 'r') as zin:",
+      "        names = zin.namelist()",
+      "        contents = {n: zin.read(n) for n in names}",
+      "    ",
+      "    # Remplacer les placeholders dans tous les fichiers XML",
+      "    for filename, content in contents.items():",
+      "        if filename.endswith('.xml') or filename.endswith('.rels'):",
+      "            text = content.decode('utf-8')",
+      "            for placeholder, value in variables.items():",
+      "                text = text.replace(placeholder, value)",
+      "            contents[filename] = text.encode('utf-8')",
+      "    ",
+      "    # Réécrire le PPTX",
+      "    with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zout:",
+      "        for name, data in contents.items():",
+      "            zout.writestr(name, data)",
+      "    ",
+      "    return output_path",
+      "",
+      "# Exemple d'utilisation",
+      "variables = {",
+      "    '{{NOM_ENTREPRISE}}': 'Groupe Leclerc',",
+      "    '{{TYPE_MISSION}}': 'Bilan Carbone',",
+      "    '{{PROGRAMME_SUBVENTION}}': 'Booster Transformation',",
+      "    '{{OPERATEUR_SUBVENTION}}': 'Rev3',",
+      "    '{{POURCENTAGE_SUBVENTION}}': '50%',",
+      "    '{{MONTANT_SUBVENTION}}': '5 000 €',",
+      "    '{{PRIX_APRES_SUBVENTION}}': '5 000 €',",
+      "    '{{INTITULE_MISSION}}': 'Mesure de l\\'empreinte carbone',",
+      "}",
+      "generate_proposal('Template master proposition v3.pptx', 'proposition_leclerc.pptx', variables)"
+    ]
+  }
+}
