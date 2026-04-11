@@ -2406,8 +2406,9 @@ const App = (() => {
     const allProspects = await DB.getProspects({ campaign_id: campaignId });
 
     // Split into actionable groups
-    const toReview = allProspects.filter(p => p.status === 'Message à valider');
+    const toReview = allProspects.filter(p => p.status === 'Message à valider' && p.pending_message);
     const reviewed = allProspects.filter(p => p.status === 'Message à envoyer');
+    const stuck = allProspects.filter(p => p.status === 'Message à valider' && !p.pending_message);
     const totalActionable = toReview.length + reviewed.length;
 
     // Update badge on Review tab
@@ -2461,7 +2462,19 @@ const App = (() => {
               <div class="review-section-label review-section-done">Validés — en attente d'envoi</div>
               ${reviewed.map(p => _reviewItem(p, 'reviewed')).join('')}
             ` : ''}
-            ${totalActionable === 0 ? '<div class="review-empty">Aucun message en attente de validation</div>' : ''}
+            ${stuck.length > 0 ? `
+              <div class="review-section-label" style="color:var(--color-text-muted)">Statut incorrect — sans message</div>
+              ${stuck.map(p => `<div class="review-prospect-item" data-id="${p.id}" style="opacity:0.6">
+                <div class="review-item-row">
+                  <div>
+                    <strong>${UI.esc(p.first_name)} ${UI.esc(p.last_name)}</strong>
+                    <span class="text-sm text-muted">${UI.esc(p.company || '')}</span>
+                  </div>
+                  <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 6px" onclick="event.stopPropagation();App._resetStuckProspect('${p.id}', '${campaignId}')">Reset</button>
+                </div>
+              </div>`).join('')}
+            ` : ''}
+            ${totalActionable === 0 && stuck.length === 0 ? '<div class="review-empty">Aucun message en attente de validation</div>' : ''}
           </div>
         </div>
         <div class="seq-right" id="reviewPreview">${firstProspect ? UI.loader() : ''}</div>
@@ -2535,7 +2548,8 @@ const App = (() => {
     const prospectData = allProspects.find(p => p.id === prospectId) || {};
     const prospectStatus = prospectData.status || '';
     const pendingMsg = prospectData.pending_message || '';
-    const isEditable = ['Message à valider', 'Message à envoyer'].includes(prospectStatus);
+    const isEditable = !!pendingMsg || ['Message à valider', 'Message à envoyer'].includes(prospectStatus);
+    const needsValidation = !!pendingMsg && prospectStatus !== 'Message à envoyer';
 
     panel.innerHTML = `
       <div class="seq-config-inner">
@@ -2557,6 +2571,7 @@ const App = (() => {
                 <div class="review-msg-preview" id="reviewMsgPreview">${UI.esc(pendingMsg)}</div>
                 ${isEditable ? `
                   <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+                    ${needsValidation ? `<button class="btn btn-primary btn-sm" onclick="App._validateReviewMessage('${prospectId}', '${campaignId}')">✓ Valider</button>` : ''}
                     <button class="btn btn-outline btn-sm" onclick="App._editReviewMessage('${prospectId}')">Modifier</button>
                     <button class="btn btn-outline btn-sm" id="btnReviewRegen" onclick="App._regenReviewMessage('${prospectId}', '${campaignId}')">Regénérer</button>
                   </div>
@@ -2570,7 +2585,7 @@ const App = (() => {
                   <div id="reviewRegenPanel" style="display:none;margin-top:10px">
                     <textarea id="reviewRegenInstructions" class="msg-textarea" rows="2" placeholder="Instructions pour Claude (ex: ton plus direct, mentionner la CSRD...)"></textarea>
                     <div style="display:flex;gap:8px;margin-top:8px">
-                      <button class="btn btn-primary btn-sm" id="btnRegenConfirm" onclick="App._confirmRegenReview('${prospectId}', '${campaignId}')">Regénérer</button>
+                      <button class="btn btn-primary btn-sm" id="btnRegenConfirm" onclick="App._confirmRegenReview('${prospectId}', '${campaignId}', ${stepOrder})">Regénérer</button>
                       <button class="btn btn-ghost btn-sm" onclick="document.getElementById('reviewRegenPanel').style.display='none'">Annuler</button>
                     </div>
                   </div>
@@ -2595,14 +2610,60 @@ const App = (() => {
       </div>`;
   }
 
-  function _editReviewMessage(prospectId) {
+  function _editReviewMessage(_prospectId) {
     document.getElementById('reviewEditPanel').style.display = 'block';
     document.getElementById('reviewRegenPanel').style.display = 'none';
   }
 
-  function _regenReviewMessage(prospectId, campaignId) {
+  function _regenReviewMessage(_prospectId, _campaignId) {
     document.getElementById('reviewRegenPanel').style.display = 'block';
     document.getElementById('reviewEditPanel').style.display = 'none';
+  }
+
+  async function _validateReviewMessage(prospectId, campaignId) {
+    try {
+      const r = await fetch('/api/prospector/update-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: prospectId, status: 'Message à envoyer' })
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      UI.toast('Message validé — sera envoyé au prochain passage');
+      await renderReviewTab(campaignId);
+    } catch (err) {
+      UI.toast('Erreur: ' + err.message, 'error');
+    }
+  }
+
+  async function _resetStuckProspect(prospectId, campaignId) {
+    try {
+      const r = await fetch('/api/prospector/update-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: prospectId, status: 'Invitation acceptée' })
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      UI.toast('Statut réinitialisé — "Invitation acceptée"');
+      await renderReviewTab(campaignId);
+    } catch (err) {
+      UI.toast('Erreur: ' + err.message, 'error');
+    }
+  }
+
+  async function _rejectReviewMessage(prospectId, campaignId, targetStatus) {
+    const status = targetStatus || 'Invitation acceptée';
+    try {
+      const r = await fetch('/api/prospector/update-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: prospectId, status, pending_message: null })
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      UI.toast(`Message annulé — prospect remis en "${status}"`);
+      await renderReviewTab(campaignId);
+    } catch (err) {
+      UI.toast('Erreur: ' + err.message, 'error');
+    }
   }
 
   async function _saveReviewMessage(prospectId, campaignId) {
@@ -2611,7 +2672,7 @@ const App = (() => {
       await fetch('/api/prospector/update-status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prospect_id: prospectId, status: 'Message à valider', pending_message: text })
+        body: JSON.stringify({ id: prospectId, status: 'Message à valider', pending_message: text })
       });
       UI.toast('Message modifié');
       _selectReviewProspect(prospectId, campaignId);
@@ -2620,7 +2681,7 @@ const App = (() => {
     }
   }
 
-  async function _confirmRegenReview(prospectId, campaignId) {
+  async function _confirmRegenReview(prospectId, campaignId, stepOrder) {
     const btn = document.getElementById('btnRegenConfirm');
     if (btn) { btn.disabled = true; btn.textContent = 'Génération...'; }
 
@@ -2632,7 +2693,7 @@ const App = (() => {
       const seqResp = await fetch(`/api/sequences?campaign_id=${campaignId}`);
       const seq = await seqResp.json();
       if (seq) {
-        const msgStep = (seq.sequence_steps || []).find(s => s.type === 'send_message');
+        const msgStep = (seq.sequence_steps || []).find(s => s.step_order === stepOrder) || (seq.sequence_steps || []).find(s => s.type === 'send_message');
         if (msgStep) stepParams = msgStep.message_params || {};
       }
     } catch(e) {}
@@ -2672,7 +2733,7 @@ const App = (() => {
         await fetch('/api/prospector/update-status', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prospect_id: prospectId, status: 'Message à valider', pending_message: result.content })
+          body: JSON.stringify({ id: prospectId, status: 'Message à valider', pending_message: result.content })
         });
         UI.toast('Message regénéré');
         _selectReviewProspect(prospectId, campaignId);
@@ -3076,7 +3137,7 @@ const App = (() => {
     addStep, deleteStep, selectStep, _switchMsgTab,
     _updateCharCount, _generateStepMessage, _saveStepConfig, _insertPlaceholder,
     _toggleInvitationNote, _updateNoteCharCount,
-    _selectReviewProspect, _filterReviewList, _editReviewMessage, _regenReviewMessage, _saveReviewMessage, _confirmRegenReview,
+    _selectReviewProspect, _filterReviewList, _editReviewMessage, _regenReviewMessage, _saveReviewMessage, _confirmRegenReview, _validateReviewMessage, _rejectReviewMessage, _resetStuckProspect,
     enrollProspect, enrollCampaign,
     openAddPlaceholder, savePlaceholder, deletePlaceholder,
     _filterCampByStatus,

@@ -4299,13 +4299,13 @@ app.post('/api/prospector/update-status', accountContext, async (req, res) => {
 
     // Update prospect_account status
     const updates = { status, updated_at: new Date().toISOString() };
-    if (pending_message !== undefined) {
-      // Store message in prospects table temporarily (deprecated but still used)
-      await supabaseAdmin.from('prospects').update({ pending_message }).eq('id', prospectId);
-    }
-    if (message_versions !== undefined) {
-      // Store message versions in prospects table temporarily (deprecated but still used)
-      await supabaseAdmin.from('prospects').update({ message_versions }).eq('id', prospectId);
+
+    // Update message fields in prospects table (pending_message, message_versions)
+    const prospectUpdates = { updated_at: new Date().toISOString() };
+    if (pending_message !== undefined) prospectUpdates.pending_message = pending_message;
+    if (message_versions !== undefined) prospectUpdates.message_versions = message_versions;
+    if (Object.keys(prospectUpdates).length > 1) {
+      await supabaseAdmin.from('prospects').update(prospectUpdates).eq('id', prospectId);
     }
 
     const { error } = await supabaseAdmin
@@ -5009,6 +5009,7 @@ ${icebreakerInfo}
 
 Contraintes :
 - Maximum ${maxChars} caractères
+- Le message DOIT commencer par "Bonjour ${prospect?.first_name || '[Prénom]'},"
 - Angle : ${message_params.angle || 'problème'}
 ${message_params.objective ? `- Objectif : ${message_params.objective}` : ''}
 ${message_params.context ? `- Contexte/thématique : ${message_params.context}` : ''}
@@ -5864,10 +5865,27 @@ app.post('/api/sequences/bulk-generate-messages', accountContext, async (req, re
       if (step) stepMap[seq.campaign_id] = step;
     }
 
+    // Load prospect statuses to skip those in invalid states (not yet connected, etc.)
+    const prospectIds = prospects.map(p => p.id);
+    const { data: paRows } = await supabaseAdmin
+      .from('prospect_account')
+      .select('prospect_id, status')
+      .eq('account_id', req.accountId)
+      .in('prospect_id', prospectIds)
+      .limit(prospectIds.length);
+    const statusMap = Object.fromEntries((paRows || []).map(r => [r.prospect_id, r.status]));
+    const BLOCKED_STATUSES = ['Profil à valider', 'Nouveau', 'Non pertinent', 'Perdu', 'Invitation envoyée'];
+
     const results = [];
 
     for (const prospect of prospects) {
       try {
+        const prospectStatus = statusMap[prospect.id];
+        if (BLOCKED_STATUSES.includes(prospectStatus)) {
+          results.push({ prospect_id: prospect.id, error: 'invalid_status', status: prospectStatus });
+          continue;
+        }
+
         const campaign = campaignMap[prospect.campaign_id] || {};
         const step = stepMap[prospect.campaign_id];
         if (!step?.message_params) {
@@ -5892,6 +5910,7 @@ ${icebreakerInfo}
 
 Contraintes :
 - Maximum ${maxChars} caractères
+- Le message DOIT commencer par "Bonjour ${prospect.first_name},"
 - Angle : ${message_params.angle || 'problème'}
 ${message_params.objective ? `- Objectif : ${message_params.objective}` : ''}
 ${message_params.context ? `- Contexte/thématique : ${message_params.context}` : ''}
@@ -5921,6 +5940,122 @@ Retourne UNIQUEMENT le message, rien d'autre. Pas de guillemets autour, pas d'ex
     res.json({ results, total: prospects.length, generated: results.filter(r => r.content).length });
   } catch (err) {
     console.error('Erreur POST /api/sequences/bulk-generate-messages:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/diagnostic/fix-issues — Apply bulk fixes for known inconsistency types
+app.post('/api/diagnostic/fix-issues', accountContext, async (req, res) => {
+  try {
+    const { type } = req.body;
+
+    if (type === 'status_valider_no_message') {
+      // Find all prospects with status='Message à valider' but no pending_message
+      const { data: paRows } = await supabaseAdmin
+        .from('prospect_account')
+        .select('prospect_id, prospects!inner(pending_message)')
+        .eq('account_id', req.accountId)
+        .eq('status', 'Message à valider');
+
+      const toFix = (paRows || []).filter(pa => !pa.prospects.pending_message).map(pa => pa.prospect_id);
+
+      if (!toFix.length) return res.json({ fixed: 0, message: 'Nothing to fix' });
+
+      const { error } = await supabaseAdmin
+        .from('prospect_account')
+        .update({ status: 'Invitation acceptée' })
+        .eq('account_id', req.accountId)
+        .in('prospect_id', toFix);
+
+      if (error) throw error;
+      return res.json({ fixed: toFix.length, prospect_ids: toFix });
+    }
+
+    res.status(400).json({ error: `Unknown fix type: ${type}` });
+  } catch (err) {
+    console.error('Erreur POST /api/diagnostic/fix-issues:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/diagnostic/prospect-audit — Cross-check prospect_account status vs sequence state vs pending_message
+app.get('/api/diagnostic/prospect-audit', accountContext, async (req, res) => {
+  try {
+    // Fetch all data in parallel
+    const [{ data: paRows }, { data: seqStates }, { data: campaigns }] = await Promise.all([
+      supabaseAdmin
+        .from('prospect_account')
+        .select('prospect_id, status, campaign_id, prospects!inner(id, first_name, last_name, company, pending_message)')
+        .eq('account_id', req.accountId),
+      supabaseAdmin
+        .from('prospect_sequence_state')
+        .select('prospect_id, status, current_step_order, sequence_id, enrolled_at')
+        .eq('account_id', req.accountId),
+      supabaseAdmin
+        .from('campaigns')
+        .select('id, name')
+        .eq('account_id', req.accountId),
+    ]);
+
+    const seqStateMap = Object.fromEntries((seqStates || []).map(s => [s.prospect_id, s]));
+    const campaignMap = Object.fromEntries((campaigns || []).map(c => [c.id, c.name]));
+
+    const STATUSES_NOT_CONNECTED = ['Profil à valider', 'Nouveau', 'Invitation envoyée'];
+    const STATUSES_WITH_MESSAGE  = ['Message à valider', 'Message à envoyer'];
+
+    const issues = [];
+
+    for (const pa of (paRows || [])) {
+      const p = pa.prospects;
+      const seq = seqStateMap[pa.prospect_id];
+      const base = {
+        prospect_id: pa.prospect_id,
+        name: `${p.first_name} ${p.last_name}`,
+        company: p.company,
+        campaign: campaignMap[pa.campaign_id] || pa.campaign_id,
+        pa_status: pa.status,
+        pending_message: p.pending_message ? p.pending_message.slice(0, 60) + '…' : null,
+        seq_step: seq?.current_step_order ?? null,
+        seq_status: seq?.status ?? null,
+        enrolled_at: seq?.enrolled_at ?? null,
+      };
+
+      // Case 1 — pending_message exists but status doesn't reflect it
+      if (p.pending_message && !STATUSES_WITH_MESSAGE.includes(pa.status)) {
+        issues.push({ ...base, issue: 'pending_message_wrong_status', fix: 'set status → Message à valider' });
+      }
+
+      // Case 2 — status = Message à valider but no pending_message
+      if (pa.status === 'Message à valider' && !p.pending_message) {
+        issues.push({ ...base, issue: 'status_valider_no_message', fix: 'set status → Invitation acceptée' });
+      }
+
+      // Case 3 — advanced in sequence (step ≥ 2) but not connected on LinkedIn
+      if (seq && seq.current_step_order >= 2 && STATUSES_NOT_CONNECTED.includes(pa.status)) {
+        issues.push({ ...base, issue: 'sequence_ahead_not_connected', fix: 'reset sequence or fix status' });
+      }
+
+      // Case 4 — enrolled in sequence but status is terminal (Non pertinent / Perdu)
+      if (seq && ['Non pertinent', 'Perdu'].includes(pa.status)) {
+        issues.push({ ...base, issue: 'enrolled_but_disqualified', fix: 'unenroll from sequence' });
+      }
+    }
+
+    // Group by issue type
+    const grouped = {};
+    for (const issue of issues) {
+      if (!grouped[issue.issue]) grouped[issue.issue] = [];
+      grouped[issue.issue].push(issue);
+    }
+
+    res.json({
+      total_prospects: (paRows || []).length,
+      total_issues: issues.length,
+      grouped,
+      all: issues,
+    });
+  } catch (err) {
+    console.error('Erreur GET /api/diagnostic/prospect-audit:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
