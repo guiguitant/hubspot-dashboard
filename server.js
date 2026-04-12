@@ -6075,17 +6075,6 @@ function cacheSet(key, value, ttlMs) {
   _cache[key] = { value, expiresAt: Date.now() + ttlMs };
 }
 
-function createImapConnection() {
-  return new Imap({
-    user: GMAIL_USER,
-    password: GMAIL_APP_PASSWORD,
-    host: 'imap.gmail.com',
-    port: 993,
-    tls: true,
-    tlsOptions: { rejectUnauthorized: false },
-  });
-}
-
 function emeliRequest(body) {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
