@@ -28,7 +28,7 @@ const UI = (() => {
 
   // Statuts assignés uniquement par l'automatisation — exclus des dropdowns manuels
   const AUTO_ONLY_STATUSES = ['Profil restreint', 'Invitation acceptée'];
-  const DROPDOWN_STATUSES = STATUSES.filter(s => !AUTO_ONLY_STATUSES.includes(s));
+  const DROPDOWN_STATUSES = [...STATUSES.filter(s => !AUTO_ONLY_STATUSES.includes(s)), 'Non pertinent'];
 
   const CAMP_STATUS_CLASSES = {
     'À lancer': 'badge-a-lancer',

@@ -828,12 +828,12 @@ const App = (() => {
         </div>
       </div>
 
-      ${prospect.source_campaign_id && seqResp?.steps?.length > 0 && !seqResp.sequence_state
+      ${prospect.campaign_id && seqResp?.steps?.length > 0 && !seqResp.sequence_state
         ? `<div class="card mt-6" style="padding:16px;display:flex;align-items:center;gap:12px">
-            <button class="btn btn-primary" id="btnStartSeq" onclick="App.enrollProspect('${id}', '${prospect.source_campaign_id}')">▶ Démarrer la séquence</button>
+            <button class="btn btn-primary" id="btnStartSeq" onclick="App.enrollProspect('${id}', '${prospect.campaign_id}')">▶ Démarrer la séquence</button>
             <span class="text-sm text-muted">${UI.esc(seqResp.sequence?.name || 'Séquence disponible')}</span>
           </div>`
-        : prospect.source_campaign_id && !seqResp?.steps?.length
+        : prospect.campaign_id && !seqResp?.steps?.length
           ? `<div class="text-sm text-muted" style="padding:8px 0">Aucune séquence configurée pour cette campagne.</div>`
           : ''}
 
@@ -960,10 +960,11 @@ const App = (() => {
     const sel = document.getElementById(`statusSelect-${id}`);
     if (!sel) return;
     const newStatus = sel.value;
-    await DB.updateProspect(id, { status: newStatus });
+    const resp = await APIClient.post('/api/prospector/bulk-update-status', { ids: [id], status: newStatus });
+    if (resp.error) { UI.toast('Erreur : ' + resp.error, 'error'); return; }
     sel.dataset.original = newStatus;
     document.getElementById(`btnSaveStatus-${id}`).style.display = 'none';
-    UI.toast('Statut mis à jour');
+    UI.toast(newStatus === 'Non pertinent' ? 'Prospect marqué non pertinent' : 'Statut mis à jour');
     renderProspectDetail(document.getElementById('app'), id);
   }
 
@@ -996,7 +997,8 @@ const App = (() => {
       UI.toast('Le message est vide — sélectionne ou écris un message avant de valider', 'error');
       return;
     }
-    await DB.updateProspect(id, { status: 'Message à envoyer', pending_message: msg });
+    const resp = await APIClient.post('/api/prospector/update-status', { id, status: 'Message à envoyer', pending_message: msg });
+    if (resp.error) { UI.toast('Erreur : ' + resp.error, 'error'); return; }
     UI.toast('Message validé — Claude Dispatch l\'enverra au prochain passage');
     renderProspectDetail(document.getElementById('app'), id);
   }
@@ -2445,7 +2447,6 @@ const App = (() => {
         return `<div class="seq-status-banner seq-active">
           <strong>En cours — Étape ${current_step_order}/${steps.length}</strong>
           <div>Prochaine action : ${UI.esc(nextLabel)} — ${daysUntil <= 0 ? 'maintenant' : 'dans ' + daysUntil + ' jour' + (daysUntil > 1 ? 's' : '')} (le ${UI.formatDate(next_action_at)})</div>
-          <div class="text-sm text-muted">Enrôlé le : ${UI.formatDate(enrolled_at)}</div>
         </div>`;
       }
       if (status === 'stopped_reply') return `<div class="seq-status-banner seq-stopped">⛔ Séquence arrêtée — réponse reçue</div>`;
@@ -2482,9 +2483,25 @@ const App = (() => {
     const isEditable = !!pendingMsg || ['Message à valider', 'Message à envoyer'].includes(prospectStatus);
     const needsValidation = !!pendingMsg && prospectStatus !== 'Message à envoyer';
 
+    // Build prospect info card
+    const jobTitle = prospectData.job_title || '';
+    const company = prospectData.company || '';
+    const sector = prospectData.sector || '';
+    const geography = prospectData.geography || '';
+    const notes = prospectData.notes || '';
+    const mainParts = [jobTitle, company].filter(Boolean);
+    const metaParts = [sector, geography].filter(Boolean);
+    const prospectCardHtml = (mainParts.length || metaParts.length || notes) ? `
+      <div class="review-prospect-card">
+        ${mainParts.length ? `<div class="review-prospect-main">${mainParts.map(UI.esc).join(' · ')}</div>` : ''}
+        ${metaParts.length ? `<div class="review-prospect-meta">${metaParts.map(UI.esc).join(' · ')}</div>` : ''}
+        ${notes ? `<div class="review-prospect-notes">${UI.esc(notes)}</div>` : ''}
+      </div>` : '';
+
     panel.innerHTML = `
       <div class="seq-config-inner">
         <h3>Prévisualisation pour ${UI.esc(name)}</h3>
+        ${prospectCardHtml}
         ${_seqBanner(seqState, data.steps)}
         ${data.steps.map((s, i) => {
           const meta = STEP_TYPES[s.type] || { icon: '❓', label: s.type };

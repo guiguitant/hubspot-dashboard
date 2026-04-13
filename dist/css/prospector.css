@@ -1045,6 +1045,37 @@ textarea.msg-textarea:focus {
 }
 .ph-missing { background: #FEF3C7; color: #D97706; padding: 1px 6px; border-radius: var(--radius-sm); font-weight: 500; }
 
+/* ---- Review prospect card ---- */
+.review-prospect-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.review-prospect-main {
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--color-text);
+}
+.review-prospect-meta {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+.review-prospect-notes {
+  font-size: var(--font-xs);
+  color: var(--color-text-secondary);
+  border-top: 1px solid var(--color-border-light);
+  margin-top: 6px;
+  padding-top: 6px;
+  font-style: italic;
+}
+
 /* ---- Sequence status banners ---- */
 .seq-status-banner { padding: 12px 16px; border-radius: var(--radius); margin-bottom: 16px; font-size: var(--font-sm); line-height: 1.6; }
 .seq-not-started { background: var(--color-bg); color: var(--color-text-secondary); border: 1px solid var(--color-border); }
