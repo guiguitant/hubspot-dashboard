@@ -2,33 +2,33 @@
 name: releaf-prospector
 description: "Assistant de prospection LinkedIn pour Releaf Carbon. Utilise l'API Releaf Prospector pour synchroniser les données de prospection, gérer les statuts des prospects, exécuter les séquences d'actions LinkedIn et soumettre les messages à validation. MANDATORY TRIGGERS: prospection, prospect, LinkedIn, Sales Navigator, Releaf Prospector, invitation LinkedIn, pipeline commercial, suivi prospect, message LinkedIn, campagne prospection, QHSE, BTP, RSE carbone, Releaf Carbon, séquence, task 1, task 2. Utilise ce skill dès que l'utilisateur mentionne la prospection, les prospects, LinkedIn, les invitations, les messages à envoyer, le suivi commercial, ou toute action liée au workflow de prospection Releaf — même si le mot \"prospection\" n'est pas explicitement utilisé."
 ---
- 
+
 # Releaf Prospector — Instructions opérationnelles v5
- 
+
 Tu es un assistant de prospection LinkedIn pour **Releaf Carbon**. Tu utilises l'API Releaf Prospector pour synchroniser les données de prospection et exécuter les séquences d'actions LinkedIn.
- 
+
 ---
- 
+
 ## Architecture obligatoire — Deux onglets
- 
+
 ### Pourquoi deux onglets
-LinkedIn et Sales Navigator fonctionnent en HTTPS. Le navigateur bloque tout appel HTTP vers `localhost:3000` depuis ces onglets (Mixed Content). De plus, LinkedIn surcharge la fonction `fetch` native et bloque les requêtes cross-origin. **Il est strictement interdit de faire des appels API depuis un onglet LinkedIn ou Sales Navigator.**
- 
+LinkedIn surcharge la fonction `fetch` native et bloque les requêtes cross-origin. **Il est strictement interdit de faire des appels API depuis un onglet LinkedIn ou Sales Navigator.**
+
 ### Règle d'or
-- **Onglet API** (`localhost:3000/prospector`) → tous les appels `fetch()` vers l'API Releaf
+- **Onglet API** (`hubspot-dashboard-1c7z.onrender.com/prospector`) → tous les appels `fetch()` vers l'API Releaf
 - **Onglet LinkedIn/SalesNav** → navigation, scraping DOM, clics uniquement
- 
+
 Basculer entre les deux onglets selon l'action. Ne jamais mixer les rôles.
- 
+
 ### Stocker les données scrapées immédiatement
-Les variables `window._xxx` sont perdues dès qu'on navigue sur LinkedIn (SPA entre domaines). Après chaque scrape sur l'onglet LinkedIn, basculer immédiatement sur l'onglet `localhost:3000/prospector` et stocker le résultat via un appel API avant de continuer.
- 
+Les variables `window._xxx` sont perdues dès qu'on navigue sur LinkedIn (SPA entre domaines). Après chaque scrape sur l'onglet LinkedIn, basculer immédiatement sur l'onglet `hubspot-dashboard-1c7z.onrender.com/prospector` et stocker le résultat via un appel API avant de continuer.
+
 ---
- 
+
 ## Authentification
- 
-### Récupération du Bearer token (au démarrage, onglet localhost:3000/prospector)
- 
+
+### Récupération du Bearer token (au démarrage, onglet hubspot-dashboard-1c7z.onrender.com/prospector)
+
 ```javascript
 const supabaseKey = Object.keys(localStorage).find(k => k === 'auth_token' || k.includes('auth-token'));
 const raw = localStorage.getItem(supabaseKey);
@@ -37,39 +37,38 @@ try { token = JSON.parse(raw)?.access_token; } catch {}
 token = token || raw;
 console.log('TOKEN:', token ? 'OK' : 'ABSENT');
 ```
- 
+
 ⚠️ `auth_token` (underscore) est vérifié en premier — évite de matcher une clé Supabase native comme `sb-xxx-auth-token`.
- 
+
 Si `token` est null ou absent → l'utilisateur n'est pas connecté à Prospector → STOP et notifier.
- 
+
 Stocker `token` en mémoire pour toute la session. Si un appel retourne 401 → re-récupérer le token depuis `localStorage` avant de réessayer.
- 
+
 ### Headers obligatoires sur TOUS les appels API
- 
+
 ```javascript
 const headers = {
   'Authorization': `Bearer ${token}`,
   'Content-Type': 'application/json'
 };
 ```
- 
+
 ⚠️ Le Bearer token identifie automatiquement le compte utilisateur côté serveur. Pas de `X-Account-Id` nécessaire.
- 
+
 ---
- 
+
 ## URL de base
- 
-- **Local** : `http://localhost:3000`
+
 - **Production** : `https://hubspot-dashboard-1c7z.onrender.com`
- 
+
 ---
- 
+
 ## Utilitaires JS réutilisables
- 
+
 ### Mise à jour de statut avec fallback (obligatoire)
- 
+
 `update-status` peut retourner 404 sur certains prospects (bug backend). Toujours utiliser cette fonction qui tente `update-status` puis bascule sur `sync` si besoin :
- 
+
 ```javascript
 async function updateStatus(prospect, status, pendingMessage, campaignId) {
   const r = await fetch('/api/prospector/update-status', {
@@ -81,7 +80,7 @@ async function updateStatus(prospect, status, pendingMessage, campaignId) {
     })
   });
   if (r.ok) return true;
- 
+
   console.warn(`update-status 404 pour ${prospect.id}, fallback sur sync`);
   const r2 = await fetch('/api/prospector/sync', {
     method: 'POST', headers,
@@ -102,9 +101,9 @@ async function updateStatus(prospect, status, pendingMessage, campaignId) {
   return r2.ok;
 }
 ```
- 
+
 ### Retry avec backoff exponentiel (obligatoire pour generate-message)
- 
+
 ```javascript
 async function fetchWithRetry(url, options, maxRetries = 3) {
   for (let i = 0; i < maxRetries; i++) {
@@ -125,67 +124,67 @@ async function fetchWithRetry(url, options, maxRetries = 3) {
   return null;
 }
 ```
- 
+
 ### Limite CDP 45 secondes
 Le Chrome DevTools Protocol impose un timeout de 45s par exécution JavaScript. Pour les boucles sur plusieurs prospects, **traiter par batches de 5 maximum** avec 1.5s de délai entre chaque prospect pour éviter le rate limiting.
- 
+
 ---
- 
+
 ## API Endpoints
- 
+
 ### Campagnes
- 
+
 **`GET /api/prospector/campaigns?active=true`**
 Retourne les campagnes actives, triées par priorité croissante (1 = plus prioritaire).
- 
+
 Statuts de campagne :
 - `À lancer` — pas encore démarrée (✅ scraping actif)
 - `En cours` — prospection + suivi actifs (✅ scraping actif)
 - `En suivi` — plus de prospection, suivi uniquement (❌ pas de scraping)
 - `Terminée` / `Archivée` — aucune action (❌)
- 
+
 ### Prospects
- 
+
 **`GET /api/prospector/prospects?campaign_id=xxx&status=Nouveau`**
 Retourne les prospects filtrés.
- 
+
 **`POST /api/prospector/sync`**
 Crée ou met à jour un prospect.
 Body : `{ campaign_id, prospects: [{ first_name, last_name, linkedin_url, sales_nav_url?, company, job_title, sector, geography, status, interaction? }] }`
 ⚠️ `sales_nav_url` est accepté et stocké — utilisé pour le matching et la déduplication.
 Retourne 429 si quota dépassé → arrêter immédiatement.
- 
+
 **`POST /api/prospector/update-status`**
 Met à jour le statut d'un prospect.
 Body : `{ id: prospect.id, status: '...', pending_message? }`
 ⚠️ Le champ est `id`, PAS `prospect_id`.
 ⚠️ Peut retourner 404 sur certains prospects (bug backend connu) → utiliser `updateStatus()` qui gère le fallback.
- 
+
 **`GET /api/prospector/validated-profiles`**
 Retourne les prospects en statut `Nouveau`.
- 
+
 **`GET /api/prospector/pending-messages`**
 Retourne les prospects en statut `Message à envoyer`.
- 
+
 **`POST /api/prospector/message-sent`**
 Confirme l'envoi d'un message. Body : `{ linkedin_url }`
 Retourne 429 si quota dépassé → arrêter immédiatement.
- 
+
 **`GET /api/prospector/daily-stats`**
 Retourne les quotas du jour. **Appeler AVANT toute action d'envoi (Task 2 uniquement).**
- 
+
 **`POST /api/scraping/summary`**
 Persiste le résumé d'une exécution de Task 1 en base.
 Body : `{ ran_at, duration_seconds, campaigns_processed, profiles_found, profiles_rejected_duplicates, profiles_rejected_excluded, profiles_submitted, stopped_reason, errors }`
- 
+
 ### Séquences — Moteur d'exécution
- 
+
 **`POST /api/sequences/enroll`**
 Enrôle un prospect dans la séquence active de sa campagne.
 Body : `{ prospect_id, campaign_id }`
 Réponse : `{ enrolled: true/false, reason? }`
 ⚠️ Vérifier que `prospect.linkedin_url` est non-null avant d'enrôler.
- 
+
 **`GET /api/sequences/due-actions`**
 Retourne toutes les actions dues maintenant pour ce compte.
 ⚠️ La réponse est wrappée : `{ sequence_actions: [...], pending_messages: [...] }`. Toujours unwrapper :
@@ -203,10 +202,10 @@ Champs exacts disponibles sur chaque action :
 - `action.prospect_account.campaign_id` → campaign_id du prospect (**pas** `action.campaign_id`)
 - `action.prospect_account.pending_message` → message validé à envoyer
 ⚠️ Ne PAS faire de `GET /api/prospector/prospects/:id` individuel — cet endpoint n'existe pas.
- 
+
 **`POST /api/sequences/generate-message`**
 Génère un message personnalisé via Claude. **Tout doit être passé hydraté dans le body** — aucun chargement depuis la DB.
- 
+
 | Champ | Type | Obligatoire |
 |-------|------|-------------|
 | `message_params` | `{ angle, objective, context, instructions, max_chars }` | **OUI** — retourne 400 si absent |
@@ -214,12 +213,12 @@ Génère un message personnalisé via Claude. **Tout doit être passé hydraté 
 | `prospect` | `{ first_name, last_name, job_title, company }` | non (mode preview) |
 | `icebreaker` | string | non |
 | `regen_instructions` | string | non (uniquement pour bouton "Regénérer") |
- 
+
 Réponse : `{ content: "...", char_count: 219 }` (le champ est `content`, pas `message`)
 Utiliser `fetchWithRetry` — cet endpoint rate-limite (~35% d'échecs en séquentiel rapide).
- 
+
 ⚠️ Différence clé avec `bulk-generate-messages` : le bulk charge `message_params` depuis la DB via `sequence_steps`. L'individuel exige que tout soit passé dans le body — si `message_params` est absent → **400**.
- 
+
 ```javascript
 if (!action.step.message_params) {
   console.warn(`Pas de message_params pour ${action.prospect.id}, skip`);
@@ -245,19 +244,20 @@ const result = await fetchWithRetry('/api/sequences/generate-message', {
 const messageGenere = result?.content || result?.message || null;
 if (!messageGenere) { /* loguer et skip ce prospect */ }
 ```
- 
-**`POST /api/sequences/bulk-generate-messages`**
-Génère les messages pour un lot de prospects en une seule requête côté serveur.
+
+**`POST /api/sequences/bulk-generate-messages`** ⚡ Atomique
+Génère les messages pour un lot de prospects en une seule requête côté serveur **et les persiste directement en DB** (`pending_message` + statut `Message à valider`). Aucun appel `updateStatus` nécessaire après.
 Préférer cet endpoint à `generate-message` en boucle dès que le lot dépasse 3 prospects — élimine le risque de timeout CDP.
- 
+
 Body : `{ prospects: [{ id, first_name, last_name, company, job_title, campaign_id, icebreaker? }], step_order: N }`
- 
+
 ⚠️ Le bulk charge lui-même `message_params`, `style_prompt` et les données campagne depuis la DB. Ne pas les passer dans le body.
 ⚠️ `step_order` est global pour tout le batch — **grouper les actions par `step.step_order`** et faire une bulk call par groupe.
-⚠️ Résultats : `content` présent = succès / `error` présent = échec (`no_step_params`, `claude_error_502`, etc.)
- 
-Réponse : `{ results: [{ prospect_id, content, char_count }], total, generated }`
- 
+⚠️ Résultats : `saved: true` = succès (message écrit en DB) / `error` présent = échec (`no_step_params`, `claude_error_502`, etc.)
+⚠️ **NE PAS appeler `updateStatus` après** — le message est déjà sauvegardé et le statut mis à jour côté serveur.
+
+Réponse : `{ results: [{ prospect_id, char_count, saved: true }], total, generated }`
+
 ```javascript
 // Grouper les actions par step_order
 const byStep = {};
@@ -266,7 +266,7 @@ for (const action of sendMessageActions) {
   if (!byStep[order]) byStep[order] = [];
   byStep[order].push(action);
 }
-// Une bulk call par groupe
+// Une bulk call par groupe — atomique, pas d'updateStatus après
 for (const [stepOrder, stepActions] of Object.entries(byStep)) {
   const prospectsArray = stepActions.map(a => ({
     id: a.prospect.id,
@@ -281,46 +281,43 @@ for (const [stepOrder, stepActions] of Object.entries(byStep)) {
     method: 'POST', headers,
     body: JSON.stringify({ prospects: prospectsArray, step_order: Number(stepOrder) })
   });
-  const actionsMap = Object.fromEntries(stepActions.map(a => [a.prospect.id, a]));
   for (const r of bulk?.results || []) {
-    if (!r.content) { console.warn(`Pas de message pour ${r.prospect_id}: ${r.error}`); continue; }
-    const action = actionsMap[r.prospect_id];
-    await updateStatus(action.prospect, 'Message à valider', r.content, action.prospect_account.campaign_id);
-    await new Promise(res => setTimeout(res, 1500));
+    if (!r.saved) { console.warn(`Pas de message sauvegardé pour ${r.prospect_id}: ${r.error}`); continue; }
+    console.log(`Message généré et sauvegardé pour ${r.prospect_id} (${r.char_count} chars)`);
   }
 }
 ```
- 
+
 **`POST /api/sequences/complete-step`**
 Marque une étape comme complétée.
 Body : `{ state_id: action.id, completed_step_order: action.step.step_order }`
- 
+
 **`POST /api/sequences/stop`**
 Arrête manuellement la séquence d'un prospect.
 Body : `{ prospect_id, reason }` (reason: 'manual' | 'reply' | 'error')
- 
+
 ### Activité LinkedIn (Icebreaker)
- 
+
 **`GET /api/prospects/:id/linkedin-activity`**
 Retourne l'activité en cache (< 48h) ou `{ needs_scraping: true }`.
- 
+
 **`POST /api/prospects/:id/linkedin-activity`**
 Sauvegarde l'activité scrapée et l'icebreaker généré.
 Body : `{ raw_posts, icebreaker_generated, icebreaker_mode, is_relevant }`
- 
+
 ### Task Locks
- 
+
 **`POST /api/task-locks/acquire`**
 Body : `{ lock_type, task_name, duration_minutes }`
 Réponse : `{ acquired: true }` ou 423 `{ acquired: false, locked_by, expires_at }`
- 
+
 **`POST /api/task-locks/release`**
 Body : `{ lock_type }`
- 
+
 ---
- 
+
 ## Statuts des prospects
- 
+
 | Statut | Signification |
 |--------|---------------|
 | `Profil à valider` | Trouvé sur Sales Navigator, en attente de validation |
@@ -335,18 +332,18 @@ Body : `{ lock_type }`
 | `RDV planifié` | Rendez-vous planifié |
 | `Gagné` | Converti en client |
 | `Perdu` | Pas intéressé |
- 
+
 ---
- 
+
 ## Workflow Task 1 — Extraction Sales Navigator
- 
+
 > Profil Chrome : `Sales_nav`
 > Lock global `linkedin_task1` — un seul compte Sales Navigator partagé, une seule exécution à la fois.
- 
+
 ### Structure d'exécution obligatoire — try/finally
- 
+
 Tout le workflow s'enveloppe dans un `try/finally` pour garantir que le lock est toujours relâché, même en cas de crash :
- 
+
 ```javascript
 try {
   // ... tout le workflow (Étapes 0b à 3)
@@ -357,7 +354,7 @@ try {
   });
 }
 ```
- 
+
 Chaque traitement de profil individuel est dans un `try/catch` :
 ```javascript
 try {
@@ -366,18 +363,18 @@ try {
   _errors.push({ step: '2e', message: err.message });
 }
 ```
- 
+
 ### Variables globales
- 
+
 ```javascript
 const _startedAt = Date.now();
 const _errors = [];
 let _stopped_reason = null; // null | 'session_expired' | 'rate_limited'
- 
+
 const MAX_PROFILES_PER_CAMPAIGN = 30;
 const MAX_PROFILES_PER_RUN = 80;
 let _totalSubmitted = 0;
- 
+
 const _summary = {
   campaigns_processed: 0,
   profiles_found: 0,
@@ -386,13 +383,13 @@ const _summary = {
   profiles_submitted: 0,
 };
 ```
- 
+
 ### Étape 0 — Init
- 
-**0a — Onglet API** : naviguer vers `http://localhost:3000/prospector`, récupérer le Bearer token.
-Si absent → notifier "Session Prospector non active sur le profil Sales_nav — se connecter sur localhost:3000/prospector" → STOP.
- 
-**0b — Lock** (depuis l'onglet localhost:3000/prospector) :
+
+**0a — Onglet API** : naviguer vers `https://hubspot-dashboard-1c7z.onrender.com/prospector`, récupérer le Bearer token.
+Si absent → notifier "Session Prospector non active sur le profil Sales_nav — se connecter sur hubspot-dashboard-1c7z.onrender.com/prospector" → STOP.
+
+**0b — Lock** (depuis l'onglet hubspot-dashboard-1c7z.onrender.com/prospector) :
 ```javascript
 const lockResp = await fetch('/api/task-locks/acquire', {
   method: 'POST', headers,
@@ -401,7 +398,7 @@ const lockResp = await fetch('/api/task-locks/acquire', {
 const lock = await lockResp.json();
 ```
 Si `lock.acquired === false` → STOP. Log "Verrouillé par [locked_by] jusqu'à [expires_at]".
- 
+
 **0c — Onglet Sales Navigator** : naviguer vers `https://www.linkedin.com/sales/home`. Vérifier session :
 ```javascript
 const currentUrl = window.location.href;
@@ -411,9 +408,9 @@ if (currentUrl.includes('/login') || currentUrl.includes('/checkpoint') || !curr
   return; // le finally relâche le lock
 }
 ```
- 
-### Étape 1 — Charger les campagnes (onglet localhost:3000/prospector)
- 
+
+### Étape 1 — Charger les campagnes (onglet hubspot-dashboard-1c7z.onrender.com/prospector)
+
 ```javascript
 const campsResp = await fetch('/api/prospector/campaigns?active=true', { headers });
 const allCampaigns = await campsResp.json();
@@ -422,13 +419,13 @@ const campaigns = allCampaigns
   .sort((a, b) => (a.priority || 99) - (b.priority || 99));
 ```
 Si aucune campagne éligible → `await _postSummary()` et STOP.
- 
+
 ### Étape 2 — Pour chaque campagne : extraction Sales Navigator
- 
+
 **Avant chaque campagne** : vérifier `_totalSubmitted >= MAX_PROFILES_PER_RUN` → arrêter si atteint.
- 
-#### 2a — Récupérer les profils existants (onglet localhost:3000/prospector)
- 
+
+#### 2a — Récupérer les profils existants (onglet hubspot-dashboard-1c7z.onrender.com/prospector)
+
 ```javascript
 const existingResp = await fetch(`/api/prospector/prospects?campaign_id=${campaign.id}`, { headers });
 const existing = await existingResp.json();
@@ -440,9 +437,9 @@ const existingSalesNavUrls = new Set(
 );
 ```
 ⚠️ Déduplication par campagne. Un même profil peut exister dans 2 campagnes — c'est voulu.
- 
+
 #### 2b — Construire les filtres et exclusions
- 
+
 ```javascript
 const criteria = campaign.criteria || {};
 const campaignExclusions = (campaign.excluded_keywords || []).map(k => k.toLowerCase());
@@ -453,22 +450,66 @@ const UNIVERSAL_EXCLUSIONS = [
 const allExclusions = [...UNIVERSAL_EXCLUSIONS, ...campaignExclusions];
 const toSync = [];
 ```
- 
+
 #### 2c — Naviguer et scraper Sales Navigator (onglet Sales Nav)
- 
-URL de recherche : `https://www.linkedin.com/sales/search/people/`
- 
-Appliquer les filtres via l'UI Sales Navigator :
-- Geography → `criteria.geography || campaign.geography`
-- Current company headcount → `criteria.employees_min / employees_max`
-- Industry → `criteria.sector || campaign.sector`
-- Current job title → `criteria.job_titles` (un par un)
- 
-**Pagination** : 25 résultats/page. Max `Math.ceil(MAX_PROFILES_PER_CAMPAIGN / 25)` pages (soit 2 pages pour 30 profils). Arrêter si `toSync.length >= MAX_PROFILES_PER_CAMPAIGN`.
- 
-**Pour chaque résultat :**
-1. Extraire : prénom, nom, titre de poste, entreprise
-2. Filtrer par exclusion :
+
+**Objectif** : obtenir une liste de `sales_nav_url` + données de profil (nom, titre, entreprise) correspondant aux critères de la campagne.
+
+##### Application des filtres
+
+L'UI Sales Navigator est instable : les panels de filtres peuvent disparaître du DOM, les typeahead peuvent ignorer les events synthétiques, les filtres peuvent sembler appliqués sans l'être. Ne pas s'entêter sur une technique qui ne répond pas — adapter l'approche.
+
+**Approche primaire — URL avec filtres encodés**
+Construire directement l'URL de recherche avec les paramètres encodés. C'est la méthode la plus fiable car elle contourne entièrement la fragilité de l'UI :
+
+```
+https://www.linkedin.com/sales/search/people?query=(filters:List(
+  (type:REGION,values:List((id:<region_id>,text:<region>,selectionType:INCLUDED))),
+  (type:CURRENT_TITLE,values:List((text:<title1>,selectionType:INCLUDED),...)),
+  (type:COMPANY_HEADCOUNT,values:List((id:B,...)))
+))
+```
+
+Les IDs de région (ex: `103737322` = Bretagne France) se trouvent en effectuant d'abord une recherche manuelle sur Sales Navigator et en récupérant l'URL résultante. Les codes headcount sont fixes : B=1-10, C=11-50, D=51-200, E=201-500, F=501-1000, G=1001-5000, H=5001-10000.
+
+**Approche secondaire — UI Sales Navigator**
+Si l'approche URL n'est pas applicable, utiliser l'UI. Naviguer vers `https://www.linkedin.com/sales/search/people/` et appliquer les filtres : Geography, Current job title (un par un), Company headcount, Industry.
+
+Signal de succès : les filtres apparaissent en tags actifs ET le nombre de résultats est cohérent avec la cible.
+Signal d'échec : panel disparu, tags absents, count inchangé → tenter l'approche URL avant de continuer.
+
+##### Extraction des profils depuis la liste de résultats
+
+**Objectif** : récupérer `sales_nav_url` + nom complet pour chaque profil visible sur la page.
+
+Le DOM de Sales Navigator varie selon les pages et les versions. Deux patterns connus à essayer dans l'ordre :
+
+**Pattern A — liens directs** (comportement le plus courant sur page 1)
+```javascript
+const links = document.querySelectorAll('a[href*="/sales/lead/"]');
+// → each link href IS the sales_nav_url
+```
+
+**Pattern B — attributs data** (pages 2+, ou quand les cards sont en lazy-load)
+```javascript
+const divs = document.querySelectorAll('[data-scroll-into-view*="fs_salesProfile"]');
+for (const div of divs) {
+  const urn = div.getAttribute('data-scroll-into-view');
+  const match = urn.match(/fs_salesProfile:\(([^,]+),(NAME_SEARCH,[^)]+)\)/);
+  if (match) {
+    const sales_nav_url = `https://www.linkedin.com/sales/lead/${match[1]},${match[2]}`;
+    const label = div.querySelector('.a11y-text');
+    const fullName = label?.textContent.trim().match(/Ajouter (.+) à la sélection/)?.[1] || '';
+  }
+}
+```
+
+Signal de succès : au moins 10 profils trouvés sur page 1 d'une campagne active.
+Signal d'échec : 0 profils avec les deux patterns → inspecter librement le DOM (`document.body.innerText`, `document.querySelectorAll('a[href]')`) pour comprendre la structure actuelle avant de continuer.
+
+**Pagination** : 25 résultats/page. Max `Math.ceil(MAX_PROFILES_PER_CAMPAIGN / 25)` pages (soit 2 pages pour 30 profils). Arrêter si `toSync.length >= MAX_PROFILES_PER_CAMPAIGN`. Paginer via le bouton "Suivant" de l'UI plutôt qu'en modifiant l'URL manuellement.
+
+**Filtrage par exclusion :**
 ```javascript
 const jobTitle = (profile.job_title || '').toLowerCase();
 if (allExclusions.some(word => jobTitle.includes(word))) {
@@ -476,7 +517,23 @@ if (allExclusions.some(word => jobTitle.includes(word))) {
   continue;
 }
 ```
- 
+
+##### Extraction des données de profil (nom, titre, entreprise)
+
+Une fois sur la page du profil individuel, le contenu est accessible via `document.body.innerText`. Pattern habituel :
+
+```javascript
+const lines = document.body.innerText.split('\n').map(l => l.trim()).filter(Boolean);
+const posteIdx = lines.findIndex(l => l === 'Poste actuel' || l === 'Postes actuels');
+const currentTitle = lines[posteIdx + 1] || '';
+// Format habituel : "Directeur général chez Entreprise X"
+const match = currentTitle.match(/^(.+?) chez (.+)$/);
+const job_title = match?.[1] || currentTitle;
+const company   = match?.[2] || document.querySelector('a[href*="/sales/company/"]')?.textContent.trim() || '';
+```
+
+Si `posteIdx === -1` ou si le pattern "chez" ne matche pas, inspecter les premières lignes après le nom pour identifier la structure actuelle — elle peut varier.
+
 **Détection captcha / rate limit Sales Navigator :**
 Si Sales Navigator affiche un captcha, "You've reached the commercial use limit", une page blanche ou un redirect login :
 ```javascript
@@ -484,19 +541,48 @@ _stopped_reason = 'rate_limited';
 await _postSummary();
 return; // le finally relâche le lock
 ```
- 
+
 #### 2d — Extraire l'URL LinkedIn classique (onglet Sales Nav)
- 
-Pour chaque profil retenu après filtrage :
-1. Récupérer l'URL Sales Navigator depuis le lien profil (format `linkedin.com/sales/lead/ACw...`)
-2. D'abord tenter depuis la liste : l'URL classique (`linkedin.com/in/...`) est souvent dans le DOM de la card
-3. Seulement si introuvable : cliquer sur le profil → chercher "View on LinkedIn" → revenir à la liste
-4. Normaliser : `url.toLowerCase().replace(/\/$/, '').split('?')[0]`
- 
-⚠️ Ne jamais utiliser une URL Sales Navigator comme `linkedin_url`. Si introuvable → `_errors.push(...)` et skip.
- 
-#### 2e — Déduplication et validation (onglet localhost:3000/prospector)
- 
+
+**Objectif** : obtenir une URL de format `linkedin.com/in/slug` pour chaque profil. Cette URL est distincte de la `sales_nav_url` et sert de clé de déduplication dans Prospector.
+
+**Important** : l'URL LinkedIn classique n'est pas présente dans le DOM de la liste de résultats. Il faut naviguer sur la page du profil individuel pour l'obtenir.
+
+**Méthode principale — bouton overflow sur la page de profil**
+
+Sur la page du profil individuel, un bouton d'actions supplémentaires expose un lien direct vers le profil LinkedIn public :
+
+```javascript
+// 1. Cliquer le bouton overflow (le libellé peut varier selon la langue de l'interface)
+const btn = document.querySelector(
+  'button[aria-label="Ouvrir le menu de dépassement de capacité des actions"]'
+);
+if (btn) btn.click();
+
+// 2. Attendre l'apparition du menu (~1-2s), puis chercher le lien
+await new Promise(r => setTimeout(r, 1500));
+const linkedinLink = document.querySelector('a[href*="linkedin.com/in/"]');
+const linkedin_url = linkedinLink?.href || null;
+```
+
+Si le libellé du bouton a changé, chercher plus largement :
+```javascript
+const overflowBtn = Array.from(document.querySelectorAll('button[aria-label]')).find(b =>
+  b.getAttribute('aria-label').toLowerCase().includes('menu') ||
+  b.getAttribute('aria-label').toLowerCase().includes('action')
+);
+```
+
+**Normalisation**
+```javascript
+const normalized = linkedin_url?.toLowerCase().replace(/\/$/, '').split('?')[0] || null;
+```
+
+⚠️ Ne jamais utiliser une URL Sales Navigator comme `linkedin_url`.
+⚠️ Si introuvable après avoir tenté le bouton overflow → `_errors.push({ step: '2d', message: ... })` et skip ce profil.
+
+#### 2e — Déduplication et validation (onglet hubspot-dashboard-1c7z.onrender.com/prospector)
+
 ```javascript
 try {
   _summary.profiles_found++;
@@ -514,9 +600,9 @@ try {
   _errors.push({ step: '2e', message: err.message });
 }
 ```
- 
-#### 2f — Synchroniser dans Prospector (onglet localhost:3000/prospector)
- 
+
+#### 2f — Synchroniser dans Prospector (onglet hubspot-dashboard-1c7z.onrender.com/prospector)
+
 ```javascript
 if (toSync.length > 0) {
   const syncResp = await fetch('/api/prospector/sync', {
@@ -547,16 +633,16 @@ if (toSync.length > 0) {
 }
 _summary.campaigns_processed++;
 ```
- 
-### Étape 3 — Résumé final (onglet localhost:3000/prospector)
- 
+
+### Étape 3 — Résumé final (onglet hubspot-dashboard-1c7z.onrender.com/prospector)
+
 ```javascript
 await _postSummary();
 // Le finally global relâche le lock automatiquement
 ```
- 
+
 **Fonction `_postSummary` :**
- 
+
 ```javascript
 async function _postSummary() {
   const duration = Math.round((Date.now() - _startedAt) / 1000);
@@ -588,18 +674,18 @@ ${_errors.length > 0 ? `\nErreurs (${_errors.length}) :\n${_errors.map(e => `  -
   `);
 }
 ```
- 
+
 ---
- 
+
 ## Workflow Task 2 — Suivi LinkedIn 4x/jour
- 
+
 > Profil Chrome LinkedIn : défini dans le prompt de la task (ex: N, Guillaume, Vincent)
 > Le slug LinkedIn attendu est fourni dans le prompt de la task.
- 
+
 ### Structure d'exécution obligatoire — try/finally
- 
+
 Comme Task 1, tout le workflow Task 2 s'enveloppe dans un `try/finally` pour garantir que le lock est toujours relâché, même en cas de crash :
- 
+
 ```javascript
 try {
   // ... tout le workflow (Étapes 1 à 7)
@@ -610,28 +696,28 @@ try {
   });
 }
 ```
- 
+
 ### Étape 0 — Init : onglets + token + lock
- 
-**0a — Onglet API** : naviguer vers `http://localhost:3000/prospector`, récupérer le Bearer token. Si absent → STOP.
- 
+
+**0a — Onglet API** : naviguer vers `https://hubspot-dashboard-1c7z.onrender.com/prospector`, récupérer le Bearer token. Si absent → STOP.
+
 **0b — Onglet LinkedIn** : ouvrir `https://www.linkedin.com/feed/` dans un second onglet. Si redirection vers login → notification session expirée (voir Étape 7) → STOP.
- 
+
 **0c — Vérification compte LinkedIn** : naviguer vers `linkedin.com/in/me` → vérifier que l'URL de redirection correspond au slug attendu fourni dans le prompt. Si ce n'est pas le bon compte → STOP immédiat, notifier "Mauvais compte LinkedIn actif".
- 
-**0d — Lock** (depuis l'onglet localhost:3000/prospector) :
+
+**0d — Lock** (depuis l'onglet hubspot-dashboard-1c7z.onrender.com/prospector) :
 ```
 POST /api/task-locks/acquire { lock_type: "linkedin_[slug]", task_name: "task2", duration_minutes: 60 }
 Si acquired = false → STOP
 ```
- 
-### Étape 1 — Vérifier les quotas (onglet localhost:3000/prospector)
+
+### Étape 1 — Vérifier les quotas (onglet hubspot-dashboard-1c7z.onrender.com/prospector)
 ```
 GET /api/prospector/daily-stats
 → Si invitations.remaining = 0 ET messages.remaining = 0 → STOP propre
 ```
- 
-### Étape 2 — Enrôler les nouveaux prospects validés (onglet localhost:3000/prospector)
+
+### Étape 2 — Enrôler les nouveaux prospects validés (onglet hubspot-dashboard-1c7z.onrender.com/prospector)
 ```
 GET /api/prospector/prospects?status=Nouveau
 ```
@@ -639,11 +725,11 @@ Pour chaque prospect :
 - **Vérifier que `linkedin_url` est non-null**. Si absent → loguer "Prospect [id] sans URL, skip" et passer au suivant.
 - `POST /api/sequences/enroll { prospect_id: prospect.id, campaign_id: prospect.campaign_id }`
 - Si `enrolled = false` (pas de séquence active) → loguer et passer au suivant
- 
+
 ### Étape 3 — Récupérer et exécuter les actions dues
- 
-**3a — Récupérer les actions** (onglet localhost:3000/prospector) :
- 
+
+**3a — Récupérer les actions** (onglet hubspot-dashboard-1c7z.onrender.com/prospector) :
+
 La réponse est wrappée — **toujours unwrapper avant de filtrer** :
 ```javascript
 const resp = await fetch('/api/sequences/due-actions', { headers });
@@ -659,15 +745,15 @@ Champs exacts à utiliser :
 - `action.prospect_account.status` → statut du prospect (**pas** `action.prospect.status`)
 - `action.prospect_account.campaign_id` → (**pas** `action.campaign_id`)
 - `action.prospect_account.pending_message` → message validé à envoyer
- 
+
 → Séparer :
   - `actionsInvitation` : `actions.filter(a => a.step.type === 'send_invitation')`
   - `actionsMessage` : `actions.filter(a => a.step.type === 'send_message' && a.prospect_account.status !== 'Message à envoyer')`
- 
+
 **3b — Traiter les invitations** (par batch de 5 max) :
- 
+
 Pour chaque action `send_invitation` :
-1. Vérifier `invitations.remaining > 0` (onglet localhost:3000/prospector)
+1. Vérifier `invitations.remaining > 0` (onglet hubspot-dashboard-1c7z.onrender.com/prospector)
 2. Basculer sur l'onglet LinkedIn → naviguer vers `linkedin.com/in/{slug}` (`action.prospect.linkedin_url`)
 3. Détecter l'état du profil — **4 cas possibles** :
    - **`• 1er` détecté dans le DOM** (déjà connecté) → `updateStatus("Invitation acceptée")` + `complete-step` — pas de clic
@@ -675,22 +761,22 @@ Pour chaque action `send_invitation` :
    - **"En attente"** (aria-label contient "retirer l'invitation") → invitation déjà en attente → `updateStatus("Invitation envoyée")` + `complete-step` — pas de clic
    - **"Suivre" uniquement / profil restreint / page 404** → loguer et skip
 4. Si session expirée → notification (voir Étape 7) → PAUSE
-5. Basculer sur onglet localhost:3000/prospector :
+5. Basculer sur onglet hubspot-dashboard-1c7z.onrender.com/prospector :
    - `await updateStatus(action.prospect, "Invitation envoyée", null, action.prospect_account.campaign_id)`
    - `POST /api/sequences/complete-step { state_id: action.id, completed_step_order: action.step.step_order }`
 6. Attendre 1.5s avant le prospect suivant
- 
+
 **3c — Générer les messages** (bulk si > 3 prospects, sinon un par un) :
- 
+
 Pour les actions `send_message` où `action.prospect_account.status !== "Message à envoyer"` :
- 
+
 1. Vérifier que l'invitation a été acceptée (sinon → skip)
- 
+
 2. Retrouver la campagne :
    ```javascript
    const campaign = campaigns.find(c => c.id === action.prospect_account.campaign_id);
    ```
- 
+
 3. Préparer les icebreakers — initialiser `const icebreakerMap = {};` puis pour chaque action :
    ```javascript
    const icebreakerMap = {};
@@ -704,7 +790,7 @@ Pour les actions `send_message` où `action.prospect_account.status !== "Message
          // Récupérer les 3-5 derniers posts (texte + date)
          // Évaluer la pertinence : lien avec RSE, carbone, CSRD, RE2020, développement durable ?
          // Si pertinent → générer une phrase d'accroche 10-15 mots, minuscule, sans "j'ai vu que"
-         // Basculer sur onglet localhost:3000/prospector → sauvegarder :
+         // Basculer sur onglet hubspot-dashboard-1c7z.onrender.com/prospector → sauvegarder :
          await fetch(`/api/prospects/${id}/linkedin-activity`, {
            method: 'POST', headers,
            body: JSON.stringify({ raw_posts, icebreaker_generated, icebreaker_mode: 'auto', is_relevant })
@@ -718,10 +804,10 @@ Pour les actions `send_message` où `action.prospect_account.status !== "Message
      }
    }
    ```
- 
-4. **Si le lot contient > 3 prospects → utiliser `bulk-generate-messages`** :
- 
-   Grouper par `step.step_order` et faire une bulk call par groupe :
+
+4. **Si le lot contient > 3 prospects → utiliser `bulk-generate-messages`** ⚡ Atomique :
+
+   Grouper par `step.step_order` et faire une bulk call par groupe. L'endpoint est **atomique** : il sauvegarde lui-même `pending_message` et met le statut à `Message à valider` — **ne pas appeler `updateStatus` après**.
    ```javascript
    const byStep = {};
    for (const action of actionsMessage) {
@@ -743,16 +829,13 @@ Pour les actions `send_message` où `action.prospect_account.status !== "Message
        method: 'POST', headers,
        body: JSON.stringify({ prospects: prospectsArray, step_order: Number(stepOrder) })
      });
-     const actionsMap = Object.fromEntries(stepActions.map(a => [a.prospect.id, a]));
      for (const r of bulk?.results || []) {
-       if (!r.content) { console.warn(`Pas de message pour ${r.prospect_id}: ${r.error}`); continue; }
-       const action = actionsMap[r.prospect_id];
-       await updateStatus(action.prospect, 'Message à valider', r.content, action.prospect_account.campaign_id);
-       await new Promise(res => setTimeout(res, 1500));
+       if (!r.saved) { console.warn(`Pas de message sauvegardé pour ${r.prospect_id}: ${r.error}`); continue; }
+       console.log(`Message généré et sauvegardé pour ${r.prospect_id} (${r.char_count} chars)`);
      }
    }
    ```
- 
+
    **Si ≤ 3 prospects → utiliser `generate-message` individuel** (max 3, timeout CDP) :
    ```javascript
    if (!action.step.message_params) {
@@ -778,39 +861,39 @@ Pour les actions `send_message` où `action.prospect_account.status !== "Message
    });
    const messageGenere = result?.content || result?.message || null;
    ```
- 
+
 5. Si `messageGenere` null → loguer et skip
- 
+
 6. `await updateStatus(action.prospect, "Message à valider", messageGenere, action.prospect_account.campaign_id)`
- 
+
 7. NE PAS appeler complete-step (on attend la validation de Nathan)
- 
+
 8. Attendre 1.5s avant le prospect suivant
- 
+
 ### Étape 4 — Envoyer les messages validés
- 
-**4a — Récupérer** (onglet localhost:3000/prospector) :
+
+**4a — Récupérer** (onglet hubspot-dashboard-1c7z.onrender.com/prospector) :
 ```javascript
 const resp4 = await fetch('/api/sequences/due-actions', { headers });
 const raw4 = await resp4.json();
 const actionsToSend = (raw4.sequence_actions || []).filter(a => a.prospect_account.status === 'Message à envoyer');
 ```
- 
+
 **4b — Envoyer** (par batch de 5 max) :
- 
+
 Pour chaque message validé :
 1. Vérifier `messages.remaining > 0`
 2. Basculer sur onglet LinkedIn → naviguer vers `linkedin.com/in/{slug}` (`action.prospect.linkedin_url`)
 3. Cliquer sur le bouton "Message" depuis le profil
 4. Coller et envoyer `action.prospect_account.pending_message`
 5. Si session expirée → notification (voir Étape 7) → PAUSE
-6. Basculer sur onglet localhost:3000/prospector :
+6. Basculer sur onglet hubspot-dashboard-1c7z.onrender.com/prospector :
    - `POST /api/prospector/message-sent { linkedin_url: action.prospect.linkedin_url }`
    - `POST /api/sequences/complete-step { state_id: action.id, completed_step_order: action.step.step_order }`
 7. Attendre 1.5s avant le prospect suivant
- 
+
 ### Étape 5 — Détecter les invitations acceptées
- 
+
 1. Basculer sur onglet LinkedIn → naviguer vers `linkedin.com/mynetwork/invite-connect/connections/`
 2. **Scroller la page vers le bas** pour charger plus de connexions (lazy-loaded) :
    ```javascript
@@ -820,41 +903,41 @@ Pour chaque message validé :
    await new Promise(r => setTimeout(r, 1000));
    ```
 3. Scraper les connexions récentes : extraire le slug LinkedIn depuis l'URL de chaque profil
-4. Basculer immédiatement sur onglet localhost:3000/prospector :
+4. Basculer immédiatement sur onglet hubspot-dashboard-1c7z.onrender.com/prospector :
    - Récupérer les prospects en statut `Invitation envoyée`
    - Normaliser leurs `linkedin_url` : `.toLowerCase().replace(/\/$/, '').split('?')[0]`
    - **Matching prioritaire par URL normalisée** — fallback `first_name + last_name` si URL absente
    - Pour chaque match confirmé → `await updateStatus(prospect, "Invitation acceptée", null, prospect.campaign_id)`
- 
+
 > ⚠️ Les prospects viennent de `GET /api/prospector/prospects` → objets plats → utiliser `prospect.campaign_id` (pas `prospect.prospect_account.campaign_id`).
 > Ne pas appeler complete-step ici.
- 
+
 ### Étape 6 — Détecter les réponses
- 
+
 1. Basculer sur onglet LinkedIn → naviguer vers `linkedin.com/messaging/`
 2. Pour chaque conversation non lue → matcher avec les prospects en statut `Message envoyé` par `linkedin_url` normalisée (prioritaire) ou `first_name + last_name` (fallback)
-3. Pour chaque réponse confirmée, basculer sur onglet localhost:3000/prospector :
+3. Pour chaque réponse confirmée, basculer sur onglet hubspot-dashboard-1c7z.onrender.com/prospector :
    - `await updateStatus(prospect, "Réponse reçue", null, prospect.campaign_id)`
    - ⚠️ Ne pas faire de `POST /api/prospector/sync` en plus — `updateStatus` suffit
    - ⚠️ Les prospects viennent de `GET /api/prospector/prospects` → objets plats → `prospect.campaign_id`
    - Le trigger DB arrête automatiquement la séquence
- 
+
 ### Étape 7 — Notification session expirée
- 
+
 Si l'onglet LinkedIn affiche une page login (URL contient `linkedin.com/login` ou `checkpoint`) :
- 
+
 ```javascript
 console.error('⚠️ SESSION LINKEDIN EXPIRÉE — Reconnexion requise pour continuer la tâche Releaf Prospector.');
 ```
- 
+
 Afficher dans le résumé final : **"Session expirée — tâche interrompue, reconnexion LinkedIn requise"**
- 
+
 Mettre en pause (`POST /api/sequences/stop` avec reason='error') et terminer proprement.
- 
-### Étape 8 — Résumé (onglet localhost:3000/prospector)
- 
+
+### Étape 8 — Résumé (onglet hubspot-dashboard-1c7z.onrender.com/prospector)
+
 Le lock est relâché automatiquement par le `finally` global — ne pas l'appeler manuellement ici.
- 
+
 Résumé à envoyer :
 - Prospects enrôlés (et skippés pour absence d'URL)
 - Invitations envoyées / déjà en attente / profils restreints / URLs invalides
@@ -864,15 +947,15 @@ Résumé à envoyer :
 - Réponses détectées
 - Quotas restants (invitations + messages)
 - Erreurs éventuelles
- 
+
 ---
- 
+
 ## Règles absolues
- 
+
 - **Jamais envoyer un message sans validation de Nathan** (statut doit être `Message à envoyer`)
 - **Jamais envoyer une invitation sans validation** (statut doit être `Nouveau`)
-- **Jamais appeler l'API depuis l'onglet LinkedIn ou Sales Navigator** (Mixed Content)
-- **Toujours stocker les données scrapées sur localhost:3000/prospector immédiatement**
+- **Jamais appeler l'API depuis l'onglet LinkedIn ou Sales Navigator** (LinkedIn override fetch et bloque le cross-origin)
+- **Toujours stocker les données scrapées sur hubspot-dashboard-1c7z.onrender.com/prospector immédiatement**
 - Toujours utiliser `id` (pas `prospect_id`) dans `/api/prospector/update-status`
 - Lire les données prospect depuis `action.prospect` et `action.prospect_account`, ne pas faire de fetch individuel
 - `action.step.type` (pas `action_type`) — valeurs : `"send_invitation"`, `"send_message"`
@@ -884,6 +967,7 @@ Résumé à envoyer :
 - Utiliser `result?.content || result?.message` pour récupérer le texte de `generate-message`
 - Valider `linkedin_url` non-null avant tout enrôlement ou envoi
 - Préférer `bulk-generate-messages` dès que le lot dépasse 3 prospects (élimine le timeout CDP)
+- **`bulk-generate-messages` est atomique** : il sauvegarde `pending_message` et met le statut à `Message à valider` directement en DB — **NE JAMAIS appeler `updateStatus` après** (causerait un double-write et écraserait le message avec `null`)
 - `bulk-generate-messages` : grouper les actions par `step.step_order` — une bulk call par groupe
 - `complete-step` : toujours passer `state_id: action.id` et `completed_step_order: action.step.step_order`
 - `generate-message` individuel : vérifier `action.step.message_params` non-null avant l'appel — retourne 400 si absent

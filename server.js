@@ -4332,6 +4332,21 @@ app.post('/api/prospector/update-status', accountContext, async (req, res) => {
       await supabaseAdmin.from('prospects').update(prospectUpdates).eq('id', prospectId);
     }
 
+    // Guard: transitioning to "Message à envoyer" requires a non-empty pending_message
+    if (status === 'Message à envoyer') {
+      // If we're setting pending_message in this call, validate it
+      if (pending_message !== undefined && !pending_message?.trim()) {
+        return res.status(400).json({ error: 'pending_message cannot be empty when setting status to "Message à envoyer"' });
+      }
+      // If no pending_message in body, check current value in DB
+      if (pending_message === undefined) {
+        const { data: pRow } = await supabaseAdmin.from('prospects').select('pending_message').eq('id', prospectId).single();
+        if (!pRow?.pending_message?.trim()) {
+          return res.status(400).json({ error: 'prospect has no pending_message — generate or write a message before validating' });
+        }
+      }
+    }
+
     const { error } = await supabaseAdmin
       .from('prospect_account')
       .update(updates)
@@ -5896,8 +5911,9 @@ app.get('/api/sequences/states', accountContext, async (req, res) => {
   }
 });
 
-// POST /api/sequences/bulk-generate-messages — Generate messages for multiple prospects in one request
-// Avoids CDP timeout caused by many sequential JS calls from the browser
+// POST /api/sequences/bulk-generate-messages — Generate AND save messages for multiple prospects
+// Atomic: generates via Claude then writes pending_message + sets status "Message à valider"
+// The Dispatch only needs to call this — no separate save step required
 // Body: { prospects: [{ id, first_name, last_name, job_title, company, campaign_id, icebreaker? }], step_order: 2 }
 app.post('/api/sequences/bulk-generate-messages', accountContext, async (req, res) => {
   try {
@@ -6019,13 +6035,30 @@ Retourne UNIQUEMENT le message, rien d'autre. Pas de guillemets autour, pas d'ex
 
         const claudeData = await claudeResp.json();
         const text = (claudeData.content?.[0]?.text || '').trim();
-        results.push({ prospect_id: prospect.id, content: text, char_count: text.length });
+        if (!text) {
+          results.push({ prospect_id: prospect.id, error: 'empty_response' });
+          continue;
+        }
+
+        // Atomic write: save pending_message + set status "Message à valider"
+        await supabaseAdmin.from('prospects').update({
+          pending_message: text,
+          message_versions: null, // clear stale versions — pending_message is the source of truth
+          updated_at: new Date().toISOString(),
+        }).eq('id', prospect.id);
+
+        await supabaseAdmin.from('prospect_account').update({
+          status: 'Message à valider',
+          updated_at: new Date().toISOString(),
+        }).eq('prospect_id', prospect.id).eq('account_id', req.accountId);
+
+        results.push({ prospect_id: prospect.id, content: text, char_count: text.length, saved: true });
       } catch (err) {
         results.push({ prospect_id: prospect.id, error: err.message });
       }
     }
 
-    res.json({ results, total: prospects.length, generated: results.filter(r => r.content).length });
+    res.json({ results, total: prospects.length, generated: results.filter(r => r.saved).length });
   } catch (err) {
     console.error('Erreur POST /api/sequences/bulk-generate-messages:', err.message);
     res.status(500).json({ error: err.message });
@@ -6057,6 +6090,54 @@ app.post('/api/diagnostic/fix-issues', accountContext, async (req, res) => {
 
       if (error) throw error;
       return res.json({ fixed: toFix.length, prospect_ids: toFix });
+    }
+
+    if (type === 'status_envoyer_no_message') {
+      // Find all prospects with status='Message à envoyer' but no pending_message
+      // These are stuck: validated but nothing to send. Reset to 'Message à valider'.
+      const { data: paRows } = await supabaseAdmin
+        .from('prospect_account')
+        .select('prospect_id, prospects!inner(id, first_name, last_name, pending_message, message_versions)')
+        .eq('account_id', req.accountId)
+        .eq('status', 'Message à envoyer');
+
+      const toFix = (paRows || []).filter(pa => !pa.prospects.pending_message?.trim());
+
+      if (!toFix.length) return res.json({ fixed: 0, message: 'Nothing to fix' });
+
+      // For each stuck prospect: if message_versions has content, promote first version to pending_message
+      // Otherwise reset to 'Message à valider' so the Dispatch will regenerate
+      const promoted = [];
+      const reset = [];
+
+      for (const pa of toFix) {
+        const p = pa.prospects;
+        const versions = p.message_versions;
+        const firstVersion = Array.isArray(versions) && versions.length > 0 ? versions[0]?.content : null;
+
+        if (firstVersion?.trim()) {
+          await supabaseAdmin.from('prospects').update({
+            pending_message: firstVersion.trim(),
+            updated_at: new Date().toISOString(),
+          }).eq('id', p.id);
+          // Keep status 'Message à envoyer' — message is now available
+          promoted.push(pa.prospect_id);
+        } else {
+          await supabaseAdmin.from('prospect_account').update({
+            status: 'Message à valider',
+            updated_at: new Date().toISOString(),
+          }).eq('prospect_id', pa.prospect_id).eq('account_id', req.accountId);
+          reset.push(pa.prospect_id);
+        }
+      }
+
+      return res.json({
+        fixed: toFix.length,
+        promoted_from_versions: promoted.length,
+        reset_to_valider: reset.length,
+        promoted_ids: promoted,
+        reset_ids: reset,
+      });
     }
 
     res.status(400).json({ error: `Unknown fix type: ${type}` });
@@ -6116,6 +6197,12 @@ app.get('/api/diagnostic/prospect-audit', accountContext, async (req, res) => {
       // Case 2 — status = Message à valider but no pending_message
       if (pa.status === 'Message à valider' && !p.pending_message) {
         issues.push({ ...base, issue: 'status_valider_no_message', fix: 'set status → Invitation acceptée' });
+      }
+
+      // Case 2b — status = Message à envoyer but no pending_message (validated but nothing to send)
+      if (pa.status === 'Message à envoyer' && !p.pending_message?.trim()) {
+        const hasVersions = Array.isArray(p.message_versions) && p.message_versions.length > 0;
+        issues.push({ ...base, issue: 'status_envoyer_no_message', fix: hasVersions ? 'promote first version → pending_message' : 'set status → Message à valider' });
       }
 
       // Case 3 — advanced in sequence (step ≥ 2) but not connected on LinkedIn

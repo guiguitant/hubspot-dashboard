@@ -837,47 +837,18 @@ const App = (() => {
           ? `<div class="text-sm text-muted" style="padding:8px 0">Aucune séquence configurée pour cette campagne.</div>`
           : ''}
 
-      ${prospect.status === 'Message à valider' ? (() => {
-        const versions = prospect.message_versions || [];
-        const hasPending = !!prospect.pending_message;
-        const hasVersions = versions.length > 0;
-        if (!hasPending && !hasVersions) return '';
-        if (hasVersions) {
-          return `<div class="message-card">
-            <div class="message-card-title" style="justify-content:space-between">
-              <span>✉️ Message LinkedIn à valider</span>
-              <button class="btn btn-sm btn-outline" id="btnRegenConfirm" onclick="App.regenerateMessages('${id}')">Regénérer le message</button>
-            </div>
-            <div class="message-versions" id="messageVersionsContainer">
-              ${versions.map((v, i) => `
-                <div class="message-version" id="msgVersion${i}">
-                  <div class="message-version-header">
-                    <strong>${UI.esc(v.label || 'Version ' + (i+1))}</strong>
-                    <button class="btn btn-sm btn-outline" onclick="App.selectMessageVersion('${id}', ${i})">Choisir</button>
-                  </div>
-                  <div class="message-version-content">${UI.esc(v.content || '')}</div>
-                </div>
-              `).join('')}
-            </div>
-            <div id="selectedMessageWrap" style="display:none">
-              <div class="message-card-title mt-4">Message sélectionné (modifiable)</div>
-              <textarea class="message-textarea" id="pendingMessage"></textarea>
-              <div class="message-actions">
-                <button class="btn btn-primary" onclick="App.validateMessage('${id}')">✓ Valider et envoyer</button>
-                <button class="btn btn-danger btn-sm" onclick="App.rejectMessage('${id}')">✕ Rejeter</button>
-              </div>
-            </div>
-          </div>`;
-        }
-        return `<div class="message-card">
-          <div class="message-card-title">✉️ Message LinkedIn à valider</div>
+      ${prospect.status === 'Message à valider' && prospect.pending_message ? `
+        <div class="message-card">
+          <div class="message-card-title" style="justify-content:space-between">
+            <span>✉️ Message LinkedIn à valider</span>
+            <button class="btn btn-sm btn-outline" id="btnRegenConfirm" onclick="App.regenerateMessages('${id}')">Regénérer</button>
+          </div>
           <textarea class="message-textarea" id="pendingMessage">${UI.esc(prospect.pending_message)}</textarea>
           <div class="message-actions">
             <button class="btn btn-primary" onclick="App.validateMessage('${id}')">✓ Valider et envoyer</button>
             <button class="btn btn-danger btn-sm" onclick="App.rejectMessage('${id}')">✕ Rejeter</button>
           </div>
-        </div>`;
-      })() : ''}
+        </div>` : ''}
 
       <div class="dash-cols" style="grid-template-columns:1fr 1fr">
         <!-- Interactions -->
@@ -1020,7 +991,11 @@ const App = (() => {
   }
 
   async function validateMessage(id) {
-    const msg = document.getElementById('pendingMessage')?.value || '';
+    const msg = (document.getElementById('pendingMessage')?.value || '').trim();
+    if (!msg) {
+      UI.toast('Le message est vide — sélectionne ou écris un message avant de valider', 'error');
+      return;
+    }
     await DB.updateProspect(id, { status: 'Message à envoyer', pending_message: msg });
     UI.toast('Message validé — Claude Dispatch l\'enverra au prochain passage');
     renderProspectDetail(document.getElementById('app'), id);
