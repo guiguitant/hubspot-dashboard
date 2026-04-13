@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Filled teardrop background -->
+  <path d="M16 2 C16 2 27 13 27 20.5 C27 26.3 22.1 30.5 16 30.5 C9.9 30.5 5 26.3 5 20.5 C5 13 16 2 16 2Z"
+        fill="#2D6A4F"/>
+  <!-- White leaf veins -->
+  <path d="M20 8 C17 13 13 18 10 24"
+        fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M13.5 10.5 C12 15 10.5 19 9.5 23"
+        fill="none" stroke="white" stroke-width="1.1" stroke-linecap="round" opacity="0.7"/>
+  <path d="M23 17 C21 20 19 23 17 27"
+        fill="none" stroke="white" stroke-width="1.1" stroke-linecap="round" opacity="0.7"/>
+</svg>

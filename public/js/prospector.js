@@ -1983,13 +1983,14 @@ const App = (() => {
       return 'complete'; // green — invitation is always ready
     }
     if (step.type === 'send_message') {
-      // Check if message_params are configured (new system: params-based, no template)
       const params = step.message_params || {};
-      const hasParams = params.angle || params.tone || params.objective;
-      if (!hasParams) {
+      if (!params.angle && !params.tone && !params.objective) {
         return 'new'; // gray — never configured
       }
-      return 'complete'; // green — params saved
+      if (!params.angle || !params.tone || !params.objective) {
+        return 'incomplete'; // orange — at least one required param missing
+      }
+      return 'complete'; // green — all required params filled
     }
     return 'complete';
   }
@@ -2102,18 +2103,8 @@ const App = (() => {
           <div class="form-group"><label>Instructions libres (optionnel)</label><textarea id="aiInstructions" rows="3" placeholder="Instructions spécifiques pour Claude : points à mentionner, à éviter, structure souhaitée...">${UI.esc(params.instructions || '')}</textarea></div>
         </div>
 
-        <div class="flex gap-2" style="margin-top:16px">
-          <button class="btn btn-primary" onclick="App._saveStepConfig('${sequenceId}','${step.id}')">Sauvegarder</button>
-          <button class="btn btn-outline btn-sm" id="btnGenerate" onclick="App._generateStepMessage('${sequenceId}')">✨ Prévisualiser un message</button>
-        </div>
-        <div class="text-sm text-muted" style="margin-top:8px">La prévisualisation génère un exemple de message avec des données fictives. Le vrai message sera généré par Dispatch avec les données réelles de chaque prospect.</div>
-
-        <div id="aiResult" style="margin-top:16px;display:none">
-          <div style="font-weight:600;margin-bottom:8px">Exemple de message généré</div>
-          <div id="aiResultContent" class="review-msg-preview" style="min-height:80px"></div>
-        </div>
-
         <div style="margin-top:16px">
+          <button class="btn btn-primary" onclick="App._saveStepConfig('${sequenceId}','${step.id}')">Sauvegarder</button>
         </div>
       </div>`;
   }
@@ -2222,7 +2213,7 @@ const App = (() => {
 
   async function addStep(sequenceId, type) {
     const body = { type, delay_days: type === 'send_message' ? 1 : 0 };
-    if (type === 'send_message') { body.message_mode = 'ai_generated'; body.message_label = ''; body.message_params = { angle: 'problème', tone: 'conversationnel', objective: '', context: '', max_chars: 300, instructions: '' }; }
+    if (type === 'send_message') { body.message_mode = 'ai_generated'; body.message_label = ''; }
     const resp = await fetch(`/api/sequences/${sequenceId}/steps`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const result = await resp.json();
     if (resp.ok) {
@@ -2299,41 +2290,6 @@ const App = (() => {
       el.textContent = ta.value.length;
       if (warning) warning.style.display = ta.value.length > 300 ? 'block' : 'none';
     }
-  }
-
-  async function _generateStepMessage() {
-    const btn = document.getElementById('btnGenerate');
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ Génération en cours...'; }
-
-    let campaign = {};
-    try { campaign = await DB.getCampaign(_currentCampaignId()); } catch(e) {}
-
-    const message_params = {
-      angle: document.getElementById('aiAngle')?.value || 'problème',
-      tone: document.getElementById('aiTone')?.value || 'conversationnel',
-      objective: document.getElementById('aiObjective')?.value || '',
-      context: document.getElementById('aiContext')?.value || '',
-      max_chars: parseInt(document.getElementById('aiMaxChars')?.value) || 300,
-      instructions: document.getElementById('aiInstructions')?.value || '',
-    };
-
-    try {
-      const resp = await fetch('/api/sequences/generate-message', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campaign, message_params }),
-      });
-      const result = await resp.json();
-      if (result.content) {
-        document.getElementById('aiResult').style.display = 'block';
-        document.getElementById('aiResultContent').textContent = result.content;
-        UI.toast('Exemple de message généré');
-      } else {
-        UI.toast(result.error || 'Erreur de génération', 'error');
-      }
-    } catch(e) {
-      UI.toast('Erreur réseau', 'error');
-    }
-    if (btn) { btn.disabled = false; btn.textContent = '✨ Prévisualiser un message'; }
   }
 
   async function _saveStepConfig(sequenceId, stepId) {
@@ -3135,7 +3091,7 @@ const App = (() => {
     switchCampTab, archiveCampaign,
     switchCampaignTab, createSequence, createNewVersion, updateSequenceName,
     addStep, deleteStep, selectStep, _switchMsgTab,
-    _updateCharCount, _generateStepMessage, _saveStepConfig, _insertPlaceholder,
+    _updateCharCount, _saveStepConfig, _insertPlaceholder,
     _toggleInvitationNote, _updateNoteCharCount,
     _selectReviewProspect, _filterReviewList, _editReviewMessage, _regenReviewMessage, _saveReviewMessage, _confirmRegenReview, _validateReviewMessage, _rejectReviewMessage, _resetStuckProspect,
     enrollProspect, enrollCampaign,

@@ -3709,6 +3709,11 @@ app.get('/prospector', (req, res) => {
   // Inject Supabase credentials for vanilla JS
   html = html.replace('__SUPABASE_URL__', process.env.SUPABASE_URL || '');
   html = html.replace('__SUPABASE_ANON_KEY__', process.env.SUPABASE_ANON_KEY || '');
+  // Cache-bust JS files to force browser reload on server restart
+  const v = Date.now();
+  html = html.replace('/js/prospector-ui.js', `/js/prospector-ui.js?v=${v}`);
+  html = html.replace('/js/prospector-db.js', `/js/prospector-db.js?v=${v}`);
+  html = html.replace('/js/prospector.js', `/js/prospector.js?v=${v}`);
   res.send(html);
 });
 
