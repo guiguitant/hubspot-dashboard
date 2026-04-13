@@ -2222,7 +2222,7 @@ const App = (() => {
 
   async function addStep(sequenceId, type) {
     const body = { type, delay_days: type === 'send_message' ? 1 : 0 };
-    if (type === 'send_message') { body.message_mode = null; body.message_label = ''; }
+    if (type === 'send_message') { body.message_mode = 'ai_generated'; body.message_label = ''; body.message_params = { angle: 'problème', tone: 'conversationnel', objective: '', context: '', max_chars: 300, instructions: '' }; }
     const resp = await fetch(`/api/sequences/${sequenceId}/steps`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const result = await resp.json();
     if (resp.ok) {

@@ -3870,11 +3870,28 @@ app.put('/api/prospector/campaigns/:id', accountContext, async (req, res) => {
     }
     if (updates.daily_quota != null) updates.daily_quota = parseInt(updates.daily_quota);
 
+    // Detect transition to "En cours" to trigger automatic enrollment
+    let previousStatus = null;
+    if (updates.status === 'En cours') {
+      const { data: current } = await supabaseAdmin.from('campaigns').select('status').eq('id', id).eq('account_id', req.accountId).single();
+      previousStatus = current?.status;
+    }
+
     const { data, error } = await supabaseAdmin.from('campaigns').update(updates).eq('id', id).eq('account_id', req.accountId).select().single();
     if (error) {
       if (error.code === '23505') return res.status(409).json({ error: 'Cette priorité est déjà utilisée.' });
       throw error;
     }
+
+    // Auto-enroll when campaign transitions to "En cours"
+    if (updates.status === 'En cours' && previousStatus === 'À lancer') {
+      const enrollResult = await enrollCampaignProspects(id, req.accountId);
+      if (enrollResult) {
+        console.log(`[Auto-enroll] Campaign ${id}: ${enrollResult.enrolled} enrolled, ${enrollResult.skipped_excluded} excluded, ${enrollResult.skipped_already} already enrolled`);
+        return res.json({ ...data, auto_enroll: enrollResult });
+      }
+    }
+
     res.json(data);
   } catch (err) {
     console.error('Erreur PUT /api/prospector/campaigns/:id:', err.message);
@@ -4322,6 +4339,10 @@ app.post('/api/prospector/update-status', accountContext, async (req, res) => {
     const campId = prev?.campaign_id;
     if (status === 'Nouveau' && prev?.status === 'Profil à valider') {
       logEvent('prospect_validated', prospectId, campId, req.accountId);
+      // Auto-enroll if campaign is active
+      enrollProspectIfCampaignActive(prospectId, campId, req.accountId)
+        .then(r => { if (r) console.log(`[Auto-enroll] Prospect ${prospectId} enrolled on validation (campaign ${campId})`); })
+        .catch(e => console.error('[Auto-enroll] Error:', e.message));
     } else if (EVENT_MAP[status]) {
       logEvent(EVENT_MAP[status], prospectId, campId, req.accountId);
     }
@@ -4487,11 +4508,15 @@ app.post('/api/prospector/bulk-update-status', accountContext, async (req, res) 
 
     if (updateErr) throw updateErr;
 
-    // Log prospect_events for each changed prospect
+    // Log prospect_events for each changed prospect + auto-enroll on validation
     for (const pa of (ownedProspects || [])) {
       if (pa.status === status) continue;
-      if (status === 'Nouveau' && pa.status !== 'Nouveau') {
+      if (status === 'Nouveau' && pa.status === 'Profil à valider') {
         logEvent('prospect_validated', pa.prospect_id, pa.campaign_id, req.accountId);
+        // Auto-enroll if campaign is active
+        enrollProspectIfCampaignActive(pa.prospect_id, pa.campaign_id, req.accountId)
+          .then(r => { if (r) console.log(`[Auto-enroll] Prospect ${pa.prospect_id} enrolled on bulk validation (campaign ${pa.campaign_id})`); })
+          .catch(e => console.error('[Auto-enroll] Error:', e.message));
       } else if (EVENT_MAP[status]) {
         logEvent(EVENT_MAP[status], pa.prospect_id, pa.campaign_id, req.accountId);
       }
@@ -5334,129 +5359,166 @@ app.post('/api/sequences/enroll', accountContext, async (req, res) => {
   }
 });
 
+// Internal helper — Enroll a single prospect if campaign is active and prospect not yet enrolled
+// Used when a prospect transitions from "Profil à valider" → "Nouveau" on an active campaign
+async function enrollProspectIfCampaignActive(prospect_id, campaign_id, account_id) {
+  if (!campaign_id) return null;
+
+  // Check campaign status
+  const { data: campaign } = await supabaseAdmin.from('campaigns')
+    .select('status')
+    .eq('id', campaign_id)
+    .eq('account_id', account_id)
+    .single();
+
+  if (!campaign || !['En cours', 'En suivi'].includes(campaign.status)) return null;
+
+  // Get active sequence
+  const { data: sequence } = await supabaseAdmin.from('sequences')
+    .select('id, sequence_steps(step_order, type, delay_days)')
+    .eq('campaign_id', campaign_id)
+    .eq('account_id', account_id)
+    .eq('is_active', true)
+    .single();
+
+  if (!sequence) return null;
+
+  const steps = (sequence.sequence_steps || []).sort((a, b) => a.step_order - b.step_order);
+  if (!steps.length) return null;
+
+  // Check not already enrolled
+  const { data: existing } = await supabaseAdmin.from('prospect_sequence_state')
+    .select('id')
+    .eq('prospect_id', prospect_id)
+    .eq('sequence_id', sequence.id)
+    .maybeSingle();
+
+  if (existing) return null; // already enrolled
+
+  // New prospect → first invitation step
+  const firstStep = steps.find(s => s.type === 'send_invitation') || steps[0];
+
+  const { error } = await supabaseAdmin.from('prospect_sequence_state').insert({
+    prospect_id,
+    sequence_id: sequence.id,
+    account_id,
+    current_step_order: firstStep.step_order,
+    status: 'active',
+    next_action_at: new Date(),
+    enrolled_at: new Date()
+  });
+
+  if (error) {
+    console.error('[Auto-enroll single] Error:', error.message);
+    return null;
+  }
+
+  return { enrolled: true, step: firstStep.step_order };
+}
+
+// Internal helper — Bulk enroll all eligible prospects of a campaign into its active sequence
+// Returns { enrolled, skipped_excluded, skipped_already, skipped_no_step, details }
+// Returns null if no active sequence exists for this campaign
+async function enrollCampaignProspects(campaign_id, account_id) {
+  const { data: sequence } = await supabaseAdmin.from('sequences')
+    .select('id, sequence_steps(step_order, type)')
+    .eq('campaign_id', campaign_id)
+    .eq('account_id', account_id)
+    .eq('is_active', true)
+    .single();
+
+  if (!sequence) return null;
+
+  const steps = (sequence.sequence_steps || []).sort((a, b) => a.step_order - b.step_order);
+  if (steps.length === 0) return null;
+
+  const firstInvitationStep = steps.find(s => s.type === 'send_invitation');
+  const firstMessageStep = steps.find(s => s.type === 'send_message');
+  const secondMessageStep = steps.filter(s => s.type === 'send_message')[1];
+
+  const { data: prospects } = await supabaseAdmin.from('prospect_account')
+    .select('prospect_id, status')
+    .eq('campaign_id', campaign_id)
+    .eq('account_id', account_id);
+
+  const { data: enrolled } = await supabaseAdmin.from('prospect_sequence_state')
+    .select('prospect_id')
+    .eq('sequence_id', sequence.id);
+  const enrolledSet = new Set((enrolled || []).map(e => e.prospect_id));
+
+  const EXCLUDED = ['Profil à valider', 'Gagné', 'Perdu', 'Non pertinent', 'Profil restreint'];
+  const results = { enrolled: 0, skipped_excluded: 0, skipped_already: 0, skipped_no_step: 0, details: {} };
+
+  for (const pa of (prospects || [])) {
+    if (EXCLUDED.includes(pa.status)) { results.skipped_excluded++; continue; }
+    if (enrolledSet.has(pa.prospect_id)) { results.skipped_already++; continue; }
+
+    let targetStepOrder = null;
+    switch (pa.status) {
+      case 'Nouveau':
+        targetStepOrder = firstInvitationStep?.step_order || steps[0].step_order;
+        break;
+      case 'Invitation envoyée':
+        targetStepOrder = firstInvitationStep
+          ? (firstMessageStep?.step_order || firstInvitationStep.step_order)
+          : steps[0].step_order;
+        break;
+      case 'Invitation acceptée':
+      case 'Message à valider':
+      case 'Message à envoyer':
+        targetStepOrder = firstMessageStep?.step_order || steps[0].step_order;
+        break;
+      case 'Message envoyé':
+      case 'Discussion en cours':
+        targetStepOrder = secondMessageStep?.step_order || null;
+        break;
+      default:
+        targetStepOrder = null;
+    }
+
+    if (!targetStepOrder) { results.skipped_no_step++; continue; }
+
+    const { data: stepData } = await supabaseAdmin.from('sequence_steps')
+      .select('delay_days')
+      .eq('sequence_id', sequence.id)
+      .eq('step_order', targetStepOrder)
+      .single();
+
+    const jitter = 0.83 + Math.random() * 0.34;
+    const delayMs = targetStepOrder > 1 && stepData
+      ? stepData.delay_days * jitter * 24 * 60 * 60 * 1000
+      : 0;
+    const nextActionAt = new Date(Date.now() + delayMs);
+
+    const { error: insertErr } = await supabaseAdmin.from('prospect_sequence_state')
+      .insert({
+        prospect_id: pa.prospect_id,
+        sequence_id: sequence.id,
+        account_id: account_id,
+        current_step_order: targetStepOrder,
+        status: 'active',
+        next_action_at: nextActionAt,
+        enrolled_at: new Date()
+      });
+
+    if (!insertErr) {
+      results.enrolled++;
+      const key = `step_${targetStepOrder}`;
+      results.details[key] = (results.details[key] || 0) + 1;
+    }
+  }
+
+  return results;
+}
+
 // POST /api/sequences/enroll-campaign — Bulk enroll all prospects of a campaign based on their status
 app.post('/api/sequences/enroll-campaign', accountContext, async (req, res) => {
   try {
     const { campaign_id } = req.body;
     if (!campaign_id) return res.status(400).json({ error: 'campaign_id required' });
 
-    // 1. Get active sequence + its steps
-    const { data: sequence } = await supabaseAdmin.from('sequences')
-      .select('id, sequence_steps(step_order, type)')
-      .eq('campaign_id', campaign_id)
-      .eq('account_id', req.accountId)
-      .eq('is_active', true)
-      .single();
-
-    if (!sequence) {
-      return res.status(400).json({ error: 'Aucune séquence active pour cette campagne' });
-    }
-
-    const steps = (sequence.sequence_steps || []).sort((a, b) => a.step_order - b.step_order);
-    if (steps.length === 0) {
-      return res.status(400).json({ error: 'La séquence n\'a aucune étape' });
-    }
-
-    // Find key step positions
-    const firstInvitationStep = steps.find(s => s.type === 'send_invitation');
-    const firstMessageStep = steps.find(s => s.type === 'send_message');
-    const secondMessageStep = steps.filter(s => s.type === 'send_message')[1];
-
-    // 2. Get all prospects of this campaign
-    const { data: prospects } = await supabaseAdmin.from('prospect_account')
-      .select('prospect_id, status')
-      .eq('campaign_id', campaign_id)
-      .eq('account_id', req.accountId);
-
-    // 3. Get already enrolled prospects
-    const { data: enrolled } = await supabaseAdmin.from('prospect_sequence_state')
-      .select('prospect_id')
-      .eq('sequence_id', sequence.id);
-    const enrolledSet = new Set((enrolled || []).map(e => e.prospect_id));
-
-    // 4. Map status to step order
-    //    Nouveau → step 1 (invitation)
-    //    Invitation envoyée → step after invitation (waiting)
-    //    Invitation acceptée / Message à valider / Message à envoyer → first message step
-    //    Message envoyé / Discussion en cours → step after first message (follow-up)
-    //    Excluded: Profil à valider, Gagné, Perdu, Non pertinent, Profil restreint
-    const EXCLUDED = ['Profil à valider', 'Gagné', 'Perdu', 'Non pertinent', 'Profil restreint'];
-
-    const results = { enrolled: 0, skipped_excluded: 0, skipped_already: 0, skipped_no_step: 0, details: {} };
-
-    for (const pa of (prospects || [])) {
-      // Skip excluded statuses
-      if (EXCLUDED.includes(pa.status)) {
-        results.skipped_excluded++;
-        continue;
-      }
-      // Skip already enrolled
-      if (enrolledSet.has(pa.prospect_id)) {
-        results.skipped_already++;
-        continue;
-      }
-
-      // Determine target step based on status
-      let targetStepOrder = null;
-
-      switch (pa.status) {
-        case 'Nouveau':
-          targetStepOrder = firstInvitationStep?.step_order || steps[0].step_order;
-          break;
-        case 'Invitation envoyée':
-          // Place after invitation step (waiting for acceptance)
-          targetStepOrder = firstInvitationStep
-            ? (firstMessageStep?.step_order || firstInvitationStep.step_order)
-            : steps[0].step_order;
-          break;
-        case 'Invitation acceptée':
-        case 'Message à valider':
-        case 'Message à envoyer':
-          targetStepOrder = firstMessageStep?.step_order || steps[0].step_order;
-          break;
-        case 'Message envoyé':
-        case 'Discussion en cours':
-          targetStepOrder = secondMessageStep?.step_order || null;
-          break;
-        default:
-          targetStepOrder = null;
-      }
-
-      if (!targetStepOrder) {
-        results.skipped_no_step++;
-        continue;
-      }
-
-      // Calculate next_action_at
-      const { data: stepData } = await supabaseAdmin.from('sequence_steps')
-        .select('delay_days')
-        .eq('sequence_id', sequence.id)
-        .eq('step_order', targetStepOrder)
-        .single();
-
-      const jitter = 0.83 + Math.random() * 0.34;
-      const delayMs = targetStepOrder > 1 && stepData
-        ? stepData.delay_days * jitter * 24 * 60 * 60 * 1000
-        : 0;
-      const nextActionAt = new Date(Date.now() + delayMs);
-
-      const { error: insertErr } = await supabaseAdmin.from('prospect_sequence_state')
-        .insert({
-          prospect_id: pa.prospect_id,
-          sequence_id: sequence.id,
-          account_id: req.accountId,
-          current_step_order: targetStepOrder,
-          status: 'active',
-          next_action_at: nextActionAt,
-          enrolled_at: new Date()
-        });
-
-      if (!insertErr) {
-        results.enrolled++;
-        const key = `step_${targetStepOrder}`;
-        results.details[key] = (results.details[key] || 0) + 1;
-      }
-    }
+    const results = await enrollCampaignProspects(campaign_id, req.accountId);
+    if (!results) return res.status(400).json({ error: 'Aucune séquence active pour cette campagne' });
 
     res.json(results);
   } catch (err) {
@@ -5507,7 +5569,7 @@ app.get('/api/sequences/due-actions', accountContext, async (req, res) => {
     // 3. Also get pending messages to send
     const { data: pendingMessages, error: msgError } = await supabaseAdmin
       .from('prospect_account')
-      .select('*, prospects(id, first_name, last_name, company, job_title, linkedin_url)')
+      .select('*, prospects(id, first_name, last_name, company, job_title, linkedin_url, pending_message)')
       .eq('account_id', req.accountId)
       .eq('status', 'Message à envoyer');
 
@@ -5848,27 +5910,46 @@ app.post('/api/sequences/bulk-generate-messages', accountContext, async (req, re
 
     // Collect unique campaign_ids to load campaigns + steps in bulk
     const campaignIds = [...new Set(prospects.map(p => p.campaign_id).filter(Boolean))];
+    const prospectIds = prospects.map(p => p.id);
+
+    // Load the actual enrolled sequence_id for each prospect (may differ from active sequence if versioning)
+    const { data: enrolledStates } = await supabaseAdmin
+      .from('prospect_sequence_state')
+      .select('prospect_id, sequence_id')
+      .in('prospect_id', prospectIds)
+      .eq('account_id', req.accountId)
+      .eq('status', 'active');
+
+    const enrolledSequenceIds = [...new Set((enrolledStates || []).map(s => s.sequence_id))];
+    const prospectToSequence = Object.fromEntries((enrolledStates || []).map(s => [s.prospect_id, s.sequence_id]));
 
     const [{ data: campaigns }, { data: sequences }] = await Promise.all([
       supabaseAdmin.from('campaigns').select('id, sector, geography, criteria').in('id', campaignIds),
-      supabaseAdmin.from('sequences')
-        .select('id, campaign_id, sequence_steps!inner(step_order, message_params, message_mode, icebreaker_mode)')
-        .in('campaign_id', campaignIds)
-        .eq('account_id', req.accountId)
-        .eq('is_active', true),
+      enrolledSequenceIds.length > 0
+        ? supabaseAdmin.from('sequences')
+            .select('id, campaign_id, sequence_steps!inner(step_order, message_params, message_mode, icebreaker_mode)')
+            .in('id', enrolledSequenceIds)
+        : Promise.resolve({ data: [] }),
     ]);
 
     const campaignMap = Object.fromEntries((campaigns || []).map(c => [c.id, c]));
-    // Map campaign_id → step at step_order (cast to int to avoid string === int mismatch)
+    // Map sequence_id → step at step_order
     const stepOrderInt = parseInt(step_order, 10);
-    const stepMap = {};
+    const stepBySeqId = {};
     for (const seq of (sequences || [])) {
       const step = seq.sequence_steps?.find(s => s.step_order === stepOrderInt);
-      if (step) stepMap[seq.campaign_id] = step;
+      if (step) stepBySeqId[seq.id] = { step, campaign_id: seq.campaign_id };
+    }
+    // Map prospect_id → step (via enrolled sequence_id)
+    const stepMap = {};
+    for (const prospect of prospects) {
+      const seqId = prospectToSequence[prospect.id];
+      if (seqId && stepBySeqId[seqId]) {
+        stepMap[prospect.id] = stepBySeqId[seqId].step;
+      }
     }
 
     // Load prospect statuses to skip those in invalid states (not yet connected, etc.)
-    const prospectIds = prospects.map(p => p.id);
     const { data: paRows } = await supabaseAdmin
       .from('prospect_account')
       .select('prospect_id, status')
@@ -5889,7 +5970,7 @@ app.post('/api/sequences/bulk-generate-messages', accountContext, async (req, re
         }
 
         const campaign = campaignMap[prospect.campaign_id] || {};
-        const step = stepMap[prospect.campaign_id];
+        const step = stepMap[prospect.id];
         if (!step?.message_params) {
           results.push({ prospect_id: prospect.id, error: 'no_step_params' });
           continue;
