@@ -3736,7 +3736,7 @@ app.get('/api/prospector/campaigns', accountContext, async (req, res) => {
     let statusMap = {};
     if (campIds.length > 0) {
       const { data: rows } = await supabaseAdmin
-        .from('prospect_account')
+        .from('prospects')
         .select('campaign_id, status')
         .eq('account_id', req.accountId)
         .in('campaign_id', campIds);
@@ -3763,15 +3763,11 @@ app.get('/api/prospector/campaigns', accountContext, async (req, res) => {
 app.get('/api/prospector/prospects', accountContext, async (req, res) => {
   try {
     let q = supabaseAdmin
-      .from('prospect_account')
+      .from('prospects')
       .select(`
-        id,
-        status,
-        campaign_id,
-        notes,
-        last_contacted_at,
-        added_at,
-        prospects!inner(id, first_name, last_name, linkedin_url, company, job_title, email, phone, sector, geography, pending_message, message_versions, created_at, updated_at),
+        id, first_name, last_name, linkedin_url, company, job_title, email, phone,
+        sector, geography, pending_message, message_versions, created_at, updated_at,
+        status, campaign_id, notes, last_contacted_at, added_at,
         campaigns(id, name)
       `)
       .eq('account_id', req.accountId)
@@ -3783,17 +3779,12 @@ app.get('/api/prospector/prospects', accountContext, async (req, res) => {
     const { data, error } = await q;
     if (error) throw error;
 
-    // Flatten the response (merge prospect data with prospect_account data)
-    const result = (data || []).map(pa => ({
-      ...pa.prospects,
-      prospect_account_id: pa.id,
-      status: pa.status,
-      campaign_id: pa.campaign_id,
-      campaign_name: pa.campaigns?.name || null,
-      notes: pa.notes,
-      last_contacted_at: pa.last_contacted_at,
-      added_at: pa.added_at
+    const result = (data || []).map(p => ({
+      ...p,
+      campaign_name: p.campaigns?.name || null,
     }));
+    // Remove nested campaigns object from response
+    result.forEach(r => delete r.campaigns);
 
     res.json(result);
   } catch (err) {
@@ -3912,12 +3903,11 @@ app.post('/api/prospector/import', accountContext, async (req, res) => {
       return res.status(400).json({ error: 'prospects array required' });
     }
 
-    // Fetch existing prospects for dedup
-    const { data: existing } = await supabaseAdmin.from('prospects').select('email, linkedin_url, first_name, last_name');
+    // Fetch existing prospects for dedup (scoped to this account)
+    const { data: existing } = await supabaseAdmin.from('prospects').select('email, linkedin_url, first_name, last_name').eq('account_id', req.accountId);
 
     let imported = 0, duplicates = 0, errors = 0;
     const toInsert = [];
-    const prospectAccountToInsert = [];
 
     for (const p of prospects) {
       const normalizedUrl = normalizeLinkedinUrl(p.linkedin_url);
@@ -3935,7 +3925,7 @@ app.post('/api/prospector/import', accountContext, async (req, res) => {
         if (skip_duplicates) continue;
       }
 
-      const row = {
+      toInsert.push({
         first_name: p.first_name || '',
         last_name: p.last_name || '',
         email: p.email || null,
@@ -3945,8 +3935,10 @@ app.post('/api/prospector/import', accountContext, async (req, res) => {
         job_title: p.job_title || null,
         sector: p.sector || null,
         geography: p.geography || null,
-      };
-      toInsert.push(row);
+        account_id: req.accountId,
+        status: 'Nouveau',
+        campaign_id: campaign_id || null,
+      });
     }
 
     if (toInsert.length > 0) {
@@ -3956,23 +3948,6 @@ app.post('/api/prospector/import', accountContext, async (req, res) => {
         errors = toInsert.length;
       } else {
         imported = inserted?.length || 0;
-
-        // Create prospect_account records for each imported prospect
-        for (const prospect of (inserted || [])) {
-          prospectAccountToInsert.push({
-            prospect_id: prospect.id,
-            account_id: req.accountId,
-            status: 'Nouveau',
-            campaign_id: campaign_id || null,
-          });
-        }
-
-        if (prospectAccountToInsert.length > 0) {
-          const { error: paError } = await supabaseAdmin.from('prospect_account').insert(prospectAccountToInsert);
-          if (paError) {
-            console.error('prospect_account insert error:', paError.message);
-          }
-        }
       }
     }
 
@@ -3995,29 +3970,19 @@ app.post('/api/prospector/import', accountContext, async (req, res) => {
 app.get('/api/prospector/export', accountContext, async (req, res) => {
   try {
     let q = supabaseAdmin
-      .from('prospect_account')
-      .select(`
-        status,
-        campaign_id,
-        notes,
-        prospects!inner(id, first_name, last_name, email, phone, linkedin_url, company, job_title, sector, geography, created_at)
-      `)
+      .from('prospects')
+      .select('id, first_name, last_name, email, phone, linkedin_url, company, job_title, sector, geography, created_at, status, notes')
       .eq('account_id', req.accountId);
 
     if (req.query.status) q = q.eq('status', req.query.status);
-    if (req.query.sector) q = q.like('prospects.sector', `%${req.query.sector}%`);
-    if (req.query.geography) q = q.like('prospects.geography', `%${req.query.geography}%`);
+    if (req.query.sector) q = q.like('sector', `%${req.query.sector}%`);
+    if (req.query.geography) q = q.like('geography', `%${req.query.geography}%`);
     if (req.query.campaign_id) q = q.eq('campaign_id', req.query.campaign_id);
 
     const { data, error } = await q.order('added_at', { ascending: false });
     if (error) throw error;
 
-    // Flatten the response
-    const flatData = (data || []).map(pa => ({
-      ...pa.prospects,
-      status: pa.status,
-      notes: pa.notes
-    }));
+    const flatData = data || [];
 
     const fields = ['first_name','last_name','email','phone','linkedin_url','company','job_title','sector','geography','status','notes'];
     const header = fields.join(',');
@@ -4040,14 +4005,14 @@ app.get('/api/prospector/export', accountContext, async (req, res) => {
 const VALID_PROSPECT_STATUSES = [
   'Profil à valider','Nouveau','Profil restreint','Invitation envoyée','Invitation acceptée',
   'Message à valider','Message à envoyer','Message envoyé',
-  'Réponse reçue','RDV planifié','Gagné','Perdu','Non pertinent'
+  'Discussion en cours','Gagné','Perdu','Non pertinent'
 ];
 
 // --- Event logging (prospect_events) ---
 const EVENT_MAP = {
   'Invitation envoyée': 'invitation_sent',
   'Invitation acceptée': 'invitation_accepted',
-  'Réponse reçue': 'response_received',
+  'Discussion en cours': 'response_received',
 };
 
 async function logEvent(type, prospectId, campaignId, accountId) {
@@ -4148,24 +4113,25 @@ app.post('/api/prospector/sync', accountContext, async (req, res) => {
 
         let existing = null;
 
-        // 1. Match by linkedin_url (most reliable)
+        // 1. Match by linkedin_url (most reliable) — scoped to this account
         if (!existing && p.linkedin_url) {
           const { data } = await supabaseAdmin.from('prospects')
-            .select('id, linkedin_url, sales_nav_url').eq('linkedin_url', p.linkedin_url).limit(1);
+            .select('id, linkedin_url, sales_nav_url, status, campaign_id').eq('linkedin_url', p.linkedin_url).eq('account_id', req.accountId).limit(1);
           if (data?.length) existing = data[0];
         }
 
         // 2. Match by sales_nav_url
         if (!existing && p.sales_nav_url) {
           const { data } = await supabaseAdmin.from('prospects')
-            .select('id, linkedin_url, sales_nav_url').eq('sales_nav_url', p.sales_nav_url).limit(1);
+            .select('id, linkedin_url, sales_nav_url, status, campaign_id').eq('sales_nav_url', p.sales_nav_url).eq('account_id', req.accountId).limit(1);
           if (data?.length) existing = data[0];
         }
 
         // 3. Fallback: match by first_name + last_name + company (case-insensitive)
         if (!existing && p.first_name && p.last_name && p.company) {
           const { data } = await supabaseAdmin.from('prospects')
-            .select('id, linkedin_url, sales_nav_url')
+            .select('id, linkedin_url, sales_nav_url, status, campaign_id')
+            .eq('account_id', req.accountId)
             .ilike('first_name', p.first_name.trim())
             .ilike('last_name', p.last_name.trim())
             .ilike('company', p.company.trim())
@@ -4174,15 +4140,7 @@ app.post('/api/prospector/sync', accountContext, async (req, res) => {
         }
 
         if (existing) {
-          // Fetch previous status from prospect_account for this account
-          const { data: prevPA } = await supabaseAdmin
-            .from('prospect_account')
-            .select('status, campaign_id')
-            .eq('prospect_id', existing.id)
-            .eq('account_id', req.accountId)
-            .single();
-
-          const prevStatus = prevPA?.status;
+          const prevStatus = existing.status;
 
           // Update existing prospect — fill missing URLs when matched via fallback
           const updates = {};
@@ -4197,26 +4155,21 @@ app.post('/api/prospector/sync', accountContext, async (req, res) => {
           if (p.pending_message !== undefined) updates.pending_message = p.pending_message;
           updates.updated_at = new Date().toISOString();
 
+          // Update status in the same row if provided
+          if (p.status && VALID_PROSPECT_STATUSES.includes(p.status)) {
+            updates.status = p.status;
+          }
+
           await supabaseAdmin.from('prospects').update(updates).eq('id', existing.id);
           updated++;
 
-          // Update prospect_account status
-          if (p.status && VALID_PROSPECT_STATUSES.includes(p.status)) {
-            const paUpdates = { status: p.status, updated_at: new Date().toISOString() };
-            await supabaseAdmin
-              .from('prospect_account')
-              .update(paUpdates)
-              .eq('prospect_id', existing.id)
-              .eq('account_id', req.accountId);
-
-            // Log event if status changed
-            const campId = prevPA?.campaign_id || campaign_id;
-            if (p.status !== prevStatus) {
-              if (p.status === 'Nouveau' && prevStatus === 'Profil à valider') {
-                logEvent('prospect_validated', existing.id, campId, req.accountId);
-              } else if (EVENT_MAP[p.status]) {
-                logEvent(EVENT_MAP[p.status], existing.id, campId, req.accountId);
-              }
+          // Log event if status changed
+          if (p.status && VALID_PROSPECT_STATUSES.includes(p.status) && p.status !== prevStatus) {
+            const campId = existing.campaign_id || campaign_id;
+            if (p.status === 'Nouveau' && prevStatus === 'Profil à valider') {
+              logEvent('prospect_validated', existing.id, campId, req.accountId);
+            } else if (EVENT_MAP[p.status]) {
+              logEvent(EVENT_MAP[p.status], existing.id, campId, req.accountId);
             }
           }
 
@@ -4231,7 +4184,7 @@ app.post('/api/prospector/sync', accountContext, async (req, res) => {
             });
           }
         } else {
-          // Create new prospect
+          // Create new prospect (single INSERT with all fields)
           const paStatus = (p.status && VALID_PROSPECT_STATUSES.includes(p.status)) ? p.status : 'Nouveau';
           const row = {
             first_name: p.first_name || '',
@@ -4245,21 +4198,15 @@ app.post('/api/prospector/sync', accountContext, async (req, res) => {
             sector: p.sector || null,
             geography: p.geography || null,
             pending_message: p.pending_message || null,
+            account_id: req.accountId,
+            status: paStatus,
+            campaign_id: campaign_id || null,
           };
 
           const { data: newP } = await supabaseAdmin.from('prospects').insert(row).select('id').single();
           created++;
 
-          // Create prospect_account record for this account
           if (newP) {
-            const paRow = {
-              prospect_id: newP.id,
-              account_id: req.accountId,
-              status: paStatus,
-              campaign_id: campaign_id || null,
-            };
-            await supabaseAdmin.from('prospect_account').insert(paRow);
-
             // Log event for new prospect
             if (EVENT_MAP[paStatus]) {
               logEvent(EVENT_MAP[paStatus], newP.id, campaign_id, req.accountId);
@@ -4307,12 +4254,11 @@ app.post('/api/prospector/update-status', accountContext, async (req, res) => {
     }
     if (!prospectId) return res.status(400).json({ error: 'id or linkedin_url required' });
 
-    // Fetch previous status + campaign_id from prospect_account (for this account only)
-    // Use limit(1)+maybeSingle to handle prospects enrolled in multiple campaigns
+    // Fetch previous status + campaign_id (this account only)
     const { data: prev } = await supabaseAdmin
-      .from('prospect_account')
+      .from('prospects')
       .select('status, campaign_id')
-      .eq('prospect_id', prospectId)
+      .eq('id', prospectId)
       .eq('account_id', req.accountId)
       .limit(1)
       .maybeSingle();
@@ -4321,24 +4267,11 @@ app.post('/api/prospector/update-status', accountContext, async (req, res) => {
       return res.status(404).json({ error: 'Prospect not found in your account' });
     }
 
-    // Update prospect_account status
-    const updates = { status, updated_at: new Date().toISOString() };
-
-    // Update message fields in prospects table (pending_message, message_versions)
-    const prospectUpdates = { updated_at: new Date().toISOString() };
-    if (pending_message !== undefined) prospectUpdates.pending_message = pending_message;
-    if (message_versions !== undefined) prospectUpdates.message_versions = message_versions;
-    if (Object.keys(prospectUpdates).length > 1) {
-      await supabaseAdmin.from('prospects').update(prospectUpdates).eq('id', prospectId);
-    }
-
     // Guard: transitioning to "Message à envoyer" requires a non-empty pending_message
     if (status === 'Message à envoyer') {
-      // If we're setting pending_message in this call, validate it
       if (pending_message !== undefined && !pending_message?.trim()) {
         return res.status(400).json({ error: 'pending_message cannot be empty when setting status to "Message à envoyer"' });
       }
-      // If no pending_message in body, check current value in DB
       if (pending_message === undefined) {
         const { data: pRow } = await supabaseAdmin.from('prospects').select('pending_message').eq('id', prospectId).single();
         if (!pRow?.pending_message?.trim()) {
@@ -4347,10 +4280,15 @@ app.post('/api/prospector/update-status', accountContext, async (req, res) => {
       }
     }
 
+    // Single UPDATE on prospects (status + message fields)
+    const updates = { status, updated_at: new Date().toISOString() };
+    if (pending_message !== undefined) updates.pending_message = pending_message;
+    if (message_versions !== undefined) updates.message_versions = message_versions;
+
     const { error } = await supabaseAdmin
-      .from('prospect_account')
+      .from('prospects')
       .update(updates)
-      .eq('prospect_id', prospectId)
+      .eq('id', prospectId)
       .eq('account_id', req.accountId);
 
     if (error) throw error;
@@ -4379,18 +4317,13 @@ app.post('/api/prospector/update-status', accountContext, async (req, res) => {
 app.get('/api/prospector/pending-messages', accountContext, async (req, res) => {
   try {
     const { data, error } = await supabaseAdmin
-      .from('prospect_account')
-      .select(`
-        prospects!inner(id, first_name, last_name, linkedin_url, pending_message, message_versions)
-      `)
+      .from('prospects')
+      .select('id, first_name, last_name, linkedin_url, pending_message, message_versions')
       .eq('status', 'Message à envoyer')
       .eq('account_id', req.accountId);
 
     if (error) throw error;
-
-    // Flatten the response
-    const result = (data || []).map(pa => pa.prospects);
-    res.json(result);
+    res.json(data || []);
   } catch (err) {
     console.error('Erreur /api/prospector/pending-messages:', err.message);
     res.status(500).json({ error: err.message });
@@ -4419,11 +4352,11 @@ app.post('/api/prospector/message-sent', accountContext, async (req, res) => {
     }
     if (!prospectId) return res.status(400).json({ error: 'id or linkedin_url required' });
 
-    // Update prospect_account status
+    // Verify prospect belongs to this account and get campaign_id
     const { data: pa } = await supabaseAdmin
-      .from('prospect_account')
+      .from('prospects')
       .select('campaign_id')
-      .eq('prospect_id', prospectId)
+      .eq('id', prospectId)
       .eq('account_id', req.accountId)
       .single();
 
@@ -4431,16 +4364,12 @@ app.post('/api/prospector/message-sent', accountContext, async (req, res) => {
       return res.status(404).json({ error: 'Prospect not found in your account' });
     }
 
-    await supabaseAdmin.from('prospect_account').update({
-      status: 'Message envoyé',
-      updated_at: new Date().toISOString(),
-    }).eq('prospect_id', prospectId).eq('account_id', req.accountId);
-
-    // Clear pending_message from prospects
+    // Single UPDATE: status + clear pending_message
     await supabaseAdmin.from('prospects').update({
+      status: 'Message envoyé',
       pending_message: null,
       updated_at: new Date().toISOString(),
-    }).eq('id', prospectId);
+    }).eq('id', prospectId).eq('account_id', req.accountId);
 
     await supabaseAdmin.from('interactions').insert({
       prospect_id: prospectId,
@@ -4464,29 +4393,24 @@ app.post('/api/prospector/message-sent', accountContext, async (req, res) => {
 app.get('/api/prospector/validated-profiles', accountContext, async (req, res) => {
   try {
     const { data, error } = await supabaseAdmin
-      .from('prospect_account')
-      .select(`
-        status,
-        campaign_id,
-        prospects!inner(id, first_name, last_name, linkedin_url, sales_nav_url, company, job_title),
-        campaigns(name)
-      `)
+      .from('prospects')
+      .select('id, first_name, last_name, linkedin_url, sales_nav_url, company, job_title, campaign_id, campaigns(name)')
       .eq('status', 'Nouveau')
       .eq('account_id', req.accountId)
-      .not('prospects.linkedin_url', 'is', null);
+      .not('linkedin_url', 'is', null);
 
     if (error) throw error;
 
-    const result = (data || []).map(pa => ({
-      id: pa.prospects.id,
-      first_name: pa.prospects.first_name,
-      last_name: pa.prospects.last_name,
-      linkedin_url: pa.prospects.linkedin_url,
-      company: pa.prospects.company,
-      job_title: pa.prospects.job_title,
-      sales_nav_url: pa.prospects.sales_nav_url || null,
-      campaign_id: pa.campaign_id,
-      campaign_name: pa.campaigns?.name || null,
+    const result = (data || []).map(p => ({
+      id: p.id,
+      first_name: p.first_name,
+      last_name: p.last_name,
+      linkedin_url: p.linkedin_url,
+      company: p.company,
+      job_title: p.job_title,
+      sales_nav_url: p.sales_nav_url || null,
+      campaign_id: p.campaign_id,
+      campaign_name: p.campaigns?.name || null,
     }));
 
     res.json(result);
@@ -4509,36 +4433,35 @@ app.post('/api/prospector/bulk-update-status', accountContext, async (req, res) 
 
     // Verify all prospects belong to this account
     const { data: ownedProspects, error: checkErr } = await supabaseAdmin
-      .from('prospect_account')
-      .select('prospect_id, campaign_id, status')
+      .from('prospects')
+      .select('id, campaign_id, status')
       .eq('account_id', req.accountId)
-      .in('prospect_id', ids);
+      .in('id', ids);
 
     if (checkErr) throw checkErr;
     if (!ownedProspects?.length || ownedProspects.length !== ids.length) {
       return res.status(403).json({ error: 'One or more prospects do not belong to your account' });
     }
 
-    // Update prospect_account records for this account only
+    // Update prospects status
     const { error: updateErr } = await supabaseAdmin
-      .from('prospect_account')
+      .from('prospects')
       .update({ status, updated_at: new Date().toISOString() })
       .eq('account_id', req.accountId)
-      .in('prospect_id', ids);
+      .in('id', ids);
 
     if (updateErr) throw updateErr;
 
     // Log prospect_events for each changed prospect + auto-enroll on validation
-    for (const pa of (ownedProspects || [])) {
-      if (pa.status === status) continue;
-      if (status === 'Nouveau' && pa.status === 'Profil à valider') {
-        logEvent('prospect_validated', pa.prospect_id, pa.campaign_id, req.accountId);
-        // Auto-enroll if campaign is active
-        enrollProspectIfCampaignActive(pa.prospect_id, pa.campaign_id, req.accountId)
-          .then(r => { if (r) console.log(`[Auto-enroll] Prospect ${pa.prospect_id} enrolled on bulk validation (campaign ${pa.campaign_id})`); })
+    for (const p of (ownedProspects || [])) {
+      if (p.status === status) continue;
+      if (status === 'Nouveau' && p.status === 'Profil à valider') {
+        logEvent('prospect_validated', p.id, p.campaign_id, req.accountId);
+        enrollProspectIfCampaignActive(p.id, p.campaign_id, req.accountId)
+          .then(r => { if (r) console.log(`[Auto-enroll] Prospect ${p.id} enrolled on bulk validation (campaign ${p.campaign_id})`); })
           .catch(e => console.error('[Auto-enroll] Error:', e.message));
       } else if (EVENT_MAP[status]) {
-        logEvent(EVENT_MAP[status], pa.prospect_id, pa.campaign_id, req.accountId);
+        logEvent(EVENT_MAP[status], p.id, p.campaign_id, req.accountId);
       }
     }
 
@@ -4567,9 +4490,9 @@ app.post('/api/prospector/undo-bulk', accountContext, async (req, res) => {
     let restored = 0;
     for (const row of history) {
       if (row.old_status) {
-        await supabaseAdmin.from('prospect_account')
+        await supabaseAdmin.from('prospects')
           .update({ status: row.old_status, updated_at: new Date().toISOString() })
-          .eq('prospect_id', row.prospect_id)
+          .eq('id', row.prospect_id)
           .eq('account_id', req.accountId);
         restored++;
       }
@@ -4586,10 +4509,10 @@ app.post('/api/prospector/undo-bulk', accountContext, async (req, res) => {
 app.get('/api/prospector/status-history/:prospect_id', accountContext, async (req, res) => {
   try {
     // Verify prospect belongs to this account
-    const { data: owns, error: checkErr } = await supabase
-      .from('prospect_account')
-      .select('prospect_id')
-      .eq('prospect_id', req.params.prospect_id)
+    const { data: owns, error: checkErr } = await supabaseAdmin
+      .from('prospects')
+      .select('id')
+      .eq('id', req.params.prospect_id)
       .eq('account_id', req.accountId)
       .single();
 
@@ -4621,9 +4544,9 @@ app.post('/api/prospector/regenerate-icebreaker', accountContext, async (req, re
 
     // Verify prospect belongs to this account
     const { data: pa, error: checkErr } = await supabaseAdmin
-      .from('prospect_account')
-      .select('prospect_id, campaign_id')
-      .eq('prospect_id', id)
+      .from('prospects')
+      .select('id, campaign_id')
+      .eq('id', id)
       .eq('account_id', req.accountId)
       .single();
 
@@ -5456,8 +5379,8 @@ async function enrollCampaignProspects(campaign_id, account_id) {
   const firstMessageStep = steps.find(s => s.type === 'send_message');
   const secondMessageStep = steps.filter(s => s.type === 'send_message')[1];
 
-  const { data: prospects } = await supabaseAdmin.from('prospect_account')
-    .select('prospect_id, status')
+  const { data: prospects } = await supabaseAdmin.from('prospects')
+    .select('id, status')
     .eq('campaign_id', campaign_id)
     .eq('account_id', account_id);
 
@@ -5471,7 +5394,7 @@ async function enrollCampaignProspects(campaign_id, account_id) {
 
   for (const pa of (prospects || [])) {
     if (EXCLUDED.includes(pa.status)) { results.skipped_excluded++; continue; }
-    if (enrolledSet.has(pa.prospect_id)) { results.skipped_already++; continue; }
+    if (enrolledSet.has(pa.id)) { results.skipped_already++; continue; }
 
     let targetStepOrder = null;
     switch (pa.status) {
@@ -5512,7 +5435,7 @@ async function enrollCampaignProspects(campaign_id, account_id) {
 
     const { error: insertErr } = await supabaseAdmin.from('prospect_sequence_state')
       .insert({
-        prospect_id: pa.prospect_id,
+        prospect_id: pa.id,
         sequence_id: sequence.id,
         account_id: account_id,
         current_step_order: targetStepOrder,
@@ -5571,25 +5494,20 @@ app.get('/api/sequences/due-actions', accountContext, async (req, res) => {
         .single();
 
       const { data: prospect } = await supabaseAdmin.from('prospects')
-        .select('id, first_name, last_name, company, job_title, linkedin_url')
+        .select('id, first_name, last_name, company, job_title, linkedin_url, pending_message, status, campaign_id')
         .eq('id', state.prospect_id)
-        .single();
-
-      const { data: pa } = await supabaseAdmin.from('prospect_account')
-        .select('status, campaign_id')
-        .eq('prospect_id', state.prospect_id)
         .eq('account_id', req.accountId)
         .single();
 
-      if (step && prospect && pa) {
-        dueActions.push({ ...state, step, prospect, prospect_account: pa });
+      if (step && prospect) {
+        dueActions.push({ ...state, step, prospect, prospect_account: { status: prospect.status, campaign_id: prospect.campaign_id, pending_message: prospect.pending_message } });
       }
     }
 
     // 3. Also get pending messages to send
     const { data: pendingMessages, error: msgError } = await supabaseAdmin
-      .from('prospect_account')
-      .select('*, prospects(id, first_name, last_name, company, job_title, linkedin_url, pending_message)')
+      .from('prospects')
+      .select('id, first_name, last_name, company, job_title, linkedin_url, pending_message, status, campaign_id, account_id')
       .eq('account_id', req.accountId)
       .eq('status', 'Message à envoyer');
 
@@ -5972,12 +5890,12 @@ app.post('/api/sequences/bulk-generate-messages', accountContext, async (req, re
 
     // Load prospect statuses to skip those in invalid states (not yet connected, etc.)
     const { data: paRows } = await supabaseAdmin
-      .from('prospect_account')
-      .select('prospect_id, status')
+      .from('prospects')
+      .select('id, status')
       .eq('account_id', req.accountId)
-      .in('prospect_id', prospectIds)
+      .in('id', prospectIds)
       .limit(prospectIds.length);
-    const statusMap = Object.fromEntries((paRows || []).map(r => [r.prospect_id, r.status]));
+    const statusMap = Object.fromEntries((paRows || []).map(r => [r.id, r.status]));
     const BLOCKED_STATUSES = ['Profil à valider', 'Nouveau', 'Non pertinent', 'Perdu', 'Invitation envoyée'];
 
     const results = [];
@@ -6043,14 +5961,10 @@ Retourne UNIQUEMENT le message, rien d'autre. Pas de guillemets autour, pas d'ex
         // Atomic write: save pending_message + set status "Message à valider"
         await supabaseAdmin.from('prospects').update({
           pending_message: text,
-          message_versions: null, // clear stale versions — pending_message is the source of truth
-          updated_at: new Date().toISOString(),
-        }).eq('id', prospect.id);
-
-        await supabaseAdmin.from('prospect_account').update({
+          message_versions: null,
           status: 'Message à valider',
           updated_at: new Date().toISOString(),
-        }).eq('prospect_id', prospect.id).eq('account_id', req.accountId);
+        }).eq('id', prospect.id).eq('account_id', req.accountId);
 
         results.push({ prospect_id: prospect.id, content: text, char_count: text.length, saved: true });
       } catch (err) {
@@ -6072,21 +5986,21 @@ app.post('/api/diagnostic/fix-issues', accountContext, async (req, res) => {
 
     if (type === 'status_valider_no_message') {
       // Find all prospects with status='Message à valider' but no pending_message
-      const { data: paRows } = await supabaseAdmin
-        .from('prospect_account')
-        .select('prospect_id, prospects!inner(pending_message)')
+      const { data: rows } = await supabaseAdmin
+        .from('prospects')
+        .select('id, pending_message')
         .eq('account_id', req.accountId)
         .eq('status', 'Message à valider');
 
-      const toFix = (paRows || []).filter(pa => !pa.prospects.pending_message).map(pa => pa.prospect_id);
+      const toFix = (rows || []).filter(p => !p.pending_message).map(p => p.id);
 
       if (!toFix.length) return res.json({ fixed: 0, message: 'Nothing to fix' });
 
       const { error } = await supabaseAdmin
-        .from('prospect_account')
+        .from('prospects')
         .update({ status: 'Invitation acceptée' })
         .eq('account_id', req.accountId)
-        .in('prospect_id', toFix);
+        .in('id', toFix);
 
       if (error) throw error;
       return res.json({ fixed: toFix.length, prospect_ids: toFix });
@@ -6094,24 +6008,20 @@ app.post('/api/diagnostic/fix-issues', accountContext, async (req, res) => {
 
     if (type === 'status_envoyer_no_message') {
       // Find all prospects with status='Message à envoyer' but no pending_message
-      // These are stuck: validated but nothing to send. Reset to 'Message à valider'.
-      const { data: paRows } = await supabaseAdmin
-        .from('prospect_account')
-        .select('prospect_id, prospects!inner(id, first_name, last_name, pending_message, message_versions)')
+      const { data: rows } = await supabaseAdmin
+        .from('prospects')
+        .select('id, first_name, last_name, pending_message, message_versions')
         .eq('account_id', req.accountId)
         .eq('status', 'Message à envoyer');
 
-      const toFix = (paRows || []).filter(pa => !pa.prospects.pending_message?.trim());
+      const toFix = (rows || []).filter(p => !p.pending_message?.trim());
 
       if (!toFix.length) return res.json({ fixed: 0, message: 'Nothing to fix' });
 
-      // For each stuck prospect: if message_versions has content, promote first version to pending_message
-      // Otherwise reset to 'Message à valider' so the Dispatch will regenerate
       const promoted = [];
       const reset = [];
 
-      for (const pa of toFix) {
-        const p = pa.prospects;
+      for (const p of toFix) {
         const versions = p.message_versions;
         const firstVersion = Array.isArray(versions) && versions.length > 0 ? versions[0]?.content : null;
 
@@ -6120,14 +6030,13 @@ app.post('/api/diagnostic/fix-issues', accountContext, async (req, res) => {
             pending_message: firstVersion.trim(),
             updated_at: new Date().toISOString(),
           }).eq('id', p.id);
-          // Keep status 'Message à envoyer' — message is now available
-          promoted.push(pa.prospect_id);
+          promoted.push(p.id);
         } else {
-          await supabaseAdmin.from('prospect_account').update({
+          await supabaseAdmin.from('prospects').update({
             status: 'Message à valider',
             updated_at: new Date().toISOString(),
-          }).eq('prospect_id', pa.prospect_id).eq('account_id', req.accountId);
-          reset.push(pa.prospect_id);
+          }).eq('id', p.id).eq('account_id', req.accountId);
+          reset.push(p.id);
         }
       }
 
@@ -6147,14 +6056,14 @@ app.post('/api/diagnostic/fix-issues', accountContext, async (req, res) => {
   }
 });
 
-// GET /api/diagnostic/prospect-audit — Cross-check prospect_account status vs sequence state vs pending_message
+// GET /api/diagnostic/prospect-audit — Cross-check prospect status vs sequence state vs pending_message
 app.get('/api/diagnostic/prospect-audit', accountContext, async (req, res) => {
   try {
     // Fetch all data in parallel
     const [{ data: paRows }, { data: seqStates }, { data: campaigns }] = await Promise.all([
       supabaseAdmin
-        .from('prospect_account')
-        .select('prospect_id, status, campaign_id, prospects!inner(id, first_name, last_name, company, pending_message)')
+        .from('prospects')
+        .select('id, first_name, last_name, company, pending_message, message_versions, status, campaign_id')
         .eq('account_id', req.accountId),
       supabaseAdmin
         .from('prospect_sequence_state')
@@ -6174,15 +6083,14 @@ app.get('/api/diagnostic/prospect-audit', accountContext, async (req, res) => {
 
     const issues = [];
 
-    for (const pa of (paRows || [])) {
-      const p = pa.prospects;
-      const seq = seqStateMap[pa.prospect_id];
+    for (const p of (paRows || [])) {
+      const seq = seqStateMap[p.id];
       const base = {
-        prospect_id: pa.prospect_id,
+        prospect_id: p.id,
         name: `${p.first_name} ${p.last_name}`,
         company: p.company,
-        campaign: campaignMap[pa.campaign_id] || pa.campaign_id,
-        pa_status: pa.status,
+        campaign: campaignMap[p.campaign_id] || p.campaign_id,
+        pa_status: p.status,
         pending_message: p.pending_message ? p.pending_message.slice(0, 60) + '…' : null,
         seq_step: seq?.current_step_order ?? null,
         seq_status: seq?.status ?? null,
@@ -6190,28 +6098,28 @@ app.get('/api/diagnostic/prospect-audit', accountContext, async (req, res) => {
       };
 
       // Case 1 — pending_message exists but status doesn't reflect it
-      if (p.pending_message && !STATUSES_WITH_MESSAGE.includes(pa.status)) {
+      if (p.pending_message && !STATUSES_WITH_MESSAGE.includes(p.status)) {
         issues.push({ ...base, issue: 'pending_message_wrong_status', fix: 'set status → Message à valider' });
       }
 
       // Case 2 — status = Message à valider but no pending_message
-      if (pa.status === 'Message à valider' && !p.pending_message) {
+      if (p.status === 'Message à valider' && !p.pending_message) {
         issues.push({ ...base, issue: 'status_valider_no_message', fix: 'set status → Invitation acceptée' });
       }
 
       // Case 2b — status = Message à envoyer but no pending_message (validated but nothing to send)
-      if (pa.status === 'Message à envoyer' && !p.pending_message?.trim()) {
+      if (p.status === 'Message à envoyer' && !p.pending_message?.trim()) {
         const hasVersions = Array.isArray(p.message_versions) && p.message_versions.length > 0;
         issues.push({ ...base, issue: 'status_envoyer_no_message', fix: hasVersions ? 'promote first version → pending_message' : 'set status → Message à valider' });
       }
 
       // Case 3 — advanced in sequence (step ≥ 2) but not connected on LinkedIn
-      if (seq && seq.current_step_order >= 2 && STATUSES_NOT_CONNECTED.includes(pa.status)) {
+      if (seq && seq.current_step_order >= 2 && STATUSES_NOT_CONNECTED.includes(p.status)) {
         issues.push({ ...base, issue: 'sequence_ahead_not_connected', fix: 'reset sequence or fix status' });
       }
 
       // Case 4 — enrolled in sequence but status is terminal (Non pertinent / Perdu)
-      if (seq && ['Non pertinent', 'Perdu'].includes(pa.status)) {
+      if (seq && ['Non pertinent', 'Perdu'].includes(p.status)) {
         issues.push({ ...base, issue: 'enrolled_but_disqualified', fix: 'unenroll from sequence' });
       }
     }

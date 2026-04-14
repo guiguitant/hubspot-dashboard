@@ -90,12 +90,14 @@ Le client maintenant:
 ### RLS Policy example:
 
 ```sql
-CREATE POLICY prospect_account_select ON prospect_account
+CREATE POLICY prospects_select ON prospects
   FOR SELECT
-  USING (account_id = (auth.jwt() ->> 'account_id')::UUID);
+  USING (auth.role() = 'service_role' OR can_access_account(account_id));
 ```
 
-Cette policy dit: "Retourne les lignes où account_id correspond au account_id du JWT token de l'utilisateur"
+Cette policy dit: "Retourne les lignes où account_id correspond au account_id du JWT token de l'utilisateur (ou accès service_role)"
+
+> **Note:** Depuis migration 13, `prospect_account` a été fusionné dans `prospects`. Les prospects portent directement leur `account_id`, `status`, et `campaign_id`.
 
 ## Architecture de sécurité (Defense in Depth)
 

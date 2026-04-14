@@ -768,7 +768,7 @@ const App = (() => {
       DB.getCampaigns(),
     ]);
 
-    // Enrich prospect with campaign info from prospect_account (source of truth)
+    // Enrich prospect with campaign info (from prospects table)
     const allProspects = await DB.getProspects();
     const paData = allProspects.find(p => p.id === id);
     if (paData) {
