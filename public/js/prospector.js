@@ -1836,14 +1836,39 @@ const App = (() => {
   function _renderCampTable(prospects, statusFilter) {
     const rows = statusFilter ? prospects.filter(p => p.status === statusFilter) : prospects;
     if (rows.length === 0) return UI.emptyState(statusFilter ? `Aucun prospect avec le statut "${statusFilter}"` : 'Aucun prospect dans cette campagne');
-    return `<table><thead><tr><th>Nom</th><th>Entreprise</th><th>Poste</th><th>Statut</th><th>Dernier contact</th></tr></thead>
-      <tbody>${rows.map(p => `<tr class="clickable" onclick="location.hash='#prospect-detail?id=${p.id}'">
+    const isAValiderFilter = statusFilter === 'Profil à valider';
+    const campId = new URLSearchParams((location.hash.split('?')[1] || '')).get('id');
+    return `<table><thead><tr><th>Nom</th><th>Entreprise</th><th>Poste</th><th>Statut</th><th>Dernier contact</th>${isAValiderFilter ? '<th></th>' : ''}</tr></thead>
+      <tbody>${rows.map(p => `<tr class="clickable ${isAValiderFilter ? 'row-a-valider' : ''}" onclick="location.hash='#prospect-detail?id=${p.id}'">
         <td><strong>${UI.esc(p.first_name)} ${UI.esc(p.last_name)}</strong></td>
         <td>${UI.esc(p.company || '')}</td>
         <td class="text-sm text-muted">${UI.esc(p.job_title || '')}</td>
         <td>${UI.statusBadge(p.status)}</td>
         <td class="text-muted text-sm">${UI.formatDate(p.updated_at)}</td>
+        ${isAValiderFilter ? `<td class="action-btns" onclick="event.stopPropagation()"><button class="btn-icon btn-validate" onclick="App.quickValidateInCampaign('${p.id}','${campId}')" title="Valider">✓</button><button class="btn-icon btn-reject" onclick="App.quickRejectInCampaign('${p.id}','${campId}')" title="Non pertinent">✕</button></td>` : ''}
       </tr>`).join('')}</tbody></table>`;
+  }
+
+  async function quickValidateInCampaign(id, campaignId) {
+    await APIClient.post('/api/prospector/bulk-update-status', { ids: [id], status: 'Nouveau' });
+    UI.toast('Profil validé');
+    await _refreshCampProspects(campaignId);
+  }
+
+  async function quickRejectInCampaign(id, campaignId) {
+    await APIClient.post('/api/prospector/bulk-update-status', { ids: [id], status: 'Non pertinent' });
+    UI.toast('Profil marqué non pertinent');
+    await _refreshCampProspects(campaignId);
+  }
+
+  async function _refreshCampProspects(campaignId) {
+    const prospects = await DB.getProspects({ campaign_id: campaignId });
+    const statusCounts = {};
+    for (const p of prospects) {
+      statusCounts[p.status] = (statusCounts[p.status] || 0) + 1;
+    }
+    _campDetailCache[campaignId] = { ..._campDetailCache[campaignId], prospects, statusCounts };
+    renderProspectsTab(campaignId, prospects, statusCounts);
   }
 
   // Cache for tab data so we don't refetch when switching back
@@ -3078,6 +3103,7 @@ const App = (() => {
     filterProspects, quickFilter, loadRappels, loadCampagnes,
     toggleSelect, toggleSelectAll, clearSelection, bulkValidate, bulkReject,
     quickValidate, quickReject,
+    quickValidateInCampaign, quickRejectInCampaign,
     reminderDone, reminderSnooze,
     handleImportFile, setMapping, importBack, importNext, launchImport,
     switchCampTab, archiveCampaign,

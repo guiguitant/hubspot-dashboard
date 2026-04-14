@@ -31,3 +31,4 @@ Dual-stack LinkedIn prospecting & CRM management application.
 - `AUTH_SETUP.md` - Supabase Magic Link config
 - `RLS_SETUP.md` - Row Level Security policies
 - `SKILL.md` - Dispatch workflow (task locks, quotas, step completion)
+- `skill_prospector_V7.md` - Prospector API endpoints, status constants, workflow steps
