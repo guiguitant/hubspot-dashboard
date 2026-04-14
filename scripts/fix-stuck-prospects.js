@@ -10,25 +10,25 @@ const supabase = createClient(
 );
 
 async function fix() {
-  // Find all prospect_account rows with status='Message à valider' + no pending_message
-  const { data: paRows, error: fetchErr } = await supabase
-    .from('prospect_account')
-    .select('prospect_id, account_id, prospects!inner(pending_message)')
+  // Find all prospects with status='Message à valider' + no pending_message
+  const { data: rows, error: fetchErr } = await supabase
+    .from('prospects')
+    .select('id, pending_message')
     .eq('status', 'Message à valider');
 
   if (fetchErr) { console.error('Fetch error:', fetchErr.message); process.exit(1); }
 
-  const toFix = (paRows || []).filter(pa => !pa.prospects.pending_message);
-  console.log(`Found ${toFix.length} stuck prospect(s):`, toFix.map(pa => pa.prospect_id));
+  const toFix = (rows || []).filter(p => !p.pending_message);
+  console.log(`Found ${toFix.length} stuck prospect(s):`, toFix.map(p => p.id));
 
   if (!toFix.length) { console.log('Nothing to fix.'); return; }
 
-  const ids = toFix.map(pa => pa.prospect_id);
-  const { error: updateErr, count } = await supabase
-    .from('prospect_account')
+  const ids = toFix.map(p => p.id);
+  const { error: updateErr } = await supabase
+    .from('prospects')
     .update({ status: 'Invitation acceptée' })
     .eq('status', 'Message à valider')
-    .in('prospect_id', ids);
+    .in('id', ids);
 
   if (updateErr) { console.error('Update error:', updateErr.message); process.exit(1); }
 

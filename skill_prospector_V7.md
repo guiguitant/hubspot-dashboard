@@ -3,7 +3,7 @@ name: releaf-prospector
 description: "Assistant de prospection LinkedIn pour Releaf Carbon. Utilise l'API Releaf Prospector pour synchroniser les données de prospection, gérer les statuts des prospects, exécuter les séquences d'actions LinkedIn et soumettre les messages à validation. MANDATORY TRIGGERS: prospection, prospect, LinkedIn, Sales Navigator, Releaf Prospector, invitation LinkedIn, pipeline commercial, suivi prospect, message LinkedIn, campagne prospection, QHSE, BTP, RSE carbone, Releaf Carbon, séquence, task 1, task 2. Utilise ce skill dès que l'utilisateur mentionne la prospection, les prospects, LinkedIn, les invitations, les messages à envoyer, le suivi commercial, ou toute action liée au workflow de prospection Releaf — même si le mot \"prospection\" n'est pas explicitement utilisé."
 ---
 
-# Releaf Prospector — Instructions opérationnelles v5
+# Releaf Prospector — Instructions opérationnelles v7
 
 Tu es un assistant de prospection LinkedIn pour **Releaf Carbon**. Tu utilises l'API Releaf Prospector pour synchroniser les données de prospection et exécuter les séquences d'actions LinkedIn.
 
@@ -127,6 +127,23 @@ async function fetchWithRetry(url, options, maxRetries = 3) {
 
 ### Limite CDP 45 secondes
 Le Chrome DevTools Protocol impose un timeout de 45s par exécution JavaScript. Pour les boucles sur plusieurs prospects, **traiter par batches de 5 maximum** avec 1.5s de délai entre chaque prospect pour éviter le rate limiting.
+
+### Exécution async dans le CDP Cowork
+Le CDP de Cowork ne supporte pas le `await` au top-level. Les exemples de ce document utilisent `async/await` pour la lisibilité — en exécution réelle, envelopper dans `(async () => { ... })()` ou utiliser `.then()` chaining.
+
+Pour les appels API lents (cold start serveur, lots importants), préférer un pattern **fire-and-poll** :
+```javascript
+// Lancer la requête (onglet API)
+fetch('/api/sequences/due-actions', { headers: window._rlf_headers })
+  .then(r => r.json())
+  .then(data => { window._rlf_result = data; window._rlf_done = true; })
+  .catch(e => { window._rlf_done = 'error:' + e.message; });
+// Vérifier dans un appel JS séparé quelques secondes plus tard
+window._rlf_done  // → true, false, ou 'error:...'
+```
+
+### Cold start serveur (Render)
+Le serveur de production (`hubspot-dashboard-1c7z.onrender.com`) se met en veille après inactivité. Le premier appel API d'une session peut prendre **1 à 2 minutes** à répondre. Le pattern fire-and-poll ci-dessus gère ce cas naturellement — ne pas considérer une réponse lente comme une erreur.
 
 ---
 
@@ -288,6 +305,8 @@ for (const [stepOrder, stepActions] of Object.entries(byStep)) {
 }
 ```
 
+⚠️ **Fallback `no_step_params`** : si le bulk retourne `error: "no_step_params"` pour la majorité du lot (données `message_params` absentes de `sequence_steps` en DB), basculer sur `generate-message` individuel qui reçoit `message_params` directement depuis `action.step.message_params` dans le body. Le bulk charge ces données depuis la DB — si elles n'y sont pas, seul l'individuel fonctionne.
+
 **`POST /api/sequences/complete-step`**
 Marque une étape comme complétée.
 Body : `{ state_id: action.id, completed_step_order: action.step.step_order }`
@@ -328,8 +347,7 @@ Body : `{ lock_type }`
 | `Message à valider` | Message généré, en attente de validation |
 | `Message à envoyer` | Validé par Nathan → envoyer |
 | `Message envoyé` | Message envoyé sur LinkedIn |
-| `Réponse reçue` | Le prospect a répondu → séquence arrêtée automatiquement |
-| `RDV planifié` | Rendez-vous planifié |
+| `Discussion en cours` | Le prospect a répondu ou RDV planifié → séquence arrêtée automatiquement |
 | `Gagné` | Converti en client |
 | `Perdu` | Pas intéressé |
 
@@ -750,21 +768,128 @@ Champs exacts à utiliser :
   - `actionsInvitation` : `actions.filter(a => a.step.type === 'send_invitation')`
   - `actionsMessage` : `actions.filter(a => a.step.type === 'send_message' && a.prospect_account.status !== 'Message à envoyer')`
 
+#### Guidance LinkedIn — Interactions DOM (Task 2)
+
+> ⚠️ LinkedIn est une SPA dont le DOM évolue régulièrement. Les indications ci-dessous
+> décrivent des **patterns courants** — si un sélecteur ne retourne rien, adapter en cherchant
+> le texte visible ou l'aria-label plutôt qu'une classe CSS spécifique.
+> L'objectif est de comprendre l'intention de chaque pattern, pas de copier aveuglément le code.
+
+##### Détecter l'état d'un profil (page `linkedin.com/in/{slug}`)
+
+Sur la page d'un profil, identifier l'état dans cet ordre :
+
+**1. Déjà connecté (1er degré)**
+Chercher un badge contenant `• 1er` ou `1st` dans la section profil (souvent près du nom).
+→ Pas de clic, `updateStatus("Invitation acceptée")`.
+
+**2. Invitation déjà en attente**
+Chercher un bouton dont l'aria-label contient `retirer` ou `withdraw` ou `pending`.
+→ Pas de clic, `updateStatus("Invitation envoyée")`.
+
+**3. "Se connecter" visible directement**
+Chercher parmi `button`, `a`, **et** `[role="button"]` un élément dont le texte visible contient `Se connecter` ou `Connect`.
+
+⚠️ **Filtrer par le nom du prospect** (via aria-label) pour éviter de cliquer sur un bouton de suggestion de profil similaire. En français, l'aria-label typique est `"Inviter [Prénom Nom] à rejoindre votre réseau"` — le mot "inviter" fait partie du pattern normal, ne pas l'exclure.
+
+```javascript
+// Stratégie indicative — adapter les sélecteurs si nécessaire
+const firstName = prospect.first_name.toLowerCase();
+const lastName = prospect.last_name.toLowerCase();
+const allConnect = Array.from(document.querySelectorAll('button, a, [role="button"]'))
+  .filter(el => (el.innerText || '').trim().toLowerCase().includes('se connecter'));
+// Filtrer par aria-label contenant le nom du prospect
+const profileConnect = allConnect.find(el => {
+  const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+  return aria.includes(firstName) || aria.includes(lastName);
+});
+```
+
+**4. "Se connecter" caché dans le menu "Plus"**
+Si aucun bouton "Se connecter" n'est trouvé directement, chercher un bouton dont le texte est `Plus` ou `More` (ou dont l'aria-label contient `plus d'actions` / `more actions`). Si présent :
+1. Cliquer → attendre ~1s l'ouverture du menu
+2. Chercher `Se connecter` parmi les `[role="menuitem"]` ou les items du dropdown
+
+```javascript
+// Indicatif — le libellé du bouton peut varier
+const plusBtn = Array.from(document.querySelectorAll('button'))
+  .find(b => b.innerText.trim() === 'Plus' || b.innerText.trim() === 'More');
+if (plusBtn) {
+  plusBtn.click();
+  // Attendre le menu, puis chercher l'item "Se connecter"
+}
+```
+
+**5. Profil restreint / "Suivre" uniquement**
+Si aucun des cas ci-dessus ne matche après vérification directe **et** menu Plus → profil en mode "suivre seulement" (créateur de contenu, compte restreint, etc.). Loguer et skip — ne pas compter comme erreur.
+
+##### Envoyer une invitation
+
+Après clic sur "Se connecter", LinkedIn ouvre généralement une modale. Deux cas :
+- Modale avec "Ajouter une note" → selon `action.step.has_note`, écrire la note ou cliquer directement "Envoyer"
+- Pas de modale visible → vérifier que le bouton "Se connecter" a disparu après 1-2s → invitation envoyée
+
+En cas de doute sur l'état final : revérifier le profil (badge "En attente" apparu ?) avant de confirmer côté API.
+
+##### Envoyer un message (Étape 4b)
+
+**Pré-requis : vérifier la connexion AVANT de tenter l'envoi.**
+
+Sur la page profil (`linkedin.com/in/{slug}`), avant de cliquer "Message", vérifier rapidement que le prospect est bien connecté. Si un bouton "En attente" est visible ou si le badge `• 1er` / `1st` est absent → skip immédiat, corriger le statut via `updateStatus("Invitation envoyée")`. Ne pas tenter de cliquer "Message" pour un non-connecté : le compose field ne se chargera pas (popup Sales Navigator bloquant).
+
+Si le prospect est en attente mais en statut "Message à envoyer" en DB, c'est une incohérence de données — la corriger et passer au suivant. Si plusieurs prospects consécutifs sont en attente, envisager un screening rapide de tous les profils restants avant de continuer les envois.
+
+**Ouverture du compose field**
+
+Cliquer sur le bouton "Message" depuis la page profil. Le champ de composition peut mettre 1 à 3 secondes à se charger (SPA). Attendre par polling plutôt que par délai fixe. Si le champ n'est pas trouvé après ~8s → loguer l'erreur et passer au prospect suivant.
+
+Le champ `.msg-form__contenteditable` est parfois à l'intérieur d'un `<iframe>` imbriqué. Si `document.querySelector` retourne null, chercher récursivement dans les iframes du document.
+
+Un popup Sales Navigator peut apparaître simultanément avec le compose field pour les connexions 1er degré. Il est non-bloquant — le dismisser (bouton "Ignorer" ou aria-label équivalent) puis continuer.
+
+**Insertion du texte**
+
+LinkedIn utilise un éditeur React contenteditable. Assigner `element.value` ou coller via clipboard ne déclenche pas les événements React. Utiliser `execCommand('insertText')` combiné avec des événements synthétiques (`CompositionEvent`, `InputEvent`) pour que React reconnaisse le contenu injecté.
+
+Pattern indicatif (adapter si le DOM a changé) :
+1. `focus()` sur le contenteditable
+2. `execCommand('selectAll')` puis `execCommand('delete')` pour vider
+3. `execCommand('insertText', false, message)` pour insérer
+4. Dispatcher des événements de type `input`, `compositionend` pour notifier React
+
+**Envoi**
+
+Tenter le bouton "Envoyer" (chercher par texte visible ou aria-label). Si le bouton est `disabled` (React n'a pas reconnu le texte injecté) : dispatcher un `KeyboardEvent('keydown', { key: 'Enter' })` sur le contenteditable — LinkedIn interprète Enter comme envoi dans la messagerie.
+
+Signal de succès : le champ se vide (0 chars) OU l'URL change vers un thread existant (`/messaging/thread/2-...`). Si ni l'un ni l'autre après 2-3s → considérer l'envoi comme échoué, loguer et passer au suivant.
+
+##### Détecter les réponses (Étape 6)
+
+Sur `linkedin.com/messaging/`, les conversations sont listées avec un preview du dernier message.
+Pour distinguer nos messages des réponses :
+- Preview commençant par `Vous :` → dernier message envoyé par nous → pas de réponse
+- Preview commençant par un prénom (ex: `Mehdi :`, `Elodie :`) → message de l'autre personne → potentielle réponse
+- Preview `Sponsorisé` ou `Offre LinkedIn` → spam, ignorer
+
+Croiser uniquement avec les prospects en statut `Message envoyé`. Matcher en priorité par `linkedin_url` normalisée, fallback par `first_name + last_name`.
+
+---
+
 **3b — Traiter les invitations** (par batch de 5 max) :
 
 Pour chaque action `send_invitation` :
 1. Vérifier `invitations.remaining > 0` (onglet hubspot-dashboard-1c7z.onrender.com/prospector)
 2. Basculer sur l'onglet LinkedIn → naviguer vers `linkedin.com/in/{slug}` (`action.prospect.linkedin_url`)
-3. Détecter l'état du profil — **4 cas possibles** :
-   - **`• 1er` détecté dans le DOM** (déjà connecté) → `updateStatus("Invitation acceptée")` + `complete-step` — pas de clic
-   - **"Se connecter" / bouton inviter disponible** → envoyer l'invitation (avec note si `has_note = true`) → `updateStatus("Invitation envoyée")` + `complete-step`
-   - **"En attente"** (aria-label contient "retirer l'invitation") → invitation déjà en attente → `updateStatus("Invitation envoyée")` + `complete-step` — pas de clic
+3. Détecter l'état du profil en suivant la guidance ci-dessus — **5 cas possibles** :
+   - **Déjà connecté (• 1er)** → `updateStatus("Invitation acceptée")` + `complete-step` — pas de clic
+   - **"Se connecter" visible** (directement ou via menu Plus) → envoyer l'invitation → `updateStatus("Invitation envoyée")` + `complete-step`
+   - **"En attente"** → invitation déjà envoyée → `updateStatus("Invitation envoyée")` + `complete-step` — pas de clic
    - **"Suivre" uniquement / profil restreint / page 404** → loguer et skip
-4. Si session expirée → notification (voir Étape 7) → PAUSE
-5. Basculer sur onglet hubspot-dashboard-1c7z.onrender.com/prospector :
+   - **Session expirée** → notification (voir Étape 7) → PAUSE
+4. Basculer sur onglet hubspot-dashboard-1c7z.onrender.com/prospector :
    - `await updateStatus(action.prospect, "Invitation envoyée", null, action.prospect_account.campaign_id)`
    - `POST /api/sequences/complete-step { state_id: action.id, completed_step_order: action.step.step_order }`
-6. Attendre 1.5s avant le prospect suivant
+5. Attendre 1.5s avant le prospect suivant
 
 **3c — Générer les messages** (bulk si > 3 prospects, sinon un par un) :
 
@@ -833,10 +958,13 @@ Pour les actions `send_message` où `action.prospect_account.status !== "Message
        if (!r.saved) { console.warn(`Pas de message sauvegardé pour ${r.prospect_id}: ${r.error}`); continue; }
        console.log(`Message généré et sauvegardé pour ${r.prospect_id} (${r.char_count} chars)`);
      }
+     // Si majorité en erreur "no_step_params" → fallback individuel pour ce groupe
    }
    ```
 
-   **Si ≤ 3 prospects → utiliser `generate-message` individuel** (max 3, timeout CDP) :
+   > ⚠️ Si le bulk retourne `no_step_params` pour tous les prospects d'un groupe, basculer sur `generate-message` individuel pour ce groupe (voir fallback dans la doc endpoint).
+
+   **Si ≤ 3 prospects (ou fallback après échec bulk) → utiliser `generate-message` individuel** (max 3, timeout CDP) :
    ```javascript
    if (!action.step.message_params) {
      console.warn(`Pas de message_params pour ${action.prospect.id}, skip`);
@@ -883,14 +1011,16 @@ const actionsToSend = (raw4.sequence_actions || []).filter(a => a.prospect_accou
 
 Pour chaque message validé :
 1. Vérifier `messages.remaining > 0`
-2. Basculer sur onglet LinkedIn → naviguer vers `linkedin.com/in/{slug}` (`action.prospect.linkedin_url`)
-3. Cliquer sur le bouton "Message" depuis le profil
-4. Coller et envoyer `action.prospect_account.pending_message`
-5. Si session expirée → notification (voir Étape 7) → PAUSE
-6. Basculer sur onglet hubspot-dashboard-1c7z.onrender.com/prospector :
-   - `POST /api/prospector/message-sent { linkedin_url: action.prospect.linkedin_url }`
+2. **Vérifier `action.prospect_account.pending_message` non-null**. Si `null` → loguer comme anomalie (prospect en "Message à envoyer" sans message réel) et skip — inclure dans le résumé final
+3. Basculer sur onglet LinkedIn → naviguer vers `linkedin.com/in/{slug}` (`action.prospect.linkedin_url`)
+4. **Vérifier le statut de connexion sur le profil** (voir "Pré-requis" dans la guidance Étape 4b ci-dessus). Si "En attente" → corriger le statut via `updateStatus(prospect, "Invitation envoyée")`, skip et passer au suivant
+5. Cliquer sur le bouton "Message" depuis le profil → attendre le compose field (voir guidance DOM ci-dessus : polling, recherche iframe, popup Sales Nav)
+6. Insérer et envoyer `action.prospect_account.pending_message` (voir guidance insertion texte + envoi ci-dessus)
+7. Si session expirée → notification (voir Étape 7) → PAUSE
+8. Basculer sur onglet hubspot-dashboard-1c7z.onrender.com/prospector :
+   - `await updateStatus(action.prospect, "Message envoyé", null, action.prospect_account.campaign_id)` — préférer `update-status` à `message-sent` (ce dernier peut retourner "Prospect not found" si l'URL n'est pas normalisée exactement comme en DB)
    - `POST /api/sequences/complete-step { state_id: action.id, completed_step_order: action.step.step_order }`
-7. Attendre 1.5s avant le prospect suivant
+9. Attendre 1.5s avant le prospect suivant
 
 ### Étape 5 — Détecter les invitations acceptées
 
@@ -917,7 +1047,7 @@ Pour chaque message validé :
 1. Basculer sur onglet LinkedIn → naviguer vers `linkedin.com/messaging/`
 2. Pour chaque conversation non lue → matcher avec les prospects en statut `Message envoyé` par `linkedin_url` normalisée (prioritaire) ou `first_name + last_name` (fallback)
 3. Pour chaque réponse confirmée, basculer sur onglet hubspot-dashboard-1c7z.onrender.com/prospector :
-   - `await updateStatus(prospect, "Réponse reçue", null, prospect.campaign_id)`
+   - `await updateStatus(prospect, "Discussion en cours", null, prospect.campaign_id)`
    - ⚠️ Ne pas faire de `POST /api/prospector/sync` en plus — `updateStatus` suffit
    - ⚠️ Les prospects viennent de `GET /api/prospector/prospects` → objets plats → `prospect.campaign_id`
    - Le trigger DB arrête automatiquement la séquence
@@ -947,6 +1077,37 @@ Résumé à envoyer :
 - Réponses détectées
 - Quotas restants (invitations + messages)
 - Erreurs éventuelles
+
+---
+
+## Recovery après interruption de session
+
+Si la session est interrompue (reset de contexte, crash, timeout) et reprise en milieu d'exécution :
+
+1. **Onglets** : vérifier que les deux onglets (API + LinkedIn) sont toujours ouverts et fonctionnels
+2. **Token** : `window._rlf_headers` ou variables en mémoire peuvent être absentes → re-récupérer le Bearer token depuis `localStorage` sur l'onglet API, ou re-naviguer vers `/prospector`
+3. **Données** : re-fetcher la liste des prospects restants depuis l'API (`pending-messages`, `due-actions`) plutôt que de reprendre une liste mémorisée qui peut être stale
+4. **Lock** : vérifier que le lock est toujours actif. Si expiré (durée de 60min dépassée), le re-acquérir avant de continuer
+
+Ne jamais supposer que l'état en mémoire est cohérent avec la DB après une interruption. Un re-fetch systématique est plus sûr qu'une reprise "à l'aveugle".
+
+---
+
+## Erreurs connues et contournements
+
+> Ces patterns ont été identifiés en production. Ils ne couvrent pas tous les cas — si un comportement inattendu apparaît, adapter l'approche plutôt que de bloquer.
+
+| Symptôme | Cause probable | Contournement |
+|---|---|---|
+| Compose field null après clic "Message" | Champ dans un `<iframe>` imbriqué | Recherche récursive dans les iframes du document |
+| Bouton "Envoyer" `disabled=true` | React n'a pas reconnu le texte injecté via DOM | Dispatcher `KeyboardEvent('keydown', Enter)` sur le contenteditable |
+| `message-sent` → "Prospect not found" | URL pas normalisée exactement comme en DB | Utiliser `updateStatus(prospect, "Message envoyé")` avec `id` |
+| Popup Sales Navigator bloque le compose | Prospect non connecté 1er degré | Vérifier "En attente" sur le profil AVANT de cliquer "Message" |
+| Compose field absent après 8s+ | Privacy settings, profil restreint, ou edge case | Skip + log, passer au prospect suivant |
+| URL LinkedIn → 404 | Slug deviné depuis le nom au lieu d'utiliser l'API | Toujours utiliser `prospect.linkedin_url` de l'API |
+| Variables `window._rlf_*` perdues | Reset de contexte / navigation cross-domain | Re-fetch depuis l'API au démarrage (voir section Recovery) |
+| Prospect "Message à envoyer" mais "En attente" sur LinkedIn | Incohérence DB (invitation non acceptée) | Corriger vers "Invitation envoyée" via `updateStatus`, skip |
+| `update-status` retourne 404 | Bug backend sur certains prospect_accounts | Le fallback `sync` dans `updateStatus()` gère ce cas |
 
 ---
 
