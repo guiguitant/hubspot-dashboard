@@ -7,6 +7,7 @@ const AdmZip = require('adm-zip');
 const fs = require('fs');
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
+const { buildSalesNavUrl } = require('./utils/buildSalesNavUrl');
 
 // --- Supabase ---
 const supabase = createClient(
@@ -3703,6 +3704,15 @@ app.get('/prospector-login', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
+// Routes React SPA — servies via le build Vite (dist/index.html)
+// React Router gère le routing côté client pour /campaigns/*
+app.get('/campaigns/new', (req, res) => {
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+});
+app.get('/campaigns/edit/:id', (req, res) => {
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+});
+
 // Route: /prospector — Serve dashboard
 app.get('/prospector', (req, res) => {
   let html = fs.readFileSync(path.join(__dirname, 'public', 'prospector.html'), 'utf8');
@@ -3755,6 +3765,53 @@ app.get('/api/prospector/campaigns', accountContext, async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('Erreur GET /api/prospector/campaigns:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/prospector/campaigns/:id — Single campaign by ID (with account_id check)
+app.get('/api/prospector/campaigns/:id', accountContext, async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('campaigns')
+      .select('*')
+      .eq('id', req.params.id)
+      .eq('account_id', req.accountId)
+      .single();
+    if (error || !data) return res.status(404).json({ error: 'Campaign not found' });
+    res.json(data);
+  } catch (err) {
+    console.error('Erreur GET /api/prospector/campaigns/:id:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/prospector/reference/sectors — 136 secteurs LinkedIn (données partagées)
+app.get('/api/prospector/reference/sectors', accountContext, async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('linkedin_sectors')
+      .select('id, label_fr, parent_category, verified')
+      .order('label_fr');
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    console.error('Erreur GET /api/prospector/reference/sectors:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/prospector/reference/geos — Zones géographiques LinkedIn
+app.get('/api/prospector/reference/geos', accountContext, async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('linkedin_geos')
+      .select('id, label_fr, geo_type')
+      .order('label_fr');
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    console.error('Erreur GET /api/prospector/reference/geos:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -3816,10 +3873,22 @@ async function shiftPriorities(targetPrio, excludeId, accountId) {
 // POST /api/prospector/campaigns — Create campaign with priority auto-shift
 app.post('/api/prospector/campaigns', accountContext, async (req, res) => {
   try {
-    const { name, status, priority, criteria, daily_quota, sector, geography, details, excluded_keywords, objectives } = req.body;
-    if (!name) return res.status(400).json({ error: 'name is required' });
+    const { name, priority, criteria, daily_quota, sector, geography, details, objectives, message_template, target_count } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'name is required' });
 
     const prio = priority != null ? parseInt(priority) : null;
+    if (prio != null && (prio < 1 || prio > 5)) return res.status(400).json({ error: 'priority must be between 1 and 5' });
+
+    if (target_count != null && (!Number.isInteger(Number(target_count)) || Number(target_count) < 1)) {
+      return res.status(400).json({ error: 'target_count must be a positive integer' });
+    }
+
+    // Validation criteria : au moins un filtre non-vide
+    const c = criteria || {};
+    const hasCriteria = (c.jobTitles?.length || c.seniorities?.length || c.geoIds?.length || c.sectorIds?.length || c.headcounts?.length || c.keywords?.length);
+    if (criteria && !hasCriteria) return res.status(400).json({ error: 'criteria must contain at least one non-empty filter' });
+
+    if (c.keywords && c.keywords.length > 5) return res.status(400).json({ error: 'criteria.keywords maximum 5 entries' });
 
     // Auto-shift existing priorities if conflict
     if (prio != null) {
@@ -3827,17 +3896,22 @@ app.post('/api/prospector/campaigns', accountContext, async (req, res) => {
       if (existing?.length) await shiftPriorities(prio, null, req.accountId);
     }
 
+    // Générer l'URL Sales Navigator si criteria fourni
+    const salesNavUrl = hasCriteria ? buildSalesNavUrl(c) : null;
+
     const row = {
       name,
-      status: status || 'À lancer',
+      status: 'À lancer', // Toujours forcé côté serveur
       priority: prio,
-      criteria: criteria || {},
+      criteria: c,
       daily_quota: daily_quota != null ? parseInt(daily_quota) : 20,
       sector: sector || null,
       geography: geography || null,
       details: details || null,
-      excluded_keywords: excluded_keywords || [],
       objectives: objectives || [],
+      message_template: message_template || null,
+      target_count: target_count != null ? parseInt(target_count) : null,
+      sales_nav_url: salesNavUrl,
       account_id: req.accountId,
     };
 
@@ -3855,16 +3929,32 @@ app.put('/api/prospector/campaigns/:id', accountContext, async (req, res) => {
   try {
     const { id } = req.params;
     const updates = {};
-    const allowed = ['name', 'status', 'priority', 'criteria', 'daily_quota', 'sector', 'geography', 'details', 'excluded_keywords', 'objectives'];
+    const allowed = ['name', 'status', 'priority', 'criteria', 'daily_quota', 'sector', 'geography', 'details', 'objectives', 'message_template', 'target_count'];
     for (const k of allowed) {
       if (req.body[k] !== undefined) updates[k] = req.body[k];
     }
+
+    // Validations
     if (updates.priority != null) {
       updates.priority = parseInt(updates.priority);
+      if (updates.priority < 1 || updates.priority > 5) return res.status(400).json({ error: 'priority must be between 1 and 5' });
       const { data: existing } = await supabaseAdmin.from('campaigns').select('id').eq('priority', updates.priority).eq('account_id', req.accountId).neq('id', id);
       if (existing?.length) await shiftPriorities(updates.priority, id, req.accountId);
     }
     if (updates.daily_quota != null) updates.daily_quota = parseInt(updates.daily_quota);
+
+    if (updates.target_count != null && (!Number.isInteger(Number(updates.target_count)) || Number(updates.target_count) < 1)) {
+      return res.status(400).json({ error: 'target_count must be a positive integer' });
+    }
+    if (updates.target_count != null) updates.target_count = parseInt(updates.target_count);
+
+    if (updates.criteria) {
+      const c = updates.criteria;
+      if (c.keywords && c.keywords.length > 5) return res.status(400).json({ error: 'criteria.keywords maximum 5 entries' });
+      // Régénérer sales_nav_url quand criteria change
+      const hasCriteria = (c.jobTitles?.length || c.seniorities?.length || c.geoIds?.length || c.sectorIds?.length || c.headcounts?.length || c.keywords?.length);
+      updates.sales_nav_url = hasCriteria ? buildSalesNavUrl(c) : null;
+    }
 
     // Detect transition to "En cours" to trigger automatic enrollment
     let previousStatus = null;
@@ -4076,8 +4166,8 @@ app.get('/api/prospector/daily-stats', accountContext, async (req, res) => {
   }
 });
 
-// POST /api/prospector/sync — Upsert prospects (create or update by linkedin_url)
-// Used by Claude Dispatch after LinkedIn actions
+// POST /api/prospector/sync — Create prospects from Sales Navigator scraping
+// Dedup: skip complet si prospect déjà existant (linkedin_url / sales_nav_url / nom+prénom+company)
 app.post('/api/prospector/sync', accountContext, async (req, res) => {
   try {
     const { prospects, campaign_id } = req.body;
@@ -4086,6 +4176,17 @@ app.post('/api/prospector/sync', accountContext, async (req, res) => {
     }
     if (!campaign_id) {
       return res.status(400).json({ error: 'campaign_id required at root level (not inside prospects[])' });
+    }
+
+    // IDOR check: vérifier que la campagne appartient à ce compte
+    const { data: campCheck } = await supabaseAdmin
+      .from('campaigns').select('id')
+      .eq('id', campaign_id).eq('account_id', req.accountId).single();
+    if (!campCheck) return res.status(404).json({ error: 'Campaign not found' });
+
+    // Batch limit
+    if (prospects.length > 25) {
+      return res.status(400).json({ error: 'Maximum 25 prospects per batch' });
     }
 
     // Quota check: count new invitations in this batch
@@ -4100,7 +4201,7 @@ app.post('/api/prospector/sync', accountContext, async (req, res) => {
       }
     }
 
-    let created = 0, updated = 0, errors = 0;
+    let created = 0, skipped = 0, errors = 0;
 
     for (const p of prospects) {
       try {
@@ -4112,117 +4213,64 @@ app.post('/api/prospector/sync', accountContext, async (req, res) => {
         }
 
         let existing = null;
+        let matchReason = null;
 
         // 1. Match by linkedin_url (most reliable) — scoped to this account
         if (!existing && p.linkedin_url) {
+          const normalized = normalizeLinkedinUrl(p.linkedin_url);
           const { data } = await supabaseAdmin.from('prospects')
-            .select('id, linkedin_url, sales_nav_url, status, campaign_id').eq('linkedin_url', p.linkedin_url).eq('account_id', req.accountId).limit(1);
-          if (data?.length) existing = data[0];
+            .select('id').eq('linkedin_url', normalized).eq('account_id', req.accountId).limit(1);
+          if (data?.length) { existing = data[0]; matchReason = 'linkedin_url'; }
         }
 
         // 2. Match by sales_nav_url
         if (!existing && p.sales_nav_url) {
           const { data } = await supabaseAdmin.from('prospects')
-            .select('id, linkedin_url, sales_nav_url, status, campaign_id').eq('sales_nav_url', p.sales_nav_url).eq('account_id', req.accountId).limit(1);
-          if (data?.length) existing = data[0];
+            .select('id').eq('sales_nav_url', p.sales_nav_url).eq('account_id', req.accountId).limit(1);
+          if (data?.length) { existing = data[0]; matchReason = 'sales_nav_url'; }
         }
 
         // 3. Fallback: match by first_name + last_name + company (case-insensitive)
         if (!existing && p.first_name && p.last_name && p.company) {
           const { data } = await supabaseAdmin.from('prospects')
-            .select('id, linkedin_url, sales_nav_url, status, campaign_id')
+            .select('id')
             .eq('account_id', req.accountId)
             .ilike('first_name', p.first_name.trim())
             .ilike('last_name', p.last_name.trim())
             .ilike('company', p.company.trim())
             .limit(1);
-          if (data?.length) existing = data[0];
+          if (data?.length) { existing = data[0]; matchReason = 'name+company'; }
         }
 
+        // Skip complet si doublon trouvé
         if (existing) {
-          const prevStatus = existing.status;
+          console.log(`[Sync skip] ${p.first_name} ${p.last_name} — match by ${matchReason} (existing id: ${existing.id})`);
+          skipped++;
+          continue;
+        }
 
-          // Update existing prospect — fill missing URLs when matched via fallback
-          const updates = {};
-          if (p.company) updates.company = p.company;
-          if (p.job_title) updates.job_title = p.job_title;
-          if (p.email) updates.email = p.email;
-          if (p.phone) updates.phone = p.phone;
-          if (p.sector) updates.sector = p.sector;
-          if (p.geography) updates.geography = p.geography;
-          if (p.linkedin_url) updates.linkedin_url = normalizeLinkedinUrl(p.linkedin_url);
-          if (p.sales_nav_url) updates.sales_nav_url = p.sales_nav_url;
-          if (p.pending_message !== undefined) updates.pending_message = p.pending_message;
-          updates.updated_at = new Date().toISOString();
+        // Create new prospect
+        const row = {
+          first_name: p.first_name || '',
+          last_name: p.last_name || '',
+          email: p.email || null,
+          phone: p.phone || null,
+          linkedin_url: normalizeLinkedinUrl(p.linkedin_url),
+          sales_nav_url: p.sales_nav_url || null,
+          company: p.company || null,
+          job_title: p.job_title || null,
+          sector: p.sector || null,
+          geography: p.geography || null,
+          account_id: req.accountId,
+          status: 'Profil à valider',
+          campaign_id: campaign_id,
+        };
 
-          // Update status in the same row if provided
-          if (p.status && VALID_PROSPECT_STATUSES.includes(p.status)) {
-            updates.status = p.status;
-          }
+        const { data: newP } = await supabaseAdmin.from('prospects').insert(row).select('id').single();
+        created++;
 
-          await supabaseAdmin.from('prospects').update(updates).eq('id', existing.id);
-          updated++;
-
-          // Log event if status changed
-          if (p.status && VALID_PROSPECT_STATUSES.includes(p.status) && p.status !== prevStatus) {
-            const campId = existing.campaign_id || campaign_id;
-            if (p.status === 'Nouveau' && prevStatus === 'Profil à valider') {
-              logEvent('prospect_validated', existing.id, campId, req.accountId);
-            } else if (EVENT_MAP[p.status]) {
-              logEvent(EVENT_MAP[p.status], existing.id, campId, req.accountId);
-            }
-          }
-
-          // Log interaction if provided
-          if (p.interaction) {
-            await supabaseAdmin.from('interactions').insert({
-              prospect_id: existing.id,
-              account_id: req.accountId,
-              type: p.interaction.type || 'Note',
-              date: p.interaction.date || new Date().toISOString().split('T')[0],
-              content: p.interaction.content || '',
-            });
-          }
-        } else {
-          // Create new prospect (single INSERT with all fields)
-          const paStatus = (p.status && VALID_PROSPECT_STATUSES.includes(p.status)) ? p.status : 'Nouveau';
-          const row = {
-            first_name: p.first_name || '',
-            last_name: p.last_name || '',
-            email: p.email || null,
-            phone: p.phone || null,
-            linkedin_url: normalizeLinkedinUrl(p.linkedin_url),
-            sales_nav_url: p.sales_nav_url || null,
-            company: p.company || null,
-            job_title: p.job_title || null,
-            sector: p.sector || null,
-            geography: p.geography || null,
-            pending_message: p.pending_message || null,
-            account_id: req.accountId,
-            status: paStatus,
-            campaign_id: campaign_id || null,
-          };
-
-          const { data: newP } = await supabaseAdmin.from('prospects').insert(row).select('id').single();
-          created++;
-
-          if (newP) {
-            // Log event for new prospect
-            if (EVENT_MAP[paStatus]) {
-              logEvent(EVENT_MAP[paStatus], newP.id, campaign_id, req.accountId);
-            }
-          }
-
-          // Log interaction if provided
-          if (p.interaction && newP) {
-            await supabaseAdmin.from('interactions').insert({
-              prospect_id: newP.id,
-              account_id: req.accountId,
-              type: p.interaction.type || 'Ajout LinkedIn',
-              date: p.interaction.date || new Date().toISOString().split('T')[0],
-              content: p.interaction.content || '',
-            });
-          }
+        if (newP && EVENT_MAP['Profil à valider']) {
+          logEvent(EVENT_MAP['Profil à valider'], newP.id, campaign_id, req.accountId);
         }
       } catch (err) {
         console.error('Sync error for prospect:', p.first_name, p.last_name, err.message);
@@ -4230,7 +4278,7 @@ app.post('/api/prospector/sync', accountContext, async (req, res) => {
       }
     }
 
-    res.json({ created, updated, errors, total: prospects.length });
+    res.json({ created, skipped, errors, total: prospects.length });
   } catch (err) {
     console.error('Erreur /api/prospector/sync:', err.message);
     res.status(500).json({ error: err.message });

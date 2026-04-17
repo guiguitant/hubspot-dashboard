@@ -20,12 +20,15 @@
     "googleapis": "^171.4.0",
     "imap": "^0.8.19",
     "jsonwebtoken": "^9.0.3",
+    "lucide-react": "^1.8.0",
     "mailparser": "^3.9.4",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^7.14.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.0.0",
+    "jest": "^30.3.0",
     "vite": "^5.0.0"
   }
 }

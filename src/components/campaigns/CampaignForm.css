@@ -1,0 +1,127 @@
+/* Campaign Form — suit le pattern CSS index.css avec variables */
+
+.cf-loading { display: flex; justify-content: center; padding: 60px; color: var(--color-text-muted); }
+
+/* Page layout */
+.cf-page { max-width: 900px; margin: 0 auto; padding: 24px; }
+.cf-header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+.cf-header h2 { margin: 0; font-size: 22px; font-weight: 600; }
+.cf-back { display: flex; align-items: center; gap: 6px; background: none; border: none; color: var(--color-primary); cursor: pointer; font-size: 14px; padding: 6px 10px; border-radius: var(--radius); }
+.cf-back:hover { background: var(--color-primary-light); }
+
+/* Sections */
+.cf-section { background: white; border: 1px solid var(--color-border); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; }
+.cf-section-title { font-size: 15px; font-weight: 600; margin: 0 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--color-border); }
+
+/* Grid */
+.cf-row { display: flex; gap: 12px; align-items: flex-start; }
+.cf-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 700px) { .cf-grid-2 { grid-template-columns: 1fr; } .cf-row { flex-direction: column; } }
+
+/* Fields */
+.cf-field { display: flex; flex-direction: column; gap: 6px; }
+.cf-field--grow { flex: 1; }
+.cf-label { font-size: 13px; font-weight: 500; color: var(--color-text); }
+.cf-label-hint { font-weight: 400; color: var(--color-text-muted); }
+.cf-input { padding: 8px 12px; border: 1px solid var(--color-border); border-radius: var(--radius); font-size: 14px; outline: none; background: white; width: 100%; box-sizing: border-box; }
+.cf-input:focus { border-color: var(--color-primary); box-shadow: 0 0 0 2px rgba(45,106,79,0.12); }
+.cf-input--error { border-color: var(--color-overdue); }
+.cf-input:disabled { background: var(--color-surface); color: var(--color-text-muted); }
+.cf-textarea { resize: vertical; min-height: 60px; font-family: inherit; }
+.cf-help { font-size: 12px; color: var(--color-text-muted); margin: 2px 0 0; }
+.cf-error { font-size: 12px; color: var(--color-overdue); }
+.cf-error--block { padding: 8px 12px; background: #fef2f2; border: 1px solid #fecaca; border-radius: var(--radius); margin-bottom: 12px; }
+
+/* Tags */
+.cf-tags-wrap { display: flex; flex-wrap: wrap; gap: 6px; min-height: 8px; }
+.cf-tag { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 20px; font-size: 12px; cursor: default; line-height: 1.4; }
+.cf-tag--include { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+.cf-tag--exclude { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+.cf-tag-remove { background: none; border: none; cursor: pointer; padding: 0; display: flex; color: inherit; opacity: 0.6; }
+.cf-tag-remove:hover { opacity: 1; }
+
+/* Tag input + dropdown */
+.cf-tag-input-wrap { position: relative; }
+.cf-dropdown { position: absolute; top: 100%; left: 0; right: 0; z-index: 20; background: white; border: 1px solid var(--color-border); border-radius: var(--radius); box-shadow: var(--shadow); margin-top: 4px; max-height: 240px; overflow-y: auto; }
+.cf-dropdown-btn { display: block; width: 100%; text-align: left; padding: 8px 12px; border: none; background: none; cursor: pointer; font-size: 13px; }
+.cf-dropdown-btn:hover { background: var(--color-surface); }
+.cf-dropdown-btn--include { color: #166534; }
+.cf-dropdown-btn--exclude { color: #991b1b; }
+.cf-dropdown-empty { padding: 12px; font-size: 12px; color: var(--color-text-muted); text-align: center; }
+
+/* Select trigger (SectorSelector) */
+.cf-select-trigger { display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 8px 12px; border: 1px solid var(--color-border); border-radius: var(--radius); background: white; font-size: 14px; cursor: pointer; color: var(--color-text-muted); }
+.cf-select-trigger:hover { border-color: var(--color-primary); }
+
+/* Panel (SectorSelector dropdown) */
+.cf-panel { position: absolute; top: 100%; left: 0; right: 0; z-index: 50; border: 1px solid var(--color-border); border-radius: var(--radius); box-shadow: 0 4px 20px rgba(0,0,0,0.12); margin-top: 4px; background: white; max-height: 320px; overflow: hidden; display: flex; flex-direction: column; }
+.cf-panel-search { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--color-border); }
+.cf-panel-search input { flex: 1; border: none; outline: none; font-size: 13px; }
+.cf-panel-list { overflow-y: auto; flex: 1; }
+.cf-panel-empty { padding: 16px; text-align: center; color: var(--color-text-muted); font-size: 13px; }
+.cf-panel-item { display: flex; align-items: center; gap: 8px; padding: 6px 12px; cursor: pointer; font-size: 13px; }
+.cf-panel-item:hover { background: var(--color-surface); }
+.cf-panel-item--nested { padding-left: 28px; }
+.cf-panel-category { border-bottom: 1px solid var(--color-border); }
+.cf-panel-cat-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; cursor: pointer; font-size: 13px; font-weight: 500; background: var(--color-surface); }
+.cf-panel-cat-header:hover { background: #eef2ff; }
+.cf-panel-cat-all { font-size: 11px; padding: 2px 8px; border: 1px solid var(--color-primary); background: none; color: var(--color-primary); border-radius: 12px; cursor: pointer; }
+.cf-panel-cat-all:hover { background: var(--color-primary-light); }
+
+/* Category pills scrollable bar (SectorSelector) */
+.cf-cat-pills { display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--color-border); overflow-x: auto; flex-shrink: 0; }
+.cf-cat-pills::-webkit-scrollbar { height: 4px; }
+.cf-cat-pills::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 2px; }
+.cf-cat-pill { white-space: nowrap; padding: 5px 12px; border-radius: 20px; font-size: 12px; border: 1px solid var(--color-border); background: white; cursor: pointer; font-family: inherit; color: var(--color-text-muted); flex-shrink: 0; }
+.cf-cat-pill:hover { border-color: var(--color-primary); color: var(--color-primary); }
+.cf-cat-pill--active { background: var(--color-primary); color: white; border-color: var(--color-primary); }
+
+/* Category label in sector list */
+.cf-panel-cat-label { padding: 8px 14px 4px; font-size: 11px; font-weight: 600; color: var(--color-text-muted); letter-spacing: 0.5px; }
+
+/* Anchor wrapper — tous les dropdowns sont positionnés par rapport à ce conteneur */
+.cf-field-anchor { position: relative; }
+
+/* Dropdown panels (Seniority, Headcount, Geo) — position absolute pour overflow sans décaler la page */
+.cf-dropdown-panel { position: absolute; top: 100%; left: 0; right: 0; z-index: 50; border: 1px solid var(--color-border); border-radius: var(--radius); box-shadow: 0 4px 20px rgba(0,0,0,0.12); margin-top: 4px; background: white; max-height: 300px; overflow: hidden; display: flex; flex-direction: column; }
+.cf-dropdown-search { width: 100%; padding: 10px 14px; border: none; border-bottom: 1px solid var(--color-border); font-size: 13px; outline: none; font-family: inherit; }
+.cf-dropdown-search:focus { background: var(--color-primary-bg); }
+.cf-dropdown-list { overflow-y: auto; flex: 1; }
+.cf-dropdown-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; font-size: 13px; border-bottom: 1px solid #f1f5f9; }
+.cf-dropdown-row:last-child { border-bottom: none; }
+.cf-dropdown-row:hover { background: #f8fafc; }
+.cf-dropdown-row--active { background: var(--color-primary-bg); }
+.cf-dropdown-row--selectable { cursor: pointer; }
+.cf-dropdown-row--highlight { background: var(--color-primary-light); }
+.cf-dropdown-row-label { font-weight: 400; }
+.cf-dropdown-row-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.cf-action-btn { background: none; border: none; cursor: pointer; font-size: 13px; font-weight: 500; padding: 2px 6px; border-radius: 4px; font-family: inherit; }
+.cf-action-btn--include { color: var(--color-primary); }
+.cf-action-btn--include:hover { background: var(--color-primary-light); }
+.cf-action-btn--include.cf-action-btn--selected { color: white; background: var(--color-primary); }
+.cf-action-btn--exclude { color: var(--color-overdue); }
+.cf-action-btn--exclude:hover { background: #fef2f2; }
+.cf-action-btn--exclude.cf-action-btn--selected { color: white; background: var(--color-overdue); }
+.cf-action-sep { color: var(--color-border); font-size: 12px; }
+.cf-dropdown-empty { padding: 16px; text-align: center; color: var(--color-text-muted); font-size: 13px; }
+
+/* Preview */
+.cf-preview { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 16px; }
+.cf-preview--empty { border-style: dashed; }
+.cf-preview-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.cf-preview-title { font-size: 13px; font-weight: 600; }
+.cf-preview-badge { font-size: 11px; padding: 2px 8px; background: var(--color-primary-light); color: var(--color-primary); border-radius: 12px; }
+.cf-preview-warning { display: flex; align-items: center; gap: 8px; color: var(--color-warning); font-size: 13px; }
+.cf-preview-url { font-family: monospace; font-size: 11px; word-break: break-all; color: var(--color-text-muted); background: white; padding: 8px; border-radius: 4px; border: 1px solid var(--color-border); margin-bottom: 8px; }
+.cf-preview-meta { font-size: 12px; color: var(--color-text-muted); margin-bottom: 8px; }
+.cf-preview-link { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--color-primary); text-decoration: none; }
+.cf-preview-link:hover { text-decoration: underline; }
+
+/* Actions */
+.cf-actions { display: flex; justify-content: flex-end; gap: 12px; padding-top: 8px; }
+.cf-btn { padding: 10px 20px; border-radius: var(--radius); font-size: 14px; font-weight: 500; cursor: pointer; border: none; }
+.cf-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.cf-btn--primary { background: var(--color-primary); color: white; }
+.cf-btn--primary:hover:not(:disabled) { background: var(--color-primary-hover); }
+.cf-btn--secondary { background: white; color: var(--color-text); border: 1px solid var(--color-border); }
+.cf-btn--secondary:hover { background: var(--color-surface); }
