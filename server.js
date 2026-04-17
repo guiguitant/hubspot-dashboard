@@ -3709,6 +3709,9 @@ app.get('/prospector-login', (req, res) => {
 app.get('/campaigns/new', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
+app.get('/campaigns/edit/:id', (req, res) => {
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+});
 
 // Route: /prospector — Serve dashboard
 app.get('/prospector', (req, res) => {
@@ -3762,6 +3765,23 @@ app.get('/api/prospector/campaigns', accountContext, async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('Erreur GET /api/prospector/campaigns:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/prospector/campaigns/:id — Single campaign by ID (with account_id check)
+app.get('/api/prospector/campaigns/:id', accountContext, async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('campaigns')
+      .select('*')
+      .eq('id', req.params.id)
+      .eq('account_id', req.accountId)
+      .single();
+    if (error || !data) return res.status(404).json({ error: 'Campaign not found' });
+    res.json(data);
+  } catch (err) {
+    console.error('Erreur GET /api/prospector/campaigns/:id:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

@@ -1,6 +1,5 @@
 import { useState, useEffect, useReducer } from 'react'
-// Navigation vers /prospector (vanilla JS) — pas useNavigate (React Router)
-
+import { useParams } from 'react-router-dom'
 import { apiFetch } from '../../lib/apiFetch'
 import { ArrowLeft } from 'lucide-react'
 import SalesNavTagInput from './SalesNavTagInput'
@@ -15,6 +14,7 @@ import './CampaignForm.css'
 const initialState = {
   name: '',
   priority: 3,
+  status: 'À lancer',
   targetCount: '',
   criteria: {
     jobTitles: [],
@@ -39,6 +39,27 @@ function reducer(state, action) {
       return { ...state, errors: action.errors }
     case 'SET_SUBMITTING':
       return { ...state, isSubmitting: action.value }
+    case 'LOAD_CAMPAIGN': {
+      const c = action.campaign
+      const criteria = c.criteria || {}
+      return {
+        ...state,
+        name: c.name || '',
+        priority: c.priority || 3,
+        status: c.status || 'À lancer',
+        targetCount: c.target_count || '',
+        messageTemplate: c.message_template || '',
+        criteria: {
+          jobTitles: criteria.jobTitles || [],
+          seniorities: criteria.seniorities || [],
+          geoIds: criteria.geoIds || [],
+          sectorIds: criteria.sectorIds || [],
+          headcounts: criteria.headcounts || [],
+          keywords: criteria.keywords || [],
+        },
+        errors: {},
+      }
+    }
     default:
       return state
   }
@@ -49,13 +70,20 @@ function isCriteriaEmpty(c) {
     !c.sectorIds?.length && !c.headcounts?.length && !c.keywords?.length
 }
 
+const STATUS_OPTIONS = ['À lancer', 'En cours', 'En suivi', 'Terminée', 'Archivée']
+
 export default function CampaignFormPage({ account }) {
+  const { id: editId } = useParams()
+  const isEdit = !!editId
   const goBack = () => { window.location.href = '/prospector' }
+
   const [form, dispatch] = useReducer(reducer, initialState)
   const [sectors, setSectors] = useState([])
   const [geos, setGeos] = useState([])
   const [loadingRef, setLoadingRef] = useState(true)
+  const [loadingCampaign, setLoadingCampaign] = useState(isEdit)
 
+  // Charger données de référence
   useEffect(() => {
     Promise.all([
       apiFetch('/api/prospector/reference/sectors').then(r => r.json()),
@@ -66,6 +94,24 @@ export default function CampaignFormPage({ account }) {
     }).catch(err => console.error('Error loading reference data:', err))
       .finally(() => setLoadingRef(false))
   }, [])
+
+  // Mode édition : charger la campagne existante
+  useEffect(() => {
+    if (!editId) return
+    apiFetch(`/api/prospector/campaigns/${editId}`)
+      .then(r => {
+        if (!r.ok) throw new Error('Campaign not found')
+        return r.json()
+      })
+      .then(campaign => {
+        dispatch({ type: 'LOAD_CAMPAIGN', campaign })
+      })
+      .catch(err => {
+        console.error('Error loading campaign:', err)
+        dispatch({ type: 'SET_ERRORS', errors: { submit: 'Campagne introuvable' } })
+      })
+      .finally(() => setLoadingCampaign(false))
+  }, [editId])
 
   const validate = () => {
     const errors = {}
@@ -91,11 +137,24 @@ export default function CampaignFormPage({ account }) {
         message_template: form.messageTemplate || null,
         target_count: form.targetCount ? Number(form.targetCount) : null,
       }
-      const res = await apiFetch('/api/prospector/campaigns', { method: 'POST', body: JSON.stringify(body) })
-      if (!res.ok) {
-        const data = await res.json()
-        dispatch({ type: 'SET_ERRORS', errors: { submit: data.error || 'Erreur serveur' } })
-        return
+
+      if (isEdit) {
+        // Mode édition : PUT + inclure status
+        body.status = form.status
+        const res = await apiFetch(`/api/prospector/campaigns/${editId}`, { method: 'PUT', body: JSON.stringify(body) })
+        if (!res.ok) {
+          const data = await res.json()
+          dispatch({ type: 'SET_ERRORS', errors: { submit: data.error || 'Erreur serveur' } })
+          return
+        }
+      } else {
+        // Mode création : POST
+        const res = await apiFetch('/api/prospector/campaigns', { method: 'POST', body: JSON.stringify(body) })
+        if (!res.ok) {
+          const data = await res.json()
+          dispatch({ type: 'SET_ERRORS', errors: { submit: data.error || 'Erreur serveur' } })
+          return
+        }
       }
       window.location.href = '/prospector'
     } catch (err) {
@@ -105,7 +164,7 @@ export default function CampaignFormPage({ account }) {
     }
   }
 
-  if (loadingRef) return <div className="cf-loading">Chargement des données de référence...</div>
+  if (loadingRef || loadingCampaign) return <div className="cf-loading">Chargement...</div>
 
   return (
     <div className="cf-page">
@@ -113,7 +172,7 @@ export default function CampaignFormPage({ account }) {
         <button type="button" className="cf-back" onClick={goBack}>
           <ArrowLeft size={18} /> Campagnes
         </button>
-        <h2>Nouvelle campagne</h2>
+        <h2>{isEdit ? 'Modifier la campagne' : 'Nouvelle campagne'}</h2>
       </div>
 
       <form onSubmit={handleSubmit} className="cf-form">
@@ -142,6 +201,18 @@ export default function CampaignFormPage({ account }) {
                 {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}</option>)}
               </select>
             </div>
+            {isEdit && (
+              <div className="cf-field" style={{ width: 160 }}>
+                <label className="cf-label">Statut</label>
+                <select
+                  value={form.status}
+                  onChange={e => dispatch({ type: 'SET_FIELD', field: 'status', value: e.target.value })}
+                  className="cf-input"
+                >
+                  {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+            )}
             <div className="cf-field" style={{ width: 160 }}>
               <label className="cf-label">Prospects cible</label>
               <input
@@ -229,7 +300,7 @@ export default function CampaignFormPage({ account }) {
             className="cf-btn cf-btn--primary"
             disabled={form.isSubmitting || isCriteriaEmpty(form.criteria)}
           >
-            {form.isSubmitting ? 'Création...' : 'Créer la campagne'}
+            {form.isSubmitting ? 'Enregistrement...' : isEdit ? 'Enregistrer les modifications' : 'Créer la campagne'}
           </button>
         </div>
       </form>

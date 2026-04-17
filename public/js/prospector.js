@@ -1691,7 +1691,7 @@ const App = (() => {
             ${UI.campStatusBadge(campaign.status)}
           </div>
           <div class="flex gap-2 items-center">
-            <button class="btn btn-outline" onclick="App.openEditCampaign('${id}')" style="display:flex;align-items:center;gap:6px">
+            <button class="btn btn-outline" onclick="window.location.href='/campaigns/edit/${id}'" style="display:flex;align-items:center;gap:6px">
               ${svgEdit} Modifier
             </button>
             ${campaign.status !== 'Archivée'

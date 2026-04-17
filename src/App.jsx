@@ -135,6 +135,7 @@ export default function App() {
     <ProspectorLayout account={activeAccount}>
       <Routes>
         <Route path="/campaigns/new" element={<CampaignFormPage account={activeAccount} />} />
+        <Route path="/campaigns/edit/:id" element={<CampaignFormPage account={activeAccount} />} />
         <Route path="*" element={<RedirectToProspector />} />
       </Routes>
     </ProspectorLayout>
