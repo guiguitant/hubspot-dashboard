@@ -19,7 +19,8 @@ function buildSalesNavUrl(criteria) {
   }
 
   // GEO
-  const geo = buildFilterBlock('GEO', criteria.geoIds || []);
+  // REGION (pas GEO — vérifié sur URL Sales Nav réelle le 17/04/2026)
+  const geo = buildFilterBlock('REGION', criteria.geoIds || []);
   if (geo) filters.push(geo);
 
   // CURRENT_TITLE (texte libre, pas d'id)

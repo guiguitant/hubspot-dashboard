@@ -8,7 +8,7 @@ describe('buildSalesNavUrl', () => {
       headcounts: ['D', 'E'],
       jobTitles: [], seniorities: []
     });
-    expect(url).toContain('type:GEO');
+    expect(url).toContain('type:REGION');
     expect(url).toContain('id:104246759');
     expect(url).toContain('type:INDUSTRY');
     expect(url).toContain('id:48');

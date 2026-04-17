@@ -18,7 +18,8 @@ export function buildSalesNavUrl(criteria) {
     return `(type:${type},values:List(${values.join(',')}))`;
   }
 
-  const geo = buildFilterBlock('GEO', criteria.geoIds || []);
+  // REGION (pas GEO — vérifié sur URL Sales Nav réelle le 17/04/2026)
+  const geo = buildFilterBlock('REGION', criteria.geoIds || []);
   if (geo) filters.push(geo);
 
   if (criteria.jobTitles?.length > 0) {
