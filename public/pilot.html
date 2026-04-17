@@ -2117,8 +2117,25 @@
       .prop-spin { width:16px; height:16px; border:2px solid rgba(255,255,255,.35); border-top-color:#fff; border-radius:50%; animation:propSpin .7s linear infinite; flex-shrink:0; }
       @keyframes propSpin { to { transform:rotate(360deg); } }
 
+      /* Deal search autocomplete */
+      .prop-deal-search { position:relative; }
+      .prop-deal-input { width:100%; background:var(--bg); border:1.5px solid var(--border); border-radius:8px; padding:.7rem .9rem; color:var(--text); font-family:inherit; font-size:.95rem; outline:none; transition:border-color .15s; }
+      .prop-deal-input:focus { border-color:var(--primary); }
+      .prop-deal-input::placeholder { color:var(--text-secondary); }
+      .prop-deal-option-divider { height:1px; background:var(--border); margin:0 .5rem; }
+      .prop-deal-option { padding:.6rem .9rem; cursor:pointer; transition:background .1s; display:flex; align-items:center; gap:.75rem; }
+      .prop-deal-option:hover { background:var(--bg-secondary); }
+      .prop-deal-option-name { font-size:.85rem; font-weight:600; color:var(--text); line-height:1.2; }
+      .prop-deal-option-meta { font-size:.74rem; color:var(--text-secondary); margin-top:.1rem; }
+      .prop-deal-option-stage { font-size:.7rem; background:rgba(34,197,94,.12); color:#22c55e; border-radius:10px; padding:.15rem .5rem; font-weight:600; flex-shrink:0; white-space:nowrap; }
+      .prop-deal-linked { align-items:center; gap:.6rem; background:rgba(34,197,94,.07); border:1.5px solid rgba(34,197,94,.3); border-radius:8px; padding:.65rem .9rem; }
+      .prop-deal-linked-name { font-size:.85rem; font-weight:600; color:var(--text); }
+      .prop-deal-linked-company { font-size:.74rem; color:var(--text-secondary); margin-top:.1rem; }
+      .prop-deal-linked-clear { font-size:.74rem; color:var(--text-secondary); cursor:pointer; padding:.2rem .45rem; border-radius:4px; transition:background .1s, color .1s; flex-shrink:0; margin-left:auto; }
+      .prop-deal-linked-clear:hover { background:rgba(239,68,68,.12); color:#ef4444; }
+
       /* Recap panel */
-      .prop-recap { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:1.25rem; position:sticky; top:70px; }
+      .prop-recap { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:1.25rem; position:sticky; top:70px; }
       .prop-recap-title { font-size:.72rem; font-weight:700; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.07em; margin-bottom:1rem; display:flex; align-items:center; gap:.4rem; }
       .prop-recap-row { display:flex; align-items:flex-start; gap:.6rem; padding:.5rem 0; border-bottom:1px solid var(--border); }
       .prop-recap-row:last-of-type { border-bottom:none; }
@@ -2150,6 +2167,29 @@
       <!-- FORMULAIRE -->
       <div>
         <form id="proposalForm" onsubmit="submitProposal(event)">
+
+          <!-- Deal HubSpot (optionnel) -->
+          <div class="section-card" style="margin-bottom:1rem;padding:1.25rem">
+            <div class="prop-step-label" style="margin-bottom:.75rem">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              Lier à un deal HubSpot&nbsp;<span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-secondary)">(optionnel)</span>
+            </div>
+            <div id="propDealSearchWrap" class="prop-deal-search">
+              <input type="text" class="prop-deal-input" id="propDealSearch"
+                placeholder="Rechercher un deal par nom…"
+                autocomplete="off"
+                oninput="onDealSearchInput(this.value)"
+                onfocus="if(this.value.trim())_renderDealDropdown(this.value.trim())">
+            </div>
+            <div id="propDealLinked" style="display:none" class="prop-deal-linked">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2" style="flex-shrink:0"><polyline points="20 6 9 17 4 12"/></svg>
+              <div style="min-width:0;flex:1">
+                <div class="prop-deal-linked-name" id="propDealLinkedName"></div>
+                <div class="prop-deal-linked-company" id="propDealLinkedCompany"></div>
+              </div>
+              <span class="prop-deal-linked-clear" onclick="clearDealLink()">✕ Délier</span>
+            </div>
+          </div>
 
           <!-- Étape 1 : Entreprise -->
           <div class="section-card" style="margin-bottom:1rem;padding:1.25rem">
@@ -2232,6 +2272,10 @@
         <div class="prop-recap-title">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 1h10a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z"/><path d="M5 5h6M5 8h4"/></svg>
           Récapitulatif
+        </div>
+        <div class="prop-recap-row" id="recapDealRow" style="display:none">
+          <div class="prop-recap-key">Deal</div>
+          <div class="prop-recap-val" id="recapDeal" style="font-size:.75rem;color:#22c55e"></div>
         </div>
         <div class="prop-recap-row">
           <div class="prop-recap-key">Entreprise</div>
@@ -7596,15 +7640,117 @@
 
     // --- Proposal Engine ---
     let proposalConfig = null;
+    let selectedDealId    = null;
+    let _allPipelineDeals = null; // cache chargé une fois
+
+    async function _loadPipelineDeals() {
+      if (_allPipelineDeals) return;
+      try {
+        const res = await fetch('/api/proposal/deals');
+        _allPipelineDeals = res.ok ? await res.json() : [];
+      } catch(_) { _allPipelineDeals = []; }
+    }
+
+    function onDealSearchInput(val) {
+      const q = val.trim();
+      if (!q) { _closeDealDropdown(); return; }
+      _renderDealDropdown(q);
+    }
+
+    function _positionDealDropdown() {
+      const input = document.getElementById('propDealSearch');
+      const dd    = document.getElementById('propDealDropdown');
+      if (!input || !dd) return;
+      const rect = input.getBoundingClientRect();
+      dd.style.top   = (rect.bottom + 4) + 'px';
+      dd.style.left  = rect.left + 'px';
+      dd.style.width = rect.width + 'px';
+    }
+
+    function _closeDealDropdown() {
+      const dd = document.getElementById('propDealDropdown');
+      if (dd) { dd.style.display = 'none'; dd.innerHTML = ''; }
+    }
+
+    function _renderDealDropdown(q) {
+      const dd = document.getElementById('propDealDropdown');
+      if (!dd) return;
+      _positionDealDropdown();
+      if (!_allPipelineDeals) {
+        dd.innerHTML = '<div style="padding:.6rem .9rem;font-size:.8rem;color:var(--text-secondary)">Chargement…</div>';
+        dd.style.display = 'block';
+        return;
+      }
+      const ql = q.toLowerCase();
+      const matches = _allPipelineDeals.filter(d => {
+        const haystack = (d.dealname + ' ' + (d.company || '')).toLowerCase();
+        return haystack.split(/[\s\-_\/,;:()]+/).some(token => token.startsWith(ql));
+      }).slice(0, 10);
+
+      if (!matches.length) {
+        dd.innerHTML = '<div style="padding:.6rem .9rem;font-size:.8rem;color:var(--text-secondary)">Aucun deal trouvé</div>';
+      } else {
+        dd.innerHTML = matches.map(d =>
+          `<div class="prop-deal-option" onclick="selectDeal('${d.id}','${_ea(d.dealname)}','${_ea(d.company)}','${_ea(d.stage)}')">
+            <div style="flex:1;min-width:0">
+              <div class="prop-deal-option-name">${escapeHtml(d.dealname)}</div>
+              ${d.company ? `<div class="prop-deal-option-meta">${escapeHtml(d.company)}</div>` : ''}
+            </div>
+            <span class="prop-deal-option-stage">${escapeHtml(d.stage)}</span>
+          </div>`
+        ).join('');
+      }
+      dd.style.display = 'block';
+    }
+
+    // Encode pour attribut HTML onclick (apostrophes)
+    function _ea(s) { return (s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+
+    function selectDeal(id, dealname, company, stage) {
+      selectedDealId = id;
+      // Pré-remplir le nom d'entreprise si le champ est vide
+      const nomInput = document.getElementById('propNom');
+      if (!nomInput.value.trim()) { nomInput.value = company || dealname; }
+      // Chip "deal lié"
+      document.getElementById('propDealLinkedName').textContent = dealname;
+      document.getElementById('propDealLinkedCompany').textContent = [company, stage].filter(Boolean).join(' · ');
+      document.getElementById('propDealLinked').style.display = 'flex';
+      document.getElementById('propDealSearchWrap').style.display = 'none';
+      _closeDealDropdown();
+      updatePropRecap();
+    }
+
+    function clearDealLink() {
+      selectedDealId = null;
+      document.getElementById('propDealLinked').style.display = 'none';
+      document.getElementById('propDealSearchWrap').style.display = 'block';
+      document.getElementById('propDealSearch').value = '';
+      _closeDealDropdown();
+      updatePropRecap();
+    }
+
+    document.addEventListener('click', (e) => {
+      const dd   = document.getElementById('propDealDropdown');
+      const wrap = document.getElementById('propDealSearchWrap');
+      if (!dd || dd.style.display === 'none') return;
+      if (!dd.contains(e.target) && (!wrap || !wrap.contains(e.target))) _closeDealDropdown();
+    });
+    window.addEventListener('resize', () => {
+      const dd = document.getElementById('propDealDropdown');
+      if (dd && dd.style.display !== 'none') _positionDealDropdown();
+    });
     const PROP_SLIDE_COUNTS = { 'Bilan Carbone': 11, 'ACV': 10, 'FDES / PEP': 6, 'EPD': 6 };
     const PROP_MISSION_ICONS = { 'Bilan Carbone':'🌍', 'ACV':'♻️', 'FDES / PEP':'📋', 'EPD':'🌱' };
 
     async function loadProposalConfig() {
       if (proposalConfig) return;
       try {
-        const res = await fetch('/api/proposal/config');
-        if (!res.ok) throw new Error('Erreur ' + res.status);
-        proposalConfig = await res.json();
+        const [configRes] = await Promise.all([
+          fetch('/api/proposal/config'),
+          _loadPipelineDeals(),
+        ]);
+        if (!configRes.ok) throw new Error('Erreur ' + configRes.status);
+        proposalConfig = await configRes.json();
       } catch(e) {
         const el = document.getElementById('propError');
         if (el) { el.textContent = 'Erreur chargement config : ' + e.message; el.style.display = 'block'; }
@@ -7673,6 +7819,17 @@
       const subKey  = document.getElementById('propSubvention')?.value || 'standard';
       const hasLogo = !!document.getElementById('propLogoPreview')?.src && document.getElementById('propLogoPreview').style.display !== 'none';
 
+      const recapDealRow = document.getElementById('recapDealRow');
+      const recapDeal    = document.getElementById('recapDeal');
+      if (recapDealRow && recapDeal) {
+        if (selectedDealId) {
+          recapDeal.textContent = document.getElementById('propDealLinkedName')?.textContent || '';
+          recapDealRow.style.display = 'flex';
+        } else {
+          recapDealRow.style.display = 'none';
+        }
+      }
+
       const recapNom = document.getElementById('recapNom');
       if (recapNom) { recapNom.textContent = nom || '—'; recapNom.className = 'prop-recap-val' + (nom ? '' : ' empty'); }
 
@@ -7735,7 +7892,7 @@
         const res = await fetch('/api/proposal/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ nom_entreprise: nom, mission, subvention, logo_base64 }),
+          body: JSON.stringify({ nom_entreprise: nom, mission, subvention, logo_base64, deal_id: selectedDealId }),
         });
 
         if (!res.ok) {
@@ -7781,6 +7938,9 @@
       <div id="modalMissionsBody" style="overflow-y:auto;padding:1.2rem 1.5rem"></div>
     </div>
   </div>
+
+  <!-- Dropdown deal search — rendu hors du formulaire pour éviter les problèmes de z-index/overflow -->
+  <div id="propDealDropdown" style="display:none;position:fixed;background:var(--card);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.2);z-index:9999;overflow:hidden"></div>
 
 </body>
 </html>

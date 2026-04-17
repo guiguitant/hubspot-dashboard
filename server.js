@@ -6458,6 +6458,90 @@ app.get('/api/emelia-label-contacts', async (req, res) => {
 });
 
 // =============================================================================
+// PROPOSAL ENGINE — recherche deals HubSpot
+// =============================================================================
+
+// GET /api/proposal/deals
+// Retourne tous les deals open du pipeline (filtrés côté client pour le "commence par")
+// retourne id + dealname + company + stage
+app.get('/api/proposal/deals', async (req, res) => {
+  try {
+    const stageIds = KANBAN_STAGES.map(s => s.id);
+    const body = {
+      filterGroups: [{
+        filters: [
+          { propertyName: 'hs_is_closed', operator: 'EQ',  value: 'false' },
+          { propertyName: 'pipeline',     operator: 'EQ',  value: 'default' },
+          { propertyName: 'dealstage',    operator: 'IN',  values: stageIds },
+        ],
+      }],
+      properties: ['dealname', 'dealstage', 'amount'],
+      associations: ['companies'],
+      limit: 100,
+    };
+
+    const result = await hubspotSearch(body);
+    const deals  = result.results || [];
+
+    // Résoudre les noms d'entreprises associées
+    const companyIds = [];
+    const dealToCompanyId = {};
+    for (const deal of deals) {
+      const assoc = deal.associations?.companies?.results?.[0];
+      if (assoc) {
+        dealToCompanyId[deal.id] = assoc.id;
+        companyIds.push(assoc.id);
+      }
+    }
+
+    // Batch fetch des entreprises (une seule requête)
+    const companyNames = {};
+    if (companyIds.length > 0) {
+      const batchPayload = JSON.stringify({ inputs: companyIds.map(id => ({ id })), properties: ['name'] });
+      const companyData  = await new Promise((resolve, reject) => {
+        let reqPath = '/crm/v3/objects/companies/batch/read';
+        const options = {
+          hostname: HUBSPOT_HOST,
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(batchPayload) },
+        };
+        reqPath = addAuth(options, reqPath);
+        options.path = reqPath;
+        const req = https.request(options, (r) => {
+          let data = '';
+          r.on('data', c => data += c);
+          r.on('end', () => {
+            try { resolve(JSON.parse(data)); } catch { resolve({ results: [] }); }
+          });
+        });
+        req.on('error', reject);
+        req.write(batchPayload);
+        req.end();
+      });
+      for (const c of (companyData.results || [])) {
+        companyNames[c.id] = c.properties?.name || '';
+      }
+    }
+
+    const stageLabel = {};
+    for (const s of KANBAN_STAGES) stageLabel[s.id] = s.label;
+
+    const output = deals.map(deal => ({
+      id:       deal.id,
+      dealname: deal.properties.dealname || '',
+      company:  companyNames[dealToCompanyId[deal.id]] || '',
+      stage:    stageLabel[deal.properties.dealstage] || deal.properties.dealstage || '',
+      amount:   deal.properties.amount ? parseFloat(deal.properties.amount) : null,
+    }));
+
+    res.json(output);
+  } catch (e) {
+    console.error('[Proposal search]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// =============================================================================
 // PROPOSAL ENGINE — génération PPTX en Node.js (adm-zip)
 // =============================================================================
 
@@ -6558,19 +6642,122 @@ function proposalReplaceText(zip, replacements) {
   });
 }
 
+function getLogoPixelDims(buf) {
+  // PNG : dimensions aux octets 16-23
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) {
+    return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+  }
+  // JPEG : chercher marqueur SOF0/SOF1/SOF2
+  if (buf[0] === 0xFF && buf[1] === 0xD8) {
+    let i = 2;
+    while (i < buf.length - 8) {
+      if (buf[i] !== 0xFF) { i++; continue; }
+      const mk = buf[i + 1];
+      if (mk === 0xC0 || mk === 0xC1 || mk === 0xC2) {
+        return { h: buf.readUInt16BE(i + 5), w: buf.readUInt16BE(i + 7) };
+      }
+      i += 2 + buf.readUInt16BE(i + 2);
+    }
+  }
+  return null;
+}
+
+// Corrige le ratio de toutes les p:pic référençant un rId donné dans un XML
+function _fixPicRatio(xml, rId, imgAR) {
+  const picPat = /<p:pic\b[\s\S]*?<\/p:pic>/g;
+  let picM, count = 0;
+  while ((picM = picPat.exec(xml)) !== null) {
+    if (!picM[0].includes(`r:embed="${rId}"`)) continue;
+    const offM = picM[0].match(/<a:off\b[^>]*x="(-?\d+)"[^>]*y="(-?\d+)"/);
+    const extM = picM[0].match(/<a:ext\b[^>]*cx="(\d+)"[^>]*cy="(\d+)"/);
+    if (!offM || !extM) continue;
+    const origX = parseInt(offM[1]), origY = parseInt(offM[2]);
+    const origCx = parseInt(extM[1]), origCy = parseInt(extM[2]);
+    const boxAR = origCx / origCy;
+    let newCx, newCy, newX, newY;
+    if (imgAR > boxAR) {
+      newCx = origCx; newCy = Math.round(origCx / imgAR);
+      newX = origX;   newY  = origY + Math.round((origCy - newCy) / 2);
+    } else {
+      newCy = origCy; newCx = Math.round(origCy * imgAR);
+      newY  = origY;  newX  = origX + Math.round((origCx - newCx) / 2);
+    }
+    const updated = picM[0]
+      .replace(/<a:off\b[^>]*x="-?\d+"[^>]*y="-?\d+"/, `<a:off x="${newX}" y="${newY}"`)
+      .replace(/<a:ext\b[^>]*cx="\d+"[^>]*cy="\d+"/, `<a:ext cx="${newCx}" cy="${newCy}"`);
+    xml = xml.replace(picM[0], updated);
+    count++;
+  }
+  return { xml, count };
+}
+
 function proposalReplaceLogo(zip, logoBuffer) {
   try {
-    const slide1Xml  = zip.readAsText('ppt/slides/slide1.xml');
+    let slide1Xml    = zip.readAsText('ppt/slides/slide1.xml');
     const slide1Rels = zip.readAsText('ppt/slides/_rels/slide1.xml.rels');
-    const blipPat    = /<a:blip\b[^>]*r:embed="([^"]+)"/g;
+
+    // Dernier r:embed dans slide1 = logo client
+    const blipPat = /<a:blip\b[^>]*r:embed="([^"]+)"/g;
     let bm, lastRId;
     while ((bm = blipPat.exec(slide1Xml)) !== null) lastRId = bm[1];
-    if (!lastRId) return;
-    const relMatch = slide1Rels.match(new RegExp(`Id="${lastRId}"[^>]*Target="([^"]+)"`));
-    if (!relMatch) return;
-    const mediaPath = `ppt/${relMatch[1].replace(/^\.\.\//, '')}`;
+    if (!lastRId) { console.warn('[Proposal] Logo: aucun blip trouvé'); return; }
+
+    // Résoudre le fichier média via les rels de slide1
+    const relEntries = slide1Rels.match(/<Relationship\b[^>]*\/>/g) || [];
+    let slideTarget = null;
+    for (const rel of relEntries) {
+      if (rel.includes(`Id="${lastRId}"`)) {
+        const m = rel.match(/Target="([^"]+)"/);
+        if (m) { slideTarget = m[1]; break; }
+      }
+    }
+    if (!slideTarget) { console.warn('[Proposal] Logo: relation introuvable pour', lastRId); return; }
+
+    // Chemin absolu ZIP du fichier média (ex: ppt/media/image2.png)
+    const mediaPath = `ppt/${slideTarget.replace(/^\.\.\//, '')}`;
+    const entry = zip.getEntry(mediaPath);
+    if (!entry) { console.warn('[Proposal] Logo: entrée ZIP introuvable:', mediaPath); return; }
+
+    // Remplacer les bytes de l'image (affecte toutes les shapes qui référencent ce fichier)
     zip.updateFile(mediaPath, logoBuffer);
-  } catch(e) { console.warn('[Proposal] Logo:', e.message); }
+
+    const dims = getLogoPixelDims(logoBuffer);
+    if (!dims) { console.log('[Proposal] Logo: remplacé (format non reconnu, pas de resize)'); return; }
+    const imgAR = dims.w / dims.h;
+
+    // --- Corriger slide1.xml ---
+    const r1 = _fixPicRatio(slide1Xml, lastRId, imgAR);
+    slide1Xml = r1.xml;
+    zip.updateFile('ppt/slides/slide1.xml', Buffer.from(slide1Xml, 'utf8'));
+
+    // --- Corriger slideMaster1.xml (le logo peut aussi apparaître dans le master) ---
+    const masterXmlPath = 'ppt/slideMasters/slideMaster1.xml';
+    const masterRelsPath = 'ppt/slideMasters/_rels/slideMaster1.xml.rels';
+    try {
+      let masterXml  = zip.readAsText(masterXmlPath);
+      const masterRels = zip.readAsText(masterRelsPath);
+      // Trouver le rId du master qui pointe vers le même fichier média
+      const mediaFilename = mediaPath.replace('ppt/media/', '');
+      const masterRelEntries = masterRels.match(/<Relationship\b[^>]*\/>/g) || [];
+      let masterRId = null;
+      for (const rel of masterRelEntries) {
+        if (rel.includes(mediaFilename)) {
+          const m = rel.match(/Id="([^"]+)"/);
+          if (m) { masterRId = m[1]; break; }
+        }
+      }
+      if (masterRId) {
+        const r2 = _fixPicRatio(masterXml, masterRId, imgAR);
+        masterXml = r2.xml;
+        zip.updateFile(masterXmlPath, Buffer.from(masterXml, 'utf8'));
+        console.log(`[Proposal] Logo: ratio corrigé slide1(${r1.count}) + master(${r2.count}) ✓`);
+      } else {
+        console.log(`[Proposal] Logo: ratio corrigé slide1(${r1.count}) [pas dans master] ✓`);
+      }
+    } catch(_) {
+      console.log(`[Proposal] Logo: ratio corrigé slide1(${r1.count}) [master inaccessible] ✓`);
+    }
+  } catch(e) { console.warn('[Proposal] Logo erreur:', e.message); }
 }
 
 // GET /api/proposal/config
