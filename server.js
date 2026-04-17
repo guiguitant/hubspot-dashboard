@@ -3704,6 +3704,12 @@ app.get('/prospector-login', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
+// Routes React SPA — servies via le build Vite (dist/index.html)
+// React Router gère le routing côté client pour /campaigns/*
+app.get('/campaigns/new', (req, res) => {
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+});
+
 // Route: /prospector — Serve dashboard
 app.get('/prospector', (req, res) => {
   let html = fs.readFileSync(path.join(__dirname, 'public', 'prospector.html'), 'utf8');

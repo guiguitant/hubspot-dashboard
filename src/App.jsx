@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import { setApiFetchContext } from './lib/apiFetch'
 import LoginPage from './components/LoginPage'
+import ProspectorLayout from './components/ProspectorLayout'
+import CampaignFormPage from './components/campaigns/CampaignFormPage'
 
 export default function App() {
   const [token, setToken] = useState(null)
@@ -114,62 +117,31 @@ export default function App() {
   }
 
   if (loading) return <div className="loading-screen">Chargement...</div>
-  if (!token) return <LoginPage onLoginSuccess={handleLoginSuccess} />
+
+  // Si pas de token et qu'on est sur /campaigns/new → rediriger vers login
+  if (!token) {
+    const onCampaignRoute = window.location.pathname.startsWith('/campaigns')
+    if (onCampaignRoute) {
+      window.location.href = '/prospector-login'
+      return null
+    }
+    return <LoginPage onLoginSuccess={handleLoginSuccess} />
+  }
+
   if (!activeAccount) return <div className="error-screen">Compte non autorisé. Contactez Nathan.</div>
 
+  // Layout prospector (sidebar + main) avec le formulaire dans le main content
   return (
-    <div className="app-container">
-      <Header
-        account={activeAccount}
-        authAccount={authAccount}
-        allAccounts={allAccounts}
-        onSwitchAccount={handleSwitchAccount}
-        onLogout={handleLogout}
-      />
-      <MainApp account={activeAccount} />
-    </div>
+    <ProspectorLayout account={activeAccount}>
+      <Routes>
+        <Route path="/campaigns/new" element={<CampaignFormPage account={activeAccount} />} />
+        <Route path="*" element={<RedirectToProspector />} />
+      </Routes>
+    </ProspectorLayout>
   )
 }
 
-function Header({ account, authAccount, allAccounts, onSwitchAccount, onLogout }) {
-  return (
-    <header className="app-header">
-      <div className="header-left">
-        <h1>🌱 Releaf Prospector</h1>
-      </div>
-      <div className="header-right">
-        {authAccount?.is_admin && allAccounts.length > 0 && (
-          <div className="admin-account-switcher">
-            <span className="admin-badge">🔧 Admin</span>
-            <select
-              value={account.id}
-              onChange={e => onSwitchAccount(e.target.value)}
-              className="account-select"
-            >
-              {allAccounts.map(a => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-        <span className="account-name">{account.name}</span>
-        <button onClick={onLogout} className="logout-btn">
-          Déconnexion
-        </button>
-      </div>
-    </header>
-  )
-}
-
-function MainApp({ account }) {
-  return (
-    <main className="app-main">
-      <div className="placeholder-message">
-        <p>Bienvenue dans l'espace prospection, {account.name}!</p>
-        <p>Le dashboard sera intégré ici.</p>
-      </div>
-    </main>
-  )
+function RedirectToProspector() {
+  window.location.href = '/prospector'
+  return null
 }

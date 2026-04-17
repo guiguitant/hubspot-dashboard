@@ -1,26 +1,28 @@
 /* Global styles */
 :root {
   --color-primary: #2D6A4F;
-  --color-primary-light: #B7E4C7;
+  --color-primary-light: #D1FAE5;
   --color-primary-hover: #245840;
-  --color-bg: #FFFFFF;
-  --color-surface: #F9FAFB;
-  --color-border: #E5E7EB;
+  --color-primary-bg: rgba(45,106,79,0.06);
+  --color-bg: #FAF9F7;
+  --color-surface: #FFFFFF;
+  --color-border: #E2E8F0;
   --color-text: #111827;
-  --color-text-muted: #6B7280;
+  --color-text-muted: #64748B;
   --color-overdue: #EF4444;
   --color-warning: #F59E0B;
+  --color-success: #10B981;
 
   --font-xs: 12px;
   --font-sm: 13px;
   --font-base: 14px;
   --font-lg: 16px;
   --font-xl: 20px;
-  --font-2xl: 28px;
+  --font-2xl: 26px;
 
-  --radius: 8px;
-  --radius-sm: 4px;
-  --shadow: 0 1px 3px rgba(0,0,0,0.08);
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow: 0 1px 3px rgba(0,0,0,0.06);
   --shadow-md: 0 4px 12px rgba(0,0,0,0.1);
 }
 
@@ -31,7 +33,8 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--color-bg);
   font-size: var(--font-base);
   color: var(--color-text);
   background: var(--color-surface);
