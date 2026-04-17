@@ -3806,7 +3806,7 @@ app.get('/api/prospector/reference/geos', accountContext, async (req, res) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('linkedin_geos')
-      .select('id, label_fr, geo_type')
+      .select('id, label_fr, geo_type, parent_id')
       .order('label_fr');
     if (error) throw error;
     res.json(data || []);

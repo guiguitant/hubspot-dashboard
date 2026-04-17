@@ -26,7 +26,17 @@ export default function GeoSearch({ geos, selected, onChange }) {
   }, [geos, search, selectedIds])
 
   const addGeo = (geo, type) => {
-    onChange([...selected, { id: geo.id, text: geo.label_fr, type }])
+    // LinkedIn attend le format exact du typeahead : "Région, Pays" pour les régions, "Ville, Région" pour les villes
+    // Les pays s'utilisent tels quels
+    let text = geo.label_fr
+    if (geo.geo_type === 'REGION') {
+      text = `${geo.label_fr}, France`
+    } else if (geo.geo_type === 'CITY') {
+      // Trouver la région parent pour construire "Ville, Région"
+      const parent = geos.find(g => g.id === geo.parent_id)
+      text = parent ? `${geo.label_fr}, ${parent.label_fr}` : geo.label_fr
+    }
+    onChange([...selected, { id: geo.id, text, type }])
   }
 
   const removeGeo = (id) => {
