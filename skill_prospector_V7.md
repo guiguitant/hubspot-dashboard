@@ -65,12 +65,14 @@ const headers = {
 
 ## Utilitaires JS réutilisables
 
-### Mise à jour de statut avec fallback (obligatoire)
+### Mise à jour de statut
 
-`update-status` peut retourner 404 sur certains prospects (bug backend). Toujours utiliser cette fonction qui tente `update-status` puis bascule sur `sync` si besoin :
+Utiliser `POST /api/prospector/update-status` avec le champ `id` du prospect. Si 404 (bug backend connu sur certains prospects), loguer l'erreur et passer au suivant.
+
+⚠️ **Le fallback via `/sync` ne fonctionne plus** — sync ignore désormais les prospects existants (skip complet). Toujours utiliser `update-status` avec `id`.
 
 ```javascript
-async function updateStatus(prospect, status, pendingMessage, campaignId) {
+async function updateStatus(prospect, status, pendingMessage) {
   const r = await fetch('/api/prospector/update-status', {
     method: 'POST', headers,
     body: JSON.stringify({
@@ -79,26 +81,10 @@ async function updateStatus(prospect, status, pendingMessage, campaignId) {
       ...(pendingMessage ? { pending_message: pendingMessage } : {})
     })
   });
-  if (r.ok) return true;
-
-  console.warn(`update-status 404 pour ${prospect.id}, fallback sur sync`);
-  const r2 = await fetch('/api/prospector/sync', {
-    method: 'POST', headers,
-    body: JSON.stringify({
-      campaign_id: campaignId || prospect.campaign_id,
-      prospects: [{
-        first_name: prospect.first_name,
-        last_name: prospect.last_name,
-        linkedin_url: prospect.linkedin_url,
-        company: prospect.company,
-        job_title: prospect.job_title,
-        status,
-        ...(pendingMessage ? { pending_message: pendingMessage } : {})
-      }]
-    })
-  });
-  if (!r2.ok) console.error(`Échec sync aussi pour ${prospect.id}`);
-  return r2.ok;
+  if (!r.ok) {
+    console.warn(`update-status ${r.status} pour ${prospect.id} (${prospect.first_name} ${prospect.last_name}) — skip`);
+  }
+  return r.ok;
 }
 ```
 
@@ -154,11 +140,29 @@ Le serveur de production (`hubspot-dashboard-1c7z.onrender.com`) se met en veill
 **`GET /api/prospector/campaigns?active=true`**
 Retourne les campagnes actives, triées par priorité croissante (1 = plus prioritaire).
 
+Champs clés d'une campagne :
+- `id`, `name`, `status`, `priority` (1-5)
+- `criteria` — JSONB contenant les filtres Sales Navigator : `jobTitles[], seniorities[], geoIds[], sectorIds[], headcounts[], keywords[]`
+- `sales_nav_url` — URL Sales Navigator **auto-générée** à partir de `criteria` (ne pas la construire manuellement)
+- `message_template` — instructions pour Claude lors de la génération de messages
+- `target_count` — nombre de prospects cible (optionnel)
+
 Statuts de campagne :
 - `À lancer` — pas encore démarrée (✅ scraping actif)
 - `En cours` — prospection + suivi actifs (✅ scraping actif)
 - `En suivi` — plus de prospection, suivi uniquement (❌ pas de scraping)
 - `Terminée` / `Archivée` — aucune action (❌)
+
+⚠️ `excluded_keywords` n'existe plus — les exclusions sont dans `criteria.jobTitles[].type = 'exclude'`.
+
+**`GET /api/prospector/campaigns/:id`**
+Retourne une campagne par ID. Filtré par `account_id` (404 si pas le bon compte). Utilisé pour récupérer `sales_nav_url` et `criteria` avant le scraping.
+
+**`GET /api/prospector/reference/sectors`**
+Retourne les 136 secteurs LinkedIn avec `id`, `label_fr`, `parent_category`, `verified`.
+
+**`GET /api/prospector/reference/geos`**
+Retourne les zones géographiques LinkedIn avec `id`, `label_fr`, `geo_type` (COUNTRY/REGION/CITY).
 
 ### Prospects
 
@@ -166,16 +170,28 @@ Statuts de campagne :
 Retourne les prospects filtrés.
 
 **`POST /api/prospector/sync`**
-Crée ou met à jour un prospect.
-Body : `{ campaign_id, prospects: [{ first_name, last_name, linkedin_url, sales_nav_url?, company, job_title, sector, geography, status, interaction? }] }`
-⚠️ `sales_nav_url` est accepté et stocké — utilisé pour le matching et la déduplication.
-Retourne 429 si quota dépassé → arrêter immédiatement.
+Crée des prospects depuis un scraping Sales Navigator. **Les doublons sont ignorés (skip complet)** — aucune mise à jour des prospects existants.
+
+Body : `{ campaign_id, prospects: [{ first_name, last_name, linkedin_url, sales_nav_url?, company, job_title, sector?, geography? }] }`
+
+Comportement :
+- **IDOR check** : `campaign_id` doit appartenir au compte authentifié, sinon 404
+- **Batch max 25** : retourne 400 si `prospects.length > 25`
+- **Dédup 3 niveaux** (skip si match) : `linkedin_url` → `sales_nav_url` → `first_name + last_name + company`
+- **Statut forcé** : `'Profil à valider'` côté serveur (le champ `status` du body est ignoré)
+- **Pas d'interaction** : le champ `interaction` n'est plus traité
+- **Log console** : chaque skip est loggé avec la raison (`linkedin_url`, `sales_nav_url`, `name+company`)
+
+Réponse : `{ created, skipped, errors, total }`
+Retourne 429 si quota d'invitations dépassé → arrêter immédiatement.
+
+⚠️ **Changement v7→v8** : sync ne fait plus de mise à jour des prospects existants. Pour mettre à jour un prospect, utiliser `POST /api/prospector/update-status`.
 
 **`POST /api/prospector/update-status`**
 Met à jour le statut d'un prospect.
 Body : `{ id: prospect.id, status: '...', pending_message? }`
 ⚠️ Le champ est `id`, PAS `prospect_id`.
-⚠️ Peut retourner 404 sur certains prospects (bug backend connu) → utiliser `updateStatus()` qui gère le fallback.
+⚠️ Peut retourner 404 sur certains prospects (bug backend connu) → loguer et passer au suivant.
 
 **`GET /api/prospector/validated-profiles`**
 Retourne les prospects en statut `Nouveau`.
@@ -350,6 +366,8 @@ Body : `{ lock_type }`
 | `Discussion en cours` | Le prospect a répondu ou RDV planifié → séquence arrêtée automatiquement |
 | `Gagné` | Converti en client |
 | `Perdu` | Pas intéressé |
+| `Profil restreint` | Profil LinkedIn non accessible |
+| `Hors séquence` | Sorti de la séquence (désintérêt, no-show, demande explicite) |
 
 ---
 
@@ -358,7 +376,9 @@ Body : `{ lock_type }`
 > Profil Chrome : `Sales_nav`
 > Lock global `linkedin_task1` — un seul compte Sales Navigator partagé, une seule exécution à la fois.
 
-### Structure d'exécution obligatoire — try/finally
+> **Philosophie** : ce workflow est une **guidance**, pas un script rigide. Les patterns de code ci-dessous sont indicatifs — le DOM de Sales Navigator évolue régulièrement. Si un sélecteur ne fonctionne pas ou qu'un comportement inattendu apparaît, **adapter l'approche** plutôt que de bloquer. L'objectif est de récupérer des profils et de les synchroniser — la méthode exacte peut varier.
+
+### Structure d'exécution recommandée — try/finally
 
 Tout le workflow s'enveloppe dans un `try/finally` pour garantir que le lock est toujours relâché, même en cas de crash :
 
@@ -382,14 +402,15 @@ try {
 }
 ```
 
-### Variables globales
+### Variables globales (valeurs recommandées, ajustables selon le contexte)
 
 ```javascript
 const _startedAt = Date.now();
 const _errors = [];
 let _stopped_reason = null; // null | 'session_expired' | 'rate_limited'
 
-const MAX_PROFILES_PER_CAMPAIGN = 30;
+// Ces limites sont des garde-fous — ajuster si nécessaire selon le target_count de la campagne
+const MAX_PROFILES_PER_CAMPAIGN = 30;  // ou campaign.target_count si défini
 const MAX_PROFILES_PER_RUN = 80;
 let _totalSubmitted = 0;
 
@@ -434,9 +455,12 @@ const campsResp = await fetch('/api/prospector/campaigns?active=true', { headers
 const allCampaigns = await campsResp.json();
 const campaigns = allCampaigns
   .filter(c => ['À lancer', 'En cours'].includes(c.status))
+  .filter(c => c.sales_nav_url) // ignorer les campagnes sans URL Sales Nav
   .sort((a, b) => (a.priority || 99) - (b.priority || 99));
 ```
 Si aucune campagne éligible → `await _postSummary()` et STOP.
+
+⚠️ `sales_nav_url` est auto-générée à la création/modification de la campagne dans Prospector. Si une campagne n'a pas de `sales_nav_url`, c'est qu'elle a été créée avant la mise à jour ou que ses critères sont vides — la skipper avec un log.
 
 ### Étape 2 — Pour chaque campagne : extraction Sales Navigator
 
@@ -456,47 +480,43 @@ const existingSalesNavUrls = new Set(
 ```
 ⚠️ Déduplication par campagne. Un même profil peut exister dans 2 campagnes — c'est voulu.
 
-#### 2b — Construire les filtres et exclusions
+#### 2b — Construire les exclusions
 
 ```javascript
 const criteria = campaign.criteria || {};
-const campaignExclusions = (campaign.excluded_keywords || []).map(k => k.toLowerCase());
+// Exclusions extraites depuis criteria.jobTitles (type = 'exclude')
+const criteriaExclusions = (criteria.jobTitles || [])
+  .filter(t => t.type === 'exclude')
+  .map(t => t.value.toLowerCase());
 const UNIVERSAL_EXCLUSIONS = [
   'stagiaire', 'alternant', 'alternante', 'apprenti', 'apprentie',
   'stage', 'alternance', 'étudiant', 'étudiante', 'intern', 'internship'
 ];
-const allExclusions = [...UNIVERSAL_EXCLUSIONS, ...campaignExclusions];
+const allExclusions = [...UNIVERSAL_EXCLUSIONS, ...criteriaExclusions];
 const toSync = [];
 ```
 
-#### 2c — Naviguer et scraper Sales Navigator (onglet Sales Nav)
+⚠️ `excluded_keywords` n'existe plus en DB — les exclusions sont dans `criteria.jobTitles[].type = 'exclude'`.
 
-**Objectif** : obtenir une liste de `sales_nav_url` + données de profil (nom, titre, entreprise) correspondant aux critères de la campagne.
+#### 2c — Naviguer vers la recherche Sales Navigator (onglet Sales Nav)
 
-##### Application des filtres
+**Objectif** : ouvrir la recherche Sales Navigator avec les filtres de la campagne, puis extraire les profils.
 
-L'UI Sales Navigator est instable : les panels de filtres peuvent disparaître du DOM, les typeahead peuvent ignorer les events synthétiques, les filtres peuvent sembler appliqués sans l'être. Ne pas s'entêter sur une technique qui ne répond pas — adapter l'approche.
+##### Navigation — utiliser `campaign.sales_nav_url`
 
-**Approche primaire — URL avec filtres encodés**
-Construire directement l'URL de recherche avec les paramètres encodés. C'est la méthode la plus fiable car elle contourne entièrement la fragilité de l'UI :
+Chaque campagne a une URL Sales Navigator pré-générée (`campaign.sales_nav_url`) qui encode tous les filtres (postes, secteurs, géographies, niveaux hiérarchiques, effectifs, mots-clés). **Naviguer directement vers cette URL** — pas besoin de construire manuellement les filtres ou d'interagir avec l'UI de filtrage.
 
-```
-https://www.linkedin.com/sales/search/people?query=(filters:List(
-  (type:REGION,values:List((id:<region_id>,text:<region>,selectionType:INCLUDED))),
-  (type:CURRENT_TITLE,values:List((text:<title1>,selectionType:INCLUDED),...)),
-  (type:COMPANY_HEADCOUNT,values:List((id:B,...)))
-))
+```javascript
+// Basculer sur onglet Sales Nav
+window.location.href = campaign.sales_nav_url;
+// Attendre le chargement complet (les cartes de profils doivent être visibles)
 ```
 
-Les IDs de région (ex: `103737322` = Bretagne France) se trouvent en effectuant d'abord une recherche manuelle sur Sales Navigator et en récupérant l'URL résultante. Les codes headcount sont fixes : B=1-10, C=11-50, D=51-200, E=201-500, F=501-1000, G=1001-5000, H=5001-10000.
+**Vérification après chargement** : si la page affiche 0 résultats, des filtres incorrects, ou une erreur — loguer et passer à la campagne suivante. Les IDs des filtres (secteurs, géographies) ont été vérifiés mais un changement côté LinkedIn est toujours possible.
 
-**Approche secondaire — UI Sales Navigator**
-Si l'approche URL n'est pas applicable, utiliser l'UI. Naviguer vers `https://www.linkedin.com/sales/search/people/` et appliquer les filtres : Geography, Current job title (un par un), Company headcount, Industry.
+**Fallback** : si `sales_nav_url` produit une erreur, il est possible de naviguer vers `https://www.linkedin.com/sales/search/people/` et d'appliquer les filtres manuellement depuis l'UI. C'est une approche de dernier recours — l'UI de filtrage est instable et les panels peuvent disparaître du DOM.
 
-Signal de succès : les filtres apparaissent en tags actifs ET le nombre de résultats est cohérent avec la cible.
-Signal d'échec : panel disparu, tags absents, count inchangé → tenter l'approche URL avant de continuer.
-
-##### Extraction des profils depuis la liste de résultats
+##### Extraction des profils depuis la liste de résultats (patterns indicatifs)
 
 **Objectif** : récupérer `sales_nav_url` + nom complet pour chaque profil visible sur la page.
 
@@ -523,7 +543,7 @@ for (const div of divs) {
 ```
 
 Signal de succès : au moins 10 profils trouvés sur page 1 d'une campagne active.
-Signal d'échec : 0 profils avec les deux patterns → inspecter librement le DOM (`document.body.innerText`, `document.querySelectorAll('a[href]')`) pour comprendre la structure actuelle avant de continuer.
+Signal d'échec : 0 profils avec les deux patterns → inspecter librement le DOM (`document.body.innerText`, `document.querySelectorAll('a[href]')`) pour comprendre la structure actuelle. Le DOM de Sales Navigator évolue — **ne pas bloquer, adapter**.
 
 **Pagination** : 25 résultats/page. Max `Math.ceil(MAX_PROFILES_PER_CAMPAIGN / 25)` pages (soit 2 pages pour 30 profils). Arrêter si `toSync.length >= MAX_PROFILES_PER_CAMPAIGN`. Paginer via le bouton "Suivant" de l'UI plutôt qu'en modifiant l'URL manuellement.
 
@@ -597,7 +617,9 @@ const normalized = linkedin_url?.toLowerCase().replace(/\/$/, '').split('?')[0] 
 ```
 
 ⚠️ Ne jamais utiliser une URL Sales Navigator comme `linkedin_url`.
-⚠️ Si introuvable après avoir tenté le bouton overflow → `_errors.push({ step: '2d', message: ... })` et skip ce profil.
+⚠️ Si introuvable après avoir tenté le bouton overflow → loguer et continuer avec `linkedin_url = null`. Le prospect sera créé sans `linkedin_url` — la déduplication se fera par `sales_nav_url` ou `nom+prénom+company`. Task 2 ne pourra pas envoyer d'invitation à ce prospect tant que `linkedin_url` n'est pas renseigné.
+
+**En cas de rate-limit ou captcha** : si Sales Navigator devient hostile pendant l'extraction des profils individuels, il est préférable de sauvegarder les profils déjà collectés (même sans `linkedin_url` pour certains) plutôt que de tout perdre. Les `linkedin_url` manquants pourront être complétés lors d'une session ultérieure.
 
 #### 2e — Déduplication et validation (onglet hubspot-dashboard-1c7z.onrender.com/prospector)
 
@@ -621,33 +643,32 @@ try {
 
 #### 2f — Synchroniser dans Prospector (onglet hubspot-dashboard-1c7z.onrender.com/prospector)
 
+Envoyer les profils en batches de **25 maximum** (limite serveur). Le statut `'Profil à valider'` est appliqué automatiquement côté serveur.
+
 ```javascript
-if (toSync.length > 0) {
+// Découper en batches de 25
+for (let i = 0; i < toSync.length; i += 25) {
+  const batch = toSync.slice(i, i + 25);
   const syncResp = await fetch('/api/prospector/sync', {
     method: 'POST', headers,
     body: JSON.stringify({
       campaign_id: campaign.id,
-      prospects: toSync.map(p => ({
+      prospects: batch.map(p => ({
         first_name: p.first_name,
         last_name: p.last_name,
         linkedin_url: p.linkedin_url,
         sales_nav_url: p.sales_nav_url,
         company: p.company,
         job_title: p.job_title,
-        sector: criteria.sector || campaign.sector || '',
-        geography: criteria.geography || campaign.geography || '',
-        status: 'Profil à valider',
-        interaction: {
-          type: 'Ajout LinkedIn',
-          content: 'Profil trouvé sur Sales Navigator — en attente de validation'
-        }
       }))
     })
   });
+  if (syncResp.status === 429) { _stopped_reason = 'rate_limited'; break; }
   const result = await syncResp.json();
-  const count = result.created || toSync.length;
-  _summary.profiles_submitted += count;
-  _totalSubmitted += count;
+  _summary.profiles_submitted += result.created || 0;
+  _summary.profiles_rejected_duplicates += result.skipped || 0;
+  _totalSubmitted += result.created || 0;
+  console.log(`Batch sync: ${result.created} créés, ${result.skipped} skippés (doublons)`);
 }
 _summary.campaigns_processed++;
 ```
@@ -1107,7 +1128,7 @@ Ne jamais supposer que l'état en mémoire est cohérent avec la DB après une i
 | URL LinkedIn → 404 | Slug deviné depuis le nom au lieu d'utiliser l'API | Toujours utiliser `prospect.linkedin_url` de l'API |
 | Variables `window._rlf_*` perdues | Reset de contexte / navigation cross-domain | Re-fetch depuis l'API au démarrage (voir section Recovery) |
 | Prospect "Message à envoyer" mais "En attente" sur LinkedIn | Incohérence DB (invitation non acceptée) | Corriger vers "Invitation envoyée" via `updateStatus`, skip |
-| `update-status` retourne 404 | Bug backend sur certains prospect_accounts | Le fallback `sync` dans `updateStatus()` gère ce cas |
+| `update-status` retourne 404 | Bug backend sur certains prospect_accounts | Loguer et passer au suivant (le fallback sync ne fonctionne plus) |
 
 ---
 
