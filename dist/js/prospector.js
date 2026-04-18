@@ -98,7 +98,7 @@ const App = (() => {
     `;
 
     // Load stats in parallel
-    const [week, total, campCount, reminders, pipeline, activity, pendingMessages, profilsAValider, chartData] = await Promise.all([
+    const [week, total, campCount, reminders, pipeline, activity, pendingMessages, profilsAValider, profilsIncomplets, chartData] = await Promise.all([
       DB.getProspectsThisWeek(),
       DB.getTotalProspects(),
       DB.getActiveCampaignCount(),
@@ -107,6 +107,7 @@ const App = (() => {
       DB.getRecentInteractions(10),
       DB.getProspects({ status: 'Message à valider' }),
       DB.getProspects({ status: 'Profil à valider' }),
+      APIClient.get('/api/prospector/prospects/incomplete?limit=100').then(r => r.json()).catch(() => []),
       APIClient.get('/api/prospector/daily-activity').then(r => r.json()).catch(() => ({ dates: [], series: {} })),
     ]);
     // Count invitations accepted (from pipeline counts)
@@ -149,6 +150,17 @@ const App = (() => {
         ${UI.statusBadge('Profil à valider')}
         <div class="action-btns">
           <button class="btn btn-sm btn-primary" onclick="location.hash='#prospects?status=${encodeURIComponent('Profil à valider')}'">Voir</button>
+        </div>
+      </li>`);
+    }
+
+    // Profils incomplets à enrichir
+    if (profilsIncomplets.length > 0) {
+      actionItems.push(`<li class="action-item">
+        <span class="name"><a class="inline-link" href="#prospects?status=${encodeURIComponent('Profil incomplet')}"><strong>${profilsIncomplets.length} profil(s) à compléter</strong></a></span>
+        ${UI.statusBadge('Profil incomplet')}
+        <div class="action-btns">
+          <button class="btn btn-sm btn-primary" onclick="location.hash='#prospects?status=${encodeURIComponent('Profil incomplet')}'">Voir</button>
         </div>
       </li>`);
     }
@@ -346,7 +358,9 @@ const App = (() => {
         <button class="qf-btn qf-active" data-filter="" onclick="App.quickFilter(this, '')">Tous <span class="qf-count" id="qfCount-all"></span></button>
         ${UI.STATUSES.map(s => {
           const LABELS = {
+            'Profil incomplet':    'À compléter',
             'Profil à valider':    'À valider',
+            'Nouveau':             'New',
             'Invitation envoyée':  'Envoyée',
             'Message à valider':   'Msg à valider',
             'Message à envoyer':   'Msg à envoyer',
@@ -384,6 +398,10 @@ const App = (() => {
 
     // Pre-select status filter if coming from pipeline click
     if (presetStatus) {
+      // Add hidden status to dropdown if not already present (e.g. navigating from dashboard alert)
+      if (!statusSel.querySelector(`option[value="${presetStatus}"]`)) {
+        const o = document.createElement('option'); o.value = presetStatus; o.textContent = presetStatus; statusSel.appendChild(o);
+      }
       statusSel.value = presetStatus;
       // Highlight the matching quick filter
       document.querySelectorAll('.qf-btn').forEach(b => { b.classList.remove('qf-active'); b.style.background = ''; b.style.color = ''; b.style.borderColor = ''; });
@@ -422,7 +440,12 @@ const App = (() => {
     btn.classList.add('qf-active');
     _applyQfActiveStyle(btn, status);
     const statusSel = document.getElementById('filterStatus');
-    if (statusSel) statusSel.value = status;
+    if (statusSel) {
+      if (status && !statusSel.querySelector(`option[value="${status}"]`)) {
+        const o = document.createElement('option'); o.value = status; o.textContent = status; statusSel.appendChild(o);
+      }
+      statusSel.value = status;
+    }
     clearSelection();
     filterProspects();
   }
@@ -1753,18 +1776,30 @@ const App = (() => {
     const total = prospects.length;
 
     const SFC_LABELS = {
+      'Profil incomplet':    'À compléter',
       'Profil à valider':    'À valider',
+      'Nouveau':             'New',
       'Invitation envoyée':  'Envoyée',
+      'Invitation acceptée': 'Acceptée',
       'Message à valider':   'Msg à valider',
       'Message à envoyer':   'Msg à envoyer',
       'Message envoyé':      'Msg envoyé',
       'Discussion en cours': 'En cours',
     };
 
-    // Show main statuses + hidden only if they have prospects (exclude Non pertinent by default)
+    // Ordered statuses for campaign filter cards
+    // "Invitation acceptée" inserted before "Message à valider" if it has prospects
+    // "Profil incomplet" shown conditionally, "Profil restreint" excluded
+    const baseStatuses = [...UI.STATUSES];
+    // Insert "Invitation acceptée" before "Message à valider" if it has prospects
+    if (statusCounts['Invitation acceptée']) {
+      const msgIdx = baseStatuses.indexOf('Message à valider');
+      if (msgIdx !== -1) baseStatuses.splice(msgIdx, 0, 'Invitation acceptée');
+      else baseStatuses.push('Invitation acceptée');
+    }
+    // Append "Profil incomplet" at the end if it has prospects
     const orderedStatuses = [
-      ...UI.STATUSES,
-      ...['Invitation acceptée', 'Profil restreint'].filter(s => statusCounts[s]),
+      ...baseStatuses,
     ];
 
     el.innerHTML = `

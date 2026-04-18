@@ -410,6 +410,7 @@ body {
 .badge-gagne       { background: #ECFCCB; color: #4D7C0F; }
 .badge-perdu       { background: #FEE2E2; color: #DC2626; }
 .badge-non-pertinent { background: #F1F5F9; color: #64748B; }
+.badge-profil-incomplet { background: #FFF7ED; color: #C2410C; }
 tr.row-muted td { opacity: 0.5; }
 
 /* Campaign statuses */
@@ -505,7 +506,7 @@ tr.row-muted td { opacity: 0.5; }
   display: flex;
   gap: 8px;
   margin-bottom: 20px;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
 }
 
 .qf-btn {
