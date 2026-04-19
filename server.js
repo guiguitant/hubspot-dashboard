@@ -6982,27 +6982,64 @@ app.post('/api/proposal/generate', express.json({ limit: '20mb' }), (req, res) =
   }
 });
 
+// POST /api/admin/regenerate-sales-nav-urls — Force-regenerate all campaign URLs (admin only)
+app.post('/api/admin/regenerate-sales-nav-urls', accountContext, async (req, res) => {
+  try {
+    if (!req.account?.is_admin) return res.status(403).json({ error: 'Admin only' });
+
+    const { data: campaigns } = await supabaseAdmin
+      .from('campaigns')
+      .select('id, name, criteria, sales_nav_url')
+      .not('criteria', 'is', null);
+
+    const results = [];
+    for (const camp of (campaigns || [])) {
+      try {
+        const c = camp.criteria;
+        if (!c || typeof c !== 'object') continue;
+        const hasCriteria = (c.jobTitles?.length || c.seniorities?.length || c.geoIds?.length || c.sectorIds?.length || c.headcounts?.length);
+        const newUrl = hasCriteria ? buildSalesNavUrl(c) : null;
+        if (newUrl !== camp.sales_nav_url) {
+          await supabaseAdmin.from('campaigns').update({ sales_nav_url: newUrl }).eq('id', camp.id);
+          results.push({ id: camp.id, name: camp.name, old_had_keywords: (camp.sales_nav_url || '').includes('keywords:'), updated: true });
+        }
+      } catch (e) {
+        results.push({ id: camp.id, name: camp.name, error: e.message });
+      }
+    }
+    res.json({ total: (campaigns || []).length, updated: results.length, results });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, async () => {
   console.log(`Releaf Pilot démarré sur http://localhost:${PORT}`);
 
-  // One-time: regenerate all sales_nav_url to purge stale keyword-contaminated URLs
+  // Regenerate all sales_nav_url to purge stale keyword-contaminated URLs
   try {
     const { data: campaigns } = await supabaseAdmin
       .from('campaigns')
-      .select('id, criteria, sales_nav_url')
+      .select('id, name, criteria, sales_nav_url')
       .not('criteria', 'is', null);
 
     let updated = 0;
     for (const camp of (campaigns || [])) {
-      const c = camp.criteria;
-      const hasCriteria = (c.jobTitles?.length || c.seniorities?.length || c.geoIds?.length || c.sectorIds?.length || c.headcounts?.length);
-      const newUrl = hasCriteria ? buildSalesNavUrl(c) : null;
-      if (newUrl !== camp.sales_nav_url) {
-        await supabaseAdmin.from('campaigns').update({ sales_nav_url: newUrl }).eq('id', camp.id);
-        updated++;
+      try {
+        const c = camp.criteria;
+        if (!c || typeof c !== 'object') continue;
+        const hasCriteria = (c.jobTitles?.length || c.seniorities?.length || c.geoIds?.length || c.sectorIds?.length || c.headcounts?.length);
+        const newUrl = hasCriteria ? buildSalesNavUrl(c) : null;
+        if (newUrl !== camp.sales_nav_url) {
+          await supabaseAdmin.from('campaigns').update({ sales_nav_url: newUrl }).eq('id', camp.id);
+          updated++;
+          console.log(`[startup] Updated sales_nav_url for "${camp.name}" (id=${camp.id})`);
+        }
+      } catch (e) {
+        console.error(`[startup] Error regenerating URL for campaign ${camp.id}:`, e.message);
       }
     }
-    if (updated > 0) console.log(`[startup] Regenerated sales_nav_url for ${updated} campaigns (keyword purge)`);
+    console.log(`[startup] sales_nav_url regeneration done: ${updated} updated out of ${(campaigns || []).length}`);
   } catch (err) {
     console.error('[startup] Failed to regenerate sales_nav_url:', err.message);
   }
