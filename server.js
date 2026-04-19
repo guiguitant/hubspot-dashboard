@@ -5,6 +5,7 @@ const http = require('http');
 const path = require('path');
 const AdmZip = require('adm-zip');
 const fs = require('fs');
+const { execFile } = require('child_process');
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
 const { buildSalesNavUrl } = require('./utils/buildSalesNavUrl');
@@ -6715,10 +6716,11 @@ const PROPOSAL_TEMPLATE_PATH = process.env.PROPOSAL_TEMPLATE_PATH ||
 const PROPOSAL_CONFIG_PATH = path.join(__dirname, 'proposal_engine', 'slide_config.json');
 
 const PROPOSAL_MISSION_MAP = {
-  'Bilan Carbone': { section: 'Bilan_Carbone', cal: 'Bilan Carbone', fin: 'Bilan_Carbone', intitule: "Mesure de l'empreinte carbone" },
-  'ACV':           { section: 'ACV',           cal: 'ACV',           fin: 'ACV',           intitule: 'Analyse de Cycle de Vie' },
-  'FDES / PEP':    { section: 'FDES_PEP',      cal: 'FDES_PEP',      fin: 'FDES_PEP',      intitule: 'FDES / PEP' },
-  'EPD':           { section: 'EPD',            cal: 'EPD',           fin: 'EPD',            intitule: 'Environmental Product Declaration' },
+  'Bilan Carbone':   { section: 'Bilan_Carbone', cal: 'Bilan Carbone', fin: 'Bilan_Carbone',   intitule: "Mesure de l'empreinte carbone",  nature: 'Standard',        langueAuto: 'FR' },
+  'ACV':             { section: 'ACV',            cal: 'ACV',           fin: 'ACV',             intitule: 'Analyse de Cycle de Vie',         nature: 'Standard',        langueAuto: 'FR' },
+  'FDES / PEP':      { section: 'FDES_PEP',       cal: 'FDES_PEP',      fin: 'FDES_PEP',        intitule: 'FDES / PEP',                      nature: 'Standard',        langueAuto: 'FR' },
+  'EPD':             { section: 'EPD',             cal: 'EPD',           fin: 'EPD',             intitule: 'Environmental Product Declaration',nature: 'Standard',        langueAuto: 'EN' },
+  'Outil sur-mesure':{ section: null,              cal: null,            fin: 'Outil_sur_mesure', intitule: 'Outil sur-mesure',                nature: 'Outil_sur_mesure', langueAuto: 'FR' },
 };
 
 const PROPOSAL_SUBVENTION = {
@@ -6730,21 +6732,44 @@ const PROPOSAL_SUBVENTION = {
   standard:   { label: 'Sans subvention',                           programme: '',                        operateur: '',          pct: '' },
 };
 
-function proposalSlidesToKeep(mission, subKey, config) {
-  const m = PROPOSAL_MISSION_MAP[mission];
+function proposalSlidesToKeep(mission, subKey, langue, config) {
+  const m    = PROPOSAL_MISSION_MAP[mission];
   const keep = new Set();
-  config.sections.introduction.slides.forEach(s => keep.add(s - 1));
-  config.sections[m.section].slides.forEach(s => keep.add(s - 1));
-  keep.add(config.sections.calendrier.section_header_slide - 1);
-  keep.add(config.sections.calendrier.slides_per_mission[m.cal] - 1);
+
+  // Slide 1 — couverture
+  keep.add(0);
+
+  // Intro : FR → slides 2-9, EN → slides 10-17
+  const introSlides = config.sections.introduction.slides_per_langue[langue];
+  introSlides.forEach(s => keep.add(s - 1));
+
+  // Contexte : header slide 18 + slide 19 (FR) ou 20 (EN)
+  keep.add(config.sections.contexte.section_header_slide - 1);
+  keep.add(config.sections.contexte.slide_per_langue[langue] - 1);
+
+  // Méthodo
+  if (m.nature === 'Outil_sur_mesure') {
+    config.sections.methodo.blocs.Outil_sur_mesure.slides.forEach(s => keep.add(s - 1));
+  } else {
+    config.sections.methodo.blocs[m.section].slides.forEach(s => keep.add(s - 1));
+  }
+
+  // Calendrier : seulement pour les missions Standard
+  if (m.nature === 'Standard') {
+    keep.add(config.sections.calendrier.section_header_slide - 1);
+    keep.add(config.sections.calendrier.slides_per_mission[m.cal] - 1);
+  }
+
+  // Proposition financière : header + slide selon combinaison
   keep.add(config.sections.proposition_financiere.section_header_slide - 1);
-  const finEntry = config.sections.proposition_financiere.slides_per_mission[m.fin];
-  if (typeof finEntry === 'number') {
-    keep.add(finEntry - 1);
+  const finEntry = config.sections.proposition_financiere.slides_per_combinaison[m.fin];
+  if (typeof finEntry === 'object' && finEntry.slide) {
+    keep.add(finEntry.slide - 1);
   } else if (finEntry && finEntry.options) {
     const slideNum = finEntry.options[subKey] || Object.values(finEntry.options)[0];
     keep.add(slideNum - 1);
   }
+
   return keep;
 }
 
@@ -6925,13 +6950,182 @@ function proposalReplaceLogo(zip, logoBuffer) {
   } catch(e) { console.warn('[Proposal] Logo erreur:', e.message); }
 }
 
+// Enrichissement SIRENE via API Data.gouv (gratuit, sans clé)
+async function fetchSireneData(siren) {
+  if (!siren || !/^\d{9}$/.test(siren.replace(/\s/g, ''))) return null;
+  const cleanSiren = siren.replace(/\s/g, '');
+  try {
+    const resp = await fetch(
+      `https://recherche-entreprises.api.gouv.fr/search?q=${cleanSiren}&page=1&per_page=1`,
+      { signal: AbortSignal.timeout(4000) }
+    );
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const r = data?.results?.[0];
+    if (!r) return null;
+    const naf    = r.activite_principale || '';
+    const libNaf = r.libelle_activite_principale || '';
+    const taille = r.tranche_effectif_salarie || '';
+    const TAILLE_MAP = {
+      '00':'0 salarié','01':'1-2','02':'3-5','03':'6-9','11':'10-19','12':'20-49',
+      '21':'50-99','22':'100-199','31':'200-249','32':'250-499','41':'500-999',
+      '42':'1000-1999','51':'2000-4999','52':'5000-9999','53':'10000+',
+    };
+    const tailleLib = TAILLE_MAP[taille] ? `${TAILLE_MAP[taille]} salariés` : '';
+    const lines = [
+      `Raison sociale : ${r.nom_complet || ''}`,
+      naf     ? `Code NAF : ${naf} — ${libNaf}` : '',
+      tailleLib ? `Effectif : ${tailleLib}` : '',
+      r.siege?.code_postal ? `Siège : ${r.siege.libelle_commune || ''} (${r.siege.code_postal})` : '',
+    ].filter(Boolean);
+    console.log('[Proposal SIRENE] données récupérées pour', cleanSiren);
+    return lines.join('\n');
+  } catch(e) {
+    console.warn('[Proposal SIRENE] Erreur:', e.message);
+    return null;
+  }
+}
+
+// Appel Claude API pour générer les placeholders de contexte client
+async function proposalGenerateAIContext({ nom_entreprise, mission, nature, langue, secteur, taille, enjeu, contexte_consultant, siren_data, config }) {
+  const fallback = config.ai_personalization.fallback_si_erreur;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    console.warn('[Proposal AI] ANTHROPIC_API_KEY absente — fallback');
+    return fallback;
+  }
+
+  const userPrompt = config.ai_personalization.prompt_utilisateur_template
+    .replace('{nom_entreprise}',     nom_entreprise       || '')
+    .replace('{secteur}',            secteur              || 'Non précisé')
+    .replace('{taille_entreprise}',  taille               || 'Non précisé')
+    .replace('{type_mission}',       mission              || '')
+    .replace('{nature_mission}',     nature               || 'Standard')
+    .replace('{enjeu_principal}',    enjeu                || 'Non précisé')
+    .replace('{langue}',             langue               || 'FR')
+    .replace('{siren_data}',         siren_data           || 'Non renseigné')
+    .replace('{contexte_consultant}',contexte_consultant  || '');
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type':    'application/json',
+        'x-api-key':       apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model:      config.ai_personalization.model_recommande,
+        max_tokens: config.ai_personalization.max_tokens,
+        system:     config.ai_personalization.prompt_systeme,
+        messages:   [{ role: 'user', content: userPrompt }],
+      }),
+    });
+
+    if (!resp.ok) {
+      console.warn('[Proposal AI] HTTP', resp.status, '— fallback');
+      return fallback;
+    }
+
+    const data = await resp.json();
+    let text = data?.content?.[0]?.text?.trim() || '';
+    // Claude entoure parfois le JSON de backticks malgré l'instruction — on les retire
+    text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    if (!text) throw new Error('Réponse vide');
+    const parsed = JSON.parse(text);
+    console.log('[Proposal AI] contexte généré ✓', Object.keys(parsed));
+    return { ...fallback, ...parsed };
+  } catch(e) {
+    console.warn('[Proposal AI] Erreur:', e.message, '— fallback');
+    return fallback;
+  }
+}
+
+// Conversion PPTX → PDF via PowerPoint COM automation (PowerShell)
+const PROPOSAL_TMP_DIR = path.join(__dirname, 'tmp');
+if (!fs.existsSync(PROPOSAL_TMP_DIR)) fs.mkdirSync(PROPOSAL_TMP_DIR);
+
+async function convertPptxToPdf(pptxBuffer) {
+  const id       = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const pptxPath = path.join(PROPOSAL_TMP_DIR, `${id}.pptx`);
+  const pdfPath  = path.join(PROPOSAL_TMP_DIR, `${id}.pdf`);
+  const pptxEsc  = pptxPath.replace(/\\/g, '\\\\');
+  const pdfEsc   = pdfPath.replace(/\\/g, '\\\\');
+
+  const psScript = `
+$ErrorActionPreference = 'Stop'
+$ppt = New-Object -ComObject PowerPoint.Application
+try {
+  $pres = $ppt.Presentations.Open('${pptxEsc}', $true, $false, $false)
+  $pres.SaveAs('${pdfEsc}', 32)
+  $pres.Close()
+} finally {
+  $ppt.Quit()
+  [System.Runtime.Interopservices.Marshal]::ReleaseComObject($ppt) | Out-Null
+}
+`.trim();
+
+  fs.writeFileSync(pptxPath, pptxBuffer);
+  try {
+    await new Promise((resolve, reject) => {
+      execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', psScript],
+        { timeout: 45000 },
+        (err, stdout, stderr) => {
+          if (err) reject(new Error(stderr?.trim() || err.message));
+          else resolve();
+        }
+      );
+    });
+    const pdf = fs.readFileSync(pdfPath);
+    console.log('[Proposal PDF] conversion OK', Math.round(pdf.length / 1024), 'KB');
+    return pdf;
+  } finally {
+    try { fs.unlinkSync(pptxPath); } catch(_) {}
+    try { fs.unlinkSync(pdfPath);  } catch(_) {}
+  }
+}
+
+// POST /api/proposal/ai-context — prévisualisation du contexte IA sans générer le PPTX
+app.post('/api/proposal/ai-context', express.json(), async (req, res) => {
+  try {
+    const { mission, langue: langueInput, secteur, taille_entreprise, enjeu_principal, contexte_consultant, siren, nom_entreprise } = req.body || {};
+    const mInf = PROPOSAL_MISSION_MAP[mission];
+    if (!mInf) return res.status(400).json({ error: `Mission inconnue : ${mission}` });
+
+    const langue = (langueInput === 'FR' || langueInput === 'EN') ? langueInput : mInf.langueAuto;
+    const config = JSON.parse(fs.readFileSync(PROPOSAL_CONFIG_PATH, 'utf8'));
+
+    const siren_data = await fetchSireneData(siren);
+
+    const aiCtx = await proposalGenerateAIContext({
+      nom_entreprise: nom_entreprise || '',
+      mission, nature: mInf.nature, langue,
+      secteur: secteur || '', taille: taille_entreprise || '',
+      enjeu: enjeu_principal || '',
+      contexte_consultant: contexte_consultant || '',
+      siren_data,
+      config,
+    });
+
+    res.json({ ok: true, context: aiCtx, langue });
+  } catch(e) {
+    console.error('[Proposal AI context]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/proposal/config
 app.get('/api/proposal/config', (req, res) => {
   try {
     const config = JSON.parse(fs.readFileSync(PROPOSAL_CONFIG_PATH, 'utf8'));
     const result = {};
     for (const mission of Object.keys(PROPOSAL_MISSION_MAP)) {
-      const finEntry = config.sections.proposition_financiere.slides_per_mission[PROPOSAL_MISSION_MAP[mission].fin];
+      const m = PROPOSAL_MISSION_MAP[mission];
+      if (m.nature === 'Outil_sur_mesure') {
+        result[mission] = [{ key: 'standard', label: 'Sans subvention' }];
+        continue;
+      }
+      const finEntry = config.sections.proposition_financiere.slides_per_combinaison[m.fin];
       const subKeys = (finEntry && typeof finEntry === 'object' && finEntry.options)
         ? Object.keys(finEntry.options)
         : ['standard'];
@@ -6942,40 +7136,90 @@ app.get('/api/proposal/config', (req, res) => {
 });
 
 // POST /api/proposal/generate
-app.post('/api/proposal/generate', express.json({ limit: '20mb' }), (req, res) => {
+app.post('/api/proposal/generate', express.json({ limit: '20mb' }), async (req, res) => {
   try {
-    const { nom_entreprise, mission, subvention = 'standard', logo_base64 } = req.body || {};
+    const {
+      nom_entreprise, mission, subvention = 'standard', logo_base64,
+      langue: langueInput, montant_ht, deal_id,
+      secteur, taille_entreprise, enjeu_principal,
+      contexte_consultant, siren,
+      ai_context,
+      format = 'pptx',
+    } = req.body || {};
+
     if (!nom_entreprise?.trim()) return res.status(400).json({ error: "Nom de l'entreprise requis" });
-    if (!PROPOSAL_MISSION_MAP[mission]) return res.status(400).json({ error: `Mission inconnue : ${mission}` });
+    const mInf = PROPOSAL_MISSION_MAP[mission];
+    if (!mInf) return res.status(400).json({ error: `Mission inconnue : ${mission}` });
     if (!fs.existsSync(PROPOSAL_TEMPLATE_PATH))
       return res.status(500).json({ error: `Template PPTX introuvable. Définir PROPOSAL_TEMPLATE_PATH dans .env` });
 
-    const config = JSON.parse(fs.readFileSync(PROPOSAL_CONFIG_PATH, 'utf8'));
-    const keep   = proposalSlidesToKeep(mission, subvention, config);
-    const zip    = new AdmZip(PROPOSAL_TEMPLATE_PATH);
+    // Langue : forcée par l'utilisateur ou auto selon la mission
+    const langue = (langueInput === 'FR' || langueInput === 'EN') ? langueInput : mInf.langueAuto;
 
+    const config = JSON.parse(fs.readFileSync(PROPOSAL_CONFIG_PATH, 'utf8'));
+
+    // Contexte IA : utiliser le contexte pré-calculé si fourni, sinon appeler Claude
+    const keep = proposalSlidesToKeep(mission, subvention, langue, config);
+    let aiCtx;
+    if (ai_context) {
+      aiCtx = ai_context;
+    } else {
+      const siren_data = await fetchSireneData(siren);
+      aiCtx = await proposalGenerateAIContext({
+        nom_entreprise: nom_entreprise.trim(),
+        mission, nature: mInf.nature, langue,
+        secteur: secteur || '', taille: taille_entreprise || '',
+        enjeu: enjeu_principal || '',
+        contexte_consultant: contexte_consultant || '',
+        siren_data,
+        config,
+      });
+    }
+
+    const zip = new AdmZip(PROPOSAL_TEMPLATE_PATH);
     proposalDeleteSlides(zip, keep);
 
-    const sub  = PROPOSAL_SUBVENTION[subvention] || PROPOSAL_SUBVENTION.standard;
-    const mInf = PROPOSAL_MISSION_MAP[mission];
+    const sub = PROPOSAL_SUBVENTION[subvention] || PROPOSAL_SUBVENTION.standard;
+    const pctNum = parseInt(sub.pct) || 0;
+    const complementPct = pctNum > 0 ? String(100 - pctNum) : '';
+
     proposalReplaceText(zip, {
-      '{{NOM_ENTREPRISE}}':         nom_entreprise.trim(),
-      '{{TYPE_MISSION}}':           mission,
-      '{{PROGRAMME_SUBVENTION}}':   sub.programme,
-      '{{OPERATEUR_SUBVENTION}}':   sub.operateur,
-      '{{POURCENTAGE_SUBVENTION}}': sub.pct,
-      '{{MONTANT_SUBVENTION}}':     '',
-      '{{PRIX_APRES_SUBVENTION}}':  '',
-      '{{INTITULE_MISSION}}':       mInf.intitule,
+      '{{NOM_ENTREPRISE}}':          nom_entreprise.trim(),
+      '{{TYPE_MISSION}}':            mission,
+      '{{PROGRAMME_SUBVENTION}}':    sub.programme,
+      '{{OPERATEUR_SUBVENTION}}':    sub.operateur,
+      '{{POURCENTAGE_SUBVENTION}}':  sub.pct,
+      '{{COMPLEMENT_POURCENTAGE}}':  complementPct,
+      '{{MONTANT_SUBVENTION}}':      '',
+      '{{PRIX_APRES_SUBVENTION}}':   '',
+      '{{INTITULE_MISSION}}':        mInf.intitule,
+      '{{MONTANT}}':                 montant_ht ? String(montant_ht) : '',
+      '{{CONTEXTE_CLIENT}}':         aiCtx.CONTEXTE_CLIENT         || '',
+      '{{ENJEU_1}}':                 aiCtx.ENJEU_1                 || '',
+      '{{ENJEU_2}}':                 aiCtx.ENJEU_2                 || '',
+      '{{ENJEU_3}}':                 aiCtx.ENJEU_3                 || '',
+      '{{POURQUOI_MAINTENANT}}':     aiCtx.POURQUOI_MAINTENANT     || '',
+      '{{NOTE_CONTEXTE}}':           aiCtx.NOTE_CONTEXTE           || '',
+      '{{CONTEXTE_METIER}}':         aiCtx.CONTEXTE_METIER         || '',
+      '{{ENJEUX_DATA}}':             aiCtx.ENJEUX_DATA             || '',
+      '{{PERIMETRE_OUTIL}}':         aiCtx.PERIMETRE_OUTIL         || '',
     });
 
     if (logo_base64) proposalReplaceLogo(zip, Buffer.from(logo_base64, 'base64'));
 
     const safeName = nom_entreprise.trim().replace(/[^a-zA-Z0-9 _\-éèêëàâùûüôîïç]/gi, '').trim();
-    const buf = zip.toBuffer();
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
-    res.setHeader('Content-Disposition', `attachment; filename="Proposition_${safeName}.pptx"`);
-    res.send(buf);
+    const pptxBuf  = zip.toBuffer();
+
+    if (format === 'pdf') {
+      const pdfBuf = await convertPptxToPdf(pptxBuf);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="Proposition_${safeName}.pdf"`);
+      res.send(pdfBuf);
+    } else {
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+      res.setHeader('Content-Disposition', `attachment; filename="Proposition_${safeName}.pptx"`);
+      res.send(pptxBuf);
+    }
   } catch(e) {
     console.error('[Proposal]', e);
     res.status(500).json({ error: e.message });

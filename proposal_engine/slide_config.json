@@ -1,198 +1,426 @@
 {
   "_description": "Configuration pour la génération automatique de propositions commerciales Releaf Carbon",
-  "_version": "3.0",
-  "_usage": "Lire ce fichier dans votre app Python pour savoir quels slides inclure selon la mission et quelles variables remplacer.",
+  "_version": "4.1",
+  "_changelog": [
+    "v4.1 — Gestion langue FR/EN : intro existe en 2 versions (FR slides 2-9, EN slides 10-17). Slide contexte aussi (19 FR / 20 EN). Langue auto = EN si EPD, FR sinon, mais forçable par l'utilisateur.",
+    "v4.0 — Ajout bloc Contexte (slide 18-20), bloc Outil sur-mesure (slides 21-26), slide financière Outil (slide 73)",
+    "v4.0 — Ajout placeholders IA : CONTEXTE_CLIENT, ENJEU_1/2/3, POURQUOI_MAINTENANT, NOTE_CONTEXTE, CONTEXTE_METIER, ENJEUX_DATA, PERIMETRE_OUTIL, MONTANT",
+    "v4.0 — Ajout dimension 'nature_mission' : Standard | Outil sur-mesure"
+  ],
+  "_usage": "Lire ce fichier dans server.js pour savoir quels slides inclure selon la combinaison mission × nature × subvention, et quelles variables remplacer.",
 
   "variables": {
     "{{NOM_ENTREPRISE}}": {
       "description": "Nom de l'entreprise cliente",
       "example": "Alliance Emploi",
       "required": true,
-      "appears_in": "Tous les footers et en-têtes de tableau"
+      "source": "formulaire",
+      "appears_in": "Footers, en-têtes de tableaux, slides contexte, slides méthodo"
     },
     "{{TYPE_MISSION}}": {
       "description": "Type de mission affiché sur le slide de couverture",
-      "values": ["Bilan Carbone", "ACV", "FDES / PEP", "EPD"],
+      "values": ["Bilan Carbone", "ACV", "FDES / PEP", "EPD", "Outil sur-mesure"],
       "required": true,
+      "source": "formulaire",
       "appears_in": "Slide 1 (couverture)"
     },
     "{{LOGO_ENTREPRISE}}": {
-      "description": "Logo de l'entreprise cliente. Sur le slide 1, remplacer l'image nommée 'logo_client' (dernière image du slide) par le logo client.",
-      "format": "PNG ou JPG",
+      "description": "Logo de l'entreprise cliente sur slide 1",
+      "format": "PNG ou JPG ou SVG",
       "required": false,
-      "appears_in": "Slide 1 (couverture) — à remplacer programmatiquement via python-pptx Shape.image"
+      "source": "formulaire (upload)",
+      "appears_in": "Slide 1"
     },
     "{{PROGRAMME_SUBVENTION}}": {
       "description": "Nom du programme de subvention",
       "example": "Booster Transformation",
       "values": ["Booster Transformation", "Diag Décarbon'Action", "Diag Ecoconception", "Sans subvention"],
       "required": false,
-      "appears_in": "Slides de proposition financière (slides 49–55)"
+      "source": "formulaire",
+      "appears_in": "Slides financières"
     },
     "{{OPERATEUR_SUBVENTION}}": {
       "description": "Opérateur du programme de subvention",
       "example": "Rev3",
       "values": ["Rev3", "Bpifrance", ""],
       "required": false,
-      "appears_in": "Slides de proposition financière"
+      "source": "formulaire",
+      "appears_in": "Slides financières"
     },
     "{{POURCENTAGE_SUBVENTION}}": {
-      "description": "Pourcentage de prise en charge de la subvention",
+      "description": "Pourcentage de prise en charge",
       "example": "50%",
       "required": false,
-      "appears_in": "Slides de proposition financière"
+      "source": "formulaire",
+      "appears_in": "Slides financières"
+    },
+    "{{COMPLEMENT_POURCENTAGE}}": {
+      "description": "Complément (100 - pourcentage_subvention) pour modalités de paiement",
+      "example": "50",
+      "required": false,
+      "source": "calculé automatiquement",
+      "appears_in": "Slides financières BC (modalités)"
     },
     "{{MONTANT_SUBVENTION}}": {
       "description": "Montant remboursé par la subvention",
       "example": "5 000 €",
       "required": false,
-      "appears_in": "Slides de proposition financière"
+      "source": "formulaire ou calculé",
+      "appears_in": "Slides financières"
     },
     "{{PRIX_APRES_SUBVENTION}}": {
       "description": "Prix final H.T. après déduction de la subvention",
       "example": "5 000 €",
       "required": false,
-      "appears_in": "Slides de proposition financière"
+      "source": "formulaire ou calculé",
+      "appears_in": "Slides financières"
     },
     "{{INTITULE_MISSION}}": {
       "description": "Intitulé de la ligne mission dans le tableau financier",
       "example": "Mesure de l'empreinte carbone",
       "required": false,
-      "appears_in": "Slides de proposition financière BC (slides 49–51)"
+      "source": "formulaire",
+      "appears_in": "Slides financières BC"
+    },
+    "{{MONTANT}}": {
+      "description": "Montant HT pour missions Outil sur-mesure (forfait libre)",
+      "example": "35 000",
+      "required": false,
+      "source": "formulaire",
+      "appears_in": "Slide 73 (financière Outil sur-mesure)"
+    },
+
+    "{{CONTEXTE_CLIENT}}": {
+      "description": "Description du client (secteur, taille, spécificité métier). 2-3 phrases, 250 caractères max.",
+      "example": "Alliance Emploi est un groupement d'employeurs implanté dans les Hauts-de-France, spécialisé dans le partage de compétences entre PME industrielles.",
+      "required": false,
+      "source": "IA (Claude API) à partir du formulaire",
+      "appears_in": "Slides 19 (FR) et 20 (EN)"
+    },
+    "{{ENJEU_1}}": {
+      "description": "Premier enjeu client. 1 phrase, 90 caractères max.",
+      "example": "Répondre aux attentes CSRD des donneurs d'ordre",
+      "required": false,
+      "source": "IA",
+      "appears_in": "Slides 19, 20"
+    },
+    "{{ENJEU_2}}": {
+      "description": "Deuxième enjeu client. 1 phrase, 90 caractères max.",
+      "example": "Anticiper les exigences réglementaires sectorielles",
+      "required": false,
+      "source": "IA",
+      "appears_in": "Slides 19, 20"
+    },
+    "{{ENJEU_3}}": {
+      "description": "Troisième enjeu client. 1 phrase, 90 caractères max.",
+      "example": "Structurer une démarche carbone pérenne",
+      "required": false,
+      "source": "IA",
+      "appears_in": "Slides 19, 20"
+    },
+    "{{POURQUOI_MAINTENANT}}": {
+      "description": "Justification du timing de la mission. 1 phrase, 140 caractères max.",
+      "example": "L'échéance CSRD 2026 impose une première mesure d'empreinte carbone fiable dès cette année.",
+      "required": false,
+      "source": "IA",
+      "appears_in": "Slides 19, 20"
+    },
+    "{{NOTE_CONTEXTE}}": {
+      "description": "Note de bas de slide, optionnelle. 1 phrase courte.",
+      "example": "Proposition basée sur un premier échange du 15 avril 2026.",
+      "required": false,
+      "source": "IA ou formulaire",
+      "appears_in": "Slides 19, 20"
+    },
+    "{{CONTEXTE_METIER}}": {
+      "description": "Contexte métier spécifique pour mission Outil sur-mesure (phase 1 cadrage). 1-2 phrases.",
+      "example": "L'outil couvrira les flux achats amont et les calculs d'empreinte produit pour la gamme B2B.",
+      "required": false,
+      "source": "IA + formulaire",
+      "appears_in": "Slide 23 (Phase 1 Outil)"
+    },
+    "{{ENJEUX_DATA}}": {
+      "description": "Enjeux data spécifiques identifiés pour mission Outil sur-mesure (phase 2 audit IT). 1-2 phrases.",
+      "example": "Intégration avec l'ERP SAP existant et extraction automatisée des données fournisseurs.",
+      "required": false,
+      "source": "IA + formulaire",
+      "appears_in": "Slide 24 (Phase 2 Outil)"
+    },
+    "{{PERIMETRE_OUTIL}}": {
+      "description": "Périmètre fonctionnel de l'outil pour mission Outil sur-mesure (phases 3-4-5).",
+      "example": "Calculateur carbone multi-sites avec interface collaborateur et export automatique des rapports.",
+      "required": false,
+      "source": "IA + formulaire",
+      "appears_in": "Slide 25 (Phases 3-4-5 Outil)"
+    }
+  },
+
+  "form_inputs": {
+    "_description": "Inputs attendus du formulaire frontend",
+    "nom_entreprise": {
+      "type": "string",
+      "required": true
+    },
+    "type_mission": {
+      "type": "enum",
+      "values": ["Bilan Carbone", "ACV", "FDES_PEP", "EPD", "Outil_sur_mesure"],
+      "required": true
+    },
+    "nature_mission": {
+      "type": "enum",
+      "values": ["Standard", "Outil_sur_mesure"],
+      "required": true,
+      "note": "Si nature = Outil_sur_mesure, alors on bascule sur le bloc méthodo Outil. Sinon on garde le bloc méthodo standard selon type_mission."
+    },
+    "subvention": {
+      "type": "enum",
+      "values": ["Rev3_50pct", "BPI_40pct", "Rev3_30pct", "BPI_70pct", "BPI_60pct", "Sans_subvention"],
+      "required": false,
+      "note": "Ne s'applique qu'aux missions standard BC et ACV"
+    },
+    "logo_entreprise": {
+      "type": "file",
+      "required": false
+    },
+    "deal_hubspot_id": {
+      "type": "string",
+      "required": false
+    },
+    "langue": {
+      "type": "enum",
+      "values": ["FR", "EN"],
+      "required": false,
+      "default": "auto",
+      "note": "Si non spécifié : FR par défaut, sauf mission EPD qui passe en EN automatiquement. L'utilisateur peut forcer EN pour une mission BC/ACV/FDES si le client est anglophone."
+    },
+    "secteur": {
+      "type": "enum",
+      "values": ["Agroalimentaire", "BTP", "Industrie", "Tertiaire", "Retail", "Autre"],
+      "required": true,
+      "note": "Utilisé pour le prompt IA contexte"
+    },
+    "taille_entreprise": {
+      "type": "enum",
+      "values": ["PME", "ETI", "Grand groupe"],
+      "required": true,
+      "note": "Utilisé pour le prompt IA contexte"
+    },
+    "enjeu_principal": {
+      "type": "enum",
+      "values": ["CSRD", "Appel d'offres", "Communication RSE", "Démarche volontaire", "Réglementation produit", "Autre"],
+      "required": true,
+      "note": "Utilisé pour le prompt IA contexte"
+    },
+    "montant_ht": {
+      "type": "number",
+      "required": false,
+      "note": "Obligatoire uniquement si nature_mission = Outil_sur_mesure (pas de subvention standard)"
+    },
+    "notes_hubspot": {
+      "type": "string",
+      "required": false,
+      "note": "Notes libres du deal HubSpot pour enrichir le prompt IA"
     }
   },
 
   "sections": {
+    "cover": {
+      "label": "Slide de couverture",
+      "always_include": true,
+      "slides": [1]
+    },
+
     "introduction": {
       "label": "Introduction Releaf Carbon",
       "always_include": true,
-      "slides": [1, 2, 3, 4, 5, 6, 7, 8, 9],
-      "description": "Slides de présentation de Releaf (toujours inclus)"
+      "_note": "L'intro existe en 2 versions : FR (slides 2-9) et EN (slides 10-17). On ne garde QUE la version correspondant à la langue.",
+      "slides_per_langue": {
+        "FR": [2, 3, 4, 5, 6, 7, 8, 9],
+        "EN": [10, 11, 12, 13, 14, 15, 16, 17]
+      },
+      "langue_auto": {
+        "_description": "Logique de sélection auto de la langue si non spécifiée par l'utilisateur",
+        "EPD": "EN",
+        "default": "FR"
+      }
     },
-    "ACV": {
-      "label": "Approche méthodologique ACV",
-      "mission_key": "ACV",
-      "slides": [10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
-      "description": "Section ACV (Analyse de Cycle de Vie) — inclure uniquement si mission = ACV"
+
+    "contexte": {
+      "label": "Contexte client (personnalisé IA)",
+      "always_include": true,
+      "section_header_slide": 18,
+      "slide_per_langue": {
+        "FR": 19,
+        "EN": 20
+      },
+      "description": "Inclure l'intro + la slide contexte dans la bonne langue (EN uniquement pour mission EPD, FR pour les autres)"
     },
-    "Bilan_Carbone": {
-      "label": "Approche méthodologique Bilan Carbone",
-      "mission_key": "Bilan Carbone",
-      "slides": [20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30],
-      "description": "Section Bilan Carbone — inclure uniquement si mission = Bilan Carbone"
+
+    "methodo": {
+      "label": "Approche méthodologique",
+      "always_include": true,
+      "_note": "On choisit UN seul bloc méthodo selon nature_mission + type_mission",
+      "blocs": {
+        "Outil_sur_mesure": {
+          "slides": [21, 22, 23, 24, 25, 26],
+          "triggered_when": "nature_mission == 'Outil_sur_mesure'",
+          "description": "Bloc méthodo Outil sur-mesure (inclut sa propre slide calendrier en 26)"
+        },
+        "ACV": {
+          "slides": [27, 28, 29, 30, 31, 32, 33, 34, 35, 36],
+          "triggered_when": "nature_mission == 'Standard' && type_mission == 'ACV'"
+        },
+        "Bilan_Carbone": {
+          "slides": [37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47],
+          "triggered_when": "nature_mission == 'Standard' && type_mission == 'Bilan Carbone'"
+        },
+        "FDES_PEP": {
+          "slides": [48, 49, 50, 51, 52, 53],
+          "triggered_when": "nature_mission == 'Standard' && type_mission == 'FDES_PEP'"
+        },
+        "EPD": {
+          "slides": [54, 55, 56, 57, 58, 59],
+          "triggered_when": "nature_mission == 'Standard' && type_mission == 'EPD'"
+        }
+      }
     },
-    "FDES_PEP": {
-      "label": "Approche méthodologique FDES / PEP",
-      "mission_key": "FDES_PEP",
-      "slides": [31, 32, 33, 34, 35, 36],
-      "description": "Section FDES / PEP (français) — inclure si mission = FDES/PEP"
-    },
-    "EPD": {
-      "label": "EPD Methodology",
-      "mission_key": "EPD",
-      "slides": [37, 38, 39, 40, 41, 42],
-      "description": "EPD section (English) — include if mission = EPD"
-    },
+
     "calendrier": {
       "label": "Calendrier prévisionnel",
-      "always_include": true,
-      "section_header_slide": 43,
+      "section_header_slide": 60,
+      "include_when": "nature_mission == 'Standard'",
+      "_note": "Si nature_mission == 'Outil_sur_mesure', le calendrier est déjà inclus dans le bloc méthodo (slide 26), donc on SKIP cette section entièrement.",
       "slides_per_mission": {
-        "Bilan Carbone": 44,
-        "ACV": 45,
-        "FDES_PEP": 46,
-        "EPD": 47
-      },
-      "description": "Toujours inclure le header + le calendrier correspondant à la mission choisie"
+        "Bilan Carbone": 61,
+        "ACV": 62,
+        "FDES_PEP": 63,
+        "EPD": 64
+      }
     },
+
     "proposition_financiere": {
       "label": "Proposition financière",
       "always_include": true,
-      "section_header_slide": 48,
-      "slides_per_mission": {
+      "section_header_slide": 65,
+      "slides_per_combinaison": {
+        "Outil_sur_mesure": {
+          "slide": 73,
+          "description": "Slide financière Outil sur-mesure (forfait libre, pas de subvention)"
+        },
         "Bilan_Carbone": {
           "options": {
-            "Rev3_50pct": 49,
-            "BPI_40pct": 50,
-            "Rev3_30pct": 51
-          },
-          "description": "3 options de subvention pour Bilan Carbone"
+            "Rev3_50pct": 66,
+            "BPI_40pct": 67,
+            "Rev3_30pct": 68
+          }
         },
         "ACV": {
           "options": {
-            "BPI_70pct": 52,
-            "BPI_60pct": 53
-          },
-          "description": "2 options de subvention pour ACV/Ecoconception"
+            "BPI_70pct": 69,
+            "BPI_60pct": 70
+          }
         },
-        "FDES_PEP": 54,
-        "EPD": 55
+        "FDES_PEP": {
+          "slide": 71
+        },
+        "EPD": {
+          "slide": 72
+        }
       }
     }
   },
 
-  "logo_replacement": {
-    "instructions": "Pour remplacer le logo client sur le slide 1, utiliser python-pptx :",
-    "python_code": [
-      "from pptx import Presentation",
-      "from pptx.util import Inches",
-      "import io",
-      "prs = Presentation('Template master proposition v3.pptx')",
-      "slide = prs.slides[0]  # Slide 1 (index 0)",
-      "# Trouver le placeholder du logo (dernière image du slide)",
-      "for shape in slide.shapes:",
-      "    if shape.shape_type == 13:  # MSO_SHAPE_TYPE.PICTURE",
-      "        # shape.name contient le nom — vérifier lequel est le logo client",
-      "        pass",
-      "prs.save('proposition_client.pptx')"
-    ]
+  "selection_logic": {
+    "_description": "Algorithme de sélection des slides à conserver. Implémenter dans server.js.",
+    "steps": [
+      "1. Déterminer la langue : si 'langue' est spécifiée dans le formulaire, l'utiliser. Sinon : 'EN' si type_mission == 'EPD', 'FR' sinon.",
+      "2. Partir du template complet (slides 1-73)",
+      "3. CONSERVER toujours slide 1 (couverture)",
+      "4. CONSERVER le bloc intro correspondant à la langue :",
+      "   - langue == 'FR' → slides 2-9",
+      "   - langue == 'EN' → slides 10-17",
+      "5. CONSERVER toujours : slide 18 (intro contexte) + UNE seule slide contexte :",
+      "   - langue == 'FR' → slide 19",
+      "   - langue == 'EN' → slide 20",
+      "6. CONSERVER le bloc méthodo :",
+      "   - si nature_mission == 'Outil_sur_mesure' → slides 21-26",
+      "   - sinon selon type_mission : ACV=27-36, BC=37-47, FDES_PEP=48-53, EPD=54-59",
+      "7. CONSERVER le bloc calendrier UNIQUEMENT si nature_mission == 'Standard' :",
+      "   - slide 60 (intro) + une slide parmi 61-64 selon type_mission",
+      "8. CONSERVER le bloc financier :",
+      "   - slide 65 (intro) + une slide selon la combinaison (voir slides_per_combinaison)",
+      "9. SUPPRIMER toutes les autres slides",
+      "10. Appeler l'API Claude pour générer les placeholders IA (prompt en FR ou EN selon la langue)",
+      "11. Remplacer les placeholders dans le XML"
+    ],
+
+    "exemples": {
+      "Bilan_Carbone_Standard_Rev3_50pct_FR": {
+        "langue": "FR",
+        "slides_finales": [1, 2,3,4,5,6,7,8,9, 18,19, 37,38,39,40,41,42,43,44,45,46,47, 60,61, 65,66],
+        "total": 24
+      },
+      "ACV_Standard_BPI_70pct_FR": {
+        "langue": "FR",
+        "slides_finales": [1, 2,3,4,5,6,7,8,9, 18,19, 27,28,29,30,31,32,33,34,35,36, 60,62, 65,69],
+        "total": 23
+      },
+      "EPD_Standard_EN": {
+        "langue": "EN",
+        "slides_finales": [1, 10,11,12,13,14,15,16,17, 18,20, 54,55,56,57,58,59, 60,64, 65,72],
+        "total": 21,
+        "note": "Langue EN auto pour EPD → intro slides 10-17 + slide contexte 20"
+      },
+      "FDES_PEP_Standard_FR": {
+        "langue": "FR",
+        "slides_finales": [1, 2,3,4,5,6,7,8,9, 18,19, 48,49,50,51,52,53, 60,63, 65,71],
+        "total": 21
+      },
+      "Outil_sur_mesure_FR": {
+        "langue": "FR",
+        "slides_finales": [1, 2,3,4,5,6,7,8,9, 18,19, 21,22,23,24,25,26, 65,73],
+        "total": 19,
+        "note": "Pas de section calendrier séparée (intégrée dans slide 26)"
+      },
+      "Bilan_Carbone_Standard_Rev3_50pct_EN": {
+        "langue": "EN",
+        "slides_finales": [1, 10,11,12,13,14,15,16,17, 18,20, 37,38,39,40,41,42,43,44,45,46,47, 60,61, 65,66],
+        "total": 24,
+        "note": "Forçage manuel EN pour un client anglophone sur une mission BC"
+      }
+    }
   },
 
-  "python_replacement_example": {
-    "description": "Exemple de code Python pour remplacer les placeholders dans le PPTX",
-    "code": [
-      "import zipfile, shutil, os, re",
-      "",
-      "def generate_proposal(template_path, output_path, variables):",
-      "    '''",
-      "    template_path: chemin vers Template master proposition v3.pptx",
-      "    output_path: chemin du fichier généré",
-      "    variables: dict avec les valeurs des placeholders",
-      "    '''",
-      "    shutil.copy(template_path, output_path)",
-      "    ",
-      "    # Lire et modifier le PPTX (qui est un ZIP)",
-      "    with zipfile.ZipFile(output_path, 'r') as zin:",
-      "        names = zin.namelist()",
-      "        contents = {n: zin.read(n) for n in names}",
-      "    ",
-      "    # Remplacer les placeholders dans tous les fichiers XML",
-      "    for filename, content in contents.items():",
-      "        if filename.endswith('.xml') or filename.endswith('.rels'):",
-      "            text = content.decode('utf-8')",
-      "            for placeholder, value in variables.items():",
-      "                text = text.replace(placeholder, value)",
-      "            contents[filename] = text.encode('utf-8')",
-      "    ",
-      "    # Réécrire le PPTX",
-      "    with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zout:",
-      "        for name, data in contents.items():",
-      "            zout.writestr(name, data)",
-      "    ",
-      "    return output_path",
-      "",
-      "# Exemple d'utilisation",
-      "variables = {",
-      "    '{{NOM_ENTREPRISE}}': 'Groupe Leclerc',",
-      "    '{{TYPE_MISSION}}': 'Bilan Carbone',",
-      "    '{{PROGRAMME_SUBVENTION}}': 'Booster Transformation',",
-      "    '{{OPERATEUR_SUBVENTION}}': 'Rev3',",
-      "    '{{POURCENTAGE_SUBVENTION}}': '50%',",
-      "    '{{MONTANT_SUBVENTION}}': '5 000 €',",
-      "    '{{PRIX_APRES_SUBVENTION}}': '5 000 €',",
-      "    '{{INTITULE_MISSION}}': 'Mesure de l\\'empreinte carbone',",
-      "}",
-      "generate_proposal('Template master proposition v3.pptx', 'proposition_leclerc.pptx', variables)"
+  "ai_personalization": {
+    "_description": "Appel API Claude pour personnaliser les placeholders de contexte client",
+    "endpoint": "https://api.anthropic.com/v1/messages",
+    "model_recommande": "claude-sonnet-4-6",
+    "max_tokens": 800,
+
+    "prompt_systeme": "Tu rédiges la slide 'Votre contexte' d'une proposition commerciale Releaf Carbon (cabinet de conseil en décarbonation à Lille : Bilan Carbone, ACV, FDES/PEP/EPD, outils sur-mesure).\n\nCette slide est insérée après la présentation de Releaf, avant la méthodologie. Elle montre au prospect qu'on a compris son métier et pourquoi la mission est pertinente maintenant.\n\nSTYLE À RESPECTER\n- Ton professionnel, sobre, direct — comme un consultant senior qui connaît le dossier\n- Phrases affirmatives, verbes précis et actifs\n- Vocabulaire sectoriel quand c'est juste (scope 3, PCR, EN 15804, CSRD, RE2020, Ecodesign Regulation, taxonomie UE...)\n- Formulations du type 'Accompagner', 'Mesurer', 'Anticiper', 'Structurer', 'Répondre à'\n- Interdit : 'nous sommes convaincus que', 'il est essentiel de', 'dans un monde où', 'les enjeux de demain'\n- Interdit : superlatifs marketing ('leader', 'innovant', 'stratégique', 'incontournable')\n- Interdit : baratin RSE générique ('agir pour la planète', 'un avenir durable', 'transition écologique')\n\nCONTEXTE_CLIENT : 2-3 phrases denses qui décrivent l'entreprise avec précision — secteur exact, positionnement, spécificité métier ou chaîne de valeur. Ce texte doit montrer qu'on a fait le travail de compréhension. Vise 200-280 caractères.\n\nENJEUX : 3 enjeux réels, distincts, ancrés dans la réalité du secteur ET de la taille. Pas des généralités. Chaque enjeu = 1 phrase nominale percutante (ex : 'Répondre aux exigences CSRD des donneurs d'ordre dès 2026'). Vise 80-110 caractères chacun.\n\nPOURQUOI_MAINTENANT : 1 phrase qui relie un déclencheur externe précis (réglementation, appel d'offres, deadline, pression client) à la mission proposée. Doit créer un sentiment d'urgence légitime. Vise 120-160 caractères.\n\nRenvoie UNIQUEMENT ce JSON brut, sans backticks, sans commentaire, sans texte avant ou après :\n{\"CONTEXTE_CLIENT\": \"...\", \"ENJEU_1\": \"...\", \"ENJEU_2\": \"...\", \"ENJEU_3\": \"...\", \"POURQUOI_MAINTENANT\": \"...\", \"NOTE_CONTEXTE\": \"...\"}\n\nSi mission Outil sur-mesure, ajoute dans le même JSON : \"CONTEXTE_METIER\": \"1-2 phrases sur les processus métier à couvrir\", \"ENJEUX_DATA\": \"1-2 phrases sur les enjeux data/IT\", \"PERIMETRE_OUTIL\": \"1 phrase sur le périmètre fonctionnel envisagé\"\n\nRÈGLES ABSOLUES\n- N'invente jamais de chiffres, noms de clients, certifications ou dates précises\n- Si les infos fournies sont pauvres, reste sobre mais précis sur le secteur — mieux vaut générique exact que spécifique faux\n- Adapte systématiquement au binôme secteur × taille × enjeu déclaré\n- Langue : FR sauf si LANGUE = EN (mission EPD ou client anglophone)",
+
+    "prompt_utilisateur_template": "Génère le contenu pour la proposition suivante :\n\nENTREPRISE : {nom_entreprise}\nSECTEUR : {secteur}\nTAILLE : {taille_entreprise}\nTYPE MISSION : {type_mission}\nNATURE : {nature_mission}\nENJEU PRINCIPAL DÉCLARÉ : {enjeu_principal}\nLANGUE : {langue}\n\n--- DONNÉES OFFICIELLES (SIRENE) ---\n{siren_data}\n\n--- CONTEXTE RÉDIGÉ PAR LE CONSULTANT ---\nC'est la source la plus importante. Le consultant qui a rencontré le client explique ici la situation, les enjeux discutés, le déclencheur de la proposition. Utilise ces informations en priorité pour rédiger CONTEXTE_CLIENT, les ENJEUX et POURQUOI_MAINTENANT.\n{contexte_consultant}",
+
+    "fallback_si_erreur": {
+      "description": "Si l'appel API Claude échoue (timeout, JSON invalide, quota), générer quand même la propale avec des valeurs par défaut neutres",
+      "CONTEXTE_CLIENT": "",
+      "ENJEU_1": "Mesurer l'empreinte environnementale de votre activité",
+      "ENJEU_2": "Identifier les leviers de réduction prioritaires",
+      "ENJEU_3": "Structurer une démarche de décarbonation pérenne",
+      "POURQUOI_MAINTENANT": "",
+      "NOTE_CONTEXTE": ""
+    }
+  },
+
+  "placeholders_replacement": {
+    "_description": "Logique de remplacement à implémenter dans server.js",
+    "mecanisme": "Après sélection des slides, ouvrir chaque fichier slideN.xml dans le PPTX (ZIP) et faire un simple String.replace() pour chaque placeholder {{VAR}}. Même logique que l'actuelle.",
+    "ordre_critique": [
+      "1. Supprimer les slides non pertinentes via manipulation du ZIP et de presentation.xml",
+      "2. Remplacer logo client (slide 1) si fourni",
+      "3. Appeler l'API Claude pour générer les placeholders IA",
+      "4. Remplacer TOUS les placeholders texte dans le XML",
+      "5. Re-zipper le PPTX"
     ]
   }
 }

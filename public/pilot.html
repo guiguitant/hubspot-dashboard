@@ -2093,9 +2093,42 @@
       .prop-mission-card { background:var(--bg); border:1.5px solid var(--border); border-radius:10px; padding:.75rem .9rem; cursor:pointer; transition:border-color .15s, background .15s, transform .12s; user-select:none; }
       .prop-mission-card:hover { border-color:var(--primary); background:rgba(34,197,94,.04); transform:translateY(-1px); }
       .prop-mission-card.selected { border-color:var(--primary); background:rgba(34,197,94,.08); }
+      .prop-mission-card.full-width { grid-column:1 / -1; }
       .prop-mission-card-icon { font-size:1.3rem; margin-bottom:.3rem; }
       .prop-mission-card-name { font-size:.85rem; font-weight:700; color:var(--text); line-height:1.2; }
       .prop-mission-card-desc { font-size:.72rem; color:var(--text-secondary); margin-top:.2rem; line-height:1.3; }
+
+      /* Contexte client pills */
+      .prop-ctx-pills { display:flex; flex-wrap:wrap; gap:.4rem; }
+      .prop-ctx-pill { padding:.3rem .65rem; border-radius:20px; border:1.5px solid var(--border); background:var(--bg); color:var(--text-secondary); font-size:.76rem; font-weight:500; cursor:pointer; transition:all .15s; white-space:nowrap; }
+      .prop-ctx-pill:hover { border-color:var(--primary); color:var(--primary); }
+      .prop-ctx-pill.selected { border-color:var(--primary); background:rgba(34,197,94,.1); color:var(--primary); font-weight:600; }
+      .prop-ctx-label { font-size:.72rem; font-weight:600; color:var(--text-secondary); margin-bottom:.4rem; margin-top:.75rem; }
+      .prop-ctx-label:first-child { margin-top:0; }
+
+      /* Langue toggle */
+      .prop-langue-toggle { display:flex; gap:.4rem; }
+      .prop-langue-btn { padding:.3rem .7rem; border-radius:6px; border:1.5px solid var(--border); background:var(--bg); color:var(--text-secondary); font-size:.76rem; font-weight:500; cursor:pointer; transition:all .15s; }
+      .prop-langue-btn:hover { border-color:var(--primary); color:var(--primary); }
+      .prop-langue-btn.selected { border-color:var(--primary); background:rgba(34,197,94,.1); color:var(--primary); font-weight:600; }
+
+      /* Format PPTX / PDF toggle */
+      .prop-format-toggle { display:flex; gap:0; border:1.5px solid var(--border); border-radius:8px; overflow:hidden; }
+      .prop-format-btn { flex:1; padding:.55rem .75rem; border:none; background:var(--bg); color:var(--text-secondary); font-family:inherit; font-size:.82rem; font-weight:500; cursor:pointer; transition:background .15s, color .15s; display:flex; align-items:center; justify-content:center; gap:.4rem; }
+      .prop-format-btn + .prop-format-btn { border-left:1.5px solid var(--border); }
+      .prop-format-btn:hover { background:var(--bg-secondary); color:var(--text); }
+      .prop-format-btn.selected { background:rgba(34,197,94,.1); color:var(--primary); font-weight:700; }
+
+      /* Modal PDF preview */
+      .prop-pdf-modal { position:fixed; inset:0; z-index:9000; background:rgba(0,0,0,.7); display:flex; flex-direction:column; align-items:center; justify-content:center; padding:1rem; }
+      .prop-pdf-modal-box { background:var(--card); border-radius:12px; width:min(900px,95vw); height:90vh; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 24px 64px rgba(0,0,0,.4); }
+      .prop-pdf-modal-header { display:flex; align-items:center; justify-content:space-between; padding:.9rem 1.25rem; border-bottom:1px solid var(--border); flex-shrink:0; }
+      .prop-pdf-modal-title { font-size:.88rem; font-weight:700; color:var(--text); display:flex; align-items:center; gap:.5rem; }
+      .prop-pdf-modal-actions { display:flex; align-items:center; gap:.6rem; }
+      .prop-pdf-dl-btn { background:linear-gradient(135deg,#16a34a,#22c55e); color:#fff; border:none; border-radius:7px; padding:.45rem .9rem; font-family:inherit; font-size:.8rem; font-weight:700; cursor:pointer; display:flex; align-items:center; gap:.4rem; }
+      .prop-pdf-close-btn { background:none; border:1.5px solid var(--border); border-radius:7px; padding:.4rem .7rem; font-family:inherit; font-size:.8rem; color:var(--text-secondary); cursor:pointer; }
+      .prop-pdf-close-btn:hover { border-color:var(--text-secondary); color:var(--text); }
+      .prop-pdf-iframe { flex:1; border:none; width:100%; }
 
       /* Subvention pills */
       .prop-sub-pills { display:flex; flex-wrap:wrap; gap:.5rem; }
@@ -2114,8 +2147,27 @@
       .prop-gen-btn:hover:not(:disabled) { transform:translateY(-1px); box-shadow:0 6px 24px rgba(34,197,94,.35); }
       .prop-gen-btn:active:not(:disabled) { transform:translateY(0); }
       .prop-gen-btn:disabled { opacity:.5; cursor:not-allowed; }
+      .prop-preview-btn { width:100%; background:var(--card); color:var(--text); border:1.5px solid var(--border); border-radius:10px; padding:.75rem 1.25rem; font-family:inherit; font-size:.88rem; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:.6rem; transition:border-color .15s, background .15s; margin-bottom:.6rem; }
+      .prop-preview-btn:hover:not(:disabled) { border-color:var(--primary); color:var(--primary); background:rgba(34,197,94,.04); }
+      .prop-preview-btn:disabled { opacity:.5; cursor:not-allowed; }
       .prop-spin { width:16px; height:16px; border:2px solid rgba(255,255,255,.35); border-top-color:#fff; border-radius:50%; animation:propSpin .7s linear infinite; flex-shrink:0; }
+      .prop-spin-dark { width:14px; height:14px; border:2px solid rgba(0,0,0,.15); border-top-color:var(--primary); border-radius:50%; animation:propSpin .7s linear infinite; flex-shrink:0; }
       @keyframes propSpin { to { transform:rotate(360deg); } }
+
+      /* Panneau aperçu IA */
+      .prop-ai-panel { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:1.25rem; margin-bottom:1rem; }
+      .prop-ai-panel-title { font-size:.72rem; font-weight:700; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.07em; margin-bottom:1rem; display:flex; align-items:center; justify-content:space-between; }
+      .prop-ai-badge { font-size:.68rem; background:rgba(99,102,241,.12); color:#818cf8; border-radius:20px; padding:.15rem .55rem; font-weight:600; text-transform:none; letter-spacing:0; }
+      .prop-ai-section { margin-bottom:.9rem; }
+      .prop-ai-section:last-child { margin-bottom:0; }
+      .prop-ai-label { font-size:.68rem; font-weight:700; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.06em; margin-bottom:.3rem; }
+      .prop-ai-text { font-size:.83rem; color:var(--text); line-height:1.55; }
+      .prop-ai-enjeux { display:flex; flex-direction:column; gap:.35rem; }
+      .prop-ai-enjeu { font-size:.82rem; color:var(--text); line-height:1.4; display:flex; align-items:flex-start; gap:.5rem; }
+      .prop-ai-enjeu::before { content:'→'; color:var(--primary); font-weight:700; flex-shrink:0; margin-top:.05rem; }
+      .prop-ai-note { font-size:.76rem; color:var(--text-secondary); font-style:italic; margin-top:.5rem; padding-top:.5rem; border-top:1px solid var(--border); }
+      .prop-ai-regen { font-size:.72rem; color:var(--text-secondary); cursor:pointer; padding:.15rem .4rem; border-radius:4px; transition:background .1s, color .1s; }
+      .prop-ai-regen:hover { background:rgba(34,197,94,.1); color:var(--primary); }
 
       /* Deal search autocomplete */
       .prop-deal-search { position:relative; }
@@ -2224,11 +2276,35 @@
                 <div class="prop-mission-card-name">EPD</div>
                 <div class="prop-mission-card-desc">Environmental Product Declaration</div>
               </div>
+              <div class="prop-mission-card full-width" onclick="selectPropMission('Outil sur-mesure')">
+                <div class="prop-mission-card-icon">⚙️</div>
+                <div class="prop-mission-card-name">Outil sur-mesure</div>
+                <div class="prop-mission-card-desc">Développement d'un outil de calcul ou de reporting carbone personnalisé</div>
+              </div>
             </div>
             <input type="hidden" id="propMission" required>
           </div>
 
-          <!-- Étape 3 : Subvention -->
+          <!-- Toggle IA -->
+          <div class="section-card" style="margin-bottom:1rem;padding:1rem 1.25rem">
+            <div class="prop-step-label" style="margin-bottom:.5rem">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+              Personnalisation IA
+            </div>
+            <div class="prop-format-toggle" id="propIaToggle">
+              <button type="button" class="prop-format-btn" onclick="selectIaMode(this,'sans')">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                Sans IA
+              </button>
+              <button type="button" class="prop-format-btn selected" onclick="selectIaMode(this,'avec')">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                Avec IA
+              </button>
+            </div>
+            <input type="hidden" id="propIaMode" value="avec">
+          </div>
+
+          <!-- Étape 3 : Subvention (masqué si Outil sur-mesure) -->
           <div class="section-card" style="margin-bottom:1rem;padding:1.25rem;transition:opacity .2s" id="propSubGroup">
             <div class="prop-step-label"><span class="prop-step-num">3</span> Programme de subvention</div>
             <div class="prop-sub-pills" id="propSubPills">
@@ -2237,9 +2313,80 @@
             <input type="hidden" id="propSubvention" value="standard">
           </div>
 
-          <!-- Étape 4 : Logo -->
+          <!-- Étape 3b : Montant HT (Outil sur-mesure uniquement) -->
+          <div class="section-card" style="margin-bottom:1rem;padding:1.25rem;display:none" id="propMontantGroup">
+            <div class="prop-step-label"><span class="prop-step-num">3</span> Montant HT</div>
+            <div style="display:flex;align-items:center;gap:.5rem">
+              <input type="number" id="propMontantHt" min="0" step="500" placeholder="Ex : 35000"
+                oninput="updatePropRecap()"
+                onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor='var(--border)'"
+                style="flex:1;background:var(--bg);border:1.5px solid var(--border);border-radius:8px;padding:.7rem .9rem;color:var(--text);font-family:inherit;font-size:.95rem;outline:none;transition:border-color .15s">
+              <span style="font-size:.85rem;color:var(--text-secondary);white-space:nowrap">€ HT</span>
+            </div>
+          </div>
+
+          <!-- Étape 4 : Contexte client (pour l'IA) -->
+          <div class="section-card" style="margin-bottom:1rem;padding:1.25rem" id="propContexteGroup">
+            <div class="prop-step-label"><span class="prop-step-num">4</span> Contexte client <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-secondary)">(pour personnalisation IA)</span></div>
+
+            <div class="prop-ctx-label">Secteur</div>
+            <div class="prop-ctx-pills" id="propSecteurPills">
+              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propSecteur','Agroalimentaire')">Agroalimentaire</div>
+              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propSecteur','BTP')">BTP</div>
+              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propSecteur','Industrie')">Industrie</div>
+              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propSecteur','Tertiaire')">Tertiaire</div>
+              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propSecteur','Retail')">Retail</div>
+              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propSecteur','Autre')">Autre</div>
+            </div>
+            <input type="hidden" id="propSecteur">
+
+            <div class="prop-ctx-label">Taille</div>
+            <div class="prop-ctx-pills" id="propTaillePills">
+              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propTaille','PME')">PME</div>
+              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propTaille','ETI')">ETI</div>
+              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propTaille','Grand groupe')">Grand groupe</div>
+            </div>
+            <input type="hidden" id="propTaille">
+
+            <div class="prop-ctx-label">Enjeu principal</div>
+            <div class="prop-ctx-pills" id="propEnjeuPills">
+              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propEnjeu','CSRD')">CSRD</div>
+              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propEnjeu','Appel d\'offres')">Appel d'offres</div>
+              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propEnjeu','Communication RSE')">Communication RSE</div>
+              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propEnjeu','Démarche volontaire')">Démarche volontaire</div>
+              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propEnjeu','Réglementation produit')">Réglementation produit</div>
+              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propEnjeu','Autre')">Autre</div>
+            </div>
+            <input type="hidden" id="propEnjeu">
+
+            <div class="prop-ctx-label" style="margin-top:.75rem">Langue de la proposition</div>
+            <div class="prop-langue-toggle" id="propLangueToggle">
+              <button type="button" class="prop-langue-btn selected" onclick="selectPropLangue(this,'auto')" data-langue="auto">Auto</button>
+              <button type="button" class="prop-langue-btn" onclick="selectPropLangue(this,'FR')" data-langue="FR">FR</button>
+              <button type="button" class="prop-langue-btn" onclick="selectPropLangue(this,'EN')" data-langue="EN">EN</button>
+            </div>
+            <input type="hidden" id="propLangue" value="auto">
+
+            <div class="prop-ctx-label" style="margin-top:.75rem">SIREN <span style="font-weight:400;color:var(--text-secondary)">(optionnel — enrichit le contexte via Data.gouv)</span></div>
+            <input type="text" id="propSiren" maxlength="11" placeholder="Ex : 123 456 789"
+              oninput="this.value=this.value.replace(/[^0-9 ]/g,'')"
+              onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor='var(--border)'"
+              style="width:100%;background:var(--bg);border:1.5px solid var(--border);border-radius:8px;padding:.65rem .9rem;color:var(--text);font-family:inherit;font-size:.9rem;outline:none;transition:border-color .15s;letter-spacing:.05em">
+
+            <div class="prop-ctx-label" style="margin-top:.75rem">
+              Contexte de la proposition
+              <span style="font-weight:600;color:#ef4444;font-size:.7rem;margin-left:.3rem">obligatoire</span>
+            </div>
+            <textarea id="propContexteConsultant" rows="5"
+              placeholder="Décris le contexte de cette proposition : qui est le client, pourquoi il vient nous voir, ce qu'on a échangé lors du RDV, le déclencheur de la mission (CSRD, appel d'offres, pression donneurs d'ordre…), les contraintes spécifiques, les enjeux discutés. Plus tu es précis, plus la slide sera percutante."
+              style="width:100%;background:var(--bg);border:1.5px solid var(--border);border-radius:8px;padding:.65rem .9rem;color:var(--text);font-family:inherit;font-size:.85rem;outline:none;resize:vertical;transition:border-color .15s;line-height:1.5"
+              onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor='var(--border)'"></textarea>
+            <div style="font-size:.7rem;color:var(--text-secondary);margin-top:.3rem">C'est la source principale pour la personnalisation IA — quelques phrases suffisent, sois factuel.</div>
+          </div>
+
+          <!-- Étape 5 : Logo -->
           <div class="section-card" style="margin-bottom:1.5rem;padding:1.25rem">
-            <div class="prop-step-label"><span class="prop-step-num">4</span> Logo client <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-secondary)">(optionnel)</span></div>
+            <div class="prop-step-label"><span class="prop-step-num">5</span> Logo client <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-secondary)">(optionnel)</span></div>
             <div class="prop-logo-zone" id="propLogoZone"
               ondragover="event.preventDefault();this.classList.add('drag-over')"
               ondragleave="this.classList.remove('drag-over')"
@@ -2255,7 +2402,72 @@
             </div>
           </div>
 
-          <!-- Bouton -->
+          <!-- Panneau aperçu IA -->
+          <div id="propAiPanel" class="prop-ai-panel" style="display:none">
+            <div class="prop-ai-panel-title">
+              <span style="display:flex;align-items:center;gap:.5rem">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+                Contexte généré par IA
+              </span>
+              <span class="prop-ai-badge" id="propAiLangBadge">FR</span>
+            </div>
+            <div class="prop-ai-section" id="propAiCtxSection" style="display:none">
+              <div class="prop-ai-label">Contexte client</div>
+              <div class="prop-ai-text" id="propAiCtx"></div>
+            </div>
+            <div class="prop-ai-section">
+              <div class="prop-ai-label">Enjeux identifiés</div>
+              <div class="prop-ai-enjeux">
+                <div class="prop-ai-enjeu" id="propAiE1"></div>
+                <div class="prop-ai-enjeu" id="propAiE2"></div>
+                <div class="prop-ai-enjeu" id="propAiE3"></div>
+              </div>
+            </div>
+            <div class="prop-ai-section" id="propAiPqmSection" style="display:none">
+              <div class="prop-ai-label">Pourquoi maintenant</div>
+              <div class="prop-ai-text" id="propAiPqm"></div>
+            </div>
+            <div class="prop-ai-section" id="propAiOutilSection" style="display:none">
+              <div class="prop-ai-label">Contexte métier</div>
+              <div class="prop-ai-text" id="propAiMetier"></div>
+              <div class="prop-ai-label" style="margin-top:.6rem">Enjeux data / IT</div>
+              <div class="prop-ai-text" id="propAiData"></div>
+              <div class="prop-ai-label" style="margin-top:.6rem">Périmètre de l'outil</div>
+              <div class="prop-ai-text" id="propAiPerimetre"></div>
+            </div>
+            <div class="prop-ai-note" id="propAiNote" style="display:none"></div>
+            <div style="margin-top:.75rem;display:flex;justify-content:flex-end">
+              <span class="prop-ai-regen" onclick="previewAiContext(true)">↺ Régénérer</span>
+            </div>
+          </div>
+
+          <!-- Format PPTX / PDF -->
+          <div style="margin-bottom:.6rem">
+            <div class="prop-step-label" style="margin-bottom:.4rem">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              Format d'export
+            </div>
+            <div class="prop-format-toggle">
+              <button type="button" class="prop-format-btn selected" onclick="selectFormat(this,'pptx')">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                PowerPoint
+              </button>
+              <button type="button" class="prop-format-btn" onclick="selectFormat(this,'pdf')">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>
+                PDF + Aperçu
+              </button>
+            </div>
+            <input type="hidden" id="propFormat" value="pptx">
+          </div>
+
+          <!-- Bouton aperçu IA -->
+          <button type="button" class="prop-preview-btn" id="propPreviewBtn" onclick="previewAiContext(false)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+            <div class="prop-spin-dark" id="propPreviewSpinner" style="display:none"></div>
+            <span id="propPreviewBtnText">Aperçu du contexte IA</span>
+          </button>
+
+          <!-- Bouton générer -->
           <button type="submit" class="prop-gen-btn" id="propGenBtn">
             <svg id="propBtnIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
             <div class="prop-spin" id="propSpinner" style="display:none"></div>
@@ -2290,6 +2502,10 @@
           <div class="prop-recap-val empty" id="recapSub">—</div>
         </div>
         <div class="prop-recap-row">
+          <div class="prop-recap-key">Langue</div>
+          <div class="prop-recap-val empty" id="recapLangue">—</div>
+        </div>
+        <div class="prop-recap-row">
           <div class="prop-recap-key">Logo</div>
           <div class="prop-recap-val empty" id="recapLogo">—</div>
         </div>
@@ -2297,8 +2513,9 @@
           <div style="font-size:.72rem;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.07em;margin-bottom:.6rem">Sections incluses</div>
           <div class="prop-slides-row">
             <div class="prop-slide-chip active">Introduction</div>
+            <div class="prop-slide-chip active">Contexte</div>
             <div class="prop-slide-chip" id="chipMission">Mission</div>
-            <div class="prop-slide-chip active">Calendrier</div>
+            <div class="prop-slide-chip active" id="chipCalendrier">Calendrier</div>
             <div class="prop-slide-chip active">Prop. financière</div>
           </div>
         </div>
@@ -7739,8 +7956,156 @@
       const dd = document.getElementById('propDealDropdown');
       if (dd && dd.style.display !== 'none') _positionDealDropdown();
     });
-    const PROP_SLIDE_COUNTS = { 'Bilan Carbone': 11, 'ACV': 10, 'FDES / PEP': 6, 'EPD': 6 };
-    const PROP_MISSION_ICONS = { 'Bilan Carbone':'🌍', 'ACV':'♻️', 'FDES / PEP':'📋', 'EPD':'🌱' };
+    // Nombre de slides méthodo par mission (pour l'estimation dans le récap)
+    const PROP_SLIDE_COUNTS = { 'Bilan Carbone': 11, 'ACV': 10, 'FDES / PEP': 6, 'EPD': 6, 'Outil sur-mesure': 6 };
+    const PROP_MISSION_ICONS = { 'Bilan Carbone':'🌍', 'ACV':'♻️', 'FDES / PEP':'📋', 'EPD':'🌱', 'Outil sur-mesure':'⚙️' };
+    const PROP_LANGUE_AUTO   = { 'Bilan Carbone':'FR', 'ACV':'FR', 'FDES / PEP':'FR', 'EPD':'EN', 'Outil sur-mesure':'FR' };
+
+    let cachedAiContext  = null;
+    let cachedPdfBlob    = null;
+    let cachedPdfName    = null;
+
+    const IA_EMPTY_CONTEXT = {
+      CONTEXTE_CLIENT: '', ENJEU_1: '', ENJEU_2: '', ENJEU_3: '',
+      POURQUOI_MAINTENANT: '', NOTE_CONTEXTE: '',
+      CONTEXTE_METIER: '', ENJEUX_DATA: '', PERIMETRE_OUTIL: '',
+    };
+
+    function selectIaMode(el, mode) {
+      document.querySelectorAll('#propIaToggle .prop-format-btn').forEach(b => b.classList.remove('selected'));
+      el.classList.add('selected');
+      document.getElementById('propIaMode').value = mode;
+      const ctxGroup     = document.getElementById('propContexteGroup');
+      const previewBtn   = document.getElementById('propPreviewBtn');
+      const aiPanel      = document.getElementById('propAiPanel');
+      if (mode === 'sans') {
+        ctxGroup.style.display   = 'none';
+        previewBtn.style.display = 'none';
+        aiPanel.style.display    = 'none';
+        cachedAiContext = null;
+      } else {
+        ctxGroup.style.display   = '';
+        previewBtn.style.display = '';
+      }
+    }
+
+    function selectFormat(el, fmt) {
+      document.querySelectorAll('.prop-format-btn').forEach(b => b.classList.remove('selected'));
+      el.classList.add('selected');
+      document.getElementById('propFormat').value = fmt;
+      const btn = document.getElementById('propBtnText');
+      if (btn) btn.textContent = fmt === 'pdf' ? 'Générer le PDF + Aperçu' : 'Générer la proposition';
+    }
+
+    function closePdfModal() {
+      document.getElementById('propPdfModal').style.display = 'none';
+      const iframe = document.getElementById('propPdfIframe');
+      if (iframe.src && iframe.src.startsWith('blob:')) URL.revokeObjectURL(iframe.src);
+      iframe.src = '';
+    }
+
+    function downloadPdfFromModal() {
+      if (!cachedPdfBlob || !cachedPdfName) return;
+      const url = URL.createObjectURL(cachedPdfBlob);
+      const a = document.createElement('a'); a.href = url; a.download = cachedPdfName;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function openPdfModal(blob, filename) {
+      cachedPdfBlob = blob;
+      cachedPdfName = filename;
+      const url = URL.createObjectURL(blob);
+      document.getElementById('propPdfIframe').src = url;
+      document.getElementById('propPdfModalTitle').textContent = filename;
+      document.getElementById('propPdfModal').style.display = 'flex';
+    }
+
+    async function previewAiContext(forceRegen = false) {
+      const mission = document.getElementById('propMission').value;
+      if (!mission) { alert('Sélectionnez d\'abord une mission.'); return; }
+      if (document.getElementById('propIaMode').value === 'sans') return;
+
+      const contexte = document.getElementById('propContexteConsultant').value.trim();
+      if (!contexte) {
+        document.getElementById('propContexteConsultant').focus();
+        document.getElementById('propContexteConsultant').style.borderColor = '#ef4444';
+        setTimeout(() => document.getElementById('propContexteConsultant').style.borderColor = 'var(--border)', 2000);
+        alert('Le contexte de la proposition est obligatoire pour générer un contenu pertinent.');
+        return;
+      }
+
+      if (!forceRegen && cachedAiContext) {
+        document.getElementById('propAiPanel').style.display = 'block';
+        return;
+      }
+
+      const btn     = document.getElementById('propPreviewBtn');
+      const spin    = document.getElementById('propPreviewSpinner');
+      const btnTxt  = document.getElementById('propPreviewBtnText');
+      btn.disabled = true; spin.style.display = 'block'; btnTxt.textContent = 'Génération…';
+
+      try {
+        const res = await fetch('/api/proposal/ai-context', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            nom_entreprise:      document.getElementById('propNom').value.trim(),
+            mission,
+            langue:              document.getElementById('propLangue').value,
+            secteur:             document.getElementById('propSecteur').value,
+            taille_entreprise:   document.getElementById('propTaille').value,
+            enjeu_principal:     document.getElementById('propEnjeu').value,
+            siren:               document.getElementById('propSiren').value.trim(),
+            contexte_consultant: contexte,
+          }),
+        });
+        if (!res.ok) throw new Error('Erreur ' + res.status);
+        const data = await res.json();
+        cachedAiContext = data.context;
+        _renderAiPanel(data.context, data.langue);
+      } catch(e) {
+        alert('Erreur aperçu IA : ' + e.message);
+      } finally {
+        btn.disabled = false; spin.style.display = 'none'; btnTxt.textContent = 'Aperçu du contexte IA';
+      }
+    }
+
+    function _renderAiPanel(ctx, langue) {
+      const panel = document.getElementById('propAiPanel');
+      panel.style.display = 'block';
+      document.getElementById('propAiLangBadge').textContent = langue || 'FR';
+
+      const ctxSection = document.getElementById('propAiCtxSection');
+      if (ctx.CONTEXTE_CLIENT) {
+        document.getElementById('propAiCtx').textContent = ctx.CONTEXTE_CLIENT;
+        ctxSection.style.display = 'block';
+      } else { ctxSection.style.display = 'none'; }
+
+      document.getElementById('propAiE1').textContent = ctx.ENJEU_1 || '';
+      document.getElementById('propAiE2').textContent = ctx.ENJEU_2 || '';
+      document.getElementById('propAiE3').textContent = ctx.ENJEU_3 || '';
+
+      const pqmSection = document.getElementById('propAiPqmSection');
+      if (ctx.POURQUOI_MAINTENANT) {
+        document.getElementById('propAiPqm').textContent = ctx.POURQUOI_MAINTENANT;
+        pqmSection.style.display = 'block';
+      } else { pqmSection.style.display = 'none'; }
+
+      const outilSection = document.getElementById('propAiOutilSection');
+      if (ctx.CONTEXTE_METIER || ctx.ENJEUX_DATA || ctx.PERIMETRE_OUTIL) {
+        document.getElementById('propAiMetier').textContent    = ctx.CONTEXTE_METIER   || '—';
+        document.getElementById('propAiData').textContent      = ctx.ENJEUX_DATA       || '—';
+        document.getElementById('propAiPerimetre').textContent = ctx.PERIMETRE_OUTIL   || '—';
+        outilSection.style.display = 'block';
+      } else { outilSection.style.display = 'none'; }
+
+      const noteEl = document.getElementById('propAiNote');
+      if (ctx.NOTE_CONTEXTE) {
+        noteEl.textContent = ctx.NOTE_CONTEXTE;
+        noteEl.style.display = 'block';
+      } else { noteEl.style.display = 'none'; }
+    }
 
     async function loadProposalConfig() {
       if (proposalConfig) return;
@@ -7761,7 +8126,10 @@
       document.getElementById('propMission').value = mission;
       document.querySelectorAll('.prop-mission-card').forEach(c => c.classList.remove('selected'));
       event.currentTarget.classList.add('selected');
+      cachedAiContext = null;
+      document.getElementById('propAiPanel').style.display = 'none';
       updatePropSubventions();
+      updatePropLangueAuto(mission);
       updatePropRecap();
     }
 
@@ -7772,19 +8140,50 @@
       updatePropRecap();
     }
 
+    function selectCtxPill(el, fieldId, value) {
+      const group = el.closest('.prop-ctx-pills');
+      group.querySelectorAll('.prop-ctx-pill').forEach(p => p.classList.remove('selected'));
+      el.classList.add('selected');
+      document.getElementById(fieldId).value = value;
+      updatePropRecap();
+    }
+
+    function selectPropLangue(el, value) {
+      document.querySelectorAll('.prop-langue-btn').forEach(b => b.classList.remove('selected'));
+      el.classList.add('selected');
+      document.getElementById('propLangue').value = value;
+      updatePropRecap();
+    }
+
+    function updatePropLangueAuto(mission) {
+      const currentForce = document.getElementById('propLangue').value;
+      if (currentForce !== 'auto') return;
+      // Pas besoin de changer l'input — le backend gère l'auto
+      // Mais on met à jour l'affichage du bouton "Auto" pour refléter la langue effective
+      updatePropRecap();
+    }
+
     function updatePropSubventions() {
       const mission = document.getElementById('propMission').value;
-      const grp = document.getElementById('propSubGroup');
-      if (!mission || !proposalConfig?.[mission]) return;
-      const subs = proposalConfig[mission];
-      const noSub = subs.length === 1 && subs[0].key === 'standard';
-      grp.style.opacity = noSub ? '0.4' : '1';
-      grp.style.pointerEvents = noSub ? 'none' : '';
-      const pills = document.getElementById('propSubPills');
-      pills.innerHTML = subs.map((s, i) =>
-        `<div class="prop-sub-pill${i === 0 ? ' selected' : ''}" onclick="selectPropSub(this,'${s.key}')">${s.label}</div>`
-      ).join('');
-      document.getElementById('propSubvention').value = subs[0].key;
+      const isOutil = mission === 'Outil sur-mesure';
+      const subGrp     = document.getElementById('propSubGroup');
+      const montantGrp = document.getElementById('propMontantGroup');
+
+      // Outil sur-mesure : masquer subvention, afficher montant HT
+      subGrp.style.display     = isOutil ? 'none' : '';
+      montantGrp.style.display = isOutil ? '' : 'none';
+
+      if (!isOutil && mission && proposalConfig?.[mission]) {
+        const subs  = proposalConfig[mission];
+        const noSub = subs.length === 1 && subs[0].key === 'standard';
+        subGrp.style.opacity      = noSub ? '0.4' : '1';
+        subGrp.style.pointerEvents = noSub ? 'none' : '';
+        const pills = document.getElementById('propSubPills');
+        pills.innerHTML = subs.map((s, i) =>
+          `<div class="prop-sub-pill${i === 0 ? ' selected' : ''}" onclick="selectPropSub(this,'${s.key}')">${s.label}</div>`
+        ).join('');
+        document.getElementById('propSubvention').value = subs[0].key;
+      }
     }
 
     function handlePropLogoChange(input) {
@@ -7817,7 +8216,9 @@
       const nom     = document.getElementById('propNom')?.value?.trim() || '';
       const mission = document.getElementById('propMission')?.value || '';
       const subKey  = document.getElementById('propSubvention')?.value || 'standard';
+      const langueVal = document.getElementById('propLangue')?.value || 'auto';
       const hasLogo = !!document.getElementById('propLogoPreview')?.src && document.getElementById('propLogoPreview').style.display !== 'none';
+      const isOutil = mission === 'Outil sur-mesure';
 
       const recapDealRow = document.getElementById('recapDealRow');
       const recapDeal    = document.getElementById('recapDeal');
@@ -7839,12 +8240,27 @@
         else { recapMission.textContent = '—'; recapMission.className = 'prop-recap-val empty'; }
       }
 
-      const subLabel = proposalConfig?.[mission]?.find(s => s.key === subKey)?.label || '—';
       const recapSub = document.getElementById('recapSub');
       if (recapSub) {
-        if (mission && subKey !== 'standard') recapSub.innerHTML = `<span class="prop-sub-badge">🏷 ${subLabel}</span>`;
-        else if (mission) { recapSub.textContent = 'Sans subvention'; recapSub.className = 'prop-recap-val'; }
-        else { recapSub.textContent = '—'; recapSub.className = 'prop-recap-val empty'; }
+        if (isOutil) {
+          const montant = document.getElementById('propMontantHt')?.value;
+          recapSub.textContent = montant ? `${Number(montant).toLocaleString('fr-FR')} € HT` : 'Montant à saisir';
+          recapSub.className = 'prop-recap-val' + (montant ? '' : ' empty');
+        } else {
+          const subLabel = proposalConfig?.[mission]?.find(s => s.key === subKey)?.label || '—';
+          if (mission && subKey !== 'standard') recapSub.innerHTML = `<span class="prop-sub-badge">🏷 ${subLabel}</span>`;
+          else if (mission) { recapSub.textContent = 'Sans subvention'; recapSub.className = 'prop-recap-val'; }
+          else { recapSub.textContent = '—'; recapSub.className = 'prop-recap-val empty'; }
+        }
+      }
+
+      const recapLangue = document.getElementById('recapLangue');
+      if (recapLangue && mission) {
+        const langueEffective = langueVal === 'auto' ? (PROP_LANGUE_AUTO[mission] || 'FR') : langueVal;
+        recapLangue.textContent = langueVal === 'auto' ? `${langueEffective} (auto)` : langueEffective;
+        recapLangue.className = 'prop-recap-val';
+      } else if (recapLangue) {
+        recapLangue.textContent = '—'; recapLangue.className = 'prop-recap-val empty';
       }
 
       const recapLogo = document.getElementById('recapLogo');
@@ -7853,10 +8269,16 @@
         else { recapLogo.textContent = 'Aucun'; recapLogo.className = 'prop-recap-val empty'; }
       }
 
-      const chip = document.getElementById('chipMission');
-      if (chip) { chip.textContent = mission || 'Mission'; chip.className = 'prop-slide-chip' + (mission ? ' active' : ''); }
+      const chipMission = document.getElementById('chipMission');
+      if (chipMission) { chipMission.textContent = mission || 'Mission'; chipMission.className = 'prop-slide-chip' + (mission ? ' active' : ''); }
 
-      const count = mission ? (9 + (PROP_SLIDE_COUNTS[mission] || 0) + 4) : null;
+      const chipCal = document.getElementById('chipCalendrier');
+      if (chipCal) { chipCal.className = 'prop-slide-chip' + (!isOutil && mission ? ' active' : ''); }
+
+      // Estimation du nombre de slides : intro(8) + contexte(2) + méthodo + [calendrier(2)] + financière(2)
+      const methodoCount = PROP_SLIDE_COUNTS[mission] || 0;
+      const calCount = (!isOutil && mission) ? 2 : 0;
+      const count = mission ? (1 + 8 + 2 + methodoCount + calCount + 2) : null;
       const countEl = document.getElementById('recapSlideCount');
       if (countEl) countEl.textContent = count ? `~${count} slides générées` : 'Sélectionnez une mission';
     }
@@ -7874,10 +8296,23 @@
       btnTxt.textContent = 'Génération en cours…';
 
       try {
-        const nom        = document.getElementById('propNom').value.trim();
-        const mission    = document.getElementById('propMission').value;
-        const subvention = document.getElementById('propSubvention').value;
-        const logoFile   = document.getElementById('propLogo').files[0];
+        const nom                = document.getElementById('propNom').value.trim();
+        const mission            = document.getElementById('propMission').value;
+        const subvention         = document.getElementById('propSubvention').value;
+        const langue             = document.getElementById('propLangue').value;
+        const secteur            = document.getElementById('propSecteur').value;
+        const taille             = document.getElementById('propTaille').value;
+        const enjeu              = document.getElementById('propEnjeu').value;
+        const montant_ht         = document.getElementById('propMontantHt').value || null;
+        const iaMode             = document.getElementById('propIaMode').value;
+        const siren              = document.getElementById('propSiren')?.value.trim() || null;
+        const contexte_consultant = document.getElementById('propContexteConsultant')?.value.trim() || '';
+        const logoFile           = document.getElementById('propLogo').files[0];
+
+        if (iaMode === 'avec' && !contexte_consultant) {
+          document.getElementById('propContexteConsultant').focus();
+          throw new Error('Le contexte de la proposition est obligatoire avec la personnalisation IA.');
+        }
 
         let logo_base64 = null;
         if (logoFile) {
@@ -7889,10 +8324,22 @@
           });
         }
 
+        const format = document.getElementById('propFormat').value || 'pptx';
+        const isPdf  = format === 'pdf';
+
+        if (isPdf) btnTxt.textContent = 'Conversion PDF en cours… (15-30s)';
+
         const res = await fetch('/api/proposal/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ nom_entreprise: nom, mission, subvention, logo_base64, deal_id: selectedDealId }),
+          body: JSON.stringify({
+            nom_entreprise: nom, mission, subvention, logo_base64, deal_id: selectedDealId,
+            langue, secteur, taille_entreprise: taille, enjeu_principal: enjeu,
+            montant_ht: montant_ht ? Number(montant_ht) : null,
+            siren, contexte_consultant,
+            ai_context: iaMode === 'sans' ? IA_EMPTY_CONTEXT : (cachedAiContext || null),
+            format,
+          }),
         });
 
         if (!res.ok) {
@@ -7903,20 +8350,28 @@
         const blob = await res.blob();
         const disposition = res.headers.get('Content-Disposition') || '';
         const fnMatch = disposition.match(/filename="?([^";\n]+)"?/);
-        const filename = fnMatch ? fnMatch[1] : `Proposition_${nom}.pptx`;
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = filename;
-        document.body.appendChild(a); a.click(); a.remove();
-        URL.revokeObjectURL(url);
+        const ext      = isPdf ? 'pdf' : 'pptx';
+        const filename = fnMatch ? fnMatch[1] : `Proposition_${nom}.${ext}`;
 
-        okEl.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> <span>"${filename}" téléchargé avec succès !</span>`;
-        okEl.style.display = 'flex';
+        if (isPdf) {
+          openPdfModal(blob, filename);
+          okEl.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> <span>PDF généré — aperçu ouvert.</span>`;
+          okEl.style.display = 'flex';
+        } else {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a'); a.href = url; a.download = filename;
+          document.body.appendChild(a); a.click(); a.remove();
+          URL.revokeObjectURL(url);
+          okEl.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> <span>"${filename}" téléchargé avec succès !</span>`;
+          okEl.style.display = 'flex';
+        }
       } catch(err) {
         errEl.textContent = err.message;
         errEl.style.display = 'block';
       } finally {
         btn.disabled = false; spin.style.display = 'none'; icon.style.display = 'block';
-        btnTxt.textContent = 'Générer la proposition';
+        const fmt = document.getElementById('propFormat')?.value;
+        btnTxt.textContent = fmt === 'pdf' ? 'Générer le PDF + Aperçu' : 'Générer la proposition';
       }
     }
 
@@ -7941,6 +8396,26 @@
 
   <!-- Dropdown deal search — rendu hors du formulaire pour éviter les problèmes de z-index/overflow -->
   <div id="propDealDropdown" style="display:none;position:fixed;background:var(--card);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.2);z-index:9999;overflow:hidden"></div>
+
+  <!-- Modal prévisualisation PDF -->
+  <div id="propPdfModal" class="prop-pdf-modal" style="display:none">
+    <div class="prop-pdf-modal-box">
+      <div class="prop-pdf-modal-header">
+        <div class="prop-pdf-modal-title">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <span id="propPdfModalTitle">Prévisualisation PDF</span>
+        </div>
+        <div class="prop-pdf-modal-actions">
+          <button class="prop-pdf-dl-btn" onclick="downloadPdfFromModal()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Télécharger le PDF
+          </button>
+          <button class="prop-pdf-close-btn" onclick="closePdfModal()">✕ Fermer</button>
+        </div>
+      </div>
+      <iframe id="propPdfIframe" class="prop-pdf-iframe" title="Prévisualisation PDF"></iframe>
+    </div>
+  </div>
 
 </body>
 </html>
