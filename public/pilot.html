@@ -943,6 +943,13 @@
     }
     .deal-proposal-chip.unsent:hover { color: #1565C0; }
 
+    .deal-redownload-btn {
+      font-size: 0.65rem; cursor: pointer; color: var(--text-secondary);
+      padding: 0.06rem 0.2rem; border-radius: 3px; flex-shrink: 0;
+      transition: color .15s, background .15s;
+    }
+    .deal-redownload-btn:hover { color: var(--primary); background: rgba(34,197,94,.1); }
+
     .forecast-bar {
       display: none;
       background: var(--primary-bg);
@@ -2106,6 +2113,11 @@
       .prop-ctx-label { font-size:.72rem; font-weight:600; color:var(--text-secondary); margin-bottom:.4rem; margin-top:.75rem; }
       .prop-ctx-label:first-child { margin-top:0; }
 
+      /* SIREN autocomplete dropdown */
+      .prop-siren-option { padding:.6rem 1rem; cursor:pointer; border-bottom:1px solid var(--border); transition:background .1s; }
+      .prop-siren-option:last-child { border-bottom:none; }
+      .prop-siren-option:hover { background:rgba(34,197,94,.07); }
+
       /* Langue toggle */
       .prop-langue-toggle { display:flex; gap:.4rem; }
       .prop-langue-btn { padding:.3rem .7rem; border-radius:6px; border:1.5px solid var(--border); background:var(--bg); color:var(--text-secondary); font-size:.76rem; font-weight:500; cursor:pointer; transition:all .15s; }
@@ -2329,37 +2341,7 @@
           <div class="section-card" style="margin-bottom:1rem;padding:1.25rem" id="propContexteGroup">
             <div class="prop-step-label"><span class="prop-step-num">4</span> Contexte client <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-secondary)">(pour personnalisation IA)</span></div>
 
-            <div class="prop-ctx-label">Secteur</div>
-            <div class="prop-ctx-pills" id="propSecteurPills">
-              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propSecteur','Agroalimentaire')">Agroalimentaire</div>
-              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propSecteur','BTP')">BTP</div>
-              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propSecteur','Industrie')">Industrie</div>
-              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propSecteur','Tertiaire')">Tertiaire</div>
-              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propSecteur','Retail')">Retail</div>
-              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propSecteur','Autre')">Autre</div>
-            </div>
-            <input type="hidden" id="propSecteur">
-
-            <div class="prop-ctx-label">Taille</div>
-            <div class="prop-ctx-pills" id="propTaillePills">
-              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propTaille','PME')">PME</div>
-              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propTaille','ETI')">ETI</div>
-              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propTaille','Grand groupe')">Grand groupe</div>
-            </div>
-            <input type="hidden" id="propTaille">
-
-            <div class="prop-ctx-label">Enjeu principal</div>
-            <div class="prop-ctx-pills" id="propEnjeuPills">
-              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propEnjeu','CSRD')">CSRD</div>
-              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propEnjeu','Appel d\'offres')">Appel d'offres</div>
-              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propEnjeu','Communication RSE')">Communication RSE</div>
-              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propEnjeu','Démarche volontaire')">Démarche volontaire</div>
-              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propEnjeu','Réglementation produit')">Réglementation produit</div>
-              <div class="prop-ctx-pill" onclick="selectCtxPill(this,'propEnjeu','Autre')">Autre</div>
-            </div>
-            <input type="hidden" id="propEnjeu">
-
-            <div class="prop-ctx-label" style="margin-top:.75rem">Langue de la proposition</div>
+            <div class="prop-ctx-label">Langue de la proposition</div>
             <div class="prop-langue-toggle" id="propLangueToggle">
               <button type="button" class="prop-langue-btn selected" onclick="selectPropLangue(this,'auto')" data-langue="auto">Auto</button>
               <button type="button" class="prop-langue-btn" onclick="selectPropLangue(this,'FR')" data-langue="FR">FR</button>
@@ -2367,11 +2349,17 @@
             </div>
             <input type="hidden" id="propLangue" value="auto">
 
-            <div class="prop-ctx-label" style="margin-top:.75rem">SIREN <span style="font-weight:400;color:var(--text-secondary)">(optionnel — enrichit le contexte via Data.gouv)</span></div>
-            <input type="text" id="propSiren" maxlength="11" placeholder="Ex : 123 456 789"
-              oninput="this.value=this.value.replace(/[^0-9 ]/g,'')"
-              onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor='var(--border)'"
-              style="width:100%;background:var(--bg);border:1.5px solid var(--border);border-radius:8px;padding:.65rem .9rem;color:var(--text);font-family:inherit;font-size:.9rem;outline:none;transition:border-color .15s;letter-spacing:.05em">
+            <div class="prop-ctx-label" style="margin-top:.75rem">Entreprise <span style="font-weight:400;color:var(--text-secondary)">(SIREN ou raison sociale — enrichit le contexte via Data.gouv)</span></div>
+            <div style="position:relative">
+              <input type="text" id="propSirenSearch" autocomplete="off" placeholder="Ex : Groupe Leclerc ou 123456789"
+                oninput="onSirenSearch(this)"
+                onfocus="this.style.borderColor='var(--primary)'" onblur="setTimeout(()=>closeSirenDropdown(),200)"
+                style="width:100%;background:var(--bg);border:1.5px solid var(--border);border-radius:8px;padding:.65rem 2.2rem .65rem .9rem;color:var(--text);font-family:inherit;font-size:.9rem;outline:none;transition:border-color .15s;box-sizing:border-box">
+              <span id="propSirenSpinner" style="display:none;position:absolute;right:.7rem;top:50%;transform:translateY(-50%);font-size:.85rem;color:var(--text-secondary)">⏳</span>
+              <div id="sirenDropdown" style="display:none;position:absolute;top:calc(100% + 2px);left:0;right:0;background:var(--bg);border:1.5px solid var(--primary);border-radius:0 0 10px 10px;z-index:200;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,.12)"></div>
+            </div>
+            <input type="hidden" id="propSiren">
+            <div id="sirenCard" style="display:none;margin-top:.5rem;border-radius:10px;border:1.5px solid var(--border);padding:.75rem 1rem;background:var(--surface,#f8f9fa);font-size:.85rem;color:var(--text)"></div>
 
             <div class="prop-ctx-label" style="margin-top:.75rem">
               Contexte de la proposition
@@ -3281,6 +3269,25 @@
       saveDealMetadata(dealId, { proposal_sent_at: null });
     }
 
+    function redownloadProposal(e, dealId) {
+      e.stopPropagation();
+      const meta = dealMetadata[dealId] || {};
+      if (!meta.proposal_storage_path) return;
+      // Petit menu inline PPTX / PDF
+      const existing = document.getElementById('_redownloadMenu');
+      if (existing) existing.remove();
+      const rect = e.target.getBoundingClientRect();
+      const menu = document.createElement('div');
+      menu.id = '_redownloadMenu';
+      menu.style.cssText = `position:fixed;top:${rect.bottom+4}px;left:${rect.left}px;background:var(--bg);border:1.5px solid var(--border);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.15);z-index:9999;overflow:hidden;font-size:.82rem`;
+      menu.innerHTML = `
+        <div onclick="window.open('/api/proposal/redownload/${dealId}?format=pptx','_blank');this.closest('#_redownloadMenu').remove()" style="padding:.5rem 1rem;cursor:pointer;border-bottom:1px solid var(--border)" onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">⬇ Télécharger PPTX</div>
+        <div onclick="window.open('/api/proposal/redownload/${dealId}?format=pdf','_blank');this.closest('#_redownloadMenu').remove()" style="padding:.5rem 1rem;cursor:pointer" onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">⬇ Télécharger PDF</div>
+      `;
+      document.body.appendChild(menu);
+      setTimeout(() => document.addEventListener('click', function h() { menu.remove(); document.removeEventListener('click', h); }), 50);
+    }
+
     function formatShortDate(iso) {
       if (!iso) return '';
       const d = new Date(iso);
@@ -3816,19 +3823,34 @@
 
           const meta = dealMetadata[deal.id] || {};
           const tags = meta.tags || [];
-          const proposalSentAt = meta.proposal_sent_at || null;
+          const proposalSentAt      = meta.proposal_sent_at || null;
+          const proposalMission     = meta.proposal_mission || null;
+          const proposalNom         = meta.proposal_nom || null;
+          const proposalStoragePath = meta.proposal_storage_path || null;
 
           // Tags + proposal — même ligne
+          const MISSION_SHORT = { 'Bilan Carbone':'BC', 'ACV':'ACV', 'FDES':'FDES', 'EPD':'EPD', 'Outil sur-mesure':'Outil' };
+          const missionLabel = proposalMission ? (MISSION_SHORT[proposalMission] || proposalMission) : '';
+          const chipTitle = proposalSentAt
+            ? `Propale générée le ${formatShortDate(proposalSentAt)}${proposalMission ? ' · ' + proposalMission : ''}${proposalNom ? ' · ' + proposalNom : ''} — cliquer pour supprimer`
+            : 'Définir date d\'envoi propale';
+          const chipLabel = proposalSentAt
+            ? `&#128196; ${[missionLabel, formatShortDate(proposalSentAt)].filter(Boolean).join(' · ')}`
+            : '&#9993;';
           const proposalChip = proposalSentAt
-            ? `<span class="deal-proposal-chip sent" onclick="clearProposal(event,'${deal.id}')" title="Propale envoyée le ${formatShortDate(proposalSentAt)} — cliquer pour supprimer">&#9993; ${formatShortDate(proposalSentAt)}</span>`
-            : `<span class="deal-proposal-chip unsent" onclick="setProposalDate(event,'${deal.id}')" title="Définir date d\'envoi propale">&#9993;</span>`;
+            ? `<span class="deal-proposal-chip sent" onclick="clearProposal(event,'${deal.id}')" title="${chipTitle}">${chipLabel}</span>`
+            : `<span class="deal-proposal-chip unsent" onclick="setProposalDate(event,'${deal.id}')" title="${chipTitle}">${chipLabel}</span>`;
+
+          const redownloadBtn = proposalStoragePath
+            ? `<span class="deal-redownload-btn" onclick="redownloadProposal(event,'${deal.id}')" title="Re-télécharger la dernière propale">&#11015;</span>`
+            : '';
 
           const tagsHtml = `<div class="kanban-card-tags" onclick="event.stopPropagation()">${
             tags.map(t => {
               const s = TAG_STYLES[t] || { bg: '#eee', color: '#555' };
               return `<span class="deal-tag" style="background:${s.bg};color:${s.color}" onclick="toggleTag('${deal.id}','${t}')">${t} ×</span>`;
             }).join('')
-          }<span class="deal-tag-add" onclick="openTagMenu(event,'${deal.id}')">+</span><span style="flex:1"></span>${proposalChip}</div>`;
+          }<span class="deal-tag-add" onclick="openTagMenu(event,'${deal.id}')">+</span><span style="flex:1"></span>${redownloadBtn}${proposalChip}</div>`;
 
           html += `<div class="kanban-card${selected}"
               draggable="true"
@@ -8053,9 +8075,6 @@
             nom_entreprise:      document.getElementById('propNom').value.trim(),
             mission,
             langue:              document.getElementById('propLangue').value,
-            secteur:             document.getElementById('propSecteur').value,
-            taille_entreprise:   document.getElementById('propTaille').value,
-            enjeu_principal:     document.getElementById('propEnjeu').value,
             siren:               document.getElementById('propSiren').value.trim(),
             contexte_consultant: contexte,
           }),
@@ -8153,6 +8172,76 @@
       el.classList.add('selected');
       document.getElementById('propLangue').value = value;
       updatePropRecap();
+    }
+
+    let _sirenDebounce = null;
+
+    function closeSirenDropdown() {
+      document.getElementById('sirenDropdown').style.display = 'none';
+    }
+
+    function selectSirenResult(r) {
+      document.getElementById('propSiren').value = r.siren;
+      document.getElementById('propSirenSearch').value = r.nom + (r.siren ? '  ·  ' + r.siren : '');
+      document.getElementById('propSirenSearch').style.borderColor = 'var(--border)';
+      closeSirenDropdown();
+      // Auto-fill nom entreprise si vide
+      const nomEl = document.getElementById('propNom');
+      if (nomEl && !nomEl.value.trim()) { nomEl.value = r.nom; updatePropRecap(); }
+      // Afficher la carte de confirmation
+      const card = document.getElementById('sirenCard');
+      const rows = [
+        ['🏢', r.nom + '  <span style="font-size:.78rem;color:var(--text-secondary)">SIREN ' + r.siren + '</span>'],
+        r.naf_code ? ['🔖', r.naf_code + (r.naf_label ? ' — ' + r.naf_label : '')] : null,
+        r.effectif  ? ['👥', r.effectif] : null,
+        (r.ville || r.code_postal) ? ['📍', [r.adresse, r.ville, r.code_postal].filter(Boolean).join(' ')] : null,
+      ].filter(Boolean);
+      card.style.display = 'block';
+      card.innerHTML = rows.map(([icon, txt]) =>
+        `<div style="display:flex;gap:.5rem;margin-bottom:.2rem"><span>${icon}</span><span>${txt}</span></div>`
+      ).join('') + '<div style="margin-top:.4rem;font-size:.75rem;color:var(--text-secondary)">Source : Data.gouv SIRENE</div>';
+    }
+
+    function onSirenSearch(input) {
+      clearTimeout(_sirenDebounce);
+      const q = input.value.trim();
+      const dropdown = document.getElementById('sirenDropdown');
+      const spinner  = document.getElementById('propSirenSpinner');
+      // Reset si champ vidé
+      if (q.length < 2) {
+        dropdown.style.display = 'none';
+        document.getElementById('sirenCard').style.display = 'none';
+        document.getElementById('propSiren').value = '';
+        return;
+      }
+      spinner.style.display = 'block';
+      _sirenDebounce = setTimeout(async () => {
+        try {
+          const res = await fetch('/api/proposal/siren-search?q=' + encodeURIComponent(q));
+          const data = await res.json();
+          spinner.style.display = 'none';
+          if (!res.ok || !data.results?.length) {
+            dropdown.innerHTML = '<div style="padding:.75rem 1rem;color:var(--text-secondary);font-size:.85rem">Aucun résultat trouvé</div>';
+            dropdown.style.display = 'block';
+            return;
+          }
+          dropdown.innerHTML = data.results.map((r, i) => `
+            <div class="prop-siren-option" onclick="selectSirenResult(${JSON.stringify(r).replace(/"/g,'&quot;')})">
+              <div style="font-weight:600;font-size:.88rem">${r.nom}</div>
+              <div style="font-size:.78rem;color:var(--text-secondary);margin-top:.15rem">
+                ${[r.adresse, r.ville, r.code_postal].filter(Boolean).join(' · ')}
+                ${r.siren ? ' &nbsp;·&nbsp; <span style="font-family:monospace">' + r.siren + '</span>' : ''}
+                ${r.naf_label ? ' &nbsp;·&nbsp; ' + r.naf_label : ''}
+              </div>
+            </div>
+          `).join('');
+          dropdown.style.display = 'block';
+        } catch(e) {
+          spinner.style.display = 'none';
+          dropdown.innerHTML = '<div style="padding:.75rem 1rem;color:#e57373;font-size:.85rem">Erreur réseau</div>';
+          dropdown.style.display = 'block';
+        }
+      }, 500);
     }
 
     function updatePropLangueAuto(mission) {
@@ -8300,9 +8389,6 @@
         const mission            = document.getElementById('propMission').value;
         const subvention         = document.getElementById('propSubvention').value;
         const langue             = document.getElementById('propLangue').value;
-        const secteur            = document.getElementById('propSecteur').value;
-        const taille             = document.getElementById('propTaille').value;
-        const enjeu              = document.getElementById('propEnjeu').value;
         const montant_ht         = document.getElementById('propMontantHt').value || null;
         const iaMode             = document.getElementById('propIaMode').value;
         const siren              = document.getElementById('propSiren')?.value.trim() || null;
@@ -8334,7 +8420,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             nom_entreprise: nom, mission, subvention, logo_base64, deal_id: selectedDealId,
-            langue, secteur, taille_entreprise: taille, enjeu_principal: enjeu,
+            langue,
             montant_ht: montant_ht ? Number(montant_ht) : null,
             siren, contexte_consultant,
             ai_context: iaMode === 'sans' ? IA_EMPTY_CONTEXT : (cachedAiContext || null),

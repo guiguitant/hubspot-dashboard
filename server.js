@@ -6987,7 +6987,7 @@ async function fetchSireneData(siren) {
 }
 
 // Appel Claude API pour générer les placeholders de contexte client
-async function proposalGenerateAIContext({ nom_entreprise, mission, nature, langue, secteur, taille, enjeu, contexte_consultant, siren_data, config }) {
+async function proposalGenerateAIContext({ nom_entreprise, mission, nature, langue, contexte_consultant, siren_data, config }) {
   const fallback = config.ai_personalization.fallback_si_erreur;
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -6997,11 +6997,8 @@ async function proposalGenerateAIContext({ nom_entreprise, mission, nature, lang
 
   const userPrompt = config.ai_personalization.prompt_utilisateur_template
     .replace('{nom_entreprise}',     nom_entreprise       || '')
-    .replace('{secteur}',            secteur              || 'Non précisé')
-    .replace('{taille_entreprise}',  taille               || 'Non précisé')
     .replace('{type_mission}',       mission              || '')
     .replace('{nature_mission}',     nature               || 'Standard')
-    .replace('{enjeu_principal}',    enjeu                || 'Non précisé')
     .replace('{langue}',             langue               || 'FR')
     .replace('{siren_data}',         siren_data           || 'Non renseigné')
     .replace('{contexte_consultant}',contexte_consultant  || '');
@@ -7085,10 +7082,44 @@ try {
   }
 }
 
+// GET /api/proposal/siren-search?q=... — autocomplete SIREN ou raison sociale (Data.gouv, 5 résultats)
+app.get('/api/proposal/siren-search', async (req, res) => {
+  const { q } = req.query;
+  if (!q || q.trim().length < 2) return res.status(400).json({ error: 'Requête trop courte' });
+  const TAILLE_MAP = {
+    '00':'0 salarié','01':'1-2 sal.','02':'3-5 sal.','03':'6-9 sal.',
+    '11':'10-19 sal.','12':'20-49 sal.','21':'50-99 sal.','22':'100-199 sal.',
+    '31':'200-249 sal.','32':'250-499 sal.','41':'500-999 sal.',
+    '42':'1 000-1 999 sal.','51':'2 000-4 999 sal.','52':'5 000-9 999 sal.','53':'10 000+ sal.',
+  };
+  try {
+    const resp = await fetch(
+      `https://recherche-entreprises.api.gouv.fr/search?q=${encodeURIComponent(q.trim())}&page=1&per_page=5`,
+      { signal: AbortSignal.timeout(5000) }
+    );
+    if (!resp.ok) return res.status(502).json({ error: 'Data.gouv indisponible' });
+    const data = await resp.json();
+    const results = (data?.results || []).map(r => ({
+      siren:     r.siren || '',
+      nom:       r.nom_complet || '',
+      naf_code:  r.activite_principale || '',
+      naf_label: r.libelle_activite_principale || '',
+      effectif:  TAILLE_MAP[r.tranche_effectif_salarie || ''] || '',
+      ville:     r.siege?.libelle_commune || '',
+      code_postal: r.siege?.code_postal || '',
+      adresse:   r.siege?.adresse || '',
+    }));
+    res.json({ results });
+  } catch(e) {
+    console.warn('[Proposal SIRENE search]', e.message);
+    res.status(504).json({ error: 'Timeout ou erreur réseau' });
+  }
+});
+
 // POST /api/proposal/ai-context — prévisualisation du contexte IA sans générer le PPTX
 app.post('/api/proposal/ai-context', express.json(), async (req, res) => {
   try {
-    const { mission, langue: langueInput, secteur, taille_entreprise, enjeu_principal, contexte_consultant, siren, nom_entreprise } = req.body || {};
+    const { mission, langue: langueInput, contexte_consultant, siren, nom_entreprise } = req.body || {};
     const mInf = PROPOSAL_MISSION_MAP[mission];
     if (!mInf) return res.status(400).json({ error: `Mission inconnue : ${mission}` });
 
@@ -7100,8 +7131,6 @@ app.post('/api/proposal/ai-context', express.json(), async (req, res) => {
     const aiCtx = await proposalGenerateAIContext({
       nom_entreprise: nom_entreprise || '',
       mission, nature: mInf.nature, langue,
-      secteur: secteur || '', taille: taille_entreprise || '',
-      enjeu: enjeu_principal || '',
       contexte_consultant: contexte_consultant || '',
       siren_data,
       config,
@@ -7141,7 +7170,6 @@ app.post('/api/proposal/generate', express.json({ limit: '20mb' }), async (req, 
     const {
       nom_entreprise, mission, subvention = 'standard', logo_base64,
       langue: langueInput, montant_ht, deal_id,
-      secteur, taille_entreprise, enjeu_principal,
       contexte_consultant, siren,
       ai_context,
       format = 'pptx',
@@ -7168,8 +7196,6 @@ app.post('/api/proposal/generate', express.json({ limit: '20mb' }), async (req, 
       aiCtx = await proposalGenerateAIContext({
         nom_entreprise: nom_entreprise.trim(),
         mission, nature: mInf.nature, langue,
-        secteur: secteur || '', taille: taille_entreprise || '',
-        enjeu: enjeu_principal || '',
         contexte_consultant: contexte_consultant || '',
         siren_data,
         config,
@@ -7210,6 +7236,32 @@ app.post('/api/proposal/generate', express.json({ limit: '20mb' }), async (req, 
     const safeName = nom_entreprise.trim().replace(/[^a-zA-Z0-9 _\-éèêëàâùûüôîïç]/gi, '').trim();
     const pptxBuf  = zip.toBuffer();
 
+    // Sauvegarde automatique dans deal_metadata + Supabase Storage si un deal est lié
+    if (deal_id) {
+      const storagePath = `${deal_id}.pptx`;
+      (async () => {
+        try {
+          const { error: upErr } = await supabaseAdmin.storage
+            .from('proposals')
+            .upload(storagePath, pptxBuf, {
+              contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+              upsert: true,
+            });
+          if (upErr) console.warn('[Proposal] Storage upload:', upErr.message);
+        } catch(e) { console.warn('[Proposal] Storage upload exception:', e.message); }
+
+        const { error: dbErr } = await supabaseAdmin.from('deal_metadata').upsert({
+          deal_id,
+          proposal_sent_at:    new Date().toISOString(),
+          proposal_mission:    mission,
+          proposal_nom:        nom_entreprise.trim(),
+          proposal_storage_path: storagePath,
+          updated_at:          new Date().toISOString(),
+        }, { onConflict: 'deal_id' });
+        if (dbErr) console.warn('[Proposal] deal_metadata upsert:', dbErr.message);
+      })();
+    }
+
     if (format === 'pdf') {
       const pdfBuf = await convertPptxToPdf(pptxBuf);
       res.setHeader('Content-Type', 'application/pdf');
@@ -7222,6 +7274,47 @@ app.post('/api/proposal/generate', express.json({ limit: '20mb' }), async (req, 
     }
   } catch(e) {
     console.error('[Proposal]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/proposal/redownload/:deal_id?format=pptx|pdf
+app.get('/api/proposal/redownload/:deal_id', async (req, res) => {
+  try {
+    const { deal_id } = req.params;
+    const format = req.query.format === 'pdf' ? 'pdf' : 'pptx';
+
+    const { data: meta, error: metaErr } = await supabaseAdmin
+      .from('deal_metadata')
+      .select('proposal_storage_path, proposal_nom, proposal_mission')
+      .eq('deal_id', deal_id)
+      .single();
+
+    if (metaErr || !meta?.proposal_storage_path) {
+      return res.status(404).json({ error: 'Aucune propale stockée pour ce deal' });
+    }
+
+    const { data: fileData, error: dlErr } = await supabaseAdmin.storage
+      .from('proposals')
+      .download(meta.proposal_storage_path);
+
+    if (dlErr || !fileData) return res.status(404).json({ error: 'Fichier introuvable dans le storage' });
+
+    const pptxBuf = Buffer.from(await fileData.arrayBuffer());
+    const safeName = (meta.proposal_nom || 'Proposition').replace(/[^a-zA-Z0-9 _\-éèêëàâùûüôîïç]/gi, '').trim();
+
+    if (format === 'pdf') {
+      const pdfBuf = await convertPptxToPdf(pptxBuf);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="Proposition_${safeName}.pdf"`);
+      res.send(pdfBuf);
+    } else {
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+      res.setHeader('Content-Disposition', `attachment; filename="Proposition_${safeName}.pptx"`);
+      res.send(pptxBuf);
+    }
+  } catch(e) {
+    console.error('[Proposal redownload]', e);
     res.status(500).json({ error: e.message });
   }
 });
