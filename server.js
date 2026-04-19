@@ -7046,10 +7046,14 @@ async function convertPptxToPdf(pptxBuffer) {
   const id       = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const pptxPath = path.join(PROPOSAL_TMP_DIR, `${id}.pptx`);
   const pdfPath  = path.join(PROPOSAL_TMP_DIR, `${id}.pdf`);
-  const pptxEsc  = pptxPath.replace(/\\/g, '\\\\');
-  const pdfEsc   = pdfPath.replace(/\\/g, '\\\\');
 
-  const psScript = `
+  fs.writeFileSync(pptxPath, pptxBuffer);
+  try {
+    if (process.platform === 'win32') {
+      // Windows : PowerShell + COM PowerPoint
+      const pptxEsc = pptxPath.replace(/\\/g, '\\\\');
+      const pdfEsc  = pdfPath.replace(/\\/g, '\\\\');
+      const psScript = `
 $ErrorActionPreference = 'Stop'
 $ppt = New-Object -ComObject PowerPoint.Application
 try {
@@ -7061,18 +7065,26 @@ try {
   [System.Runtime.Interopservices.Marshal]::ReleaseComObject($ppt) | Out-Null
 }
 `.trim();
-
-  fs.writeFileSync(pptxPath, pptxBuffer);
-  try {
-    await new Promise((resolve, reject) => {
-      execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', psScript],
-        { timeout: 45000 },
-        (err, stdout, stderr) => {
-          if (err) reject(new Error(stderr?.trim() || err.message));
+      await new Promise((resolve, reject) => {
+        execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', psScript],
+          { timeout: 45000 },
+          (err, stdout, stderr) => {
+            if (err) reject(new Error(stderr?.trim() || err.message));
+            else resolve();
+          }
+        );
+      });
+    } else {
+      // Linux (Render) : LibreOffice headless
+      await new Promise((resolve, reject) => {
+        execFile('libreoffice', [
+          '--headless', '--convert-to', 'pdf', '--outdir', PROPOSAL_TMP_DIR, pptxPath,
+        ], { timeout: 60000 }, (err, stdout, stderr) => {
+          if (err) reject(new Error('LibreOffice: ' + (stderr?.trim() || err.message)));
           else resolve();
-        }
-      );
-    });
+        });
+      });
+    }
     const pdf = fs.readFileSync(pdfPath);
     console.log('[Proposal PDF] conversion OK', Math.round(pdf.length / 1024), 'KB');
     return pdf;
@@ -7240,6 +7252,15 @@ app.post('/api/proposal/generate', express.json({ limit: '20mb' }), async (req, 
     if (deal_id) {
       const storagePath = `${deal_id}.pptx`;
       (async () => {
+        // Créer le bucket s'il n'existe pas
+        try {
+          const { error: bucketErr } = await supabaseAdmin.storage.createBucket('proposals', { public: false });
+          if (bucketErr && !bucketErr.message.includes('already exists')) {
+            console.warn('[Proposal] Storage createBucket:', bucketErr.message);
+          }
+        } catch(e) {}
+
+        let uploadOk = false;
         try {
           const { error: upErr } = await supabaseAdmin.storage
             .from('proposals')
@@ -7248,15 +7269,16 @@ app.post('/api/proposal/generate', express.json({ limit: '20mb' }), async (req, 
               upsert: true,
             });
           if (upErr) console.warn('[Proposal] Storage upload:', upErr.message);
+          else uploadOk = true;
         } catch(e) { console.warn('[Proposal] Storage upload exception:', e.message); }
 
         const { error: dbErr } = await supabaseAdmin.from('deal_metadata').upsert({
           deal_id,
-          proposal_sent_at:    new Date().toISOString(),
-          proposal_mission:    mission,
-          proposal_nom:        nom_entreprise.trim(),
-          proposal_storage_path: storagePath,
-          updated_at:          new Date().toISOString(),
+          proposal_sent_at:      new Date().toISOString(),
+          proposal_mission:      mission,
+          proposal_nom:          nom_entreprise.trim(),
+          proposal_storage_path: uploadOk ? storagePath : null,
+          updated_at:            new Date().toISOString(),
         }, { onConflict: 'deal_id' });
         if (dbErr) console.warn('[Proposal] deal_metadata upsert:', dbErr.message);
       })();
