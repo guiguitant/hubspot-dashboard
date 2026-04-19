@@ -58,18 +58,15 @@ export function buildSalesNavUrl(criteria) {
     filters.push(`(type:COMPANY_HEADCOUNT,values:List(${hc.join(',')}))`);
   }
 
+  // keywords et instructions Claude ne sont PAS injectés dans la recherche Sales Nav
   const base = 'https://www.linkedin.com/sales/search/people';
-  const keywordParts = (criteria.keywords || []).map(k => encodeURIComponent(`"${k}"`));
-  const keywordString = keywordParts.join('%20');
 
   const filterPart = filters.length > 0 ? `filters:List(${filters.join(',')})` : '';
-  const keywordPart = keywordString ? `keywords:${keywordString}` : '';
 
   const queryParts = [
     'recentSearchParam:(doLogHistory:true)',
     'spellCorrectionEnabled:true',
     filterPart,
-    keywordPart,
   ].filter(Boolean).join(',');
 
   return `${base}?query=(${queryParts})`;
