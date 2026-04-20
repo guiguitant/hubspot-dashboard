@@ -1,4 +1,4 @@
--- Migration 18: New scraping workflow — statuses, attempts counter, extended summaries
+-- Migration 20: New scraping workflow — statuses, attempts counter, extended summaries
 -- Supports the Phase 1 (bulk extract) → Phase 2 (individual visits) workflow
 
 -- 1. Add scrapping_attempts counter to prospects (for soupape: 3 failed visits → "À compléter")

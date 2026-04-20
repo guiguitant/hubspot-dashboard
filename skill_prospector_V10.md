@@ -180,15 +180,18 @@ Comportement :
 - **IDOR check** : `campaign_id` doit appartenir au compte authentifié, sinon 404
 - **Batch max 25** : retourne 400 si `prospects.length > 25`
 - **Dédup 3 niveaux** (skip si match) : `linkedin_url` → `sales_nav_url` → `first_name + last_name + company`
-- **Statut forcé** : `'Profil à valider'` par défaut côté serveur (le champ `status` du body est ignoré)
-- **Flag `partial`** : si `partial: true` dans le body, le statut est `'Profil incomplet'` au lieu de `'Profil à valider'`. Utiliser pour les profils scrapés avec des données manquantes (rate-limit SN).
-- **Pas d'interaction** : le champ `interaction` n'est plus traité
+- **Statut forcé** côté serveur (le champ `status` du body est ignoré) :
+  - Par défaut → `'Profil à valider'`
+  - Si `partial: true` → `'Profil incomplet'` (profils avec données manquantes après rate-limit SN)
+  - Si `scrapping_pending: true` → `'scrapping_pending'` (Phase 1 : en attente de visite individuelle pour linkedin_url)
+- **Limite journalière** : max 50 nouveaux prospects par campagne par jour (retourne 400 si dépassé)
+- **Guard rail partial** : `partial: true` sans `cooldown_triggered: true` est limité à 5 prospects par batch
+- **Batch dedup optimisé** : 1 query au lieu de 3×N — tous les dedup keys chargés en mémoire
 - **Log console** : chaque skip est loggé avec la raison (`linkedin_url`, `sales_nav_url`, `name+company`)
 
 Réponse : `{ created, skipped, errors, total }`
 Retourne 429 si quota d'invitations dépassé → arrêter immédiatement.
-
-⚠️ **Changement v7→v8** : sync ne fait plus de mise à jour des prospects existants. Pour mettre à jour un prospect, utiliser `POST /api/prospector/update-status` ou `PATCH /api/prospector/prospects/:id/enrich`.
+Retourne 400 si limite journalière campagne dépassée (50/jour) → passer à la campagne suivante.
 
 **`GET /api/prospector/prospects/incomplete`**
 Retourne les prospects avec des données manquantes (`linkedin_url` IS NULL, `job_title` vide/NULL, ou `company` vide/NULL).
@@ -197,9 +200,10 @@ Trié par date de création DESC.
 
 **`PATCH /api/prospector/prospects/:id/enrich`**
 Complète les données manquantes d'un prospect existant. Merge partiel — ne met à jour QUE les champs fournis dans le body, sans écraser les champs existants.
-Body : `{ linkedin_url?, job_title?, company? }`
+Body : `{ linkedin_url?, job_title?, company?, visit_failed?: boolean }`
 - Si `linkedin_url` est fourni et déjà utilisé par un autre prospect du même compte → retourne **409 Conflict** avec le prospect existant.
-- **Auto-transition** : si après le merge les 3 champs `linkedin_url` + `job_title` + `company` sont non-vides ET le statut actuel est `'Profil incomplet'`, le statut passe automatiquement à `'Profil à valider'`.
+- **Auto-transition** : si après le merge les 3 champs `linkedin_url` + `job_title` + `company` sont non-vides ET le statut actuel est `'Profil incomplet'` ou `'scrapping_pending'`, le statut passe automatiquement à `'Profil à valider'`.
+- **visit_failed** : si `visit_failed: true`, incrémente `scrapping_attempts`. Si `scrapping_attempts >= 3` et statut = `'scrapping_pending'` → auto-transition vers `'À compléter'` (soupape anti-boucle). Utiliser quand la page profil charge normalement mais que le linkedin_url est introuvable.
 
 **`POST /api/prospector/update-status`**
 Met à jour le statut d'un prospect.
@@ -570,43 +574,28 @@ Si aucune campagne éligible → `await _postSummary()` et STOP.
 
 ⚠️ `sales_nav_url` est auto-générée à la création/modification de la campagne dans Prospector. Si une campagne n'a pas de `sales_nav_url`, c'est qu'elle a été créée avant la mise à jour ou que ses critères sont vides — la skipper avec un log.
 
-### Étape 1b — Enrichissement des profils incomplets (optionnelle, onglet hubspot-dashboard-1c7z.onrender.com/prospector puis Sales Navigator)
+### Étape 1b — Reprise Phase 2 : visites `scrapping_pending` du run précédent (onglet hubspot-dashboard-1c7z.onrender.com/prospector puis Sales Navigator)
 
-Avant d'extraire de nouveaux profils, vérifier s'il existe des profils incomplets à enrichir. Cette étape est prioritaire car elle transforme des données inutiles en prospects exploitables.
+Avant d'extraire de nouveaux profils, vérifier s'il existe des profils `scrapping_pending` (Phase 1 terminée, linkedin_url manquant) laissés par un run précédent interrompu (rate-limit, crash, time_limit).
+
+⚠️ Cette étape consomme des visites individuelles (budget rate-limit). Elle est scopée **par campagne** pour éviter la cascade cross-campagne.
 
 ```javascript
-// Pour chaque campagne, vérifier les profils incomplets
 for (const campaign of campaigns) {
-  const incResp = await fetch(`/api/prospector/prospects/incomplete?campaign_id=${campaign.id}&limit=50`, { headers });
-  const incompleteProfiles = await incResp.json();
-  if (!incompleteProfiles.length) continue;
+  // Chercher les profils scrapping_pending pour cette campagne
+  const pendingResp = await fetch(
+    `/api/prospector/prospects?campaign_id=${campaign.id}&status=scrapping_pending&include_pending=true`, 
+    { headers }
+  );
+  const pendingProfiles = await pendingResp.json();
+  if (!pendingProfiles.length) continue;
 
-  console.log(`📋 ${incompleteProfiles.length} profils incomplets pour ${campaign.name} — tentative d'enrichissement (max ${MAX_ENRICHMENTS_PER_CAMPAIGN})`);
-  let _enrichedThisCampaign = 0;
+  console.log(`🔄 ${pendingProfiles.length} profils scrapping_pending pour ${campaign.name} — reprise Phase 2`);
 
-  for (const profile of incompleteProfiles) {
-    if (_enrichedThisCampaign >= MAX_ENRICHMENTS_PER_CAMPAIGN) {
-      console.log(`  ⏸️ Limite enrichissement atteinte (${MAX_ENRICHMENTS_PER_CAMPAIGN}) — passage à la campagne suivante`);
-      break;
-    }
-    if (!profile.sales_nav_url) {
-      // Profil orphelin : pas de sales_nav_url → impossible à enrichir
-      // Si créé depuis plus de 3 jours → marquer Non pertinent pour ne pas polluer la file
-      const ageMs = Date.now() - new Date(profile.created_at).getTime();
-      const ageDays = ageMs / (1000 * 60 * 60 * 24);
-      if (ageDays > 3) {
-        await fetch('/api/prospector/update-status', {
-          method: 'POST', headers,
-          body: JSON.stringify({ id: profile.id, status: 'Non pertinent' })
-        });
-        console.log(`  🗑️ ${profile.first_name} ${profile.last_name} — orphelin > 3j, marqué Non pertinent`);
-      } else {
-        console.log(`  ⏭️ ${profile.first_name} ${profile.last_name} — pas de sales_nav_url, skip (créé il y a ${Math.round(ageDays)}j)`);
-      }
-      continue;
-    }
+  for (const profile of pendingProfiles) {
+    if (!profile.sales_nav_url) continue; // pas de sales_nav_url → impossible à visiter
 
-    // Compteurs + pause préventive (même logique que Étape 2d)
+    // Compteurs + pause préventive (même logique que Phase 2)
     _totalProfileVisits++;
     _visitsSinceBreak++;
     _summary.profile_visits_sn++;
@@ -617,34 +606,55 @@ for (const campaign of campaigns) {
     }
     // Délai aléatoire OBLIGATOIRE avant chaque visite de profil SN
     await new Promise(r => setTimeout(r, 21000 + Math.random() * 18000)); // 21–39s (30s ±30%)
+
     // Naviguer vers le profil SN (onglet Sales Navigator)
-    // Extraire linkedin_url, job_title, company selon les patterns 2d
+    // → Extraire linkedin_url, job_title, company selon les patterns Phase 2 (Étape 2g)
 
-    const enrichData = {};
-    if (!profile.linkedin_url && extractedLinkedinUrl) enrichData.linkedin_url = extractedLinkedinUrl;
-    if (!profile.job_title && extractedJobTitle) enrichData.job_title = extractedJobTitle;
-    if (!profile.company && extractedCompany) enrichData.company = extractedCompany;
+    const rlSignal = detectRateLimit(document.body.innerText);
 
-    if (Object.keys(enrichData).length > 0) {
-      // Basculer sur l'onglet API
+    if (rlSignal) {
+      // Rate-limit détecté → arrêter la reprise, passer à l'Étape 2 (Phase 1)
+      _consecutiveEmptyPages++;
+      if (_consecutiveEmptyPages >= 2) {
+        _summary.cooldown_triggered = true;
+        console.log(`⚠️ Rate-limit SN (${rlSignal}) pendant reprise — stop`);
+        break;
+      }
+      continue;
+    }
+    _consecutiveEmptyPages = 0;
+
+    // Page OK — chercher le linkedin_url
+    const linkedinLink = /* extraction overflow button → a[href*="linkedin.com/in/"] (voir 2g) */;
+    const extractedLinkedinUrl = linkedinLink?.href || null;
+
+    if (extractedLinkedinUrl) {
+      // Aussi mettre à jour company/job_title si meilleures données depuis la page profil
+      const enrichData = { linkedin_url: extractedLinkedinUrl };
+      // ... extraire job_title et company depuis la page profil (voir patterns 2g)
+      // Si plus complets que les données existantes, les inclure dans enrichData
+
       const enrichResp = await fetch(`/api/prospector/prospects/${profile.id}/enrich`, {
         method: 'PATCH', headers,
         body: JSON.stringify(enrichData)
       });
       if (enrichResp.ok) {
         _summary.profiles_enriched++;
-        _enrichedThisCampaign++;
-        console.log(`  ✅ Enrichi : ${profile.first_name} ${profile.last_name} (${_enrichedThisCampaign}/${MAX_ENRICHMENTS_PER_CAMPAIGN})`);
+        console.log(`  ✅ ${profile.first_name} ${profile.last_name} → Profil à valider`);
       } else if (enrichResp.status === 409) {
         console.log(`  ⚠️ Doublon linkedin_url pour ${profile.first_name} ${profile.last_name}`);
       }
+    } else {
+      // Page OK mais linkedin_url introuvable → profil définitivement incomplet
+      await fetch(`/api/prospector/prospects/${profile.id}/enrich`, {
+        method: 'PATCH', headers,
+        body: JSON.stringify({ visit_failed: true })
+      });
+      console.log(`  ❌ ${profile.first_name} ${profile.last_name} — linkedin_url introuvable, visit_failed`);
     }
 
-    // Si rate-limit détecté pendant l'enrichissement → passer directement à l'Étape 2
-    if (_consecutiveEmptyPages >= 2) {
-      console.log('⚠️ Rate-limit SN pendant enrichissement — passage à l\'extraction');
-      break;
-    }
+    // Si rate-limit → stop reprise
+    if (_consecutiveEmptyPages >= 2) break;
   }
 }
 ```
@@ -652,24 +662,33 @@ for (const campaign of campaigns) {
 Signal de succès : `_summary.profiles_enriched > 0` dans le résumé final.
 Signal d'échec : rate-limit SN → passer à l'Étape 2 sans bloquer.
 
-### Étape 2 — Pour chaque campagne : extraction Sales Navigator
+### Étape 2 — Pour chaque campagne : Phase 1 (bulk extract) + Phase 2 (visites individuelles)
+
+**Architecture en 2 phases** :
+- **Phase 1** : extraire les profils depuis les **cartes** de résultats SN (nom, company, job_title, sales_nav_url). Rapide, aucune visite individuelle, aucun risque de rate-limit.
+- **Phase 2** : visiter individuellement chaque profil pour récupérer le **linkedin_url**. Lent (30s entre chaque), risque de rate-limit.
+
+Les profils sont sync'd en DB entre les deux phases avec le statut `scrapping_pending` (invisible en front). Nathan ne voit rien tant que Phase 2 n'a pas promu le profil en `Profil à valider`.
 
 **Avant chaque campagne**, vérifier 3 garde-fous :
 1. `_totalSubmitted >= (_isWarmUp ? 20 : MAX_PROFILES_PER_RUN)` → arrêter si atteint
-2. `Date.now() - _startedAt > 70 * 60 * 1000` → arrêter si > 70 min (marge de sécurité avant le lock de 90 min). Mettre `_stopped_reason = 'time_limit'`.
-3. **Délai inter-campagne** : si ce n'est pas la première campagne, attendre 10-20s aléatoire avant de démarrer :
+2. `Date.now() - _startedAt > 70 * 60 * 1000` → arrêter si > 70 min. Mettre `_stopped_reason = 'time_limit'`.
+3. **Délai inter-campagne** : si ce n'est pas la première campagne, attendre 10-20s aléatoire :
 ```javascript
 if (_summary.campaigns_processed > 0) {
   await new Promise(r => setTimeout(r, 10000 + Math.random() * 10000)); // 10–20s
 }
 ```
 
-⚠️ **Reprise automatique au prochain run** : si le run s'arrête en cours de campagne (time_limit, quota, rate-limit), les profils déjà sync ne seront pas re-créés grâce à la dédup (Étape 2a+2e). Le prochain run reprendra naturellement : il scannera les pages de résultats SN déjà traitées (rapide, pas de visite individuelle), la dédup filtrera les profils connus, et l'extraction se poursuivra avec les profils non encore traités.
+⚠️ **Reprise automatique** : si le run s'arrête pendant Phase 1, la dédup empêche les doublons au prochain run. Si le run s'arrête pendant Phase 2, les profils restent en `scrapping_pending` et l'Étape 1b du prochain run les reprend.
+
+---
 
 #### 2a — Récupérer les profils existants (onglet hubspot-dashboard-1c7z.onrender.com/prospector)
 
 ```javascript
-const existingResp = await fetch(`/api/prospector/prospects?campaign_id=${campaign.id}`, { headers });
+// include_pending=true pour inclure les scrapping_pending dans la dédup
+const existingResp = await fetch(`/api/prospector/prospects?campaign_id=${campaign.id}&include_pending=true`, { headers });
 const existing = await existingResp.json();
 const existingLinkedinUrls = new Set(
   existing.map(p => normalizeLinkedinUrl(p.linkedin_url) || '')
@@ -682,15 +701,14 @@ const existingNameCompany = new Set(
 );
 ```
 ⚠️ Déduplication 3 niveaux (alignée sur le serveur) : `linkedin_url` → `sales_nav_url` → `nom+prénom+company`.
-⚠️ Normalisation `linkedin_url` : utiliser `normalizeLinkedinUrl()` (définie à l'Étape 2d) — extrait le slug et reconstruit l'URL, identique au serveur.
-⚠️ Normalisation `sales_nav_url` : `.toLowerCase().replace(/\/$/, '').split('?')[0]` (pas de slug à extraire).
-⚠️ Déduplication par campagne. Un même profil peut exister dans 2 campagnes — c'est voulu.
+⚠️ Normalisation `linkedin_url` : utiliser `normalizeLinkedinUrl()` (définie ci-dessous) — extrait le slug et reconstruit l'URL, identique au serveur.
+⚠️ Normalisation `sales_nav_url` : `.toLowerCase().replace(/\/$/, '').split('?')[0]`.
+⚠️ `include_pending=true` est nécessaire pour que la dédup voie les profils `scrapping_pending` déjà en DB.
 
 #### 2b — Construire les exclusions
 
 ```javascript
 const criteria = campaign.criteria || {};
-// Exclusions extraites depuis criteria.jobTitles (type = 'exclude')
 const criteriaExclusions = (criteria.jobTitles || [])
   .filter(t => t.type === 'exclude')
   .map(t => t.value.toLowerCase());
@@ -702,31 +720,26 @@ const allExclusions = [...UNIVERSAL_EXCLUSIONS, ...criteriaExclusions];
 const toSync = [];
 ```
 
-⚠️ `excluded_keywords` n'existe plus en DB — les exclusions sont dans `criteria.jobTitles[].type = 'exclude'`.
+---
+
+#### Phase 1 — Extraction bulk depuis les cartes SN (aucune visite individuelle)
 
 #### 2c — Naviguer vers la recherche Sales Navigator (onglet Sales Nav)
 
-**Objectif** : ouvrir la recherche Sales Navigator avec les filtres de la campagne, puis extraire les profils.
-
-##### Navigation — utiliser `campaign.sales_nav_url`
-
-Chaque campagne a une URL Sales Navigator pré-générée (`campaign.sales_nav_url`) qui encode tous les filtres (postes, secteurs, géographies, niveaux hiérarchiques, effectifs, mots-clés). **Naviguer directement vers cette URL** — pas besoin de construire manuellement les filtres ou d'interagir avec l'UI de filtrage.
+Chaque campagne a une URL Sales Navigator pré-générée (`campaign.sales_nav_url`) qui encode tous les filtres.
 
 ```javascript
-// Basculer sur onglet Sales Nav
 window.location.href = campaign.sales_nav_url;
 // Attendre le chargement complet (les cartes de profils doivent être visibles)
 ```
 
-**Vérification après chargement** : si la page affiche 0 résultats, des filtres incorrects, ou une erreur — loguer et passer à la campagne suivante. Les IDs des filtres (secteurs, géographies) ont été vérifiés mais un changement côté LinkedIn est toujours possible.
+**Vérification** : si la page affiche 0 résultats ou une erreur → loguer et passer à la campagne suivante.
 
-**Fallback** : si `sales_nav_url` produit une erreur, il est possible de naviguer vers `https://www.linkedin.com/sales/search/people/` et d'appliquer les filtres manuellement depuis l'UI. C'est une approche de dernier recours — l'UI de filtrage est instable et les panels peuvent disparaître du DOM.
+#### 2d — Extraire les profils depuis les cartes de résultats
 
-##### Extraction des profils depuis la liste de résultats (patterns indicatifs)
+**Objectif** : récupérer `sales_nav_url` + `nom` + `company` + `job_title` pour chaque profil visible sur la page. **Aucune visite de profil individuel à ce stade.**
 
-**Objectif** : récupérer `sales_nav_url` + nom complet pour chaque profil visible sur la page.
-
-Le DOM de Sales Navigator varie selon les pages et les versions. Deux patterns connus à essayer dans l'ordre :
+Le DOM de Sales Navigator varie. Deux patterns connus à essayer dans l'ordre :
 
 **Pattern A — liens directs** (comportement le plus courant sur page 1)
 ```javascript
@@ -734,7 +747,7 @@ const links = document.querySelectorAll('a[href*="/sales/lead/"]');
 // → each link href IS the sales_nav_url
 ```
 
-**Pattern B — attributs data** (pages 2+, ou quand les cards sont en lazy-load)
+**Pattern B — attributs data** (pages 2+, lazy-load)
 ```javascript
 const divs = document.querySelectorAll('[data-scroll-into-view*="fs_salesProfile"]');
 for (const div of divs) {
@@ -742,36 +755,145 @@ for (const div of divs) {
   const match = urn.match(/fs_salesProfile:\(([^,]+),(NAME_SEARCH,[^)]+)\)/);
   if (match) {
     const sales_nav_url = `https://www.linkedin.com/sales/lead/${match[1]},${match[2]}`;
-    const label = div.querySelector('.a11y-text');
-    const fullName = label?.textContent.trim().match(/Ajouter (.+) à la sélection/)?.[1] || '';
   }
 }
 ```
 
-Signal de succès : au moins 10 profils trouvés sur page 1 d'une campagne active.
-Signal d'échec : 0 profils avec les deux patterns → inspecter librement le DOM (`document.body.innerText`, `document.querySelectorAll('a[href]')`) pour comprendre la structure actuelle. Le DOM de Sales Navigator évolue — **ne pas bloquer, adapter**.
+**Extraction des données depuis la carte** (pour chaque profil trouvé) :
 
-**Pagination** : 25 résultats/page. Max `Math.ceil(MAX_PROFILES_PER_CAMPAIGN / 25)` pages (soit 2 pages pour 30 profils). Arrêter si `toSync.length >= MAX_PROFILES_PER_CAMPAIGN`. Paginer via le bouton "Suivant" de l'UI plutôt qu'en modifiant l'URL manuellement.
+Chaque carte de résultat SN affiche le nom, le poste et l'entreprise dans le texte visible. Extraire ces données via le DOM de la carte (pas besoin de visiter le profil) :
 
-⚠️ **Délai entre les pages** : attendre 5-10s aléatoire après chaque clic "Suivant" avant d'extraire les profils.
+```javascript
+// Le container de la carte est l'ancêtre commun du lien profil
+// Adapter les sélecteurs au DOM actuel — ces patterns sont indicatifs
+const card = link.closest('li') || link.closest('[data-scroll-into-view]');
+if (!card) continue;
+
+const cardText = card.innerText;
+const cardLines = cardText.split('\n').map(l => l.trim()).filter(Boolean);
+
+// Le nom est le texte du lien profil
+const fullName = link.textContent.trim();
+const nameParts = fullName.split(' ');
+const first_name = nameParts[0] || '';
+const last_name = nameParts.slice(1).join(' ') || '';
+
+// Le poste et l'entreprise sont dans les lignes suivantes de la carte
+// Pattern courant : "Directeur général chez Entreprise X"
+// ou bien : titre sur une ligne, entreprise sur la suivante
+let job_title = '', company = '';
+for (const line of cardLines) {
+  const chezMatch = line.match(/^(.+?) chez (.+)$/);
+  if (chezMatch) {
+    job_title = chezMatch[1];
+    company = chezMatch[2];
+    break;
+  }
+}
+// Fallback : chercher un lien vers la page entreprise dans la carte
+if (!company) {
+  const companyLink = card.querySelector('a[href*="/sales/company/"]');
+  company = companyLink?.textContent.trim() || '';
+}
+```
+
+Signal de succès : au moins 10 profils trouvés sur page 1 avec nom + company.
+Signal d'échec : 0 profils → inspecter le DOM (`document.body.innerText`, `document.querySelectorAll('a[href]')`) pour comprendre la structure actuelle. **Ne pas bloquer, adapter.**
+
+**Pagination** : 25 résultats/page. Paginer via le bouton "Suivant".
+
+⚠️ **Délai entre les pages** :
 ```javascript
 await new Promise(r => setTimeout(r, 5000 + Math.random() * 5000)); // 5–10s entre pages
 ```
 
-**Filtrage par exclusion :**
+**Filtrage par exclusion** (appliqué immédiatement sur les données de la carte) :
 ```javascript
-const jobTitle = (profile.job_title || '').toLowerCase();
-if (allExclusions.some(word => jobTitle.includes(word))) {
+if (allExclusions.some(word => job_title.toLowerCase().includes(word))) {
   _summary.profiles_rejected_excluded++;
   continue;
 }
 ```
 
-##### Extraction des données de profil (nom, titre, entreprise)
+#### 2e — Déduplication et validation
 
-⚠️ **AVANT chaque navigation vers un profil individuel** :
+```javascript
+_summary.profiles_found++;
+const normalizedSalesUrl = (profile.sales_nav_url || '').toLowerCase().replace(/\/$/, '').split('?')[0];
+const nameCompanyKey = `${first_name.toLowerCase().trim()}|${last_name.toLowerCase().trim()}|${company.toLowerCase().trim()}`;
 
-1. **Pause préventive toutes les 20 visites** (évite le rate-limit avant qu'il ne se déclenche) :
+// Phase 1 n'a pas de linkedin_url → dédup sur sales_nav_url et name+company uniquement
+if (existingSalesNavUrls.has(normalizedSalesUrl) || existingNameCompany.has(nameCompanyKey)) {
+  _summary.profiles_rejected_duplicates++;
+  continue;
+}
+
+toSync.push({ first_name, last_name, company, job_title, sales_nav_url });
+existingSalesNavUrls.add(normalizedSalesUrl);
+existingNameCompany.add(nameCompanyKey);
+
+if (toSync.length >= MAX_PROFILES_PER_RUN) break;
+```
+
+#### 2f — Sync Phase 1 → statut `scrapping_pending` (onglet hubspot-dashboard-1c7z.onrender.com/prospector)
+
+⚠️ **Micro-batches de 5 profils** : sync par petits lots pendant la boucle de scraping.
+
+```javascript
+async function syncPhase1(profiles, campaignId) {
+  const result = await fetchWithRetry('/api/prospector/sync', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      campaign_id: campaignId,
+      scrapping_pending: true,  // → statut 'scrapping_pending'
+      prospects: profiles.map(p => ({
+        first_name: p.first_name, last_name: p.last_name,
+        sales_nav_url: p.sales_nav_url,
+        company: p.company, job_title: p.job_title,
+        // linkedin_url: absent → sera ajouté en Phase 2
+      }))
+    })
+  });
+  if (!result) { _errors.push({ step: '2f', message: `Sync failed for ${profiles.length} profiles` }); return; }
+  _summary.profiles_submitted += profiles.length;
+  _summary.profiles_created += result.created || 0;
+  _summary.profiles_created_partial += result.created || 0;
+  _summary.profiles_rejected_duplicates += result.skipped || 0;
+  _totalSubmitted += result.created || 0;
+  console.log(`Phase 1 sync: ${result.created} créés (scrapping_pending), ${result.skipped} skippés`);
+}
+
+// DANS la boucle de scraping (2c-2e) — sync dès 5 profils accumulés :
+if (toSync.length >= 5) {
+  await syncPhase1(toSync, campaign.id);
+  toSync.length = 0;
+}
+
+// EN FIN de Phase 1 — sync le reste
+if (toSync.length > 0) {
+  await syncPhase1(toSync, campaign.id);
+  toSync.length = 0;
+}
+```
+
+---
+
+#### Phase 2 — Visites individuelles pour linkedin_url
+
+#### 2g — Visiter chaque profil `scrapping_pending` (onglet Sales Nav puis onglet API)
+
+Récupérer la liste des profils à visiter depuis l'API :
+```javascript
+const pendingResp = await fetch(
+  `/api/prospector/prospects?campaign_id=${campaign.id}&status=scrapping_pending&include_pending=true`,
+  { headers }
+);
+const pendingProfiles = await pendingResp.json();
+```
+
+Pour chaque profil :
+
+**1. Délais obligatoires AVANT chaque visite** :
 ```javascript
 _totalProfileVisits++;
 _visitsSinceBreak++;
@@ -781,69 +903,43 @@ if (_visitsSinceBreak >= BREAK_EVERY_N_VISITS) {
   await new Promise(r => setTimeout(r, BREAK_DURATION_MS)); // 5 min
   _visitsSinceBreak = 0;
 }
-```
-
-2. **Délai aléatoire entre chaque profil** :
-```javascript
 await new Promise(r => setTimeout(r, 21000 + Math.random() * 18000)); // 21–39s (30s ±30%)
 ```
-Ne JAMAIS retirer ou réduire ce délai. Un intervalle fixe est détectable comme automatisation — la composante aléatoire est volontaire.
+Ne JAMAIS retirer ou réduire ce délai.
 
-Une fois sur la page du profil individuel, le contenu est accessible via `document.body.innerText`. Pattern habituel :
-
+**2. Naviguer vers le profil** (onglet Sales Nav) :
 ```javascript
-const lines = document.body.innerText.split('\n').map(l => l.trim()).filter(Boolean);
-const posteIdx = lines.findIndex(l => l === 'Poste actuel' || l === 'Postes actuels');
-const currentTitle = lines[posteIdx + 1] || '';
-// Format habituel : "Directeur général chez Entreprise X"
-const match = currentTitle.match(/^(.+?) chez (.+)$/);
-const job_title = match?.[1] || currentTitle;
-const company   = match?.[2] || document.querySelector('a[href*="/sales/company/"]')?.textContent.trim() || '';
+window.location.href = profile.sales_nav_url;
+// Attendre le chargement complet
 ```
 
-Si `posteIdx === -1` ou si le pattern "chez" ne matche pas, inspecter les premières lignes après le nom pour identifier la structure actuelle — elle peut varier.
-
-**Profil inaccessible (page vide ou erreur de chargement)** : si la page individuelle ne charge pas après 2 tentatives (reload), soumettre le profil avec les données disponibles depuis la liste de résultats :
-- `first_name`, `last_name` : extraits du fullName de la liste
-- `sales_nav_url` : construite depuis l'URN
-- `linkedin_url` : null
-- `job_title` : '' (vide)
-- `company` : '' (vide)
-
-Le prospect sera créé en statut `'Profil incomplet'` (via le split complet/partiel de l'Étape 2f) et les données manquantes pourront être complétées automatiquement lors d'un prochain run (Étape 1b) ou manuellement.
-
-**Détection captcha / rate limit Sales Navigator :**
-Si Sales Navigator affiche un captcha, "You've reached the commercial use limit", une page blanche ou un redirect login :
+**3. Vérifier le rate-limit** :
 ```javascript
-_stopped_reason = 'rate_limited';
-await _postSummary();
-return; // le finally relâche le lock
+const rlSignal = detectRateLimit(document.body.innerText);
+if (rlSignal) {
+  _consecutiveEmptyPages++;
+  if (_consecutiveEmptyPages >= 2) {
+    _summary.cooldown_triggered = true;
+    console.log(`⚠️ Rate-limit SN (${rlSignal}) en Phase 2 — stop, restants gérés au prochain run`);
+    break; // → les profils restent en scrapping_pending pour l'Étape 1b du prochain run
+  }
+  continue;
+}
+_consecutiveEmptyPages = 0;
 ```
 
-#### 2d — Extraire l'URL LinkedIn classique (onglet Sales Nav)
-
-**Objectif** : obtenir une URL de format `linkedin.com/in/slug` pour chaque profil. Cette URL est distincte de la `sales_nav_url` et sert de clé de déduplication dans Prospector.
-
-**Important** : l'URL LinkedIn classique n'est pas présente dans le DOM de la liste de résultats. Il faut naviguer sur la page du profil individuel pour l'obtenir.
-
-**Méthode principale — bouton overflow sur la page de profil**
-
-Sur la page du profil individuel, un bouton d'actions supplémentaires expose un lien direct vers le profil LinkedIn public :
-
+**4. Extraire le linkedin_url** (bouton overflow) :
 ```javascript
-// 1. Cliquer le bouton overflow (le libellé peut varier selon la langue de l'interface)
 const btn = document.querySelector(
   'button[aria-label="Ouvrir le menu de dépassement de capacité des actions"]'
 );
 if (btn) btn.click();
-
-// 2. Attendre l'apparition du menu (~1-2s), puis chercher le lien
 await new Promise(r => setTimeout(r, 1500));
 const linkedinLink = document.querySelector('a[href*="linkedin.com/in/"]');
 const linkedin_url = linkedinLink?.href || null;
 ```
 
-Si le libellé du bouton a changé, chercher plus largement :
+Fallback si le libellé a changé :
 ```javascript
 const overflowBtn = Array.from(document.querySelectorAll('button[aria-label]')).find(b =>
   b.getAttribute('aria-label').toLowerCase().includes('menu') ||
@@ -851,7 +947,7 @@ const overflowBtn = Array.from(document.querySelectorAll('button[aria-label]')).
 );
 ```
 
-**Normalisation** (alignée sur `normalizeLinkedinUrl()` côté serveur — extrait le slug et reconstruit l'URL)
+**Normalisation** :
 ```javascript
 function normalizeLinkedinUrl(url) {
   if (!url) return null;
@@ -859,88 +955,56 @@ function normalizeLinkedinUrl(url) {
   const match = url.match(/linkedin\.com\/in\/([a-zA-Z0-9\-_%]+)/);
   return match ? `https://www.linkedin.com/in/${match[1].toLowerCase()}` : url.toLowerCase();
 }
-const normalized = normalizeLinkedinUrl(linkedin_url);
+```
+
+**5. Aussi extraire company/job_title depuis la page profil** (données potentiellement plus complètes que la carte) :
+```javascript
+const lines = document.body.innerText.split('\n').map(l => l.trim()).filter(Boolean);
+const posteIdx = lines.findIndex(l => l === 'Poste actuel' || l === 'Postes actuels');
+const currentTitle = lines[posteIdx + 1] || '';
+const chezMatch = currentTitle.match(/^(.+?) chez (.+)$/);
+const profileJobTitle = chezMatch?.[1] || currentTitle;
+const profileCompany = chezMatch?.[2] || document.querySelector('a[href*="/sales/company/"]')?.textContent.trim() || '';
+```
+
+**6. Enrichir le profil** (onglet API) :
+```javascript
+if (linkedin_url) {
+  const enrichData = { linkedin_url: normalizeLinkedinUrl(linkedin_url) };
+  // Mettre à jour company/job_title si la page profil donne des données plus complètes
+  if (profileJobTitle && profileJobTitle.length > (profile.job_title || '').length) {
+    enrichData.job_title = profileJobTitle;
+  }
+  if (profileCompany && profileCompany.length > (profile.company || '').length) {
+    enrichData.company = profileCompany;
+  }
+
+  const enrichResp = await fetch(`/api/prospector/prospects/${profile.id}/enrich`, {
+    method: 'PATCH', headers,
+    body: JSON.stringify(enrichData)
+  });
+  // Auto-promotion : scrapping_pending → Profil à valider (côté serveur)
+  if (enrichResp.ok) {
+    _summary.profiles_created_complete++;
+    _summary.profiles_enriched++;
+    console.log(`  ✅ ${profile.first_name} ${profile.last_name} → Profil à valider`);
+  } else if (enrichResp.status === 409) {
+    console.log(`  ⚠️ Doublon linkedin_url pour ${profile.first_name} ${profile.last_name}`);
+  }
+} else {
+  // Page OK mais linkedin_url introuvable → profil définitivement incomplet
+  await fetch(`/api/prospector/prospects/${profile.id}/enrich`, {
+    method: 'PATCH', headers,
+    body: JSON.stringify({ visit_failed: true })
+  });
+  console.log(`  ❌ ${profile.first_name} ${profile.last_name} — pas de linkedin_url, visit_failed (${profile.scrapping_attempts + 1}/3)`);
+}
 ```
 
 ⚠️ Ne jamais utiliser une URL Sales Navigator comme `linkedin_url`.
-⚠️ Si introuvable après avoir tenté le bouton overflow → loguer et continuer avec `linkedin_url = null`. Le prospect sera créé sans `linkedin_url` — la déduplication se fera par `sales_nav_url` ou `nom+prénom+company`. Task 2 ne pourra pas envoyer d'invitation à ce prospect tant que `linkedin_url` n'est pas renseigné.
 
-**En cas de rate-limit ou captcha** : si Sales Navigator devient hostile pendant l'extraction des profils individuels, il est préférable de sauvegarder les profils déjà collectés (même sans `linkedin_url` pour certains) plutôt que de tout perdre. Les `linkedin_url` manquants pourront être complétés lors d'une session ultérieure.
-
-#### 2e — Déduplication et validation (onglet hubspot-dashboard-1c7z.onrender.com/prospector)
-
+**Fin de campagne :**
 ```javascript
-try {
-  _summary.profiles_found++;
-  const normalizedUrl = normalizeLinkedinUrl(profile.linkedin_url) || '';
-  const normalizedSalesUrl = (profile.sales_nav_url || '').toLowerCase().replace(/\/$/, '').split('?')[0];
-  const nameCompanyKey = `${(profile.first_name || '').toLowerCase().trim()}|${(profile.last_name || '').toLowerCase().trim()}|${(profile.company || '').toLowerCase().trim()}`;
-  if (existingLinkedinUrls.has(normalizedUrl) || existingSalesNavUrls.has(normalizedSalesUrl) || existingNameCompany.has(nameCompanyKey)) {
-    _summary.profiles_rejected_duplicates++;
-    continue;
-  }
-  toSync.push(profile);
-  existingLinkedinUrls.add(normalizedUrl);
-  existingSalesNavUrls.add(normalizedSalesUrl);
-  existingNameCompany.add(nameCompanyKey);
-  if (toSync.length >= MAX_PROFILES_PER_CAMPAIGN) break;
-  if (_totalSubmitted + toSync.length >= MAX_PROFILES_PER_RUN) break;
-} catch (err) {
-  _errors.push({ step: '2e', message: err.message });
-}
-```
-
-#### 2f — Synchroniser dans Prospector (onglet hubspot-dashboard-1c7z.onrender.com/prospector)
-
-⚠️ **Micro-batches de 5 profils** : pour éviter de perdre des données en cas de crash, sync par petits lots **pendant** la boucle de scraping, pas uniquement en fin de campagne. Dès que `toSync` contient 5 profils validés, basculer sur l'onglet API, sync, puis reprendre le scraping.
-
-Séparer les profils en deux groupes avant chaque sync :
-- **Complets** : ont `linkedin_url` + `job_title` + `company` → sync normal (statut `'Profil à valider'`)
-- **Partiels** : manquent un ou plusieurs de ces champs → sync avec `partial: true` (statut `'Profil incomplet'`)
-
-```javascript
-// Fonction de sync réutilisable — utilise fetchWithRetry pour la résilience
-async function syncProfiles(profiles, campaignId) {
-  const complete = profiles.filter(p => p.linkedin_url && p.job_title && p.company);
-  const partial = profiles.filter(p => !p.linkedin_url || !p.job_title || !p.company);
-
-  for (const [group, isPartial] of [[complete, false], [partial, true]]) {
-    if (!group.length) continue;
-    const result = await fetchWithRetry('/api/prospector/sync', {
-      method: 'POST', headers,
-      body: JSON.stringify({
-        campaign_id: campaignId,
-        partial: isPartial || undefined,
-        prospects: group.map(p => ({
-          first_name: p.first_name, last_name: p.last_name,
-          linkedin_url: p.linkedin_url, sales_nav_url: p.sales_nav_url,
-          company: p.company, job_title: p.job_title,
-        }))
-      })
-    });
-    if (!result) { _errors.push({ step: '2f', message: `Sync failed for ${group.length} profiles` }); continue; }
-    _summary.profiles_submitted += group.length;
-    _summary.profiles_created += result.created || 0;
-    if (isPartial) _summary.profiles_created_partial += result.created || 0;
-    else _summary.profiles_created_complete += result.created || 0;
-    _summary.profiles_rejected_duplicates += result.skipped || 0;
-    _totalSubmitted += result.created || 0;
-    console.log(`Sync${isPartial ? ' (partial)' : ''}: ${result.created} créés, ${result.skipped} skippés`);
-  }
-}
-
-// DANS la boucle de scraping (Étape 2c-2e) — sync dès 5 profils accumulés :
-if (toSync.length >= 5) {
-  // Basculer sur onglet API
-  await syncProfiles(toSync, campaign.id);
-  toSync.length = 0; // vider le buffer
-}
-
-// EN FIN de campagne — sync le reste (< 5 profils)
-if (toSync.length > 0) {
-  await syncProfiles(toSync, campaign.id);
-  toSync.length = 0;
-}
 _summary.campaigns_processed++;
 ```
 
@@ -957,7 +1021,6 @@ await _postSummary();
 async function _postSummary() {
   const duration = Math.round((Date.now() - _startedAt) / 1000);
   try {
-    // Body standard pour le backend (champs connus du schéma uniquement)
     await fetch('/api/scraping/summary', {
       method: 'POST', headers,
       body: JSON.stringify({
@@ -969,6 +1032,11 @@ async function _postSummary() {
         profiles_rejected_excluded: _summary.profiles_rejected_excluded,
         profiles_submitted: _summary.profiles_submitted,
         profiles_created: _summary.profiles_created,
+        profiles_created_complete: _summary.profiles_created_complete,
+        profiles_created_partial: _summary.profiles_created_partial,
+        profiles_enriched: _summary.profiles_enriched,
+        profile_visits_sn: _summary.profile_visits_sn,
+        cooldown_triggered: _summary.cooldown_triggered,
         stopped_reason: _stopped_reason,
         errors: _errors,
       })
@@ -976,7 +1044,6 @@ async function _postSummary() {
   } catch (e) {
     console.error('⚠️ Erreur POST summary (non-bloquant):', e.message);
   }
-  // Le console.log inclut les métriques étendues (même si le backend ne les persiste pas encore)
   console.log(`
 📋 RÉSUMÉ TÂCHE 1 — Scraping Sales Navigator
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -984,22 +1051,19 @@ Durée : ${Math.floor(duration / 60)}min ${duration % 60}s
 Mode warm-up : ${_isWarmUp ? 'Oui' : 'Non'}
 Campagnes traitées : ${_summary.campaigns_processed}
 Visites de profils SN : ${_summary.profile_visits_sn}
-Profils trouvés : ${_summary.profiles_found}
-Rejetés (doublons client+serveur) : ${_summary.profiles_rejected_duplicates}
+Profils trouvés (cartes) : ${_summary.profiles_found}
+Rejetés (doublons) : ${_summary.profiles_rejected_duplicates}
 Rejetés (exclus) : ${_summary.profiles_rejected_excluded}
-Envoyés au sync : ${_summary.profiles_submitted}
-Créés complets ("Profil à valider") : ${_summary.profiles_created_complete}
-Créés partiels ("Profil incomplet") : ${_summary.profiles_created_partial}
+Phase 1 — sync scrapping_pending : ${_summary.profiles_created_partial}
+Phase 2 — promus Profil à valider : ${_summary.profiles_created_complete}
+Profils enrichis (reprise Phase 2) : ${_summary.profiles_enriched}
 Total créés : ${_summary.profiles_created}
-Profils enrichis (Étape 1b) : ${_summary.profiles_enriched}
 Cooldown SN déclenché : ${_summary.cooldown_triggered ? 'Oui' : 'Non'}
 ${_stopped_reason ? `\nArrêt : ${_stopped_reason}` : ''}
 ${_errors.length > 0 ? `\nErreurs (${_errors.length}) :\n${_errors.map(e => `  - [${e.step}] ${e.message}`).join('\n')}` : ''}
   `);
 }
 ```
-
-⚠️ Les champs `profiles_created_complete`, `profiles_created_partial`, `profiles_enriched` et `cooldown_triggered` sont nouveaux et ne sont PAS dans le schéma de `POST /api/scraping/summary`. Ne pas les inclure dans le body de l'appel API — uniquement dans le `console.log` du résumé. Si dans une version future le backend les accepte, les ajouter au body.
 
 ---
 
