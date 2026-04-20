@@ -100,11 +100,12 @@ const App = (() => {
         </select>
       </div>
       <div class="stat-grid">
-        <div class="stat-card">
+        <div class="stat-card stat-has-tooltip">
           <div class="sfc-icon-wrap" style="background:#DBEAFE;color:#2563EB">
             <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="5.5" cy="4.5" r="2.5"/><path d="M1 13c0-2.5 2-4.5 4.5-4.5"/><circle cx="11.5" cy="5.5" r="2"/><path d="M15 13c0-2 1.5-3.5-3.5-3.5H10"/></svg>
           </div>
           <div><div class="stat-value" id="statTotal">—</div><div class="stat-label">Total prospects</div></div>
+          <div class="stat-tooltip">Hors profils non pertinents, restreints et en attente de scraping</div>
         </div>
         <div class="stat-card stat-has-tooltip">
           <div class="sfc-icon-wrap" style="background:#FCE7F3;color:#BE185D">
