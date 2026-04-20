@@ -257,7 +257,7 @@ const App = (() => {
     const fmtDate = iso => { const d = new Date(iso + 'T00:00:00'); return `${d.getDate()} ${FR_MONTHS[d.getMonth()]}`; };
 
     const ACTIVITY_SERIES = {
-      invitation_accepted: { label: 'Invitation acceptée',     color: '#10B981' },
+      invitation_accepted: { label: 'Invitation acceptée',     color: '#2563EB' },
       message_sent:        { label: 'Message envoyé',          color: '#0F766E' },
       response_received:   { label: 'Discussion en cours',     color: '#BE185D' },
       deal_won:            { label: 'Gagné',                   color: '#4D7C0F' },
@@ -286,8 +286,8 @@ const App = (() => {
             borderColor: meta.color,
             backgroundColor: meta.color + '18',
             borderWidth: 2,
-            pointRadius: 4,
-            pointHoverRadius: 6,
+            pointRadius: 0,
+            pointHoverRadius: 5,
             pointHitRadius: 12,
             tension: 0.35,
             fill: false,
