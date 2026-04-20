@@ -4548,6 +4548,26 @@ app.post('/api/prospector/update-status', accountContext, async (req, res) => {
       });
     }
 
+    // Record interaction for daily quota tracking
+    const today = todayParis();
+    if (status === 'Invitation envoyée' && prev.status !== 'Invitation envoyée') {
+      await supabaseAdmin.from('interactions').insert({
+        prospect_id: prospectId,
+        account_id: req.accountId,
+        type: 'Ajout LinkedIn',
+        date: today,
+        content: 'Invitation LinkedIn envoyée via Dispatch',
+      });
+    } else if (status === 'Message envoyé' && prev.status !== 'Message envoyé') {
+      await supabaseAdmin.from('interactions').insert({
+        prospect_id: prospectId,
+        account_id: req.accountId,
+        type: 'Message envoyé',
+        date: today,
+        content: 'Message LinkedIn envoyé via Dispatch',
+      });
+    }
+
     // Log event
     const campId = prev?.campaign_id;
     if (status === 'Nouveau' && prev?.status === 'Profil à valider') {
@@ -4733,6 +4753,27 @@ app.post('/api/prospector/bulk-update-status', accountContext, async (req, res) 
       }));
     if (historyRows.length > 0) {
       await supabaseAdmin.from('status_history').insert(historyRows);
+    }
+
+    // Record interactions for daily quota tracking (bulk)
+    const today = todayParis();
+    if (status === 'Invitation envoyée' || status === 'Message envoyé') {
+      const interactionType = status === 'Invitation envoyée' ? 'Ajout LinkedIn' : 'Message envoyé';
+      const interactionContent = status === 'Invitation envoyée'
+        ? 'Invitation LinkedIn envoyée via Dispatch (bulk)'
+        : 'Message LinkedIn envoyé via Dispatch (bulk)';
+      const interactionRows = ownedProspects
+        .filter(p => p.status !== status)
+        .map(p => ({
+          prospect_id: p.id,
+          account_id: req.accountId,
+          type: interactionType,
+          date: today,
+          content: interactionContent,
+        }));
+      if (interactionRows.length > 0) {
+        await supabaseAdmin.from('interactions').insert(interactionRows);
+      }
     }
 
     // Log prospect_events for each changed prospect + auto-enroll on validation
