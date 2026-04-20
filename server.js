@@ -4147,6 +4147,7 @@ const MAX_ACTIVE_CAMPAIGNS = 2;
 const EVENT_MAP = {
   'Invitation envoyée': 'invitation_sent',
   'Invitation acceptée': 'invitation_accepted',
+  'Message envoyé': 'message_sent',
   'Discussion en cours': 'response_received',
 };
 
@@ -5070,7 +5071,7 @@ app.get('/api/prospector/daily-activity', accountContext, async (req, res) => {
     const fromDate = dates[0];
 
     // Query events grouped by day + type (timezone Paris), filtered by account
-    const { data: events } = await supabase
+    const { data: events } = await supabaseAdmin
       .from('prospect_events')
       .select('type, created_at')
       .eq('account_id', req.accountId)
