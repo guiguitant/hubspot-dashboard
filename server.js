@@ -4126,14 +4126,14 @@ app.get('/api/prospector/export', accountContext, async (req, res) => {
 // ============================================================
 
 const VALID_PROSPECT_STATUSES = [
-  'scrapping_pending','Profil incomplet','À compléter','Profil à valider','Nouveau','Profil restreint',
+  'scrapping_pending','Profil incomplet','Profil à valider','Nouveau','Profil restreint',
   'Invitation envoyée','Invitation acceptée',
   'Message à valider','Message à envoyer','Message envoyé',
   'Discussion en cours','Gagné','Perdu','Non pertinent'
 ];
 
 // Statuses that count toward MAX_PROFILES_PER_CAMPAIGN quota
-// Excludes: 'Non pertinent', 'Perdu', 'À compléter' (dead-end profiles don't block new scraping)
+// Excludes: 'Non pertinent', 'Perdu' (dead-end profiles don't block new scraping)
 const ACTIVE_PROSPECT_STATUSES = [
   'scrapping_pending', 'Profil incomplet', 'Profil à valider', 'Nouveau', 'Profil restreint',
   'Invitation envoyée', 'Invitation acceptée',
@@ -4418,7 +4418,7 @@ app.patch('/api/prospector/prospects/:id/enrich', accountContext, async (req, re
       .eq('id', id).eq('account_id', req.accountId).single();
     if (fetchErr || !prospect) return res.status(404).json({ error: 'Prospect not found' });
 
-    // Handle visit_failed: increment scrapping_attempts, maybe transition to "À compléter"
+    // Handle visit_failed: increment scrapping_attempts, maybe transition to "Non pertinent"
     if (visit_failed) {
       const MAX_SCRAPPING_ATTEMPTS = 3;
       const newAttempts = (prospect.scrapping_attempts || 0) + 1;
@@ -4427,7 +4427,7 @@ app.patch('/api/prospector/prospects/:id/enrich', accountContext, async (req, re
         updated_at: new Date().toISOString(),
       };
       if (newAttempts >= MAX_SCRAPPING_ATTEMPTS && prospect.status === 'scrapping_pending') {
-        failUpdates.status = 'À compléter';
+        failUpdates.status = 'Non pertinent';
       }
       const { data: failUpdated, error: failErr } = await supabaseAdmin.from('prospects')
         .update(failUpdates)
@@ -4483,7 +4483,7 @@ app.patch('/api/prospector/prospects/:id/enrich', accountContext, async (req, re
 // POST /api/prospector/update-status — Update a prospect's status (by linkedin_url or id)
 app.post('/api/prospector/update-status', accountContext, async (req, res) => {
   try {
-    const { linkedin_url, id, prospect_id, status, pending_message, message_versions } = req.body;
+    const { linkedin_url, id, prospect_id, status, pending_message, message_versions, step_order } = req.body;
     if (!status || !VALID_PROSPECT_STATUSES.includes(status)) {
       return res.status(400).json({ error: 'Invalid status. Valid: ' + VALID_PROSPECT_STATUSES.join(', ') });
     }
@@ -4497,10 +4497,10 @@ app.post('/api/prospector/update-status', accountContext, async (req, res) => {
     }
     if (!prospectId) return res.status(400).json({ error: 'id or linkedin_url required' });
 
-    // Fetch previous status + campaign_id (this account only)
+    // Fetch previous status + campaign_id + pending_message (this account only)
     const { data: prev } = await supabaseAdmin
       .from('prospects')
-      .select('status, campaign_id')
+      .select('status, campaign_id, pending_message')
       .eq('id', prospectId)
       .eq('account_id', req.accountId)
       .limit(1)
@@ -4551,21 +4551,25 @@ app.post('/api/prospector/update-status', accountContext, async (req, res) => {
     // Record interaction for daily quota tracking
     const today = todayParis();
     if (status === 'Invitation envoyée' && prev.status !== 'Invitation envoyée') {
-      await supabaseAdmin.from('interactions').insert({
+      const interactionRow = {
         prospect_id: prospectId,
         account_id: req.accountId,
         type: 'Ajout LinkedIn',
         date: today,
         content: 'Invitation LinkedIn envoyée via Dispatch',
-      });
+      };
+      if (step_order != null) interactionRow.step_order = step_order;
+      await supabaseAdmin.from('interactions').insert(interactionRow);
     } else if (status === 'Message envoyé' && prev.status !== 'Message envoyé') {
-      await supabaseAdmin.from('interactions').insert({
+      const interactionRow = {
         prospect_id: prospectId,
         account_id: req.accountId,
         type: 'Message envoyé',
         date: today,
-        content: 'Message LinkedIn envoyé via Dispatch',
-      });
+        content: prev.pending_message || 'Message LinkedIn envoyé via Dispatch',
+      };
+      if (step_order != null) interactionRow.step_order = step_order;
+      await supabaseAdmin.from('interactions').insert(interactionRow);
     }
 
     // Log event
@@ -4617,7 +4621,7 @@ app.post('/api/prospector/message-sent', accountContext, async (req, res) => {
       });
     }
 
-    const { linkedin_url, id } = req.body;
+    const { linkedin_url, id, step_order } = req.body;
     let prospectId = id;
     if (!prospectId && linkedin_url) {
       const normalizedUrl = normalizeLinkedinUrl(linkedin_url);
@@ -4627,10 +4631,10 @@ app.post('/api/prospector/message-sent', accountContext, async (req, res) => {
     }
     if (!prospectId) return res.status(400).json({ error: 'id or linkedin_url required' });
 
-    // Verify prospect belongs to this account and get campaign_id + current status
+    // Verify prospect belongs to this account and get campaign_id + current status + message content
     const { data: pa } = await supabaseAdmin
       .from('prospects')
-      .select('campaign_id, status')
+      .select('campaign_id, status, pending_message')
       .eq('id', prospectId)
       .eq('account_id', req.accountId)
       .single();
@@ -4658,13 +4662,15 @@ app.post('/api/prospector/message-sent', accountContext, async (req, res) => {
       });
     }
 
-    await supabaseAdmin.from('interactions').insert({
+    const interactionRow = {
       prospect_id: prospectId,
       account_id: req.accountId,
       type: 'Message envoyé',
       date: new Date().toISOString().split('T')[0],
-      content: 'Message LinkedIn envoyé via Claude Dispatch',
-    });
+      content: pa.pending_message || 'Message LinkedIn envoyé via Claude Dispatch',
+    };
+    if (step_order != null) interactionRow.step_order = step_order;
+    await supabaseAdmin.from('interactions').insert(interactionRow);
 
     // Log event
     logEvent('message_sent', prospectId, pa?.campaign_id, req.accountId);
@@ -4997,6 +5003,53 @@ app.post('/api/prospector/regenerate-icebreaker', accountContext, async (req, re
     });
   } catch (err) {
     console.error('Erreur /api/prospector/regenerate-icebreaker:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/prospector/dashboard-stats?from=YYYY-MM-DD&to=YYYY-MM-DD — Aggregated stats for dashboard cards
+app.get('/api/prospector/dashboard-stats', accountContext, async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from and to query params required (YYYY-MM-DD)' });
+
+    const fromTs = `${from}T00:00:00`;
+    const toTs = `${to}T23:59:59`;
+
+    const [campaignsResp, enrolledResp, acceptedResp, totalResp] = await Promise.all([
+      // Active campaigns: "En cours" or "En suivi"
+      supabaseAdmin.from('campaigns')
+        .select('id', { count: 'exact', head: true })
+        .eq('account_id', req.accountId)
+        .in('status', ['En cours', 'En suivi']),
+      // Prospects enrolled in a campaign during the period
+      supabaseAdmin.from('prospect_sequence_state')
+        .select('id', { count: 'exact', head: true })
+        .eq('account_id', req.accountId)
+        .gte('enrolled_at', fromTs)
+        .lte('enrolled_at', toTs),
+      // Invitations accepted during the period (from prospect_events — most reliable)
+      supabaseAdmin.from('prospect_events')
+        .select('id', { count: 'exact', head: true })
+        .eq('account_id', req.accountId)
+        .eq('type', 'invitation_accepted')
+        .gte('created_at', fromTs)
+        .lte('created_at', toTs),
+      // Total prospects (no date filter)
+      supabaseAdmin.from('prospects')
+        .select('id', { count: 'exact', head: true })
+        .eq('account_id', req.accountId)
+        .not('status', 'in', '("Non pertinent","Profil restreint","scrapping_pending")'),
+    ]);
+
+    res.json({
+      active_campaigns: campaignsResp.count || 0,
+      prospects_enrolled: enrolledResp.count || 0,
+      invitations_accepted: acceptedResp.count || 0,
+      total_prospects: totalResp.count || 0,
+    });
+  } catch (err) {
+    console.error('Erreur /api/prospector/dashboard-stats:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -5364,8 +5417,8 @@ app.get('/api/sequences/preview', accountContext, async (req, res) => {
     const account = acctResp.data || {};
     const steps = (seqResp.data.sequence_steps || []).sort((a, b) => a.step_order - b.step_order);
 
-    // Fetch sequence state and activity for real-time status
-    const [seqStateResp, activityResp] = await Promise.all([
+    // Fetch sequence state, activity, and sent messages for real-time status
+    const [seqStateResp, activityResp, sentMsgsResp] = await Promise.all([
       supabaseAdmin.from('prospect_sequence_state')
         .select('status, current_step_order, next_action_at, enrolled_at')
         .eq('prospect_id', prospect_id)
@@ -5375,6 +5428,12 @@ app.get('/api/sequences/preview', accountContext, async (req, res) => {
         .select('icebreaker_generated, icebreaker_mode, is_relevant, scraped_at')
         .eq('prospect_id', prospect_id)
         .maybeSingle(),
+      supabaseAdmin.from('interactions')
+        .select('content, date, created_at, step_order')
+        .eq('prospect_id', prospect_id)
+        .eq('account_id', req.accountId)
+        .eq('type', 'Message envoyé')
+        .order('created_at', { ascending: true }),
     ]);
 
     const replacements = {
@@ -5405,6 +5464,7 @@ app.get('/api/sequences/preview', accountContext, async (req, res) => {
       sequence: { id: seqResp.data.id, name: seqResp.data.name, version: seqResp.data.version },
       sequence_state: seqStateResp.data || null,
       activity: activityResp.data || null,
+      sent_messages: (sentMsgsResp.data || []).filter(m => m.content && m.content !== 'Message LinkedIn envoyé via Claude Dispatch' && m.content !== 'Message LinkedIn envoyé via Dispatch'),
     });
   } catch (err) {
     console.error('Erreur GET /api/sequences/preview:', err.message);

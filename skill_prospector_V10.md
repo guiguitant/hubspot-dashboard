@@ -74,14 +74,13 @@ Utiliser `POST /api/prospector/update-status` avec le champ `id` du prospect. Si
 ⚠️ **Le fallback via `/sync` ne fonctionne plus** — sync ignore désormais les prospects existants (skip complet). Toujours utiliser `update-status` avec `id`.
 
 ```javascript
-async function updateStatus(prospect, status, pendingMessage) {
+async function updateStatus(prospect, status, pendingMessage, campaignId, stepOrder) {
+  const body = { id: prospect.id, status };
+  if (pendingMessage) body.pending_message = pendingMessage;
+  if (stepOrder != null) body.step_order = stepOrder;
   const r = await fetch('/api/prospector/update-status', {
     method: 'POST', headers,
-    body: JSON.stringify({
-      id: prospect.id,
-      status,
-      ...(pendingMessage ? { pending_message: pendingMessage } : {})
-    })
+    body: JSON.stringify(body)
   });
   if (!r.ok) {
     console.warn(`update-status ${r.status} pour ${prospect.id} (${prospect.first_name} ${prospect.last_name}) — skip`);
@@ -203,7 +202,7 @@ Complète les données manquantes d'un prospect existant. Merge partiel — ne m
 Body : `{ linkedin_url?, job_title?, company?, visit_failed?: boolean }`
 - Si `linkedin_url` est fourni et déjà utilisé par un autre prospect du même compte → retourne **409 Conflict** avec le prospect existant.
 - **Auto-transition** : si après le merge les 3 champs `linkedin_url` + `job_title` + `company` sont non-vides ET le statut actuel est `'Profil incomplet'` ou `'scrapping_pending'`, le statut passe automatiquement à `'Profil à valider'`.
-- **visit_failed** : si `visit_failed: true`, incrémente `scrapping_attempts`. Si `scrapping_attempts >= 3` et statut = `'scrapping_pending'` → auto-transition vers `'À compléter'` (soupape anti-boucle). Utiliser quand la page profil charge normalement mais que le linkedin_url est introuvable.
+- **visit_failed** : si `visit_failed: true`, incrémente `scrapping_attempts`. Si `scrapping_attempts >= 3` et statut = `'scrapping_pending'` → auto-transition vers `'Non pertinent'` (soupape anti-boucle). Utiliser quand la page profil charge normalement mais que le linkedin_url est introuvable.
 
 **`POST /api/prospector/update-status`**
 Met à jour le statut d'un prospect.
@@ -385,7 +384,7 @@ Body : `{ lock_type }`
 |--------|---------------|
 | `Profil incomplet` | Données partielles (rate-limit SN) — doit être enrichi avant validation. Transition → `Profil à valider` via PATCH /enrich quand les 3 champs (linkedin_url, job_title, company) sont complets |
 | `Profil à valider` | Trouvé sur Sales Navigator, en attente de validation |
-| `Non pertinent` | Rejeté — hors campagne |
+| `Non pertinent` | Rejeté — hors campagne, ou profil irrécupérable après 3 tentatives de scraping |
 | `Nouveau` | Validé → enrôler dans la séquence + envoyer invitation |
 | `Invitation envoyée` | Invitation LinkedIn envoyée |
 | `Invitation acceptée` | Le prospect a accepté |
@@ -1259,7 +1258,7 @@ Pour chaque action `send_invitation` :
    - **"Suivre" uniquement / profil restreint / page 404** → loguer et skip
    - **Session expirée** → notification (voir Étape 7) → PAUSE
 4. Basculer sur onglet hubspot-dashboard-1c7z.onrender.com/prospector :
-   - `await updateStatus(action.prospect, "Invitation envoyée", null, action.prospect_account.campaign_id)`
+   - `await updateStatus(action.prospect, "Invitation envoyée", null, action.prospect_account.campaign_id, action.step.step_order)`
    - `POST /api/sequences/complete-step { state_id: action.id, completed_step_order: action.step.step_order }`
 5. Attendre **15-30s aléatoire** avant le prospect suivant :
    ```javascript
@@ -1393,7 +1392,7 @@ Pour chaque message validé :
 6. Insérer et envoyer `action.prospect_account.pending_message` (voir guidance insertion texte + envoi ci-dessus)
 7. Si session expirée → notification (voir Étape 7) → PAUSE
 8. Basculer sur onglet hubspot-dashboard-1c7z.onrender.com/prospector :
-   - `await updateStatus(action.prospect, "Message envoyé", null, action.prospect_account.campaign_id)` — préférer `update-status` à `message-sent` (ce dernier peut retourner "Prospect not found" si l'URL n'est pas normalisée exactement comme en DB)
+   - `await updateStatus(action.prospect, "Message envoyé", null, action.prospect_account.campaign_id, action.step.step_order)` — préférer `update-status` à `message-sent` (ce dernier peut retourner "Prospect not found" si l'URL n'est pas normalisée exactement comme en DB)
    - `POST /api/sequences/complete-step { state_id: action.id, completed_step_order: action.step.step_order }`
 9. Attendre **15-30s aléatoire** avant le prospect suivant :
    ```javascript

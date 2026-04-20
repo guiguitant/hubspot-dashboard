@@ -291,6 +291,41 @@ body {
   transform: translateY(-1px);
 }
 
+.stat-has-tooltip {
+  position: relative;
+}
+.stat-tooltip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1e293b;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 8px 12px;
+  border-radius: 8px;
+  width: max-content;
+  max-width: 260px;
+  text-align: center;
+  z-index: 10;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,.15);
+}
+.stat-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: #1e293b;
+}
+.stat-has-tooltip:hover .stat-tooltip {
+  display: block;
+}
+
 .stat-icon {
   font-size: 28px;
   width: 48px;

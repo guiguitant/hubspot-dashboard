@@ -8,7 +8,6 @@ const UI = (() => {
   const STATUS_CLASSES = {
     // Pipeline visible (quick filters + dashboard)
     'Profil incomplet': 'badge-profil-incomplet',
-    'À compléter': 'badge-a-completer',
     'Profil à valider': 'badge-profil-a-valider',
     'Nouveau': 'badge-nouveau',
     'Invitation envoyée': 'badge-invitation',
@@ -30,7 +29,7 @@ const UI = (() => {
   const STATUSES = Object.keys(STATUS_CLASSES).filter(s => !HIDDEN_STATUSES.includes(s));
 
   // Statuts assignés uniquement par l'automatisation — exclus des dropdowns manuels
-  const AUTO_ONLY_STATUSES = ['Profil restreint', 'Invitation acceptée', 'Profil incomplet', 'À compléter', 'scrapping_pending'];
+  const AUTO_ONLY_STATUSES = ['Profil restreint', 'Invitation acceptée', 'Profil incomplet', 'scrapping_pending'];
   const DROPDOWN_STATUSES = [...STATUSES.filter(s => !AUTO_ONLY_STATUSES.includes(s)), 'Non pertinent'];
 
   const CAMP_STATUS_CLASSES = {
@@ -58,7 +57,6 @@ const UI = (() => {
     'Non pertinent':       { color: '#64748B', bg: '#F1F5F9' },
     'Profil restreint':    { color: '#374151', bg: '#F3F4F6' },
     'Profil incomplet':    { color: '#C2410C', bg: '#FFF7ED' },
-    'À compléter':         { color: '#B45309', bg: '#FFFBEB' },
     'scrapping_pending':   { color: '#6B7280', bg: '#F3F4F6' },
   };
 
@@ -78,7 +76,6 @@ const UI = (() => {
     'Non pertinent':       '<circle cx="8" cy="8" r="6"/><path d="M4.5 4.5l7 7"/>',
     'Profil restreint':    '<rect x="4" y="8" width="8" height="6" rx="1"/><path d="M5.5 8V6a2.5 2.5 0 015 0v2"/>',
     'Profil incomplet':    '<circle cx="7" cy="5.5" r="2.5"/><path d="M1 14c0-3 2.7-5.5 6-5.5s6 2.5 6 5.5"/><path d="M12 3.5a1.5 1.5 0 011.5 1.5c0 .6-.4 1-1 1.3v.7"/><circle cx="12.5" cy="8" r=".4" fill="currentColor" stroke="none"/>',
-    'À compléter':         '<circle cx="7" cy="5.5" r="2.5"/><path d="M1 14c0-3 2.7-5.5 6-5.5s6 2.5 6 5.5"/><path d="M11 6l4 4m0-4l-4 4"/>',
     'scrapping_pending':   '<circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 2"/>',
   };
 
