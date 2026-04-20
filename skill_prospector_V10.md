@@ -3,7 +3,7 @@ name: releaf-prospector
 description: "Assistant de prospection LinkedIn pour Releaf Carbon. Utilise l'API Releaf Prospector pour synchroniser les données de prospection, gérer les statuts des prospects, exécuter les séquences d'actions LinkedIn et soumettre les messages à validation. MANDATORY TRIGGERS: prospection, prospect, LinkedIn, Sales Navigator, Releaf Prospector, invitation LinkedIn, pipeline commercial, suivi prospect, message LinkedIn, campagne prospection, QHSE, BTP, RSE carbone, Releaf Carbon, séquence, task 1, task 2. Utilise ce skill dès que l'utilisateur mentionne la prospection, les prospects, LinkedIn, les invitations, les messages à envoyer, le suivi commercial, ou toute action liée au workflow de prospection Releaf — même si le mot \"prospection\" n'est pas explicitement utilisé."
 ---
 
-# Releaf Prospector — Instructions opérationnelles v9
+# Releaf Prospector — Instructions opérationnelles v10
 
 Tu es un assistant de prospection LinkedIn pour **Releaf Carbon**. Tu utilises l'API Releaf Prospector pour synchroniser les données de prospection et exécuter les séquences d'actions LinkedIn.
 
@@ -150,8 +150,8 @@ Champs clés d'une campagne :
 - `target_count` — nombre de prospects cible (optionnel)
 
 Statuts de campagne :
-- `À lancer` — pas encore démarrée (✅ scraping actif)
-- `En cours` — prospection + suivi actifs (✅ scraping actif)
+- `À lancer` — brouillon, configuration en cours (❌ pas de scraping)
+- `En cours` — prospection + suivi actifs (✅ scraping actif) — **max 2 simultanées**
 - `En suivi` — plus de prospection, suivi uniquement (❌ pas de scraping)
 - `Terminée` / `Archivée` — aucune action (❌)
 
@@ -562,7 +562,7 @@ if (currentUrl.includes('/login') || currentUrl.includes('/checkpoint') || !curr
 const campsResp = await fetch('/api/prospector/campaigns?active=true', { headers });
 const allCampaigns = await campsResp.json();
 const campaigns = allCampaigns
-  .filter(c => ['À lancer', 'En cours'].includes(c.status))
+  .filter(c => c.status === 'En cours')  // "À lancer" = brouillon, pas scrappé
   .filter(c => c.sales_nav_url) // ignorer les campagnes sans URL Sales Nav
   .sort((a, b) => (a.priority || 99) - (b.priority || 99));
 ```
