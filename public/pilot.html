@@ -2131,16 +2131,6 @@
       .prop-format-btn:hover { background:var(--bg-secondary); color:var(--text); }
       .prop-format-btn.selected { background:rgba(34,197,94,.1); color:var(--primary); font-weight:700; }
 
-      /* Modal PDF preview */
-      .prop-pdf-modal { position:fixed; inset:0; z-index:9000; background:rgba(0,0,0,.7); display:flex; flex-direction:column; align-items:center; justify-content:center; padding:1rem; }
-      .prop-pdf-modal-box { background:var(--card); border-radius:12px; width:min(900px,95vw); height:90vh; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 24px 64px rgba(0,0,0,.4); }
-      .prop-pdf-modal-header { display:flex; align-items:center; justify-content:space-between; padding:.9rem 1.25rem; border-bottom:1px solid var(--border); flex-shrink:0; }
-      .prop-pdf-modal-title { font-size:.88rem; font-weight:700; color:var(--text); display:flex; align-items:center; gap:.5rem; }
-      .prop-pdf-modal-actions { display:flex; align-items:center; gap:.6rem; }
-      .prop-pdf-dl-btn { background:linear-gradient(135deg,#16a34a,#22c55e); color:#fff; border:none; border-radius:7px; padding:.45rem .9rem; font-family:inherit; font-size:.8rem; font-weight:700; cursor:pointer; display:flex; align-items:center; gap:.4rem; }
-      .prop-pdf-close-btn { background:none; border:1.5px solid var(--border); border-radius:7px; padding:.4rem .7rem; font-family:inherit; font-size:.8rem; color:var(--text-secondary); cursor:pointer; }
-      .prop-pdf-close-btn:hover { border-color:var(--text-secondary); color:var(--text); }
-      .prop-pdf-iframe { flex:1; border:none; width:100%; }
 
       /* Subvention pills */
       .prop-sub-pills { display:flex; flex-wrap:wrap; gap:.5rem; }
@@ -2442,7 +2432,7 @@
               </button>
               <button type="button" class="prop-format-btn" onclick="selectFormat(this,'pdf')">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>
-                PDF + Aperçu
+                PDF
               </button>
             </div>
             <input type="hidden" id="propFormat" value="pptx">
@@ -7984,8 +7974,6 @@
     const PROP_LANGUE_AUTO   = { 'Bilan Carbone':'FR', 'ACV':'FR', 'FDES / PEP':'FR', 'EPD':'EN', 'Outil sur-mesure':'FR' };
 
     let cachedAiContext  = null;
-    let cachedPdfBlob    = null;
-    let cachedPdfName    = null;
 
     const IA_EMPTY_CONTEXT = {
       CONTEXTE_CLIENT: '', ENJEU_1: '', ENJEU_2: '', ENJEU_3: '',
@@ -8016,31 +8004,7 @@
       el.classList.add('selected');
       document.getElementById('propFormat').value = fmt;
       const btn = document.getElementById('propBtnText');
-      if (btn) btn.textContent = fmt === 'pdf' ? 'Générer le PDF + Aperçu' : 'Générer la proposition';
-    }
-
-    function closePdfModal() {
-      document.getElementById('propPdfModal').style.display = 'none';
-      const iframe = document.getElementById('propPdfIframe');
-      if (iframe.src && iframe.src.startsWith('blob:')) URL.revokeObjectURL(iframe.src);
-      iframe.src = '';
-    }
-
-    function downloadPdfFromModal() {
-      if (!cachedPdfBlob || !cachedPdfName) return;
-      const url = URL.createObjectURL(cachedPdfBlob);
-      const a = document.createElement('a'); a.href = url; a.download = cachedPdfName;
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
-    }
-
-    function openPdfModal(blob, filename) {
-      cachedPdfBlob = blob;
-      cachedPdfName = filename;
-      const url = URL.createObjectURL(blob);
-      document.getElementById('propPdfIframe').src = url;
-      document.getElementById('propPdfModalTitle').textContent = filename;
-      document.getElementById('propPdfModal').style.display = 'flex';
+      if (btn) btn.textContent = fmt === 'pdf' ? 'Générer en PDF' : 'Générer la proposition';
     }
 
     async function previewAiContext(forceRegen = false) {
@@ -8439,25 +8403,19 @@
         const ext      = isPdf ? 'pdf' : 'pptx';
         const filename = fnMatch ? fnMatch[1] : `Proposition_${nom}.${ext}`;
 
-        if (isPdf) {
-          openPdfModal(blob, filename);
-          okEl.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> <span>PDF généré — aperçu ouvert.</span>`;
-          okEl.style.display = 'flex';
-        } else {
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a'); a.href = url; a.download = filename;
-          document.body.appendChild(a); a.click(); a.remove();
-          URL.revokeObjectURL(url);
-          okEl.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> <span>"${filename}" téléchargé avec succès !</span>`;
-          okEl.style.display = 'flex';
-        }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+        okEl.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> <span>"${filename}" téléchargé avec succès !</span>`;
+        okEl.style.display = 'flex';
       } catch(err) {
         errEl.textContent = err.message;
         errEl.style.display = 'block';
       } finally {
         btn.disabled = false; spin.style.display = 'none'; icon.style.display = 'block';
         const fmt = document.getElementById('propFormat')?.value;
-        btnTxt.textContent = fmt === 'pdf' ? 'Générer le PDF + Aperçu' : 'Générer la proposition';
+        btnTxt.textContent = fmt === 'pdf' ? 'Générer en PDF' : 'Générer la proposition';
       }
     }
 
@@ -8483,25 +8441,6 @@
   <!-- Dropdown deal search — rendu hors du formulaire pour éviter les problèmes de z-index/overflow -->
   <div id="propDealDropdown" style="display:none;position:fixed;background:var(--card);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.2);z-index:9999;overflow:hidden"></div>
 
-  <!-- Modal prévisualisation PDF -->
-  <div id="propPdfModal" class="prop-pdf-modal" style="display:none">
-    <div class="prop-pdf-modal-box">
-      <div class="prop-pdf-modal-header">
-        <div class="prop-pdf-modal-title">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-          <span id="propPdfModalTitle">Prévisualisation PDF</span>
-        </div>
-        <div class="prop-pdf-modal-actions">
-          <button class="prop-pdf-dl-btn" onclick="downloadPdfFromModal()">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Télécharger le PDF
-          </button>
-          <button class="prop-pdf-close-btn" onclick="closePdfModal()">✕ Fermer</button>
-        </div>
-      </div>
-      <iframe id="propPdfIframe" class="prop-pdf-iframe" title="Prévisualisation PDF"></iframe>
-    </div>
-  </div>
 
 </body>
 </html>
