@@ -257,11 +257,10 @@ const App = (() => {
     const fmtDate = iso => { const d = new Date(iso + 'T00:00:00'); return `${d.getDate()} ${FR_MONTHS[d.getMonth()]}`; };
 
     const ACTIVITY_SERIES = {
-      prospect_validated:  { label: 'Profils validés',         color: '#EA580C' },
-      invitation_sent:     { label: 'Invitations envoyées',    color: '#7C3AED' },
-      invitation_accepted: { label: 'Invitations acceptées',   color: '#065F46' },
-      message_sent:        { label: 'Messages envoyés',        color: '#0F766E' },
-      response_received:   { label: 'Réponses reçues',         color: '#BE185D' },
+      invitation_accepted: { label: 'Invitation acceptée',     color: '#10B981' },
+      message_sent:        { label: 'Message envoyé',          color: '#0F766E' },
+      response_received:   { label: 'Discussion en cours',     color: '#BE185D' },
+      deal_won:            { label: 'Gagné',                   color: '#4D7C0F' },
     };
 
     const chartDates = chartData.dates || [];

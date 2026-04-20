@@ -4149,6 +4149,7 @@ const EVENT_MAP = {
   'Invitation acceptée': 'invitation_accepted',
   'Message envoyé': 'message_sent',
   'Discussion en cours': 'response_received',
+  'Gagné': 'deal_won',
 };
 
 async function logEvent(type, prospectId, campaignId, accountId) {
@@ -5078,7 +5079,7 @@ app.get('/api/prospector/daily-activity', accountContext, async (req, res) => {
       .gte('created_at', fromDate + 'T00:00:00+01:00');
 
     // Aggregate by day (Paris timezone) + type
-    const EVENT_TYPES = ['prospect_validated', 'invitation_sent', 'invitation_accepted', 'message_sent', 'response_received'];
+    const EVENT_TYPES = ['invitation_accepted', 'message_sent', 'response_received', 'deal_won'];
     const series = {};
     for (const t of EVENT_TYPES) {
       series[t] = new Array(dates.length).fill(0);
