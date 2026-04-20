@@ -7042,15 +7042,66 @@ async function proposalGenerateAIContext({ nom_entreprise, mission, nature, lang
 const PROPOSAL_TMP_DIR = path.join(__dirname, 'tmp');
 if (!fs.existsSync(PROPOSAL_TMP_DIR)) fs.mkdirSync(PROPOSAL_TMP_DIR);
 
+async function convertPptxToPdfCloudConvert(pptxBuffer) {
+  const apiKey = process.env.CLOUDCONVERT_API_KEY;
+  if (!apiKey) throw new Error('CLOUDCONVERT_API_KEY non configurée');
+
+  // Créer un job : upload → convert → export
+  const jobRes = await fetch('https://api.cloudconvert.com/v2/jobs', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      tasks: {
+        'upload':  { operation: 'import/upload' },
+        'convert': { operation: 'convert', input: 'upload', input_format: 'pptx', output_format: 'pdf' },
+        'export':  { operation: 'export/url', input: 'convert' },
+      },
+    }),
+  });
+  if (!jobRes.ok) throw new Error('CloudConvert: erreur création job (' + jobRes.status + ')');
+  const job = await jobRes.json();
+  const jobId = job.data.id;
+  const uploadTask = job.data.tasks.find(t => t.name === 'upload');
+
+  // Uploader le PPTX vers l'URL presignée
+  const { url: uploadUrl, parameters: uploadParams } = uploadTask.result.form;
+  const form = new FormData();
+  for (const [k, v] of Object.entries(uploadParams)) form.append(k, v);
+  form.append('file', new Blob([pptxBuffer], {
+    type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  }), 'presentation.pptx');
+  const uploadRes = await fetch(uploadUrl, { method: 'POST', body: form });
+  if (!uploadRes.ok) throw new Error('CloudConvert: erreur upload (' + uploadRes.status + ')');
+
+  // Attendre la fin du job (poll toutes les 2s, max 60s)
+  for (let i = 0; i < 30; i++) {
+    await new Promise(r => setTimeout(r, 2000));
+    const statusRes = await fetch(`https://api.cloudconvert.com/v2/jobs/${jobId}`, {
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+    });
+    const status = await statusRes.json();
+    if (status.data.status === 'error') throw new Error('CloudConvert: conversion échouée');
+    const exportTask = status.data.tasks.find(t => t.name === 'export');
+    if (exportTask?.status === 'finished') {
+      const pdfUrl = exportTask.result.files[0].url;
+      const pdfRes = await fetch(pdfUrl);
+      const pdfBuf = Buffer.from(await pdfRes.arrayBuffer());
+      console.log('[Proposal PDF] CloudConvert OK', Math.round(pdfBuf.length / 1024), 'KB');
+      return pdfBuf;
+    }
+  }
+  throw new Error('CloudConvert: timeout');
+}
+
 async function convertPptxToPdf(pptxBuffer) {
   const id       = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const pptxPath = path.join(PROPOSAL_TMP_DIR, `${id}.pptx`);
   const pdfPath  = path.join(PROPOSAL_TMP_DIR, `${id}.pdf`);
 
-  fs.writeFileSync(pptxPath, pptxBuffer);
-  try {
-    if (process.platform === 'win32') {
-      // Windows : PowerShell + COM PowerPoint
+  if (process.platform === 'win32') {
+    // Windows : PowerShell + COM PowerPoint
+    fs.writeFileSync(pptxPath, pptxBuffer);
+    try {
       const pptxEsc = pptxPath.replace(/\\/g, '\\\\');
       const pdfEsc  = pdfPath.replace(/\\/g, '\\\\');
       const psScript = `
@@ -7074,23 +7125,16 @@ try {
           }
         );
       });
-    } else {
-      // Linux (Render) : LibreOffice headless
-      await new Promise((resolve, reject) => {
-        execFile('libreoffice', [
-          '--headless', '--convert-to', 'pdf', '--outdir', PROPOSAL_TMP_DIR, pptxPath,
-        ], { timeout: 60000 }, (err, stdout, stderr) => {
-          if (err) reject(new Error('LibreOffice: ' + (stderr?.trim() || err.message)));
-          else resolve();
-        });
-      });
+      const pdf = fs.readFileSync(pdfPath);
+      console.log('[Proposal PDF] conversion OK', Math.round(pdf.length / 1024), 'KB');
+      return pdf;
+    } finally {
+      try { fs.unlinkSync(pptxPath); } catch(_) {}
+      try { fs.unlinkSync(pdfPath);  } catch(_) {}
     }
-    const pdf = fs.readFileSync(pdfPath);
-    console.log('[Proposal PDF] conversion OK', Math.round(pdf.length / 1024), 'KB');
-    return pdf;
-  } finally {
-    try { fs.unlinkSync(pptxPath); } catch(_) {}
-    try { fs.unlinkSync(pdfPath);  } catch(_) {}
+  } else {
+    // Linux : CloudConvert API
+    return convertPptxToPdfCloudConvert(pptxBuffer);
   }
 }
 
