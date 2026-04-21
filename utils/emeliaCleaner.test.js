@@ -56,7 +56,7 @@ describe('cleanEmeliaRows', () => {
     const existing = new Set(['https://www.linkedin.com/in/ACwAABR']);
     const { accepted, rejections } = cleanEmeliaRows([baseRow], existing);
     expect(accepted).toHaveLength(0);
-    expect(rejections[0].reason).toContain('Doublon');
+    expect(rejections[0].reason).toBe('Doublon (déjà présent dans un compte actif)');
   });
 
   it('déduplique au sein du même import (intra-import)', () => {
@@ -64,7 +64,7 @@ describe('cleanEmeliaRows', () => {
     const { accepted, rejections } = cleanEmeliaRows(rows, new Set());
     expect(accepted).toHaveLength(1);
     expect(rejections).toHaveLength(1);
-    expect(rejections[0].reason).toContain('Doublon');
+    expect(rejections[0].reason).toBe('Doublon (présent plusieurs fois dans ce fichier)');
   });
 
   it('concatène summary et description avec séparateur', () => {
@@ -90,5 +90,17 @@ describe('cleanEmeliaRows', () => {
   it('numéro de ligne commence à 2 (ligne 1 = header)', () => {
     const { rejections } = cleanEmeliaRows([{ ...baseRow, firstName: '' }], new Set());
     expect(rejections[0].row).toBe(2);
+  });
+
+  it('rejette si firstName ne contient que des espaces', () => {
+    const { accepted, rejections } = cleanEmeliaRows([{ ...baseRow, firstName: '   ' }], new Set());
+    expect(accepted).toHaveLength(0);
+    expect(rejections[0].reason).toBe('Prénom manquant');
+  });
+
+  it('met last_name à null si lastName vide', () => {
+    const { accepted } = cleanEmeliaRows([{ ...baseRow, lastName: '' }], new Set());
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0].last_name).toBeNull();
   });
 });

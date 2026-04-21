@@ -1,12 +1,13 @@
 'use strict';
 
 /**
- * @param {object[]} rows - Parsed CSV rows (array of objects with Emelia column names)
+ * @param {object[]} rows - Array of objects with Emelia column names (format-agnostic — works with csv-parse or xlsx output)
  * @param {Set<string>} existingLinkedinUrls - LinkedIn URLs already in DB for this account
  * @returns {{ accepted: object[], rejections: object[] }}
  */
 function cleanEmeliaRows(rows, existingLinkedinUrls) {
-  const seenUrls = new Set(existingLinkedinUrls);
+  if (!(existingLinkedinUrls instanceof Set)) throw new TypeError('existingLinkedinUrls must be a Set');
+  const seenUrls = new Set(); // tracks URLs added during this import only
   const accepted = [];
   const rejections = [];
 
@@ -31,8 +32,12 @@ function cleanEmeliaRows(rows, existingLinkedinUrls) {
       rejections.push({ row: rowNum, name, reason: 'Titre de poste et entreprise manquants' });
       return;
     }
-    if (seenUrls.has(linkedinUrl)) {
+    if (existingLinkedinUrls.has(linkedinUrl)) {
       rejections.push({ row: rowNum, name, reason: 'Doublon (déjà présent dans un compte actif)' });
+      return;
+    }
+    if (seenUrls.has(linkedinUrl)) {
+      rejections.push({ row: rowNum, name, reason: 'Doublon (présent plusieurs fois dans ce fichier)' });
       return;
     }
 
