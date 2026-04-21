@@ -9,6 +9,10 @@ const { execFile } = require('child_process');
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
 const { buildSalesNavUrl } = require('./utils/buildSalesNavUrl');
+const multer = require('multer');
+const { parse: parseCsv } = require('csv-parse/sync');
+const { cleanEmeliaRows } = require('./utils/emeliaCleaner');
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 // --- Supabase ---
 const supabase = createClient(
@@ -4085,6 +4089,72 @@ app.post('/api/prospector/import', accountContext, async (req, res) => {
     res.json({ imported, duplicates, errors });
   } catch (err) {
     console.error('Erreur /api/prospector/import:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/prospector/import-emelia — Import depuis fichier CSV Emelia
+// dry_run=true : analyse uniquement, aucune insertion en DB
+app.post('/api/prospector/import-emelia', accountContext, upload.single('file'), async (req, res) => {
+  try {
+    const campaign_id = req.body.campaign_id;
+    const isDryRun = req.body.dry_run === 'true' || req.body.dry_run === true;
+
+    if (!campaign_id) return res.status(400).json({ error: 'campaign_id requis' });
+    if (!req.file) return res.status(400).json({ error: 'Fichier requis' });
+
+    const csvText = req.file.buffer.toString('utf-8');
+    const rows = parseCsv(csvText, {
+      delimiter: ';',
+      columns: true,
+      skip_empty_lines: true,
+      relax_quotes: true,
+      trim: true,
+    });
+
+    const { data: existing, error: existingErr } = await supabaseAdmin
+      .from('prospects')
+      .select('linkedin_url')
+      .eq('account_id', req.accountId)
+      .not('status', 'in', '("Non pertinent","Perdu")');
+    if (existingErr) throw existingErr;
+
+    const existingUrls = new Set((existing || []).map(p => p.linkedin_url).filter(Boolean));
+    const { accepted, rejections } = cleanEmeliaRows(rows, existingUrls);
+
+    if (isDryRun) {
+      return res.json({ imported: accepted.length, rejected: rejections.length, rejections });
+    }
+
+    let insertedCount = 0;
+    if (accepted.length > 0) {
+      const toInsert = accepted.map(p => ({
+        ...p,
+        account_id: req.accountId,
+        campaign_id,
+        status: 'Profil à valider',
+      }));
+      const { data: inserted, error: insertErr } = await supabaseAdmin
+        .from('prospects')
+        .insert(toInsert)
+        .select('id');
+      if (insertErr) throw insertErr;
+      insertedCount = inserted.length;
+
+      await supabaseAdmin.from('imports').insert({
+        account_id: req.accountId,
+        campaign_id,
+        filename: req.file.originalname,
+        total_rows: rows.length,
+        imported: insertedCount,
+        duplicates: rejections.filter(r => r.reason.includes('Doublon')).length,
+        errors: rejections.filter(r => !r.reason.includes('Doublon')).length,
+      });
+    }
+
+    res.json({ imported: insertedCount, rejected: rejections.length, rejections });
+  } catch (err) {
+    console.error('Erreur /api/prospector/import-emelia:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
