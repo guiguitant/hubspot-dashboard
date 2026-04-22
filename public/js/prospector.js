@@ -1748,6 +1748,13 @@ const App = (() => {
             <button class="btn btn-outline" onclick="window.location.href='/campaigns/edit/${id}'" style="display:flex;align-items:center;gap:6px">
               ${svgEdit} Modifier
             </button>
+            ${campaign.status !== 'Terminée' && campaign.status !== 'Archivée'
+              ? `<button class="btn btn-outline" onclick="location.hash='#emelia-import?campaign_id=${id}'" style="display:flex;align-items:center;gap:6px">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v9M4 7l4 4 4-4"/><path d="M2 13h12"/></svg>
+                  Importer Emelia
+                </button>`
+              : ''
+            }
             ${campaign.status !== 'Archivée'
               ? `<button class="btn btn-ghost" onclick="App.archiveCampaign('${id}', true)" style="display:flex;align-items:center;gap:6px">${svgArch} Archiver</button>`
               : `<button class="btn btn-outline" onclick="App.archiveCampaign('${id}', false)">Désarchiver</button>`
