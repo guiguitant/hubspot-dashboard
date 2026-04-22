@@ -12,7 +12,18 @@ const { buildSalesNavUrl } = require('./utils/buildSalesNavUrl');
 const multer = require('multer');
 const { parse: parseCsv } = require('csv-parse/sync');
 const { cleanEmeliaRows } = require('./utils/emeliaCleaner');
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['text/csv', 'application/csv', 'text/plain'];
+    if (allowed.includes(file.mimetype) || file.originalname.endsWith('.csv')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Seuls les fichiers .csv sont acceptés'));
+    }
+  },
+});
 
 // --- Supabase ---
 const supabase = createClient(
@@ -4103,12 +4114,19 @@ app.post('/api/prospector/import-emelia', accountContext, upload.single('file'),
     if (!campaign_id) return res.status(400).json({ error: 'campaign_id requis' });
     if (!req.file) return res.status(400).json({ error: 'Fichier requis' });
 
+    const { data: campCheck } = await supabaseAdmin
+      .from('campaigns')
+      .select('id')
+      .eq('id', campaign_id)
+      .eq('account_id', req.accountId)
+      .single();
+    if (!campCheck) return res.status(404).json({ error: 'Campagne introuvable' });
+
     const csvText = req.file.buffer.toString('utf-8');
     const rows = parseCsv(csvText, {
       delimiter: ';',
       columns: true,
       skip_empty_lines: true,
-      relax_quotes: true,
       trim: true,
     });
 
@@ -4139,18 +4157,19 @@ app.post('/api/prospector/import-emelia', accountContext, upload.single('file'),
         .insert(toInsert)
         .select('id');
       if (insertErr) throw insertErr;
-      insertedCount = inserted.length;
-
-      await supabaseAdmin.from('imports').insert({
-        account_id: req.accountId,
-        campaign_id,
-        filename: req.file.originalname,
-        total_rows: rows.length,
-        imported: insertedCount,
-        duplicates: rejections.filter(r => r.reason.includes('Doublon')).length,
-        errors: rejections.filter(r => !r.reason.includes('Doublon')).length,
-      });
+      insertedCount = inserted?.length ?? 0;
     }
+
+    // Always log the import attempt
+    await supabaseAdmin.from('imports').insert({
+      account_id: req.accountId,
+      campaign_id,
+      filename: req.file.originalname,
+      total_rows: rows.length,
+      imported: insertedCount,
+      duplicates: rejections.filter(r => r.reason.includes('Doublon')).length,
+      errors: rejections.filter(r => !r.reason.includes('Doublon')).length,
+    });
 
     res.json({ imported: insertedCount, rejected: rejections.length, rejections });
   } catch (err) {
