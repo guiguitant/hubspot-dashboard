@@ -31,20 +31,18 @@ Les commits récents (`0a7167d feat: remove Task 1 scraping infrastructure`) ont
 
 Seules références restantes : `skill_prospector_V10_backup.md` (archive volontaire, laissée intacte).
 
-### 1.2 Endpoints "DEAD" sans caller mais documentés dans V11 — **À TA DÉCISION**
+### 1.2 Endpoints sans caller — **TRANCHÉ** après confirmation Nathan
 
-Ces endpoints n'ont **aucun caller** dans le repo (ni frontend, ni scripts), mais sont documentés dans `skill_prospector_V11.md`. Je ne les ai **pas retirés** : probablement destinés à des consommateurs externes (Dispatch, outils tiers).
+> Claude Dispatch n'a d'autre doc que `skill_prospector_V11.md`. Donc : endpoint absent de V11 ∧ aucun caller interne ⇒ **mort**.
 
-| Méthode | Route | Ligne server.js | Doc V11 | Avis |
-|---|---|---|---|---|
-| POST | `/api/prospector/import` | 4037 | oui | Import JSON générique. Semble redondant avec `/import-emelia` ; probablement usable par Dispatch externe |
-| GET | `/api/prospector/export` | 4195 | non | Export CSV. Pas de bouton UI. **Bon candidat suppression** si jamais exposé |
-| GET | `/api/prospector/validated-profiles` | 4521 | oui (§213) | Utilisé par Dispatch Task 2 ? à confirmer |
-| GET | `/api/prospector/status-history/:id` | 4684 | non | Audit trail. Pas de consommateur |
-| POST | `/api/sequences/stop` | 5858 | oui (§348) | Référencé dans workflow doc |
-| GET | `/api/sequences/states` | 6072 | non | Pas de consommateur visible |
-
-**Recommandation** : passer en revue Dispatch + outils externes, puis soit supprimer, soit ajouter un commentaire `// Called by <système>` pour justifier leur présence.
+| Méthode | Route | Doc V11 | Décision |
+|---|---|---|---|
+| POST | `/api/prospector/import` (générique JSON) | ❌ absent | **Supprimé** — `/import-emelia` est le seul moyen d'import documenté |
+| GET | `/api/prospector/export` | ❌ absent | **Supprimé** |
+| GET | `/api/prospector/status-history/:id` | ❌ absent | **Supprimé** |
+| GET | `/api/sequences/states` | ❌ absent | **Supprimé** |
+| GET | `/api/prospector/validated-profiles` | ✅ V11 §218 | **Gardé** (Dispatch récupère les "Nouveau") |
+| POST | `/api/sequences/stop` | ✅ V11 §348, §799 | **Gardé** (Dispatch appelle avec `reason='error'`) |
 
 ### 1.3 Endpoints DISPATCH-ONLY — **CONSERVÉS** (safety par défaut)
 
@@ -91,13 +89,16 @@ Tous les endpoints dont le commentaire inline mentionne Dispatch/automation sont
 - ✅ Endpoints `/api/scraping/summaries` + `/api/scraping/summary` supprimés (§1.1)
 - ⚪ Statuts `scrapping_pending` et `Profil incomplet` restent valides dans les constantes `VALID_PROSPECT_STATUSES` / `ACTIVE_PROSPECT_STATUSES` (server.js ~4231, 4240). **Gardés** — prospects historiques avec ces statuts existent encore en DB (cf. `scripts/purge-incomplete-prospects.js`).
 
-### Migrations — **GARDÉES** (historique)
+### Migrations — **NETTOYAGE VIA MIGRATION 22**
 
-| Migration | Status | Justification |
-|---|---|---|
-| `10_scraping_summaries.sql` | Table inutilisée | Orpheline après suppression endpoints. **Pas supprimée** — migrations SQL sont du versioning historique, on ne réécrit pas le passé. À envisager : `DROP TABLE scraping_summaries` via nouvelle migration |
-| `17_profil_incomplet_status.sql` | Statut toujours valide | Utilisé par UI + purge script |
-| `20_scraping_workflow_v2.sql` | Colonnes dormantes | `scrapping_attempts` plus utilisée — à retirer via migration future |
+Migration `22_drop_scraping_infrastructure.sql` créée :
+- `DROP TABLE scraping_summaries` (orpheline depuis suppression endpoints)
+- `ALTER TABLE prospects DROP COLUMN scrapping_attempts` (plus lue ni écrite)
+- `DROP INDEX idx_prospects_scrapping_pending`
+
+Les migrations 10, 17, 20 restent en place (historique). Le statut `scrapping_pending` et `Profil incomplet` restent dans la CHECK constraint des prospects — prospects legacy existent encore en DB.
+
+**À toi d'exécuter la migration 22 sur Supabase quand tu juges bon** (après backup par précaution).
 
 ### Scripts — **GARDÉS**
 
@@ -107,7 +108,7 @@ Tous les endpoints dont le commentaire inline mentionne Dispatch/automation sont
 ### Docs
 
 - ✅ `CLAUDE.md` — corrigé (§4)
-- ⚠️ `RESUME.md` — **très obsolète** (dernière maj 2026-04-07). Mentionne Task 1 actif, 9 migrations (on en a 21), liste d'endpoints dépassée. J'ai ajouté un bandeau STALE en tête de fichier plutôt que de le réécrire intégralement — une réécriture complète nécessite ton input sur la vision du projet.
+- ⚠️ `RESUME.md` — **supprimé**. Trop obsolète (dernière maj 2026-04-07), redondant avec `CLAUDE.md` + `skill_prospector_V11.md` qui sont les sources à jour. Une réécriture nécessiterait ton input produit ; en attendant, la suppression élimine le risque de lecture trompeuse. Git history le conserve si besoin.
 
 ---
 
@@ -166,27 +167,30 @@ Choses repérées pendant l'audit qui ne sont **ni mort, ni doc, ni cleanup triv
 
 5. **`package.json`** — `lucide-react` et `react-router-dom@^7` listés en deps. Vérifier que toutes les deps React sont réellement utilisées (hors scope).
 
-6. **Test préexistant en échec sur `master`** : `utils/buildSalesNavUrl.test.js` ligne 79 — le test attend `"keywords:"` dans l'URL construite pour `{ keywords: ['Bilan Carbone', 'RSE'] }`, mais `buildSalesNavUrl` retourne aujourd'hui `(recentSearchParam:(doLogHistory:true),spellCorrectionEnabled:true)` sans le segment keywords. Introduit probablement par `627ed17 fix(skill): 3 bugs post Task 1 run + keyword purge from Sales Nav URL` — le fix a retiré les keywords de l'URL Sales Nav mais pas mis à jour le test. **44/45 tests passent.** Non corrigé dans cet audit (hors scope, décision produit à prendre : garder les keywords ou aligner le test).
+6. ~~Test préexistant en échec~~ — **Corrigé**. `utils/buildSalesNavUrl.test.js` ligne 79 testait `expect(url).toContain('keywords:')`, mais le commit `627ed17 fix(skill): 3 bugs post Task 1 run + keyword purge from Sales Nav URL` a intentionnellement retiré les keywords de l'URL Sales Nav (confirmé par le commentaire inline `buildSalesNavUrl.js:69` : "keywords et instructions Claude ne sont PAS injectés"). Le test a été aligné sur la nouvelle réalité (`expect(url).not.toContain('keywords:')`). **45/45 tests passent.**
 
 ---
 
-## 7. Actions non menées (à ta décision)
+## 7. Actions restantes (à ta décision)
 
-- [ ] Supprimer (ou non) les 6 endpoints "DEAD-looking mais documentés V11" (§1.2)
-- [ ] Réécrire `RESUME.md` (ou le retirer — info redondante avec skill V11 + CLAUDE.md)
-- [ ] Migration de nettoyage : `DROP TABLE scraping_summaries` + `ALTER TABLE prospects DROP COLUMN scrapping_attempts`
-- [ ] Décider du sort de `dist/js/*.js` versionnés (gitignore ? build auto ?)
-- [ ] Audit des dependances `package.json` (deps inutilisées ?)
+- [x] ~~Endpoints "DEAD" dans V11 ou non~~ — Tranché (§1.2)
+- [x] ~~RESUME.md~~ — Supprimé
+- [x] ~~Migration nettoyage scraping~~ — `migrations/22_drop_scraping_infrastructure.sql` créée, **à exécuter sur Supabase quand prêt**
+- [x] ~~Test buildSalesNavUrl préexistant~~ — Corrigé
+- [ ] **Décider du sort de `dist/js/*.js` versionnés** — soit gitignore + build auto en CI, soit hook pré-commit. Laisse tel quel pour l'instant (architectural)
+- [ ] **Audit des dépendances `package.json`** — vérifier `lucide-react`, vieilles deps — hors scope audit
+- [ ] **Point à reviewer §6.1** : `/import-emelia` dédup sur **tous** les statuts (incluant `Non pertinent`/`Perdu`). Voulu ?
 
 ---
 
 ## Fichiers modifiés sur cette branche
 
-- `server.js` — retrait endpoints `/api/scraping/summaries` + `/api/scraping/summary` (~70 lignes)
-- `public/js/prospector.js` — retrait 3 fonctions + 2 vars + 1 console.log (~70 lignes)
-- `dist/js/prospector.js` — idem (miroir)
-- `CLAUDE.md` — docs corrigées
-- `RESUME.md` — bandeau STALE en tête
+- `server.js` — retrait 6 endpoints morts : `/api/scraping/summaries`, `/api/scraping/summary`, `/api/prospector/import`, `/api/prospector/export`, `/api/prospector/status-history/:id`, `/api/sequences/states` (~230 lignes)
+- `public/js/prospector.js` + `dist/js/prospector.js` — retrait 3 fonctions + 2 vars + 1 console.log (~150 lignes au total)
+- `CLAUDE.md` — refs obsolètes corrigées (V11 au lieu de V7, PIN au lieu de Magic Link, etc.)
+- `RESUME.md` — supprimé (trop obsolète pour être utile)
+- `utils/buildSalesNavUrl.test.js` — test aligné sur le comportement post-`627ed17`
+- `migrations/22_drop_scraping_infrastructure.sql` — créée (à exécuter manuellement sur Supabase)
 - `docs/audits/2026-04-22-prospector-audit.md` — ce rapport
 
-**Total** : ~140 lignes de code retirées, 6 endpoints documentés signalés pour décision.
+**Total** : **~380 lignes de code retirées**, 6 endpoints obsolètes supprimés, 45/45 tests passent, 1 migration SQL prête à appliquer.
