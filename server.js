@@ -328,7 +328,14 @@ const KANBAN_STAGES = [
 ];
 
 // --- Fetch open deals for pipeline kanban ---
+let openDealsCache = null;
+let openDealsCacheTime = 0;
+const OPEN_DEALS_CACHE_TTL = 5 * 60 * 1000;
+
 async function fetchOpenDeals() {
+  if (openDealsCache && (Date.now() - openDealsCacheTime) < OPEN_DEALS_CACHE_TTL) {
+    return openDealsCache;
+  }
   const allDeals = [];
   let after = undefined;
   const stageIds = KANBAN_STAGES.map(s => s.id);
@@ -380,6 +387,8 @@ async function fetchOpenDeals() {
     });
   }
 
+  openDealsCache = pipelineDeals;
+  openDealsCacheTime = Date.now();
   return pipelineDeals;
 }
 
@@ -2035,10 +2044,14 @@ function parsePlanTresorerie(csvText) {
     'Fournitures', 'Honoraires divers',
   ];
 
-  // Financements
-  const financements = [
-    'Prêt bancaire', 'Remb. OPCO', 'Avance remboursable BPI',
-    'Subvention BFT', 'Aide apprentissage',
+  // Financements : pattern-based detection, chaque pattern attribue une catégorie à la ligne
+  // Permet de capturer dynamiquement toute nouvelle ligne correspondante (ex. "Subvention XYZ") sans toucher au code
+  const financementPatterns = [
+    { pattern: /^Subvention\b/i,       category: 'subvention' },
+    { pattern: /^Aide\s/i,             category: 'aide' },
+    { pattern: /^Prêt\b/i,             category: 'pret' },
+    { pattern: /^Remb\./i,             category: 'remb' },
+    { pattern: /^Avance\b/i,           category: 'avance' },
   ];
 
   const lines = {};
@@ -2065,8 +2078,9 @@ function parsePlanTresorerie(csvText) {
     if (chargesVariablesItems.includes(label)) {
       chargesVariablesData.push({ name: label, values });
     }
-    if (financements.includes(label)) {
-      financementsData.push({ name: label, values });
+    const matchedFin = financementPatterns.find(p => p.pattern.test(label));
+    if (matchedFin) {
+      financementsData.push({ name: label, category: matchedFin.category, values });
     }
   }
 
@@ -2717,8 +2731,21 @@ const QONTO_ORG_ID = process.env.QONTO_ORG_ID;
 const QONTO_API_KEY = process.env.QONTO_API_KEY;
 const QONTO_HOST = 'thirdparty.qonto.com';
 
+// Cache par endpoint (URL complète comme clé). La Promise elle-même est cachée pour
+// que les requêtes concurrentes partagent le même appel HTTP. En cas d'échec, l'entrée
+// est purgée pour permettre une nouvelle tentative immédiate.
+// NB : les URLs Qonto qui embarquent `new Date().toISOString()` (ex. fetchQontoTransactions)
+// auront une clé différente à chaque ms et ne bénéficieront pas du cache — c'est accepté
+// car ces appels sont déjà chapeautés par le cache endpoint de /api/tresorerie.
+const qontoCache = new Map();
+const QONTO_CACHE_TTL = 5 * 60 * 1000;
+
 function qontoRequest(endpoint) {
-  return new Promise((resolve, reject) => {
+  const cached = qontoCache.get(endpoint);
+  if (cached && (Date.now() - cached.time) < QONTO_CACHE_TTL) {
+    return cached.promise;
+  }
+  const promise = new Promise((resolve, reject) => {
     const url = new URL(endpoint, `https://${QONTO_HOST}`);
     const options = {
       hostname: QONTO_HOST,
@@ -2744,6 +2771,12 @@ function qontoRequest(endpoint) {
     req.on('error', reject);
     req.end();
   });
+  qontoCache.set(endpoint, { promise, time: Date.now() });
+  promise.catch(() => {
+    const cur = qontoCache.get(endpoint);
+    if (cur && cur.promise === promise) qontoCache.delete(endpoint);
+  });
+  return promise;
 }
 
 app.get('/api/qonto', async (req, res) => {
@@ -3459,6 +3492,123 @@ app.get('/api/previsionnel-charges', async (req, res) => {
     });
   } catch (err) {
     console.error('Erreur /api/previsionnel-charges:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// EBE — Compose CA Facturé, Charges projetées, Financements, Pipeline pour une année
+// ============================================================
+
+let planTresoCache = null;
+let planTresoCacheTime = 0;
+const PLAN_TRESO_CACHE_TTL = 10 * 60 * 1000;
+
+async function fetchAndParsePlanTresorerie() {
+  if (planTresoCache && (Date.now() - planTresoCacheTime) < PLAN_TRESO_CACHE_TTL) {
+    return planTresoCache;
+  }
+  const csv = await fetchGoogleSheetCSV(GID_PLAN_TRESORERIE);
+  const data = parsePlanTresorerie(csv);
+  planTresoCache = data;
+  planTresoCacheTime = Date.now();
+  return data;
+}
+
+async function fetchFinancementsForYear(year) {
+  const planData = await fetchAndParsePlanTresorerie();
+  if (!planData.financements) return { subventions: [], aides: [] };
+
+  const result = { subventions: [], aides: [] };
+  for (const fin of planData.financements) {
+    let total = 0;
+    planData.months.forEach((m, i) => {
+      if (m.year === year) total += fin.values[i] || 0;
+    });
+    if (total === 0) continue;
+    const bucket = fin.category === 'subvention' ? result.subventions
+                 : fin.category === 'aide'       ? result.aides
+                 : null;
+    if (bucket) bucket.push({ label: fin.name, montant: Math.round(total) });
+  }
+  return result;
+}
+
+async function computePipelinePondere() {
+  const pipelineDeals = await fetchOpenDeals();
+  let total = 0;
+  for (const stage of KANBAN_STAGES) {
+    const deals = pipelineDeals[stage.label] || [];
+    for (const deal of deals) {
+      total += deal.amount * (deal.probability / 100);
+    }
+  }
+  return Math.round(total);
+}
+
+app.get('/api/ebe', async (req, res) => {
+  try {
+    const yearParam = parseInt(req.query.year, 10);
+    if (!yearParam) return res.status(400).json({ error: 'Paramètre year requis' });
+
+    const start = `${yearParam}-01-01`;
+    const end   = `${yearParam}-12-31`;
+    const currentYear = new Date().getFullYear();
+    const isCurrentYear = yearParam === currentYear;
+
+    // 1) CA Facturé sur l'année (Acompte + Solde des missions Notion dans la plage)
+    const missions = await fetchAllNotionMissions();
+    const startDate = new Date(start);
+    const endDate = new Date(end); endDate.setHours(23, 59, 59, 999);
+    let caFacture = 0;
+    for (const m of missions) {
+      if (m.dateFactureAcompte && m.montantAcompte > 0) {
+        const d = new Date(m.dateFactureAcompte);
+        if (d >= startDate && d <= endDate) caFacture += m.montantAcompte;
+      }
+      if (m.dateFactureFinale) {
+        const montantSolde = m.ca - m.montantAcompte;
+        if (montantSolde > 0) {
+          const d = new Date(m.dateFactureFinale);
+          if (d >= startDate && d <= endDate) caFacture += montantSolde;
+        }
+      }
+    }
+    caFacture = Math.round(caFacture);
+
+    // 2) Charges projetées sur l'année — réutilise la logique /api/charges-hybride via fetch interne
+    const chargesRes = await fetch(`http://localhost:${PORT}/api/charges-hybride?start=${start}&end=${end}`);
+    const chargesData = await chargesRes.json();
+    const totalCharges = Math.round(chargesData.totalCharges || 0);
+
+    // 3) Financements (Subv + Aide) de l'année depuis GSheet Plan_TRE_Prév
+    const financements = await fetchFinancementsForYear(yearParam);
+    const totalSubv = financements.subventions.reduce((s, f) => s + f.montant, 0);
+    const totalAide = financements.aides.reduce((s, f) => s + f.montant, 0);
+
+    // 4) Pipeline pondéré — seulement pour l'année en cours (les années passées n'ont plus de pipeline)
+    const pipelinePondere = isCurrentYear ? await computePipelinePondere() : 0;
+
+    // 5) EBE factuel (CA Facturé) et projeté (CA Facturé + Pipeline pondéré)
+    const ebeFactuel = caFacture - totalCharges + totalSubv + totalAide;
+    const caProjete  = caFacture + pipelinePondere;
+    const ebeProjete = caProjete - totalCharges + totalSubv + totalAide;
+
+    res.json({
+      year: yearParam,
+      ca: { facture: caFacture, pipelinePondere, projete: caProjete },
+      charges: { total: totalCharges },
+      financements: {
+        subventions: financements.subventions,
+        aides: financements.aides,
+        totalSubv,
+        totalAide,
+      },
+      ebe: { factuel: Math.round(ebeFactuel), projete: Math.round(ebeProjete) },
+      fetchedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('Erreur /api/ebe:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

@@ -363,6 +363,32 @@
       box-shadow: 0 0 0 4px rgba(0,61,46,0.12);
     }
 
+    /* Tooltip au survol d'une card KPI */
+    .kpi-tooltip-wrapper { position: relative; cursor: help; }
+    .kpi-tooltip-wrapper .kpi-tooltip-content {
+      display: none;
+      position: absolute;
+      top: calc(100% + 0.4rem);
+      left: 0;
+      z-index: 100;
+      min-width: 280px;
+      max-width: 360px;
+      padding: 0.8rem 1rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+      font-size: 0.82rem;
+      line-height: 1.5;
+      color: var(--text);
+      white-space: normal;
+    }
+    .kpi-tooltip-wrapper:hover .kpi-tooltip-content { display: block; }
+    .kpi-tooltip-content .tt-formula { font-family: ui-monospace, monospace; color: var(--text-secondary); margin-bottom: 0.5rem; }
+    .kpi-tooltip-content .tt-section { margin-top: 0.5rem; font-weight: 600; color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; }
+    .kpi-tooltip-content .tt-row { display: flex; justify-content: space-between; gap: 1rem; padding: 0.15rem 0; }
+    .kpi-tooltip-content .tt-row strong { font-weight: 600; }
+
     .kpi-positive { color: var(--success) !important; }
     .kpi-negative { color: var(--danger) !important; }
 
@@ -1819,14 +1845,13 @@
   <!-- PAGE: Analytics -->
   <div class="app-page" id="page-analytics">
   <div class="page">
-    <div class="page-icon">&#128200;</div>
     <h1 class="page-title">Analytics</h1>
     <p class="page-desc">Analyse du chiffre d'affaires facturé par période.</p>
 
     <!-- Sélecteur de période -->
     <div class="section" style="margin-bottom:1.5rem">
       <div class="section-title">Période d'analyse</div>
-      <div style="display:flex;flex-wrap:wrap;gap:0.5rem;margin-bottom:1rem">
+      <div style="display:flex;flex-wrap:nowrap;gap:0.5rem;margin-bottom:1rem;overflow-x:auto">
         <button class="analytics-preset active" onclick="selectPreset('exercice-courant')">Exercice courant</button>
         <button class="analytics-preset" onclick="selectPreset('exercice-precedent')">Exercice précédent</button>
         <button class="analytics-preset" onclick="selectPreset('annee-courante')">Année en cours</button>
@@ -1845,6 +1870,31 @@
       <div id="analyticsPeriodLabel" style="font-size:0.85rem;color:var(--text-secondary);margin-top:0.5rem"></div>
     </div>
 
+    <!-- Top KPI (communs aux onglets, toujours en mode réel) -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:2rem">
+      <div class="kpi-block">
+        <div class="kpi-label">CA Facturé</div>
+        <div class="kpi-value" id="analyticsCa">--</div>
+        <div class="kpi-sub" id="analyticsCaSub">sur la période</div>
+      </div>
+      <div class="kpi-block">
+        <div class="kpi-label">Charges réelles</div>
+        <div class="kpi-value" id="analyticsTopCharges">--</div>
+        <div class="kpi-sub">Qonto, sur la période</div>
+      </div>
+      <div class="kpi-block">
+        <div class="kpi-label">Moyenne mensuelle</div>
+        <div class="kpi-value" id="analyticsTopMoyenne">--</div>
+        <div class="kpi-sub">charges, par mois</div>
+      </div>
+      <div class="kpi-block kpi-tooltip-wrapper" id="kpiTopEbe" style="display:none">
+        <div class="kpi-label">EBE</div>
+        <div class="kpi-value" id="analyticsTopEbe">--</div>
+        <div class="kpi-sub">projection annuelle</div>
+        <div class="kpi-tooltip-content" id="analyticsTopEbeTooltip"></div>
+      </div>
+    </div>
+
     <!-- Onglets -->
     <div class="analytics-tabs">
       <button class="analytics-tab active" onclick="switchAnalyticsTab('ca')">Chiffre d'affaires</button>
@@ -1859,13 +1909,13 @@
 
     <!-- Onglet CA -->
     <div id="analytics-tab-ca">
-      <!-- KPI CA -->
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:2rem">
-        <div class="kpi-block">
-          <div class="kpi-label">CA Facturé</div>
-          <div class="kpi-value" id="analyticsCa">--</div>
-          <div class="kpi-sub" id="analyticsCaSub">sur la période</div>
-        </div>
+      <!-- Toggle pipeline pondéré (visible uniquement pour les 3 presets éligibles à l'EBE) -->
+      <div id="caPipelineToggleWrapper" style="display:none;align-items:center;gap:0.6rem;margin-bottom:1.5rem">
+        <input type="checkbox" id="caPipelineCheckbox" onchange="toggleCaPipeline(this.checked)" style="width:15px;height:15px;cursor:pointer;accent-color:var(--primary)">
+        <label for="caPipelineCheckbox" style="font-size:0.9rem;cursor:pointer;color:var(--text)">Avec pipeline pondéré</label>
+      </div>
+      <!-- KPI CA (masqués quand 'Avec pipeline pondéré' est coché) -->
+      <div id="analyticsCaBaseCards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:2rem">
         <div class="kpi-block">
           <div class="kpi-label">Nombre de factures</div>
           <div class="kpi-value" id="analyticsNbMissions">--</div>
@@ -1875,6 +1925,34 @@
           <div class="kpi-label">Ticket moyen</div>
           <div class="kpi-value" id="analyticsTicketMoyen">--</div>
           <div class="kpi-sub">par mission</div>
+        </div>
+      </div>
+      <!-- KPI CA projeté (visibles uniquement quand la checkbox 'Avec pipeline pondéré' est cochée) -->
+      <div id="analyticsCaProjCards" style="display:none;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:2rem">
+        <div class="kpi-block">
+          <div class="kpi-label">Total CA projeté</div>
+          <div class="kpi-value" id="analyticsCaTotalProjete">--</div>
+          <div class="kpi-sub">facturé + pipeline</div>
+        </div>
+        <div class="kpi-block">
+          <div class="kpi-label" style="display:flex;align-items:center;gap:0.4rem">
+            <span style="width:8px;height:8px;border-radius:50%;background:#7A9BBF;display:inline-block"></span>Facturé
+          </div>
+          <div class="kpi-value" id="analyticsCaFacturePart">--</div>
+          <div class="kpi-sub">missions facturées</div>
+        </div>
+        <div class="kpi-block">
+          <div class="kpi-label" style="display:flex;align-items:center;gap:0.4rem">
+            <span style="width:8px;height:8px;border-radius:50%;background:#9ECAB4;display:inline-block"></span>Pipeline
+          </div>
+          <div class="kpi-value" id="analyticsCaPipelinePart">--</div>
+          <div class="kpi-sub">HubSpot pondéré</div>
+        </div>
+        <div class="kpi-block kpi-tooltip-wrapper">
+          <div class="kpi-label">EBE projeté</div>
+          <div class="kpi-value" id="analyticsCaEbeProjete">--</div>
+          <div class="kpi-sub">CA projeté − charges + aides</div>
+          <div class="kpi-tooltip-content" id="analyticsCaEbeTooltip"></div>
         </div>
       </div>
 
@@ -1916,14 +1994,13 @@
         <input type="checkbox" id="chargesPrevCheckbox" onchange="toggleChargesPrev(this.checked)" style="width:15px;height:15px;cursor:pointer;accent-color:var(--primary)">
         <label for="chargesPrevCheckbox" style="font-size:0.9rem;cursor:pointer;color:var(--text)">Prévisionnel (données gsheet)</label>
       </div>
-      <!-- KPI Charges -->
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:2rem">
+      <!-- KPI Charges projetées (visibles uniquement quand la checkbox est cochée) -->
+      <div id="analyticsChargesProjCards" style="display:none;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:2rem">
         <div class="kpi-block">
-          <div class="kpi-label">Total charges</div>
-          <div class="kpi-value" id="analyticsChargesTotal">--</div>
-          <div class="kpi-sub" id="analyticsChargesTotalSub">sur la période</div>
+          <div class="kpi-label">Total projeté</div>
+          <div class="kpi-value" id="analyticsChargesTotalProjete">--</div>
+          <div class="kpi-sub">réel + prévisionnel</div>
         </div>
-        <!-- KPI split réel/prévisionnel (visible uniquement en mode hybride) -->
         <div class="kpi-block" id="kpiChargesReel" style="display:none">
           <div class="kpi-label" style="display:flex;align-items:center;gap:0.4rem">
             <span style="width:8px;height:8px;border-radius:50%;background:#7A9BBF;display:inline-block"></span>Réel (Qonto)
@@ -1933,15 +2010,15 @@
         </div>
         <div class="kpi-block" id="kpiChargesPrev" style="display:none">
           <div class="kpi-label" style="display:flex;align-items:center;gap:0.4rem">
-            <span style="width:8px;height:8px;border-radius:50%;background:#9ECAB4;display:inline-block"></span>Prévisionnel (GSheet)
+            <span style="width:8px;height:8px;border-radius:50%;background:#9ECAB4;display:inline-block"></span>Prévi (GSheet)
           </div>
           <div class="kpi-value" id="analyticsChargesPrevTotal">--</div>
           <div class="kpi-sub" id="analyticsChargesPrevPeriode">--</div>
         </div>
         <div class="kpi-block">
-          <div class="kpi-label">Moyenne mensuelle</div>
-          <div class="kpi-value" id="analyticsChargesMoyenne">--</div>
-          <div class="kpi-sub">par mois</div>
+          <div class="kpi-label">Moy. mens. projetée</div>
+          <div class="kpi-value" id="analyticsChargesMoyenneProjetee">--</div>
+          <div class="kpi-sub">total projeté / nb mois</div>
         </div>
       </div>
       <div class="section">
@@ -4667,13 +4744,8 @@
       const sousCatBtn = document.getElementById('btnAnalyticsChargesSousCat');
       sousCatBtn.disabled = false;
       sousCatBtn.style.opacity = '';
-      // Masquer les KPI split si on décoche
-      if (!checked) {
-        document.getElementById('kpiChargesReel').style.display = 'none';
-        document.getElementById('kpiChargesPrev').style.display = 'none';
-        const subEl = document.getElementById('analyticsChargesTotalSub');
-        if (subEl) subEl.textContent = 'sur la période';
-      }
+      document.getElementById('analyticsChargesProjCards').style.display = checked ? 'grid' : 'none';
+      updateTopEbeCard();
       renderAnalyticsChargesChart();
     }
 
@@ -4694,9 +4766,109 @@
       return fmt(start) + ' – ' + fmt(end);
     }
 
-    function updateChargesKpis(data) {
-      document.getElementById('analyticsChargesTotal').textContent = formatEuro(data.totalCharges || 0);
-      document.getElementById('analyticsChargesMoyenne').textContent = formatEuro(data.moyenneMensuelle || 0);
+    // Cards du haut (communes aux deux tabs, toujours alimentées par /api/charges réel)
+    function updateTopChargesKpis(data) {
+      document.getElementById('analyticsTopCharges').textContent = formatEuro(data.totalCharges || 0);
+      document.getElementById('analyticsTopMoyenne').textContent = formatEuro(data.moyenneMensuelle || 0);
+    }
+
+    // EBE — card du haut (visible uniquement pour les 3 presets éligibles + checkbox Charges cochée)
+    function getEbeYearForPreset(preset) {
+      const currentYear = new Date().getFullYear();
+      if (preset === 'exercice-courant')   return currentYear;
+      if (preset === 'exercice-precedent') return currentYear - 1;
+      if (preset === 'annee-courante')     return currentYear;
+      return null;
+    }
+
+    function buildEbeTooltip(data, useProjete) {
+      const caVal   = useProjete ? data.ca.projete : data.ca.facture;
+      const caLabel = useProjete ? 'CA projeté' : 'CA Facturé';
+      const ebeVal  = useProjete ? data.ebe.projete : data.ebe.factuel;
+      let html = '<div class="tt-formula">' + caLabel + ' (' + formatEuro(caVal) + ') − Charges (' + formatEuro(data.charges.total) + ') + Subv (' + formatEuro(data.financements.totalSubv) + ') + Aide (' + formatEuro(data.financements.totalAide) + ')</div>';
+      html += '<div class="tt-row"><strong>EBE</strong><strong>' + formatEuro(ebeVal) + '</strong></div>';
+      if (data.financements.subventions.length > 0) {
+        html += '<div class="tt-section">Subventions</div>';
+        for (const s of data.financements.subventions) {
+          html += '<div class="tt-row"><span>' + s.label + '</span><span>' + formatEuro(s.montant) + '</span></div>';
+        }
+      }
+      if (data.financements.aides.length > 0) {
+        html += '<div class="tt-section">Aides</div>';
+        for (const a of data.financements.aides) {
+          html += '<div class="tt-row"><span>' + a.label + '</span><span>' + formatEuro(a.montant) + '</span></div>';
+        }
+      }
+      return html;
+    }
+
+    let analyticsEbeCache = null;
+    let analyticsCaPipeline = false;
+
+    async function ensureEbeData(year) {
+      if (analyticsEbeCache && analyticsEbeCache.year === year) return analyticsEbeCache.data;
+      const res = await fetch('/api/ebe?year=' + year);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      analyticsEbeCache = { year, data };
+      return data;
+    }
+
+    async function updateTopEbeCard() {
+      const card = document.getElementById('kpiTopEbe');
+      const year = getEbeYearForPreset(analyticsCurrentPreset);
+      const eligible = year !== null && analyticsChargesPrev;
+      if (!eligible) { card.style.display = 'none'; return; }
+      card.style.display = '';
+      try {
+        const data = await ensureEbeData(year);
+        document.getElementById('analyticsTopEbe').textContent = formatEuro(data.ebe.factuel);
+        document.getElementById('analyticsTopEbeTooltip').innerHTML = buildEbeTooltip(data, false);
+      } catch (e) {
+        console.error('Erreur /api/ebe:', e);
+        document.getElementById('analyticsTopEbe').textContent = '—';
+      }
+    }
+
+    function toggleCaPipeline(checked) {
+      analyticsCaPipeline = checked;
+      document.getElementById('analyticsCaProjCards').style.display = checked ? 'grid' : 'none';
+      document.getElementById('analyticsCaBaseCards').style.display = checked ? 'none' : 'grid';
+      if (checked) updateCaProjCards();
+    }
+
+    async function updateCaProjCards() {
+      if (!analyticsCaPipeline) return;
+      const year = getEbeYearForPreset(analyticsCurrentPreset);
+      if (year === null) return;
+      try {
+        const data = await ensureEbeData(year);
+        document.getElementById('analyticsCaTotalProjete').textContent = formatEuro(data.ca.projete);
+        document.getElementById('analyticsCaFacturePart').textContent  = formatEuro(data.ca.facture);
+        document.getElementById('analyticsCaPipelinePart').textContent = formatEuro(data.ca.pipelinePondere);
+        document.getElementById('analyticsCaEbeProjete').textContent   = formatEuro(data.ebe.projete);
+        document.getElementById('analyticsCaEbeTooltip').innerHTML     = buildEbeTooltip(data, true);
+      } catch (e) {
+        console.error('Erreur /api/ebe (CA):', e);
+      }
+    }
+
+    // Montre/masque la checkbox 'Avec pipeline pondéré' selon l'éligibilité du preset
+    function updateCaPipelineState() {
+      const eligible = getEbeYearForPreset(analyticsCurrentPreset) !== null;
+      document.getElementById('caPipelineToggleWrapper').style.display = eligible ? 'flex' : 'none';
+      if (!eligible && analyticsCaPipeline) {
+        analyticsCaPipeline = false;
+        document.getElementById('caPipelineCheckbox').checked = false;
+        document.getElementById('analyticsCaProjCards').style.display = 'none';
+        document.getElementById('analyticsCaBaseCards').style.display = 'grid';
+      }
+    }
+
+    // 4 cards projetées dans le tab Charges (visibles uniquement quand checkbox cochée, alimentées par /api/charges-hybride)
+    function updateChargesProjCards(data) {
+      document.getElementById('analyticsChargesTotalProjete').textContent = formatEuro(data.totalCharges || 0);
+      document.getElementById('analyticsChargesMoyenneProjetee').textContent = formatEuro(data.moyenneMensuelle || 0);
       const hasReal = data.real != null;
       const hasPrev = data.prev != null;
       document.getElementById('kpiChargesReel').style.display = hasReal ? '' : 'none';
@@ -4709,8 +4881,6 @@
         document.getElementById('analyticsChargesPrevTotal').textContent = formatEuro(data.prev.total);
         document.getElementById('analyticsChargesPrevPeriode').textContent = formatPeriodLabel(data.prev.start, data.prev.end);
       }
-      const subEl = document.getElementById('analyticsChargesTotalSub');
-      if (subEl) subEl.textContent = (hasReal || hasPrev) ? 'réel + prévisionnel' : 'sur la période';
     }
 
     async function renderAnalyticsChargesChart() {
@@ -4730,7 +4900,7 @@
         const res = await fetch(endpoint);
         analyticsChargesData = await res.json();
         if (!analyticsChargesData.ventilationCharges) return;
-        updateChargesKpis(analyticsChargesData);
+        if (analyticsChargesPrev) updateChargesProjCards(analyticsChargesData);
         const source = analyticsChargesMode === 'sous-categories' && analyticsChargesData.ventilationChargesDetail
           ? analyticsChargesData.ventilationChargesDetail.map(v => ({ label: v.sousCat || v.categorie, montant: v.montant }))
           : analyticsChargesData.ventilationCharges.map(v => ({ label: v.categorie, montant: v.montant }));
@@ -4934,6 +5104,9 @@
       }
       analyticsCurrentStart = start;
       analyticsCurrentEnd = end;
+      // Invalider le cache EBE à chaque changement de période
+      analyticsEbeCache = null;
+      updateCaPipelineState();
 
       // Afficher l'overlay de chargement
       const loader = document.getElementById('analyticsLoader');
@@ -4944,23 +5117,35 @@
       tabCharges.style.visibility = 'hidden';
 
       try {
-        const fetches = [fetch(`/api/analytics?start=${start}&end=${end}`)];
+        // Toujours fetch analytics (CA) + charges réel (pour les cards du haut, peu importe le tab actif)
+        const fetches = [
+          fetch(`/api/analytics?start=${start}&end=${end}`),
+          fetch(`/api/charges?start=${start}&end=${end}`),
+        ];
+        // Si la checkbox prévisionnel est cochée, fetch également l'endpoint hybride (pour les 4 cards du tab + graphes)
         const chargesVisible = tabCharges.style.display !== 'none';
-        if (chargesVisible) {
-          const chargesEndpoint = analyticsChargesPrev
-            ? `/api/charges-hybride?start=${start}&end=${end}`
-            : `/api/charges?start=${start}&end=${end}`;
-          fetches.push(fetch(chargesEndpoint));
+        if (analyticsChargesPrev) {
+          fetches.push(fetch(`/api/charges-hybride?start=${start}&end=${end}`));
         }
 
         const results = await Promise.all(fetches);
-        const data = await results[0].json();
-        renderAnalytics(data);
+        const analyticsData = await results[0].json();
+        const chargesRealData = await results[1].json();
+
+        renderAnalytics(analyticsData);
+        updateTopChargesKpis(chargesRealData);
+        updateTopEbeCard();
+        updateCaProjCards();
 
         if (chargesVisible) {
-          analyticsChargesData = await results[1].json();
-          if (!analyticsChargesData.ventilationCharges) return;
-          updateChargesKpis(analyticsChargesData);
+          if (analyticsChargesPrev) {
+            analyticsChargesData = await results[2].json();
+            if (!analyticsChargesData.ventilationCharges) return;
+            updateChargesProjCards(analyticsChargesData);
+          } else {
+            analyticsChargesData = chargesRealData;
+            if (!analyticsChargesData.ventilationCharges) return;
+          }
           const source = analyticsChargesMode === 'sous-categories' && analyticsChargesData.ventilationChargesDetail
             ? analyticsChargesData.ventilationChargesDetail.map(v => ({ label: v.sousCat || v.categorie, montant: v.montant }))
             : analyticsChargesData.ventilationCharges.map(v => ({ label: v.categorie, montant: v.montant }));
