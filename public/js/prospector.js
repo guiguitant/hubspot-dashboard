@@ -24,6 +24,7 @@ const App = (() => {
       case '#campagnes':       renderCampagnes(app); break;
       case '#campaign-detail': renderCampaignDetail(app, params.get('id')); break;
       case '#imports':         renderImports(app); break;
+      case '#emelia-import': renderEmeliaImport(app, params.get('campaign_id')); break;
       case '#logs':            renderLogs(app); break;
       case '#rappels':         renderRappels(app); break;
       case '#placeholders':    location.hash = '#campagnes'; break;
@@ -2897,8 +2898,7 @@ const App = (() => {
   let _importState = { step: 1, rawData: null, headers: [], mapping: {}, parsed: [], duplicates: [], file: null };
 
   function renderImports(container) {
-    _importState = { step: 1, rawData: null, headers: [], mapping: {}, parsed: [], duplicates: [], file: null };
-    renderImportStep(container);
+    renderEmeliaImport(container, null);
   }
 
   function renderImportStep(container) {
@@ -3144,6 +3144,189 @@ const App = (() => {
   }
 
   // ============================================================
+  // EMELIA IMPORT
+  // ============================================================
+  let _emeliaPendingFile = null;
+  let _emeliaDryRunResult = null;
+  let _emeliaCampaignId = null;
+  let _emeliaCampaignsList = [];
+
+  async function renderEmeliaImport(container, preselectedCampaignId) {
+    _emeliaPendingFile = null;
+    _emeliaDryRunResult = null;
+    _emeliaCampaignId = preselectedCampaignId || null;
+
+    if (!preselectedCampaignId) {
+      try {
+        const r = await APIClient.get('/api/prospector/campaigns');
+        const data = await r.json();
+        _emeliaCampaignsList = (data.campaigns || []).filter(c => c.status !== 'Terminée' && c.status !== 'Archivée');
+      } catch (e) {
+        _emeliaCampaignsList = [];
+      }
+    }
+
+    _renderEmeliaStep1(container);
+  }
+
+  function _renderEmeliaStep1(container) {
+    const campaignSelector = !_emeliaCampaignId ? `
+      <div class="form-group" style="margin-bottom:1.25rem">
+        <label class="form-label" style="display:block;margin-bottom:4px;font-weight:500">Campagne</label>
+        <select id="emeliaCampaignSel" class="form-control" style="width:100%">
+          <option value="">— Sélectionner une campagne —</option>
+          ${_emeliaCampaignsList.map(c => `<option value="${c.id}">${UI.esc(c.name)}</option>`).join('')}
+        </select>
+      </div>
+    ` : '';
+
+    container.innerHTML = `
+      <div class="page-header"><h1 class="page-title">Import Emelia</h1></div>
+      <div class="card" style="max-width:600px;margin:0 auto">
+        <div class="card-body" style="padding:2rem">
+          <p style="color:#6b7280;margin-bottom:1.5rem">Importez un fichier <strong>.csv</strong> exporté depuis Emelia. Les profils seront ajoutés en statut <strong>Profil à valider</strong>.</p>
+          ${campaignSelector}
+          <div class="form-group" style="margin-bottom:1.25rem">
+            <label class="form-label" style="display:block;margin-bottom:4px;font-weight:500">Fichier Emelia (.csv)</label>
+            <div id="emeliaDrop" style="border:2px dashed #d1d5db;border-radius:8px;padding:2rem;text-align:center;cursor:pointer;transition:border-color 0.2s">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="1.5" style="margin:0 auto 0.75rem;display:block"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              <p id="emeliaDragLabel" style="margin:0;color:#6b7280">Glisser un fichier .csv ici ou <span style="color:#2563eb;text-decoration:underline">parcourir</span></p>
+              <input type="file" id="emeliFileInput" accept=".csv" style="display:none">
+            </div>
+          </div>
+          <button id="emeliAnalyzeBtn" class="btn btn-primary" style="width:100%" disabled onclick="App.emeliAnalyze()">Analyser le fichier</button>
+        </div>
+      </div>
+    `;
+
+    const drop = document.getElementById('emeliaDrop');
+    const input = document.getElementById('emeliFileInput');
+    drop.addEventListener('click', () => input.click());
+    drop.addEventListener('dragover', e => { e.preventDefault(); drop.style.borderColor = '#2563eb'; });
+    drop.addEventListener('dragleave', () => { drop.style.borderColor = '#d1d5db'; });
+    drop.addEventListener('drop', e => {
+      e.preventDefault();
+      drop.style.borderColor = '#d1d5db';
+      if (e.dataTransfer.files[0]) _emeliSetFile(e.dataTransfer.files[0]);
+    });
+    input.addEventListener('change', () => { if (input.files[0]) _emeliSetFile(input.files[0]); });
+  }
+
+  function _emeliSetFile(file) {
+    if (!file.name.endsWith('.csv')) {
+      UI.toast('Format invalide — seuls les fichiers .csv sont acceptés', 'error');
+      return;
+    }
+    _emeliaPendingFile = file;
+    document.getElementById('emeliaDragLabel').textContent = `📄 ${file.name} (${(file.size / 1024).toFixed(1)} Ko)`;
+    document.getElementById('emeliAnalyzeBtn').disabled = false;
+  }
+
+  async function emeliAnalyze() {
+    const campaignId = _emeliaCampaignId || (document.getElementById('emeliaCampaignSel') || {}).value;
+    if (!campaignId) { UI.toast('Sélectionnez une campagne', 'error'); return; }
+    if (!_emeliaPendingFile) { UI.toast('Sélectionnez un fichier', 'error'); return; }
+    _emeliaCampaignId = campaignId;
+
+    const btn = document.getElementById('emeliAnalyzeBtn');
+    btn.textContent = 'Analyse en cours…';
+    btn.disabled = true;
+
+    try {
+      const fd = new FormData();
+      fd.append('file', _emeliaPendingFile);
+      fd.append('campaign_id', campaignId);
+      fd.append('dry_run', 'true');
+
+      const token = localStorage.getItem('auth_token');
+      const headers = { 'Authorization': `Bearer ${token}` };
+      const switchId = localStorage.getItem('activeAccountId');
+      if (switchId) headers['X-Switch-Account'] = switchId;
+
+      const res = await fetch('/api/prospector/import-emelia', { method: 'POST', headers, body: fd });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Erreur serveur'); }
+      _emeliaDryRunResult = await res.json();
+      _renderEmeliaStep2(document.getElementById('app'));
+    } catch (err) {
+      UI.toast('Erreur : ' + err.message, 'error');
+      btn.textContent = 'Analyser le fichier';
+      btn.disabled = false;
+    }
+  }
+
+  function _renderEmeliaStep2(container) {
+    const r = _emeliaDryRunResult;
+    const rejHtml = r.rejections.length === 0 ? '' : `
+      <div style="margin-top:1rem;border:1px solid #fecaca;border-radius:6px;padding:0.75rem;background:#fef2f2">
+        <p style="font-weight:600;margin:0 0 0.5rem;color:#dc2626">❌ ${r.rejected} profil(s) rejeté(s)</p>
+        <ul style="list-style:none;padding:0;margin:0;font-size:0.85rem;color:#6b7280">
+          ${r.rejections.map(rej => `<li style="padding:3px 0">${UI.esc(rej.name)} (ligne ${rej.row}) — ${UI.esc(rej.reason)}</li>`).join('')}
+        </ul>
+      </div>`;
+
+    container.innerHTML = `
+      <div class="page-header"><h1 class="page-title">Import Emelia — Aperçu</h1></div>
+      <div class="card" style="max-width:600px;margin:0 auto">
+        <div class="card-body" style="padding:2rem">
+          <div style="padding:1rem;background:#f0fdf4;border-radius:8px;border:1px solid #bbf7d0;margin-bottom:0.75rem">
+            <p style="margin:0;color:#15803d;font-weight:600">✅ ${r.imported} prospect(s) prêt(s) à importer</p>
+          </div>
+          ${rejHtml}
+          <div style="display:flex;gap:0.75rem;margin-top:1.5rem">
+            <button class="btn btn-ghost" onclick="App.emeliReset()">Annuler</button>
+            <button class="btn btn-primary" style="flex:1" onclick="App.emeliConfirm()" ${r.imported === 0 ? 'disabled' : ''}>
+              Confirmer l'import (${r.imported} prospects)
+            </button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  async function emeliConfirm() {
+    const btn = document.querySelector('[onclick="App.emeliConfirm()"]');
+    if (btn) { btn.textContent = 'Import en cours…'; btn.disabled = true; }
+
+    try {
+      const fd = new FormData();
+      fd.append('file', _emeliaPendingFile);
+      fd.append('campaign_id', _emeliaCampaignId);
+      fd.append('dry_run', 'false');
+
+      const token = localStorage.getItem('auth_token');
+      const headers = { 'Authorization': `Bearer ${token}` };
+      const switchId = localStorage.getItem('activeAccountId');
+      if (switchId) headers['X-Switch-Account'] = switchId;
+
+      const res = await fetch('/api/prospector/import-emelia', { method: 'POST', headers, body: fd });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Erreur serveur'); }
+      const result = await res.json();
+      _renderEmeliaStep3(document.getElementById('app'), result);
+    } catch (err) {
+      UI.toast('Erreur : ' + err.message, 'error');
+      if (btn) { btn.textContent = "Confirmer l'import"; btn.disabled = false; }
+    }
+  }
+
+  function _renderEmeliaStep3(container, result) {
+    container.innerHTML = `
+      <div class="page-header"><h1 class="page-title">Import terminé</h1></div>
+      <div class="card" style="max-width:600px;margin:0 auto">
+        <div class="card-body" style="padding:2rem;text-align:center">
+          <div style="font-size:3rem;margin-bottom:1rem">✅</div>
+          <h2 style="margin-bottom:0.5rem">${result.imported} prospect(s) importé(s)</h2>
+          <p style="color:#6b7280;margin-bottom:2rem">Statut initial : <strong>Profil à valider</strong></p>
+          <button class="btn btn-primary" onclick="location.hash='#prospects?status=${encodeURIComponent('Profil à valider')}'">
+            Valider les profils →
+          </button>
+        </div>
+      </div>`;
+  }
+
+  function emeliReset() {
+    renderEmeliaImport(document.getElementById('app'), _emeliaCampaignId);
+  }
+
+  // ============================================================
   // INIT
   // ============================================================
   function init() {
@@ -3201,5 +3384,8 @@ const App = (() => {
     enrollProspect, enrollCampaign,
     openAddPlaceholder, savePlaceholder, deletePlaceholder,
     _filterCampByStatus,
+    emeliAnalyze,
+    emeliConfirm,
+    emeliReset,
   };
 })();
