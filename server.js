@@ -4033,77 +4033,6 @@ app.put('/api/prospector/campaigns/:id', accountContext, async (req, res) => {
   }
 });
 
-// POST /api/prospector/import — Bulk import from Claude Dispatch or external
-app.post('/api/prospector/import', accountContext, async (req, res) => {
-  try {
-    const { prospects, campaign_id, skip_duplicates = true } = req.body;
-    if (!prospects || !Array.isArray(prospects)) {
-      return res.status(400).json({ error: 'prospects array required' });
-    }
-
-    // Fetch existing prospects for dedup (scoped to this account)
-    const { data: existing } = await supabaseAdmin.from('prospects').select('email, linkedin_url, first_name, last_name').eq('account_id', req.accountId);
-
-    let imported = 0, duplicates = 0, errors = 0;
-    const toInsert = [];
-
-    for (const p of prospects) {
-      const normalizedUrl = normalizeLinkedinUrl(p.linkedin_url);
-
-      const isDupe = (existing || []).some(e =>
-        (p.email && e.email && p.email.toLowerCase() === e.email.toLowerCase()) ||
-        (normalizedUrl && e.linkedin_url && normalizeLinkedinUrl(e.linkedin_url) === normalizedUrl) ||
-        (p.first_name && p.last_name && e.first_name &&
-         e.first_name.toLowerCase() === p.first_name.toLowerCase() &&
-         e.last_name.toLowerCase() === p.last_name.toLowerCase())
-      );
-
-      if (isDupe) {
-        duplicates++;
-        if (skip_duplicates) continue;
-      }
-
-      toInsert.push({
-        first_name: p.first_name || '',
-        last_name: p.last_name || '',
-        email: p.email || null,
-        phone: p.phone || null,
-        linkedin_url: normalizedUrl,
-        company: p.company || null,
-        job_title: p.job_title || null,
-        sector: p.sector || null,
-        geography: p.geography || null,
-        account_id: req.accountId,
-        status: 'Nouveau',
-        campaign_id: campaign_id || null,
-      });
-    }
-
-    if (toInsert.length > 0) {
-      const { data: inserted, error } = await supabaseAdmin.from('prospects').insert(toInsert).select();
-      if (error) {
-        console.error('Bulk insert error:', error.message);
-        errors = toInsert.length;
-      } else {
-        imported = inserted?.length || 0;
-      }
-    }
-
-    // Log import
-    await supabaseAdmin.from('imports').insert({
-      filename: 'api-import',
-      total_rows: prospects.length,
-      imported, duplicates, errors,
-      account_id: req.accountId,
-    });
-
-    res.json({ imported, duplicates, errors });
-  } catch (err) {
-    console.error('Erreur /api/prospector/import:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // POST /api/prospector/import-emelia — Import depuis fichier CSV Emelia
 // dry_run=true : analyse uniquement, aucune insertion en DB
 app.post('/api/prospector/import-emelia', accountContext, upload.single('file'), async (req, res) => {
@@ -4187,38 +4116,6 @@ app.post('/api/prospector/import-emelia', accountContext, upload.single('file'),
     res.json({ imported: insertedCount, rejected: rejections.length, rejections });
   } catch (err) {
     console.error('Erreur /api/prospector/import-emelia:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /api/prospector/export — CSV export
-app.get('/api/prospector/export', accountContext, async (req, res) => {
-  try {
-    let q = supabaseAdmin
-      .from('prospects')
-      .select('id, first_name, last_name, email, phone, linkedin_url, company, job_title, sector, geography, created_at, status, notes')
-      .eq('account_id', req.accountId);
-
-    if (req.query.status) q = q.eq('status', req.query.status);
-    if (req.query.sector) q = q.like('sector', `%${req.query.sector}%`);
-    if (req.query.geography) q = q.like('geography', `%${req.query.geography}%`);
-    if (req.query.campaign_id) q = q.eq('campaign_id', req.query.campaign_id);
-
-    const { data, error } = await q.order('added_at', { ascending: false });
-    if (error) throw error;
-
-    const flatData = data || [];
-
-    const fields = ['first_name','last_name','email','phone','linkedin_url','company','job_title','sector','geography','status','notes'];
-    const header = fields.join(',');
-    const rows = flatData.map(r => fields.map(f => `"${(r[f] || '').replace(/"/g, '""')}"`).join(','));
-    const csv = [header, ...rows].join('\n');
-
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="prospects-export.csv"');
-    res.send(csv);
-  } catch (err) {
-    console.error('Erreur /api/prospector/export:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -4676,36 +4573,6 @@ app.post('/api/prospector/undo-bulk', accountContext, async (req, res) => {
     res.json({ success: true, restored });
   } catch (err) {
     console.error('Erreur /api/prospector/undo-bulk:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /api/prospector/status-history/:prospect_id — History of status changes
-app.get('/api/prospector/status-history/:prospect_id', accountContext, async (req, res) => {
-  try {
-    // Verify prospect belongs to this account
-    const { data: owns, error: checkErr } = await supabaseAdmin
-      .from('prospects')
-      .select('id')
-      .eq('id', req.params.prospect_id)
-      .eq('account_id', req.accountId)
-      .single();
-
-    if (checkErr || !owns) {
-      return res.status(403).json({ error: 'Prospect not found in your account' });
-    }
-
-    const { data, error } = await supabaseAdmin
-      .from('status_history')
-      .select('*')
-      .eq('prospect_id', req.params.prospect_id)
-      .eq('account_id', req.accountId)
-      .order('created_at', { ascending: false })
-      .limit(50);
-    if (error) throw error;
-    res.json(data || []);
-  } catch (err) {
-    console.error('Erreur /api/prospector/status-history:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -5991,30 +5858,6 @@ app.post('/api/dispatch/summary', accountContext, async (req, res) => {
     res.json(data);
   } catch (err) {
     console.error('Erreur POST /api/dispatch/summary:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================
-// GET /api/sequences/states — Sequence states for all prospects
-// ============================================================
-app.get('/api/sequences/states', accountContext, async (req, res) => {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('prospect_sequence_state')
-      .select('id, prospect_id, status, current_step_order, sequence_id')
-      .eq('account_id', req.accountId);
-
-    if (error) return res.status(500).json({ error: error.message });
-
-    // Return a map { prospect_id → { status, current_step_order, sequence_id } }
-    const map = {};
-    for (const row of (data || [])) {
-      map[row.prospect_id] = row;
-    }
-    res.json(map);
-  } catch (err) {
-    console.error('Erreur GET /api/sequences/states:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
