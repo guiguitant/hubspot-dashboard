@@ -369,8 +369,6 @@ const App = (() => {
   // ============================================================
   // PROSPECTS LIST
   // ============================================================
-  let _prospectFilters = {};
-
   let _selectedProspects = new Set();
 
   // Sort state for "Nom" column (null = default order, 'asc' = A→Z, 'desc' = Z→A)
@@ -740,15 +738,6 @@ const App = (() => {
     await APIClient.post('/api/prospector/bulk-update-status', { ids: [id], status: 'Non pertinent' });
     UI.toast('Profil marqué non pertinent');
     filterProspects();
-  }
-
-  function _seqBadgeHtml(s) {
-    if (!s) return '<span class="badge badge-non-pertinent">Non enrôlé</span>';
-    if (s.status === 'active') return `<span class="badge badge-envoye">Active — Étape ${s.current_step_order}</span>`;
-    if (s.status === 'completed') return '<span class="badge badge-gagne">Terminée ✅</span>';
-    if (s.status === 'stopped_reply') return '<span class="badge badge-perdu">Arrêtée ⛔</span>';
-    if (s.status === 'paused') return '<span class="badge badge-a-valider">En pause</span>';
-    return '<span class="badge badge-non-pertinent">Non enrôlé</span>';
   }
 
   async function filterProspects() {
@@ -1543,64 +1532,6 @@ const App = (() => {
     </div>`;
   }
 
-  function initCardDrag() {
-    const list = document.getElementById('campCardsList');
-    if (!list) return;
-    let dragCard = null;
-
-    list.querySelectorAll('.camp-card').forEach(card => {
-      card.addEventListener('click', e => {
-        if (card._dragged) return;
-        location.hash = `#campaign-detail?id=${card.dataset.id}`;
-      });
-
-      card.addEventListener('dragstart', e => {
-        dragCard = card;
-        card.classList.add('dragging');
-        e.dataTransfer.effectAllowed = 'move';
-        card._dragged = true;
-      });
-
-      card.addEventListener('dragend', () => {
-        card.classList.remove('dragging');
-        list.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
-        setTimeout(() => { card._dragged = false; }, 50);
-        dragCard = null;
-      });
-
-      card.addEventListener('dragover', e => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        if (card !== dragCard) {
-          list.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
-          card.classList.add('drag-over');
-        }
-      });
-
-      card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
-
-      card.addEventListener('drop', async e => {
-        e.preventDefault();
-        card.classList.remove('drag-over');
-        if (!dragCard || dragCard === card) return;
-
-        const fromIdx = parseInt(dragCard.dataset.idx);
-        const toIdx = parseInt(card.dataset.idx);
-        if (fromIdx === toIdx) return;
-
-        const moved = _campaignsCache.splice(fromIdx, 1)[0];
-        _campaignsCache.splice(toIdx, 0, moved);
-
-        renderCampaignCards();
-
-        const updates = _campaignsCache.map((c, i) => ({ id: c.id, priority: i + 1 }));
-        for (const u of updates) {
-          await APIClient.put(`/api/prospector/campaigns/${u.id}`, { priority: u.priority });
-        }
-      });
-    });
-  }
-
   function buildCampaignBody(raw, jobTagsId, exclTagsId, objTagsId) {
     return {
       name: raw.name,
@@ -2013,7 +1944,6 @@ const App = (() => {
 
   let _seqActiveStepId = null; // currently selected step in split panel
   let _placeholdersCache = null;
-  let _seqStatesCache = null; // prospect sequence states for list badges
 
   async function renderSequenceTab(campaignId) {
     const el = document.getElementById('campaignTabContent');
@@ -2344,8 +2274,6 @@ const App = (() => {
     await fetch(`/api/sequences/${sequenceId}/steps/${stepId}`, { method: 'DELETE' });
     renderSequenceTab(_currentCampaignId());
   }
-
-  function _onStepTypeChange() {} // no longer needed in split panel
 
   function _switchMsgTab(tab) {
     const manualZone = document.getElementById('msgTabManual');
@@ -3435,8 +3363,7 @@ const App = (() => {
     }, true); // Use capture phase
 
     // Reload page when account changes (to refresh all data with new account_id header)
-    document.addEventListener('account-changed', (e) => {
-      console.log('Account changed to:', e.detail?.name);
+    document.addEventListener('account-changed', () => {
       // Reload the current page to refresh all data
       router();
     });
