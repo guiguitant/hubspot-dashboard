@@ -3229,6 +3229,7 @@ const App = (() => {
     _emeliaCampaignId = campaignId;
 
     const btn = document.getElementById('emeliAnalyzeBtn');
+    if (!btn) return;
     btn.textContent = 'Analyse en cours…';
     btn.disabled = true;
 
@@ -3240,7 +3241,7 @@ const App = (() => {
 
       const token = localStorage.getItem('auth_token');
       const headers = { 'Authorization': `Bearer ${token}` };
-      const switchId = localStorage.getItem('activeAccountId');
+      const switchId = accountContext.getSwitchAccountId();
       if (switchId) headers['X-Switch-Account'] = switchId;
 
       const res = await fetch('/api/prospector/import-emelia', { method: 'POST', headers, body: fd });
@@ -3256,6 +3257,7 @@ const App = (() => {
 
   function _renderEmeliaStep2(container) {
     const r = _emeliaDryRunResult;
+    if (!r) return;
     const rejHtml = r.rejections.length === 0 ? '' : `
       <div style="margin-top:1rem;border:1px solid #fecaca;border-radius:6px;padding:0.75rem;background:#fef2f2">
         <p style="font-weight:600;margin:0 0 0.5rem;color:#dc2626">❌ ${r.rejected} profil(s) rejeté(s)</p>
@@ -3274,7 +3276,7 @@ const App = (() => {
           ${rejHtml}
           <div style="display:flex;gap:0.75rem;margin-top:1.5rem">
             <button class="btn btn-ghost" onclick="App.emeliReset()">Annuler</button>
-            <button class="btn btn-primary" style="flex:1" onclick="App.emeliConfirm()" ${r.imported === 0 ? 'disabled' : ''}>
+            <button id="emeliConfirmBtn" class="btn btn-primary" style="flex:1" onclick="App.emeliConfirm()" ${r.imported === 0 ? 'disabled' : ''}>
               Confirmer l'import (${r.imported} prospects)
             </button>
           </div>
@@ -3283,7 +3285,7 @@ const App = (() => {
   }
 
   async function emeliConfirm() {
-    const btn = document.querySelector('[onclick="App.emeliConfirm()"]');
+    const btn = document.getElementById('emeliConfirmBtn');
     if (btn) { btn.textContent = 'Import en cours…'; btn.disabled = true; }
 
     try {
@@ -3294,7 +3296,7 @@ const App = (() => {
 
       const token = localStorage.getItem('auth_token');
       const headers = { 'Authorization': `Bearer ${token}` };
-      const switchId = localStorage.getItem('activeAccountId');
+      const switchId = accountContext.getSwitchAccountId();
       if (switchId) headers['X-Switch-Account'] = switchId;
 
       const res = await fetch('/api/prospector/import-emelia', { method: 'POST', headers, body: fd });
@@ -3323,6 +3325,7 @@ const App = (() => {
   }
 
   function emeliReset() {
+    if (!_emeliaCampaignId) _emeliaCampaignsList = [];
     renderEmeliaImport(document.getElementById('app'), _emeliaCampaignId);
   }
 
