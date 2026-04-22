@@ -1720,9 +1720,11 @@ async function fetchQontoTransactions(iban, monthsBack = 6) {
 }
 
 // Build treasury data from Qonto
-async function buildTresorerieFromQonto() {
-  // Return cache if fresh
-  if (tresorerieCache && (Date.now() - tresorerieCacheTime) < TRESORERIE_CACHE_TTL) {
+// horizonMonths : nombre de mois projetés dans `previsionnel` (défaut 12, utilisé par /api/tresorerie).
+// Le cache ne s'applique qu'au horizon par défaut pour éviter les résultats tronqués sur un horizon plus long.
+async function buildTresorerieFromQonto(horizonMonths = 12) {
+  // Return cache if fresh (uniquement pour l'horizon par défaut)
+  if (horizonMonths === 12 && tresorerieCache && (Date.now() - tresorerieCacheTime) < TRESORERIE_CACHE_TTL) {
     return tresorerieCache;
   }
 
@@ -1790,11 +1792,11 @@ async function buildTresorerieFromQonto() {
     ? chargesRecurrentes.reduce((s, v) => s + v, 0) / chargesRecurrentes.length
     : chargesMoisCourant;
 
-  // --- Prévisionnel mois par mois (12 mois) ---
+  // --- Prévisionnel mois par mois (horizon dynamique) ---
   const previsionnel = [];
   let soldeProjection = solde || 0;
 
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < horizonMonths; i++) {
     const mDate = new Date(currentYear, currentMonth - 1 + i, 1);
     const mois = mDate.getMonth() + 1;
     const annee = mDate.getFullYear();
@@ -1845,9 +1847,11 @@ async function buildTresorerieFromQonto() {
     creditsDetailParMois,
   };
 
-  // Update cache
-  tresorerieCache = result;
-  tresorerieCacheTime = Date.now();
+  // Update cache (uniquement pour l'horizon par défaut)
+  if (horizonMonths === 12) {
+    tresorerieCache = result;
+    tresorerieCacheTime = Date.now();
+  }
 
   return result;
 }
@@ -2226,7 +2230,11 @@ function masseSalarialeMois(annee, mois, salaries) {
   return { total: Math.round(total), detail };
 }
 
-async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, salaries, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals, crPrevData, caEstimatif }) {
+// buildPrevisionnel paramètres baseline :
+// - includeGSheet : si false, les charges futures retombent sur la moyenne Qonto au lieu des valeurs GSheet CR_Prev (défaut true)
+// - includePipeline : si false, le pipeline pondéré HubSpot n'est pas calculé (défaut true)
+// Les deux valent true par défaut pour préserver le comportement existant de /api/tresorerie.
+async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, salaries, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals, crPrevData, caEstimatif, includeGSheet = true, includePipeline = true }) {
   // --- A encaisser depuis Notion (factures envoyées + prévisionnelles) ---
   const facturesAEncaisser = [];
   const now = new Date();
@@ -2301,19 +2309,21 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
   const totalPrevisionnel = facturesAEncaisser.filter(f => f.previsionnel).reduce((s, f) => s + f.montant, 0);
   const totalAEncaisserNotion = totalEnvoye + totalPrevisionnel;
 
-  // Calcul du pipeline pondéré HubSpot
-  const factor = pipelineFactor != null ? pipelineFactor : 1;
+  // Calcul du pipeline pondéré HubSpot (désactivable via includePipeline=false)
+  const factor = includePipeline ? (pipelineFactor != null ? pipelineFactor : 1) : 0;
   let pipelinePondere = 0;
   const pipelineDetail = [];
-  for (const stage of KANBAN_STAGES) {
-    const deals = pipelineDeals[stage.label] || [];
-    for (const deal of deals) {
-      const weighted = deal.amount * (deal.probability / 100) * factor;
-      pipelinePondere += weighted;
-      pipelineDetail.push({
-        name: deal.name, amount: deal.amount,
-        probability: deal.probability, weighted: Math.round(weighted), stage: stage.label,
-      });
+  if (includePipeline) {
+    for (const stage of KANBAN_STAGES) {
+      const deals = pipelineDeals[stage.label] || [];
+      for (const deal of deals) {
+        const weighted = deal.amount * (deal.probability / 100) * factor;
+        pipelinePondere += weighted;
+        pipelineDetail.push({
+          name: deal.name, amount: deal.amount,
+          probability: deal.probability, weighted: Math.round(weighted), stage: stage.label,
+        });
+      }
     }
   }
 
@@ -2377,9 +2387,9 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
     }
   }
 
-  // --- Charges GSheet par mois (pour remplacer la moyenne Qonto sur les mois futurs) ---
+  // --- Charges GSheet par mois (remplacent la moyenne Qonto sur les mois futurs, désactivable via includeGSheet=false) ---
   const chargesGSheetParMois = {};
-  if (crPrevData && crPrevData.categories) {
+  if (includeGSheet && crPrevData && crPrevData.categories) {
     for (const [, moisData] of Object.entries(crPrevData.categories)) {
       for (const [mKey, val] of Object.entries(moisData)) {
         chargesGSheetParMois[mKey] = (chargesGSheetParMois[mKey] || 0) + val;
@@ -2585,9 +2595,72 @@ app.delete('/api/scenarios/:id/overrides/:oid', async (req, res) => {
 
 // --- Projections ---
 
-async function fetchBaseData() {
+// Convertit un preset d'horizon en nombre de mois à projeter (à partir du mois en cours, inclus)
+function getHorizonMonths(preset) {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+  let endYear, endMonth;
+  if (preset === 's1-np1')       { endYear = currentYear + 1; endMonth = 6;  }
+  else if (preset === 'n-plus-1'){ endYear = currentYear + 1; endMonth = 12; }
+  else                           { endYear = currentYear;     endMonth = 12; } // fin-annee (défaut)
+  return Math.max(1, (endYear - currentYear) * 12 + (endMonth - currentMonth) + 1);
+}
+
+// Parse les query params communs aux endpoints de projection (horizon, toggles baseline)
+function parseProjectionQuery(req) {
+  const preset = req.query.horizon || 'fin-annee';
+  return {
+    preset,
+    horizonMonths: getHorizonMonths(preset),
+    includeGSheet: req.query.includeGSheet !== 'false',
+    includePipeline: req.query.includePipeline !== 'false',
+  };
+}
+
+// Enrichit chaque mois de la projection avec les champs P&L et EBE cumulé pour les tabs de visualisation.
+// Les subventions/aides viennent de Plan_TRE_Prév (cached 10 min). Si includeGSheet=false, subv+aide=0.
+async function enrichWithPnlEbe(projection, { includeGSheet = true } = {}) {
+  const subvByMonth = {};
+  const aideByMonth = {};
+  if (includeGSheet) {
+    const planData = await fetchAndParsePlanTresorerie();
+    for (const fin of (planData.financements || [])) {
+      planData.months.forEach((m, i) => {
+        const key = `${m.year}-${String(m.month).padStart(2, '0')}`;
+        const val = fin.values[i] || 0;
+        if (val === 0) return;
+        if (fin.category === 'subvention') subvByMonth[key] = (subvByMonth[key] || 0) + val;
+        if (fin.category === 'aide')       aideByMonth[key] = (aideByMonth[key] || 0) + val;
+      });
+    }
+  }
+  let ebeCumul = 0;
+  return projection.map((mois) => {
+    const mKey = `${mois.annee}-${String(mois.mois).padStart(2, '0')}`;
+    const ca = mois.encaissementsTotal ?? ((mois.encaissements || 0) + (mois.encaissementsFactures || 0) + (mois.revenusExceptionnels || 0) + (mois.fictionalEncaissements || 0));
+    const charges = mois.decaissements || 0;
+    const subv = Math.round(subvByMonth[mKey] || 0);
+    const aide = Math.round(aideByMonth[mKey] || 0);
+    const marge = ca - charges;
+    const ebeMensuel = marge + subv + aide;
+    ebeCumul += ebeMensuel;
+    return {
+      ...mois,
+      pnl_ca:       Math.round(ca),
+      pnl_charges:  Math.round(charges),
+      pnl_marge:    Math.round(marge),
+      subventions:  subv,
+      aides:        aide,
+      ebe_mensuel:  Math.round(ebeMensuel),
+      ebe_cumule:   Math.round(ebeCumul),
+    };
+  });
+}
+
+async function fetchBaseData(horizonMonths = 12) {
   const [qontoData, pipelineDeals, notionMissions, crPrevData] = await Promise.all([
-    buildTresorerieFromQonto(),
+    buildTresorerieFromQonto(horizonMonths),
     fetchOpenDeals(),
     fetchAllNotionMissions(),
     fetchAndParseCRPrev(),
@@ -2671,14 +2744,17 @@ function applyOverrides(baseData, overrides) {
 
 app.get('/api/scenarios/baseline/projection', async (req, res) => {
   try {
-    const base = await fetchBaseData();
+    const { preset, horizonMonths, includeGSheet, includePipeline } = parseProjectionQuery(req);
+    const base = await fetchBaseData(horizonMonths);
     const result = await buildPrevisionnel({
       qontoData: base.qontoData, pipelineDeals: base.pipelineDeals,
       notionMissions: base.notionMissions, salaries: base.salaries,
       revenus: base.revenus, chargesFixesExtras: [], pipelineFactor: 1, fictionalDeals: [],
       crPrevData: base.crPrevData, caEstimatif: null,
+      includeGSheet, includePipeline,
     });
-    res.json({ nom: 'Baseline', previsionnel: result.previsionnel });
+    const enriched = await enrichWithPnlEbe(result.previsionnel, { includeGSheet });
+    res.json({ nom: 'Baseline', horizon: preset, previsionnel: enriched });
   } catch (err) {
     console.error('Erreur baseline projection:', err.message);
     res.status(500).json({ error: err.message });
@@ -2699,14 +2775,18 @@ app.get('/api/scenarios/baseline/salaries', async (req, res) => {
 app.get('/api/scenarios/:id/projection', async (req, res) => {
   try {
     // Vérifier que l'id n'est pas "baseline"
-    if (req.params.id === 'baseline') return res.redirect('/api/scenarios/baseline/projection');
+    if (req.params.id === 'baseline') {
+      const qs = req.url.split('?')[1] || '';
+      return res.redirect('/api/scenarios/baseline/projection' + (qs ? '?' + qs : ''));
+    }
 
     const { data: scenario, error } = await supabase.from('scenarios').select('*').eq('id', req.params.id).single();
     if (error || !scenario) return res.status(404).json({ error: 'Scenario non trouve' });
 
     const { data: overrides } = await supabase.from('scenario_overrides').select('*').eq('scenario_id', req.params.id).order('created_at');
 
-    const base = await fetchBaseData();
+    const { preset, horizonMonths, includeGSheet, includePipeline } = parseProjectionQuery(req);
+    const base = await fetchBaseData(horizonMonths);
     const applied = applyOverrides(base, overrides || []);
 
     const result = await buildPrevisionnel({
@@ -2717,8 +2797,10 @@ app.get('/api/scenarios/:id/projection', async (req, res) => {
       pipelineFactor: applied.pipelineFactor,
       fictionalDeals: applied.fictionalDeals,
       crPrevData: base.crPrevData, caEstimatif: applied.caEstimatif,
+      includeGSheet, includePipeline,
     });
-    res.json({ nom: scenario.nom, previsionnel: result.previsionnel });
+    const enriched = await enrichWithPnlEbe(result.previsionnel, { includeGSheet });
+    res.json({ nom: scenario.nom, horizon: preset, previsionnel: enriched });
   } catch (err) {
     console.error('Erreur scenario projection:', err.message);
     res.status(500).json({ error: err.message });
