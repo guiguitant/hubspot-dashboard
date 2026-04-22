@@ -1,5 +1,7 @@
 # Releaf Prospector - Project Resume
 
+> ⚠️ **STALE — last comprehensive update 2026-04-07.** Since then: Task 1 (LinkedIn scraping) was removed (commits `0a7167d`, `ffe0403`), skill doc moved from V7 → V11, migrations grew from 9 to 21, React `src/` now also hosts campaign form pages (not just auth). For current truth, see `skill_prospector_V11.md` and `CLAUDE.md`. This file is kept for historical context only and will be either rewritten or deleted.
+
 ## Project Overview
 **Releaf Prospector** is a dual-stack LinkedIn prospecting & CRM management application for Releaf Carbon. It combines automated LinkedIn prospect scraping with manual CRM management, featuring AI-powered messaging via Claude API and HubSpot integration.
 
