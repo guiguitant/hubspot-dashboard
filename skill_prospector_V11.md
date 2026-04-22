@@ -169,29 +169,45 @@ Input : `multipart/form-data`
 - `campaign_id` — UUID (requis)
 - `dry_run` — `"true"` pour aperçu sans insertion, `"false"` pour l'insertion réelle (défaut `false`)
 
-Colonnes CSV utilisées : `firstName`, `lastName`, `linkedinUrlProfile`, `title`, `company`, `industry`, `location`, `summary`, `description`, `companyDescription`. Les autres colonnes sont ignorées.
+Colonnes CSV utilisées : `firstName`, `lastName`, `linkedinUrlProfile`, `title`, `company`, `industry`, `location`, `summary`, `description`, `companyDescription`. Les autres colonnes sont ignorées. Les lignes entièrement vides (padding Emelia) sont silencieusement ignorées — elles ne comptent ni comme acceptées ni comme rejetées.
 
-**Règles de rejet** — une ligne est rejetée si :
-- `firstName` vide ou absent
-- `title` ET `company` tous les deux vides
-- `linkedinUrlProfile` absent
-- `linkedin_url` déjà présente dans les prospects actifs du compte (doublon)
+**Règles de rejet** — une ligne est rejetée avec une raison explicite dans l'un de ces cas :
 
-Mode `dry_run=true` : parse, nettoie et retourne le rapport **sans insérer en DB**.
-Mode `dry_run=false` : insère les prospects en statut `Profil à valider`.
+Champs manquants :
+- `firstName` vide ou absent → `"Prénom manquant"`
+- `linkedinUrlProfile` absent → `"URL LinkedIn manquante"`
+- `title` ET `company` tous les deux vides → `"Titre de poste et entreprise manquants"`
+
+Doublons vs DB (sur **tout le compte, tous statuts confondus** — y compris `Non pertinent`, `Perdu`, `Gagné`) :
+- URL LinkedIn déjà connue (match après normalisation : https, www., lowercase, trailing slash strippé, query strippé) → `"Doublon (URL déjà connue)"`
+- **Fallback nom+entreprise** — même prénom+nom (slug : NFD, sans accents, sans casse, sans espaces, sans caractères non alphanumériques) **et** entreprise compatible (tokens ≥ 3 chars non génériques partagés, ou slug strictement égal) → `"Doublon (même nom + entreprise)"`
+  Exemple : "Maël Lagarde / Groupe VSB" (CSV) matche "Maël Lagarde / VSB" (DB). Les tokens génériques filtrés incluent : `groupe`, `holding`, `sa`, `sas`, `sarl`, `ltd`, `inc`, `gmbh`, `corp`, `le`, `la`, `de`, `du`, `et`, etc.
+
+Doublons intra-fichier (même CSV) :
+- Même URL présente deux fois → `"Doublon (présent plusieurs fois dans ce fichier)"`
+- Même nom + entreprise présents deux fois → `"Doublon (présent plusieurs fois dans ce fichier)"`
+
+> ⚠️ **Pourquoi le fallback nom+entreprise est critique** : les prospects importés historiquement ont des URLs LinkedIn **vanity** (`/in/prenom-nom-abc123`), mais les exports Emelia fournissent des URLs **encodées** (`/in/ACwAABR18ts...`). Sans ce fallback, un même prospect passerait deux fois — une fois en vanity, une fois en encodé.
+
+Mode `dry_run=true` : parse, nettoie et retourne le rapport **sans insérer en DB**. La réponse inclut aussi `campaign_name` (nom de la campagne cible) pour affichage UI.
+Mode `dry_run=false` : insère les prospects en statut `Profil à valider` et enregistre l'opération dans la table `imports`.
 
 Réponse :
 ```json
 {
   "imported": 47,
-  "rejected": 3,
+  "rejected": 4,
+  "campaign_name": "Industriels - Bretagne",
   "rejections": [
-    { "row": 2, "name": "Yan Guiselin", "reason": "Titre de poste manquant" },
-    { "row": 5, "name": "Anne Dupont",  "reason": "Doublon (déjà dans un compte actif)" },
-    { "row": 9, "name": "(inconnu)",    "reason": "Prénom manquant" }
+    { "row": 2, "name": "Yan Guiselin", "company": null,        "reason": "Titre de poste et entreprise manquants" },
+    { "row": 5, "name": "Anne Dupont",  "company": "Acme SAS",  "reason": "Doublon (URL déjà connue)",           "existing_status": "Message envoyé",  "existing_campaign": "Industriels - Bretagne" },
+    { "row": 7, "name": "Maël Lagarde", "company": "Groupe VSB", "reason": "Doublon (même nom + entreprise)",    "existing_status": "Non pertinent",   "existing_campaign": "BTP - PACA" },
+    { "row": 9, "name": "(inconnu)",    "company": null,        "reason": "Prénom manquant" }
   ]
 }
 ```
+
+Les champs `existing_status` et `existing_campaign` ne sont présents que pour les doublons vs DB — ils renseignent l'utilisateur sur où et dans quel état le prospect existe déjà. `campaign_name` à la racine n'est renvoyé qu'en mode `dry_run=true`.
 
 **`POST /api/prospector/update-status`**
 Met à jour le statut d'un prospect.

@@ -373,6 +373,36 @@ const App = (() => {
 
   let _selectedProspects = new Set();
 
+  // Sort state for "Nom" column (null = default order, 'asc' = A→Z, 'desc' = Z→A)
+  let _prospectsSort = null;
+
+  function _cycleSort(current) {
+    if (current === null) return 'asc';
+    if (current === 'asc') return 'desc';
+    return null;
+  }
+
+  function _sortIndicator(state) {
+    if (state === 'asc') return ' ↑';
+    if (state === 'desc') return ' ↓';
+    return ' ↕';
+  }
+
+  function _sortByName(rows, direction) {
+    if (!direction) return rows;
+    const dir = direction === 'asc' ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const an = `${a.last_name || ''} ${a.first_name || ''}`.trim();
+      const bn = `${b.last_name || ''} ${b.first_name || ''}`.trim();
+      return an.localeCompare(bn, 'fr', { sensitivity: 'base' }) * dir;
+    });
+  }
+
+  function sortProspects() {
+    _prospectsSort = _cycleSort(_prospectsSort);
+    filterProspects();
+  }
+
   async function renderProspects(container, presetStatus) {
     _selectedProspects.clear();
     container.innerHTML = `
@@ -730,7 +760,8 @@ const App = (() => {
     if (campaignFilter === 'none') opts.no_campaign = true;
     else if (campaignFilter) opts.campaign_id = campaignFilter;
 
-    const prospects = await DB.getProspects(opts);
+    const prospectsRaw = await DB.getProspects(opts);
+    const prospects = _sortByName(prospectsRaw, _prospectsSort);
     const hasValidatable = prospects.some(p => p.status === 'Profil à valider');
     const svgOpen = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h10a1 1 0 001-1v-3"/><path d="M10 2h4v4"/><path d="M7 9L14 2"/></svg>`;
     const tbody = prospects.length === 0
@@ -758,7 +789,7 @@ const App = (() => {
     document.getElementById('prospectsTable').innerHTML = `
       <table><thead><tr>
         <th style="width:30px"><input type="checkbox" id="selectAll" onchange="App.toggleSelectAll(this.checked)"></th>
-        <th>Nom</th><th>Fonction</th><th>Entreprise</th><th>Campagne</th><th>Statut</th><th>Dernier contact</th><th></th>
+        <th style="cursor:pointer;user-select:none" onclick="App.sortProspects()" title="Trier par nom">Nom<span style="color:var(--color-primary);font-weight:600">${_sortIndicator(_prospectsSort)}</span></th><th>Fonction</th><th>Entreprise</th><th>Campagne</th><th>Statut</th><th>Dernier contact</th><th></th>
       </tr></thead>
       <tbody>${tbody}</tbody></table>`;
 
@@ -1806,6 +1837,17 @@ const App = (() => {
 
   let _campActiveStatus = null;
 
+  let _campSort = null;
+
+  function sortCampProspects() {
+    _campSort = _cycleSort(_campSort);
+    const campId = new URLSearchParams((location.hash.split('?')[1] || '')).get('id');
+    if (!campId || !_campDetailCache[campId]) return;
+    const card = document.getElementById('campProspectsCard');
+    if (!card) return;
+    card.querySelector('.table-wrap').innerHTML = _renderCampTable(_campDetailCache[campId].prospects, _campActiveStatus);
+  }
+
   function renderProspectsTab(id, prospects, statusCounts) {
     _campActiveStatus = null;
     const el = document.getElementById('campaignTabContent');
@@ -1903,11 +1945,12 @@ const App = (() => {
   }
 
   function _renderCampTable(prospects, statusFilter) {
-    const rows = statusFilter ? prospects.filter(p => p.status === statusFilter) : prospects;
+    const filtered = statusFilter ? prospects.filter(p => p.status === statusFilter) : prospects;
+    const rows = _sortByName(filtered, _campSort);
     if (rows.length === 0) return UI.emptyState(statusFilter ? `Aucun prospect avec le statut "${statusFilter}"` : 'Aucun prospect dans cette campagne');
     const isAValiderFilter = statusFilter === 'Profil à valider';
     const campId = new URLSearchParams((location.hash.split('?')[1] || '')).get('id');
-    return `<table><thead><tr><th>Nom</th><th>Entreprise</th><th>Poste</th><th>Statut</th><th>Dernier contact</th>${isAValiderFilter ? '<th></th>' : ''}</tr></thead>
+    return `<table><thead><tr><th style="cursor:pointer;user-select:none" onclick="App.sortCampProspects()" title="Trier par nom">Nom<span style="color:var(--color-primary);font-weight:600">${_sortIndicator(_campSort)}</span></th><th>Entreprise</th><th>Poste</th><th>Statut</th><th>Dernier contact</th>${isAValiderFilter ? '<th></th>' : ''}</tr></thead>
       <tbody>${rows.map(p => `<tr class="clickable ${isAValiderFilter ? 'row-a-valider' : ''}" onclick="location.hash='#prospect-detail?id=${p.id}'">
         <td><strong>${UI.esc(p.first_name)} ${UI.esc(p.last_name)}</strong></td>
         <td>${UI.esc(p.company || '')}</td>
@@ -3157,17 +3200,20 @@ const App = (() => {
   let _emeliaDryRunResult = null;
   let _emeliaCampaignId = null;
   let _emeliaCampaignsList = [];
+  let _emeliaIsPreselected = false;
 
   async function renderEmeliaImport(container, preselectedCampaignId) {
     _emeliaPendingFile = null;
     _emeliaDryRunResult = null;
     _emeliaCampaignId = preselectedCampaignId || null;
+    _emeliaIsPreselected = !!preselectedCampaignId;
 
     if (!preselectedCampaignId) {
       try {
         const r = await APIClient.get('/api/prospector/campaigns');
         const data = await r.json();
-        _emeliaCampaignsList = (data.campaigns || []).filter(c => c.status !== 'Terminée' && c.status !== 'Archivée');
+        const list = Array.isArray(data) ? data : (data.campaigns || []);
+        _emeliaCampaignsList = list.filter(c => c.status !== 'Terminée' && c.status !== 'Archivée');
       } catch (e) {
         _emeliaCampaignsList = [];
       }
@@ -3268,24 +3314,52 @@ const App = (() => {
     const rejHtml = r.rejections.length === 0 ? '' : `
       <div style="margin-top:1rem;border:1px solid #fecaca;border-radius:6px;padding:0.75rem;background:#fef2f2">
         <p style="font-weight:600;margin:0 0 0.5rem;color:#dc2626">❌ ${r.rejected} profil(s) rejeté(s)</p>
-        <ul style="list-style:none;padding:0;margin:0;font-size:0.85rem;color:#6b7280">
-          ${r.rejections.map(rej => `<li style="padding:3px 0">${UI.esc(rej.name)} (ligne ${rej.row}) — ${UI.esc(rej.reason)}</li>`).join('')}
-        </ul>
+        <div style="overflow-x:auto;font-size:0.82rem">
+          <table style="width:100%;border-collapse:collapse;color:#374151">
+            <thead>
+              <tr style="text-align:left;border-bottom:1px solid #fca5a5;color:#6b7280">
+                <th style="padding:4px 6px;font-weight:600">Ligne</th>
+                <th style="padding:4px 6px;font-weight:600">Nom</th>
+                <th style="padding:4px 6px;font-weight:600">Entreprise</th>
+                <th style="padding:4px 6px;font-weight:600">Raison</th>
+                <th style="padding:4px 6px;font-weight:600">Statut existant</th>
+                <th style="padding:4px 6px;font-weight:600">Campagne existante</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${r.rejections.map(rej => `
+                <tr style="border-bottom:1px solid #fee2e2">
+                  <td style="padding:4px 6px;color:#9ca3af">${rej.row}</td>
+                  <td style="padding:4px 6px">${UI.esc(rej.name)}</td>
+                  <td style="padding:4px 6px">${UI.esc(rej.company || '—')}</td>
+                  <td style="padding:4px 6px">${UI.esc(rej.reason)}</td>
+                  <td style="padding:4px 6px">${UI.esc(rej.existing_status || '—')}</td>
+                  <td style="padding:4px 6px">${UI.esc(rej.existing_campaign || '—')}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
       </div>`;
+
+    const campLabel = r.campaign_name
+      ? `<p style="margin:0 0 0.75rem;color:#374151;font-size:0.9rem">Campagne cible : <strong>${UI.esc(r.campaign_name)}</strong></p>`
+      : '';
 
     container.innerHTML = `
       <div class="page-header"><h1 class="page-title">Import Emelia — Aperçu</h1></div>
-      <div class="card" style="max-width:600px;margin:0 auto">
+      <div class="card" style="max-width:900px;margin:0 auto">
         <div class="card-body" style="padding:2rem">
+          ${campLabel}
           <div style="padding:1rem;background:#f0fdf4;border-radius:8px;border:1px solid #bbf7d0;margin-bottom:0.75rem">
             <p style="margin:0;color:#15803d;font-weight:600">✅ ${r.imported} prospect(s) prêt(s) à importer</p>
           </div>
           ${rejHtml}
           <div style="display:flex;gap:0.75rem;margin-top:1.5rem">
-            <button class="btn btn-ghost" onclick="App.emeliReset()">Annuler</button>
-            <button id="emeliConfirmBtn" class="btn btn-primary" style="flex:1" onclick="App.emeliConfirm()" ${r.imported === 0 ? 'disabled' : ''}>
-              Confirmer l'import (${r.imported} prospects)
-            </button>
+            ${r.imported === 0
+              ? `<button class="btn btn-primary" style="flex:1" onclick="App.emeliReset()">Choisir un autre fichier</button>`
+              : `<button class="btn btn-ghost" onclick="App.emeliReset()">Annuler</button>
+                 <button id="emeliConfirmBtn" class="btn btn-primary" style="flex:1" onclick="App.emeliConfirm()">Confirmer l'import (${r.imported} prospects)</button>`}
           </div>
         </div>
       </div>`;
@@ -3332,8 +3406,10 @@ const App = (() => {
   }
 
   function emeliReset() {
-    if (!_emeliaCampaignId) _emeliaCampaignsList = [];
-    renderEmeliaImport(document.getElementById('app'), _emeliaCampaignId);
+    // If campaign was preselected via route (#emelia-import?campaign_id=X), keep it.
+    // If user picked it from the dropdown on #imports, clear it so the dropdown reappears.
+    const keep = _emeliaIsPreselected ? _emeliaCampaignId : null;
+    renderEmeliaImport(document.getElementById('app'), keep);
   }
 
   // ============================================================
@@ -3394,6 +3470,8 @@ const App = (() => {
     enrollProspect, enrollCampaign,
     openAddPlaceholder, savePlaceholder, deletePlaceholder,
     _filterCampByStatus,
+    sortProspects,
+    sortCampProspects,
     emeliAnalyze,
     emeliConfirm,
     emeliReset,

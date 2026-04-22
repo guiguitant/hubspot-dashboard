@@ -1,2 +1,9 @@
 node_modules/
 .env
+
+# Local Claude Code config
+.claude/
+
+# Local data files (CSV / Excel)
+*.csv
+*.xlsx

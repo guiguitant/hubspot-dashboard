@@ -4130,18 +4130,31 @@ app.post('/api/prospector/import-emelia', accountContext, upload.single('file'),
       trim: true,
     });
 
-    const { data: existing, error: existingErr } = await supabaseAdmin
-      .from('prospects')
-      .select('linkedin_url')
-      .eq('account_id', req.accountId)
-      .not('status', 'in', '("Non pertinent","Perdu")');
+    const [{ data: existing, error: existingErr }, { data: allCamps }] = await Promise.all([
+      supabaseAdmin.from('prospects')
+        .select('linkedin_url, first_name, last_name, company, status, campaign_id')
+        .eq('account_id', req.accountId),
+      supabaseAdmin.from('campaigns')
+        .select('id, name')
+        .eq('account_id', req.accountId),
+    ]);
     if (existingErr) throw existingErr;
 
-    const existingUrls = new Set((existing || []).map(p => p.linkedin_url).filter(Boolean));
-    const { accepted, rejections } = cleanEmeliaRows(rows, existingUrls);
+    const campNameById = new Map((allCamps || []).map(c => [c.id, c.name]));
+    const enrichedExisting = (existing || []).map(p => ({
+      ...p,
+      campaign_name: p.campaign_id ? (campNameById.get(p.campaign_id) || null) : null,
+    }));
+
+    const { accepted, rejections } = cleanEmeliaRows(rows, enrichedExisting);
 
     if (isDryRun) {
-      return res.json({ imported: accepted.length, rejected: rejections.length, rejections });
+      return res.json({
+        imported: accepted.length,
+        rejected: rejections.length,
+        rejections,
+        campaign_name: campNameById.get(campaign_id) || null,
+      });
     }
 
     let insertedCount = 0;
