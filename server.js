@@ -3184,7 +3184,10 @@ app.get('/api/charges', async (req, res) => {
       .sort((a, b) => b.montant - a.montant);
 
     const totalCharges = ventilationCharges.reduce((s, c) => s + c.montant, 0);
-    const nbMois = Math.max(1, Math.round((endD - startD) / (1000 * 60 * 60 * 24 * 30.5)));
+    // Clip à aujourd'hui pour éviter de sous-estimer la moyenne quand la période s'étend dans le futur
+    // (ex. "Exercice courant" envoie end=YYYY-12-31, mais Qonto n'a que des charges jusqu'à aujourd'hui)
+    const clippedEndD = endD > new Date() ? new Date() : endD;
+    const nbMois = Math.max(1, Math.round((clippedEndD - startD) / (1000 * 60 * 60 * 24 * 30.5)));
     const moyenneMensuelle = totalCharges / nbMois;
 
     const chargesParMoisN = agregParMois(txsN);
@@ -3228,12 +3231,16 @@ app.get('/api/charges-hybride', async (req, res) => {
     const startKey = start.slice(0, 7);
     const endKey   = end.slice(0, 7);
 
-    // Séparation des périodes
-    const realEndKey   = endKey <= todayKey ? endKey : todayKey;
+    // Le mois en cours est traité comme prévisionnel : les charges de fin de mois (salaires, etc.)
+    // ne sont pas encore passées sur Qonto, donc inclure le mois en cours en réel sous-estime le total.
+    // → Réel = jusqu'au mois précédent (inclus), Prévisionnel = à partir du mois en cours.
+    // En janvier, realEndKey pointe sur décembre de l'année précédente : hasReal devient false et tout passe en GSheet, ce qui est correct (aucun mois clôturé dans l'exercice courant).
+    const prevMonth    = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevMonthKey = `${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, '0')}`;
+
+    const realEndKey   = endKey <= prevMonthKey ? endKey : prevMonthKey;
     const hasReal      = start <= realEndKey;
-    const nextMonth    = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-    const nextMonthKey = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}`;
-    const prevStartKey = start > todayKey ? start : nextMonthKey;
+    const prevStartKey = start > todayKey ? start : todayKey;
     const hasPrev      = prevStartKey <= end;
 
     // --- Partie réelle (Qonto) ---
