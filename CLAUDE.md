@@ -12,8 +12,9 @@ Dual-stack LinkedIn prospecting & CRM management application.
 - `npm run frontend:build` - Build React to /dist
 
 ## Important Files
-- `server.js` - Monolith backend (~6000 lines) with all API endpoints
-- `public/js/prospector.js` - Dispatch system (automated LinkedIn sequence execution)
+- `server.js` - Monolith backend (~7500 lines) with all API endpoints
+- `public/js/prospector.js` - Main Prospector SPA frontend (vanilla JS, IIFE exposing `App.*`); also exposes endpoints consumed by external Dispatch automation
+- `src/App.jsx` - React/Vite frontend for `/prospector-login`, `/campaigns/new`, `/campaigns/edit/:id` (built into `dist/`)
 - `src/lib/apiFetch.js` - API helper with Bearer token + admin header injection
 - `src/lib/supabase.js` - Supabase client initialization
 
@@ -28,7 +29,8 @@ Dual-stack LinkedIn prospecting & CRM management application.
 - Backend is CommonJS (`require`/`module.exports`) — no `import/export`
 
 ## Key Docs
-- `AUTH_SETUP.md` - Supabase Magic Link config
+- `AUTH_SETUP.md` - PIN-based authentication setup (birthdate PINs → JWT tokens)
 - `RLS_SETUP.md` - Row Level Security policies
-- `SKILL.md` - Dispatch workflow (task locks, quotas, step completion)
-- `skill_prospector_V7.md` - Prospector API endpoints, status constants, workflow steps
+- `skill_prospector_V11.md` - Current Prospector API endpoints, status constants, workflow (Task 1 removed)
+- `skill_prospector_V10_backup.md` - Archive (kept intentionally for reference; do not delete)
+- `docs/audits/` - Audit reports

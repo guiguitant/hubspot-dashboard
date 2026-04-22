@@ -71,13 +71,15 @@ describe('buildSalesNavUrl', () => {
     expect(url).toContain('spellCorrectionEnabled:true');
   });
 
-  it('encapsule les keywords multi-mots entre guillemets encodés', () => {
+  it("n'injecte pas les keywords dans l'URL Sales Nav (purgés depuis commit 627ed17)", () => {
+    // Les keywords sont utilisés côté Claude pour filtrer les prospects,
+    // mais pas dans l'URL de recherche Sales Navigator elle-même.
     const url = buildSalesNavUrl({
       geoIds: [], jobTitles: [], sectorIds: [], headcounts: [], seniorities: [],
       keywords: ['Bilan Carbone', 'RSE']
     });
-    expect(url).toContain('keywords:');
-    expect(url).toContain('%22Bilan%20Carbone%22');
+    expect(url).not.toContain('keywords:');
+    expect(url).not.toContain('Bilan%20Carbone');
   });
 
   it('retourne une URL structurellement valide même avec criteria vide', () => {
