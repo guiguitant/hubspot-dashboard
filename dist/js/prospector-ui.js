@@ -7,7 +7,6 @@ const UI = (() => {
   // ---- Status badge ----
   const STATUS_CLASSES = {
     // Pipeline visible (quick filters + dashboard)
-    'Profil incomplet': 'badge-profil-incomplet',
     'Profil à valider': 'badge-profil-a-valider',
     'Nouveau': 'badge-nouveau',
     'Invitation envoyée': 'badge-invitation',
@@ -28,7 +27,7 @@ const UI = (() => {
   const STATUSES = Object.keys(STATUS_CLASSES).filter(s => !HIDDEN_STATUSES.includes(s));
 
   // Statuts assignés uniquement par l'automatisation — exclus des dropdowns manuels
-  const AUTO_ONLY_STATUSES = ['Profil restreint', 'Invitation acceptée', 'Profil incomplet'];
+  const AUTO_ONLY_STATUSES = ['Profil restreint', 'Invitation acceptée'];
   const DROPDOWN_STATUSES = [...STATUSES.filter(s => !AUTO_ONLY_STATUSES.includes(s)), 'Non pertinent'];
 
   const CAMP_STATUS_CLASSES = {
@@ -55,7 +54,6 @@ const UI = (() => {
     'Perdu':               { color: '#DC2626', bg: '#FEE2E2' },
     'Non pertinent':       { color: '#64748B', bg: '#F1F5F9' },
     'Profil restreint':    { color: '#374151', bg: '#F3F4F6' },
-    'Profil incomplet':    { color: '#C2410C', bg: '#FFF7ED' },
   };
 
   // SVG icon paths for status filter cards (16×16 viewBox, stroke-based)
@@ -73,7 +71,6 @@ const UI = (() => {
     'Perdu':               '<circle cx="8" cy="8" r="6"/><path d="M5.5 5.5l5 5M10.5 5.5l-5 5"/>',
     'Non pertinent':       '<circle cx="8" cy="8" r="6"/><path d="M4.5 4.5l7 7"/>',
     'Profil restreint':    '<rect x="4" y="8" width="8" height="6" rx="1"/><path d="M5.5 8V6a2.5 2.5 0 015 0v2"/>',
-    'Profil incomplet':    '<circle cx="7" cy="5.5" r="2.5"/><path d="M1 14c0-3 2.7-5.5 6-5.5s6 2.5 6 5.5"/><path d="M12 3.5a1.5 1.5 0 011.5 1.5c0 .6-.4 1-1 1.3v.7"/><circle cx="12.5" cy="8" r=".4" fill="currentColor" stroke="none"/>',
   };
 
   function statusBadge(status) {

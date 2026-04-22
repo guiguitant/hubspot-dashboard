@@ -47,21 +47,72 @@ const App = (() => {
   // ============================================================
   // DASHBOARD
   // ============================================================
+  // Dashboard period helpers
+  function _dashPeriod(preset) {
+    const now = new Date();
+    const y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
+    const pad = n => String(n).padStart(2, '0');
+    const fmt = dt => `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}`;
+    switch (preset) {
+      case 'week': {
+        const mon = new Date(y, m, d - (now.getDay() || 7) + 1);
+        return { from: fmt(mon), to: fmt(now), label: 'Semaine en cours' };
+      }
+      case 'month': {
+        return { from: `${y}-${pad(m+1)}-01`, to: fmt(now), label: 'Mois en cours' };
+      }
+      case 'quarter': {
+        const qStart = new Date(y, Math.floor(m / 3) * 3, 1);
+        return { from: fmt(qStart), to: fmt(now), label: 'Trimestre en cours' };
+      }
+      case 'year': {
+        return { from: `${y}-01-01`, to: fmt(now), label: 'Année en cours' };
+      }
+      default: return { from: `${y}-${pad(m+1)}-01`, to: fmt(now), label: 'Mois en cours' };
+    }
+  }
+
+  let _currentDashPeriod = 'month';
+
+  async function _refreshDashboardStats() {
+    const { from, to } = _dashPeriod(_currentDashPeriod);
+    try {
+      const stats = await APIClient.get(`/api/prospector/dashboard-stats?from=${from}&to=${to}`).then(r => r.json());
+      document.getElementById('statTotal').textContent = stats.total_prospects;
+      document.getElementById('statEnrolled').textContent = stats.prospects_enrolled;
+      document.getElementById('statAccepted').textContent = stats.invitations_accepted;
+      document.getElementById('statCampaigns').textContent = stats.active_campaigns;
+    } catch (e) {
+      console.error('dashboard-stats error:', e);
+    }
+  }
+
   async function renderDashboard(container) {
+    const period = _dashPeriod(_currentDashPeriod);
     container.innerHTML = `
-      <h1 class="page-title">Dashboard</h1>
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+        <h1 class="page-title" style="margin:0">Dashboard</h1>
+        <select id="dashPeriodSelect" onchange="App._changeDashPeriod(this.value)" style="padding:6px 12px;border-radius:8px;border:1px solid var(--color-border, #e2e8f0);font-size:13px;background:white">
+          <option value="week"${_currentDashPeriod==='week'?' selected':''}>Semaine en cours</option>
+          <option value="month"${_currentDashPeriod==='month'?' selected':''}>Mois en cours</option>
+          <option value="quarter"${_currentDashPeriod==='quarter'?' selected':''}>Trimestre en cours</option>
+          <option value="year"${_currentDashPeriod==='year'?' selected':''}>Année en cours</option>
+        </select>
+      </div>
       <div class="stat-grid">
-        <div class="stat-card">
+        <div class="stat-card stat-has-tooltip">
           <div class="sfc-icon-wrap" style="background:#DBEAFE;color:#2563EB">
             <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="5.5" cy="4.5" r="2.5"/><path d="M1 13c0-2.5 2-4.5 4.5-4.5"/><circle cx="11.5" cy="5.5" r="2"/><path d="M15 13c0-2 1.5-3.5-3.5-3.5H10"/></svg>
           </div>
           <div><div class="stat-value" id="statTotal">—</div><div class="stat-label">Total prospects</div></div>
+          <div class="stat-tooltip">Hors profils non pertinents, restreints et en attente de scraping</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card stat-has-tooltip">
           <div class="sfc-icon-wrap" style="background:#FCE7F3;color:#BE185D">
             <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="5.5" cy="4.5" r="2.5"/><path d="M1 13c0-2.5 2-4.5 4.5-4.5"/><circle cx="11.5" cy="5.5" r="2"/><path d="M15 13c0-2-1.5-3.5-3.5-3.5H10"/></svg>
           </div>
-          <div><div class="stat-value" id="statWeek">—</div><div class="stat-label">Prospects cette semaine</div></div>
+          <div><div class="stat-value" id="statEnrolled">—</div><div class="stat-label">Prospects enrollés</div></div>
+          <div class="stat-tooltip">Prospects inscrits dans une séquence de prospection (invitation + messages) sur la période sélectionnée</div>
         </div>
         <div class="stat-card">
           <div class="sfc-icon-wrap" style="background:#D1FAE5;color:#065F46">
@@ -98,20 +149,17 @@ const App = (() => {
     `;
 
     // Load stats in parallel
-    const [week, total, campCount, reminders, pipeline, activity, pendingMessages, profilsAValider, profilsIncomplets, chartData] = await Promise.all([
-      DB.getProspectsThisWeek(),
-      DB.getTotalProspects(),
-      DB.getActiveCampaignCount(),
+    const [reminders, pipeline, activity, pendingMessages, profilsAValider, chartData] = await Promise.all([
       DB.getReminders({ status: 'pending' }),
       DB.getProspectCountsByStatus(),
       DB.getRecentInteractions(10),
       DB.getProspects({ status: 'Message à valider' }),
       DB.getProspects({ status: 'Profil à valider' }),
-      APIClient.get('/api/prospector/prospects/incomplete?limit=100').then(r => r.json()).catch(() => []),
       APIClient.get('/api/prospector/daily-activity').then(r => r.json()).catch(() => ({ dates: [], series: {} })),
     ]);
-    // Count invitations accepted (from pipeline counts)
-    const acceptedCount = pipeline['Invitation acceptée'] || 0;
+
+    // Load dashboard stat cards (with period filter)
+    _refreshDashboardStats();
 
     // Load quotas
     APIClient.get('/api/prospector/daily-stats').then(r => r.json()).then(stats => {
@@ -132,11 +180,6 @@ const App = (() => {
       msgBar.className = 'quota-fill' + (msgPct >= 100 ? ' quota-red' : msgPct >= 75 ? ' quota-orange' : '');
     }).catch(() => {});
 
-    document.getElementById('statTotal').textContent = total;
-    document.getElementById('statWeek').textContent = week;
-    document.getElementById('statAccepted').textContent = acceptedCount;
-    document.getElementById('statCampaigns').textContent = campCount;
-
     // Actions à faire (rappels + messages à valider)
     const todayStr = UI.todayStr();
     const dueReminders = reminders.filter(r => r.due_date <= todayStr);
@@ -150,17 +193,6 @@ const App = (() => {
         ${UI.statusBadge('Profil à valider')}
         <div class="action-btns">
           <button class="btn btn-sm btn-primary" onclick="location.hash='#prospects?status=${encodeURIComponent('Profil à valider')}'">Voir</button>
-        </div>
-      </li>`);
-    }
-
-    // Profils incomplets à enrichir
-    if (profilsIncomplets.length > 0) {
-      actionItems.push(`<li class="action-item">
-        <span class="name"><a class="inline-link" href="#prospects?status=${encodeURIComponent('Profil incomplet')}"><strong>${profilsIncomplets.length} profil(s) à compléter</strong></a></span>
-        ${UI.statusBadge('Profil incomplet')}
-        <div class="action-btns">
-          <button class="btn btn-sm btn-primary" onclick="location.hash='#prospects?status=${encodeURIComponent('Profil incomplet')}'">Voir</button>
         </div>
       </li>`);
     }
@@ -213,11 +245,10 @@ const App = (() => {
     const fmtDate = iso => { const d = new Date(iso + 'T00:00:00'); return `${d.getDate()} ${FR_MONTHS[d.getMonth()]}`; };
 
     const ACTIVITY_SERIES = {
-      prospect_validated:  { label: 'Profils validés',         color: '#EA580C' },
-      invitation_sent:     { label: 'Invitations envoyées',    color: '#7C3AED' },
-      invitation_accepted: { label: 'Invitations acceptées',   color: '#065F46' },
-      message_sent:        { label: 'Messages envoyés',        color: '#0F766E' },
-      response_received:   { label: 'Réponses reçues',         color: '#BE185D' },
+      invitation_accepted: { label: 'Invitation acceptée',     color: '#2563EB' },
+      message_sent:        { label: 'Message envoyé',          color: '#0F766E' },
+      response_received:   { label: 'Discussion en cours',     color: '#BE185D' },
+      deal_won:            { label: 'Gagné',                   color: '#4D7C0F' },
     };
 
     const chartDates = chartData.dates || [];
@@ -243,8 +274,8 @@ const App = (() => {
             borderColor: meta.color,
             backgroundColor: meta.color + '18',
             borderWidth: 2,
-            pointRadius: 4,
-            pointHoverRadius: 6,
+            pointRadius: 0,
+            pointHoverRadius: 5,
             pointHitRadius: 12,
             tension: 0.35,
             fill: false,
@@ -358,7 +389,6 @@ const App = (() => {
         <button class="qf-btn qf-active" data-filter="" onclick="App.quickFilter(this, '')">Tous <span class="qf-count" id="qfCount-all"></span></button>
         ${UI.STATUSES.map(s => {
           const LABELS = {
-            'Profil incomplet':    'À compléter',
             'Profil à valider':    'À valider',
             'Nouveau':             'New',
             'Invitation envoyée':  'Envoyée',
@@ -1776,7 +1806,6 @@ const App = (() => {
     const total = prospects.length;
 
     const SFC_LABELS = {
-      'Profil incomplet':    'À compléter',
       'Profil à valider':    'À valider',
       'Nouveau':             'New',
       'Invitation envoyée':  'Envoyée',
@@ -1789,7 +1818,7 @@ const App = (() => {
 
     // Ordered statuses for campaign filter cards
     // "Invitation acceptée" inserted before "Message à valider" if it has prospects
-    // "Profil incomplet" shown conditionally, "Profil restreint" excluded
+    // "Profil restreint" excluded
     const baseStatuses = [...UI.STATUSES];
     // Insert "Invitation acceptée" before "Message à valider" if it has prospects
     if (statusCounts['Invitation acceptée']) {
@@ -1797,10 +1826,7 @@ const App = (() => {
       if (msgIdx !== -1) baseStatuses.splice(msgIdx, 0, 'Invitation acceptée');
       else baseStatuses.push('Invitation acceptée');
     }
-    // Append "Profil incomplet" at the end if it has prospects
-    const orderedStatuses = [
-      ...baseStatuses,
-    ];
+    const orderedStatuses = [...baseStatuses];
 
     el.innerHTML = `
       <div class="sfc-grid mt-6" id="sfcGrid">
@@ -2495,6 +2521,15 @@ const App = (() => {
     const prospect = document.querySelector(`.review-prospect-item[data-id="${prospectId}"]`);
     const name = prospect?.querySelector('strong')?.textContent || '';
     const seqState = data.sequence_state || null;
+    const sentMessages = data.sent_messages || [];
+    // Index sent messages by step_order for exact matching; fallback queue for legacy (no step_order)
+    const sentByStep = {};
+    const sentFallback = [];
+    for (const m of sentMessages) {
+      if (m.step_order != null) sentByStep[m.step_order] = m;
+      else sentFallback.push(m);
+    }
+    let fallbackIdx = 0;
 
     // Helper: render status banner
     function _seqBanner(state, steps) {
@@ -2572,8 +2607,18 @@ const App = (() => {
           const delayHtml = i > 0 ? `<div class="review-delay">${s.delay_days === 0 ? 'Immédiatement' : `Attendre ${s.delay_days} jour${s.delay_days > 1 ? 's' : ''}`}</div>` : '';
 
           let contentHtml = '';
+          const isStepDone = cls === 'step-done';
           if (s.type === 'send_message') {
-            if (pendingMsg && stepOrder === (seqState?.current_step_order || 0)) {
+            const sentForStep = sentByStep[stepOrder] || (isStepDone && fallbackIdx < sentFallback.length ? sentFallback[fallbackIdx++] : null);
+            if (isStepDone && sentForStep) {
+              // Step completed — show the sent message
+              const sent = sentForStep;
+              contentHtml = `
+                <div class="review-msg-preview" style="border-left:3px solid var(--color-success, #16a34a);padding-left:12px;opacity:0.85">
+                  <div style="font-size:11px;color:var(--color-text-muted);margin-bottom:4px">Envoyé le ${UI.formatDate(sent.date)}</div>
+                  ${UI.esc(sent.content)}
+                </div>`;
+            } else if (pendingMsg && stepOrder === (seqState?.current_step_order || 0)) {
               // Message already generated — show it with edit/regen options
               contentHtml = `
                 <div class="review-msg-preview" id="reviewMsgPreview">${UI.esc(pendingMsg)}</div>
@@ -2752,6 +2797,11 @@ const App = (() => {
       UI.toast('Erreur: ' + err.message, 'error');
     }
     if (btn) { btn.disabled = false; btn.textContent = 'Regénérer'; }
+  }
+
+  function _changeDashPeriod(preset) {
+    _currentDashPeriod = preset;
+    _refreshDashboardStats();
   }
 
   function _filterReviewList() {
@@ -3146,6 +3196,7 @@ const App = (() => {
     addStep, deleteStep, selectStep, _switchMsgTab,
     _updateCharCount, _saveStepConfig, _insertPlaceholder,
     _toggleInvitationNote, _updateNoteCharCount,
+    _changeDashPeriod,
     _selectReviewProspect, _filterReviewList, _editReviewMessage, _regenReviewMessage, _saveReviewMessage, _confirmRegenReview, _validateReviewMessage, _rejectReviewMessage, _resetStuckProspect,
     enrollProspect, enrollCampaign,
     openAddPlaceholder, savePlaceholder, deletePlaceholder,
