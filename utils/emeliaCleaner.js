@@ -20,6 +20,9 @@ function cleanEmeliaRows(rows, existingLinkedinUrls) {
     const title = String(row.title || '').trim();
     const company = String(row.company || '').trim();
 
+    // Silently skip fully empty rows (Emelia pads exports with blank lines)
+    if (!firstName && !lastName && !linkedinUrl && !title && !company) return;
+
     if (!firstName) {
       rejections.push({ row: rowNum, name: '(inconnu)', reason: 'Prénom manquant' });
       return;

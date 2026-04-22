@@ -103,4 +103,11 @@ describe('cleanEmeliaRows', () => {
     expect(accepted).toHaveLength(1);
     expect(accepted[0].last_name).toBeNull();
   });
+
+  it('ignore silencieusement les lignes entièrement vides (padding Emelia)', () => {
+    const emptyRow = { firstName: '', lastName: '', linkedinUrlProfile: '', title: '', company: '' };
+    const { accepted, rejections } = cleanEmeliaRows([emptyRow, baseRow], new Set());
+    expect(accepted).toHaveLength(1);
+    expect(rejections).toHaveLength(0);
+  });
 });
