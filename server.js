@@ -2223,9 +2223,20 @@ function masseSalarialeMois(annee, mois, salaries) {
     const sortie = s.date_sortie ? new Date(s.date_sortie) : null;
     if (entree > mDate) continue;
     if (sortie && sortie < new Date(annee, mois - 1, 1)) continue;
-    const cout = s.net_mensuel + s.charges_mensuelles;
+    // Applique les augmentations scénario (cumulatives) dont la date_debut est atteinte
+    let multiplier = 1;
+    if (s.augmentations && s.augmentations.length > 0) {
+      for (const aug of s.augmentations) {
+        if (aug.date_debut && new Date(aug.date_debut) <= mDate) {
+          multiplier *= (1 + (aug.percent || 0) / 100);
+        }
+      }
+    }
+    const net = s.net_mensuel * multiplier;
+    const charges = s.charges_mensuelles * multiplier;
+    const cout = net + charges;
     total += cout;
-    detail.push({ nom: s.nom, poste: s.poste, type: s.type, net: s.net_mensuel, charges: s.charges_mensuelles, cout: Math.round(cout) });
+    detail.push({ nom: s.nom, poste: s.poste, type: s.type, net: Math.round(net), charges: Math.round(charges), cout: Math.round(cout) });
   }
   return { total: Math.round(total), detail };
 }
@@ -2233,8 +2244,12 @@ function masseSalarialeMois(annee, mois, salaries) {
 // buildPrevisionnel paramètres baseline :
 // - includeGSheet : si false, les charges futures retombent sur la moyenne Qonto au lieu des valeurs GSheet CR_Prev (défaut true)
 // - includePipeline : si false, le pipeline pondéré HubSpot n'est pas calculé (défaut true)
-// Les deux valent true par défaut pour préserver le comportement existant de /api/tresorerie.
-async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, salaries, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals, crPrevData, caEstimatif, includeGSheet = true, includePipeline = true }) {
+// Nouveaux leviers scénarios (Phase B) :
+// - revenusRecurrentsExtras : [{ libelle, montant_mensuel, mois_debut, mois_fin }] — revenus récurrents sur période
+// - subventionsAnnoncees    : [{ libelle, montant, mois }]                            — boosts one-shot catégorisés subv/aide (vs revenu_exceptionnel "exceptionnel")
+// - gsheetOverrides         : [{ categorie, mois_debut, mois_fin, montant_mensuel }]   — override d'une ligne GSheet CR_Prev au niveau catégorie mère
+// Les anciens paramètres (chargesFixesExtras, pipelineFactor, fictionalDeals, caEstimatif) restent actifs pour préserver l'existant.
+async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, salaries, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals, crPrevData, caEstimatif, includeGSheet = true, includePipeline = true, revenusRecurrentsExtras = [], subventionsAnnoncees = [], gsheetOverrides = [] }) {
   // --- A encaisser depuis Notion (factures envoyées + prévisionnelles) ---
   const facturesAEncaisser = [];
   const now = new Date();
@@ -2377,6 +2392,30 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
     }
   }
 
+  // --- Revenus récurrents (scénarios) — analog à chargesFixesExtras côté encaissements ---
+  const revenusRecurrentsParMois = {};
+  if (revenusRecurrentsExtras && revenusRecurrentsExtras.length > 0) {
+    for (const rr of revenusRecurrentsExtras) {
+      for (const mois of qontoData.previsionnel) {
+        const mKey = `${mois.annee}-${String(mois.mois).padStart(2, '0')}`;
+        if (mKey >= rr.mois_debut && mKey <= rr.mois_fin) {
+          revenusRecurrentsParMois[mKey] = (revenusRecurrentsParMois[mKey] || 0) + rr.montant_mensuel;
+        }
+      }
+    }
+  }
+
+  // --- Subventions annoncées (scénarios) — one-shot, catégorisées subv pour remonter dans l'EBE ---
+  const subvAnnonceesParMois = {};
+  const subvAnnonceesDetailParMois = {};
+  if (subventionsAnnoncees && subventionsAnnoncees.length > 0) {
+    for (const s of subventionsAnnoncees) {
+      subvAnnonceesParMois[s.mois] = (subvAnnonceesParMois[s.mois] || 0) + (s.montant || 0);
+      if (!subvAnnonceesDetailParMois[s.mois]) subvAnnonceesDetailParMois[s.mois] = [];
+      subvAnnonceesDetailParMois[s.mois].push(s);
+    }
+  }
+
   // --- Deals fictifs (scénarios) ---
   const fictionalEncaissements = {};
   if (fictionalDeals && fictionalDeals.length > 0) {
@@ -2388,11 +2427,17 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
   }
 
   // --- Charges GSheet par mois (remplacent la moyenne Qonto sur les mois futurs, désactivable via includeGSheet=false) ---
+  // gsheetOverrides permet de remplacer la valeur d'une catégorie mère sur une plage de mois
   const chargesGSheetParMois = {};
   if (includeGSheet && crPrevData && crPrevData.categories) {
-    for (const [, moisData] of Object.entries(crPrevData.categories)) {
+    const findOverride = (cat, mKey) => (gsheetOverrides || []).find(o =>
+      o.categorie === cat && mKey >= o.mois_debut && mKey <= o.mois_fin
+    );
+    for (const [cat, moisData] of Object.entries(crPrevData.categories)) {
       for (const [mKey, val] of Object.entries(moisData)) {
-        chargesGSheetParMois[mKey] = (chargesGSheetParMois[mKey] || 0) + val;
+        const override = findOverride(cat, mKey);
+        const finalVal = override ? (override.montant_mensuel || 0) : val;
+        chargesGSheetParMois[mKey] = (chargesGSheetParMois[mKey] || 0) + finalVal;
       }
     }
   }
@@ -2422,6 +2467,8 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
     }
 
     const revExc = Math.round(revenusParMois[mKey] || 0);
+    const revenusRecurrents = Math.round(revenusRecurrentsParMois[mKey] || 0);
+    const subvAnnoncees = Math.round(subvAnnonceesParMois[mKey] || 0);
     const masse = masseSalarialeMois(mois.annee, mois.mois, salaries);
     const chargesFixesExtra = Math.round(chargesFixesParMois[mKey] || 0);
 
@@ -2442,20 +2489,23 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
       encaissementsRetard: factRetard,
       revenusExceptionnels: revExc,
       revenusExceptionnelsDetail: revenusDetailParMois[mKey] || [],
+      revenusRecurrents,
+      subventionsAnnoncees: subvAnnoncees,
+      subventionsAnnonceesDetail: subvAnnonceesDetailParMois[mKey] || [],
       masseSalariale: masse.total,
       masseSalarialeDetail: masse.detail,
       chargesFixesExtra,
       fictionalEncaissements: fictionalEnc,
       decaissements: decaissementsBase + chargesFixesExtra,
       encaissements: encBase,
-      encaissementsTotal: encBase + encaissementsFactures + revExc + fictionalEnc,
+      encaissementsTotal: encBase + encaissementsFactures + revExc + fictionalEnc + revenusRecurrents + subvAnnoncees,
     };
   });
 
-  // Recalculer les soldes
+  // Recalculer les soldes (inclut les nouveaux flux positifs)
   let soldeCumul = qontoData.soldeActuel || 0;
   for (const mois of previsionnelFinal) {
-    const encTotal = mois.encaissements + (mois.encaissementsFactures || 0) + (mois.revenusExceptionnels || 0) + (mois.fictionalEncaissements || 0);
+    const encTotal = mois.encaissements + (mois.encaissementsFactures || 0) + (mois.revenusExceptionnels || 0) + (mois.fictionalEncaissements || 0) + (mois.revenusRecurrents || 0) + (mois.subventionsAnnoncees || 0);
     const variation = encTotal - mois.decaissements;
     mois.soldeDebut = Math.round(soldeCumul);
     soldeCumul += variation;
@@ -2638,10 +2688,15 @@ async function enrichWithPnlEbe(projection, { includeGSheet = true } = {}) {
   let ebeCumul = 0;
   return projection.map((mois) => {
     const mKey = `${mois.annee}-${String(mois.mois).padStart(2, '0')}`;
-    const ca = mois.encaissementsTotal ?? ((mois.encaissements || 0) + (mois.encaissementsFactures || 0) + (mois.revenusExceptionnels || 0) + (mois.fictionalEncaissements || 0));
+    // Les subventions annoncées (scénario) sont cash-in pour la tréso mais NE sont PAS du CA P&L ;
+    // on les retire du pnl_ca et on les ajoute aux subventions pour l'EBE.
+    const subvAnnonceesMois = mois.subventionsAnnoncees || 0;
+    const encTotal = mois.encaissementsTotal ?? ((mois.encaissements || 0) + (mois.encaissementsFactures || 0) + (mois.revenusExceptionnels || 0) + (mois.fictionalEncaissements || 0) + (mois.revenusRecurrents || 0) + subvAnnonceesMois);
+    const ca = encTotal - subvAnnonceesMois;
     const charges = mois.decaissements || 0;
-    const subv = Math.round(subvByMonth[mKey] || 0);
+    const subvGSheet = Math.round(subvByMonth[mKey] || 0);
     const aide = Math.round(aideByMonth[mKey] || 0);
+    const subv = subvGSheet + subvAnnonceesMois;
     const marge = ca - charges;
     const ebeMensuel = marge + subv + aide;
     ebeCumul += ebeMensuel;
@@ -2650,7 +2705,7 @@ async function enrichWithPnlEbe(projection, { includeGSheet = true } = {}) {
       pnl_ca:       Math.round(ca),
       pnl_charges:  Math.round(charges),
       pnl_marge:    Math.round(marge),
-      subventions:  subv,
+      subventions:  Math.round(subv),
       aides:        aide,
       ebe_mensuel:  Math.round(ebeMensuel),
       ebe_cumule:   Math.round(ebeCumul),
@@ -2675,12 +2730,15 @@ async function fetchBaseData(horizonMonths = 12) {
 }
 
 function applyOverrides(baseData, overrides) {
-  let salaries = [...baseData.salaries];
+  let salaries = baseData.salaries.map(s => ({ ...s })); // clone shallow pour éviter de muter baseData
   let revenus = [...baseData.revenus];
   let chargesFixesExtras = [];
   let pipelineFactor = 1;
   let fictionalDeals = [];
   let caEstimatif = null;
+  let revenusRecurrentsExtras = [];
+  let subventionsAnnoncees = [];
+  let gsheetOverrides = [];
 
   for (const ov of overrides) {
     const d = ov.data;
@@ -2736,10 +2794,72 @@ function applyOverrides(baseData, overrides) {
           mois: d.mois,
         });
         break;
+      case 'salaire_augmentation':
+        // % d'augmentation cumulative à partir d'une date. Si salarie_ids vide/absent → applique à tous.
+        salaries = salaries.map(s => {
+          const targets = d.salarie_ids;
+          if (targets && targets.length && !targets.includes(s.id)) return s;
+          const aug = { percent: d.percent || 0, date_debut: d.date_debut };
+          return { ...s, augmentations: [...(s.augmentations || []), aug] };
+        });
+        break;
+      case 'revenu_recurrent':
+        revenusRecurrentsExtras.push({
+          libelle: d.libelle || 'Revenu récurrent',
+          montant_mensuel: d.montant_mensuel || 0,
+          mois_debut: d.mois_debut,
+          mois_fin: d.mois_fin,
+        });
+        break;
+      case 'pret': {
+        // Décompose en : revenu one-shot (entrée) + charge récurrente (mensualité amortissable)
+        const P = d.montant || 0;
+        const tx = (d.taux_annuel || 0) / 100;
+        const n = d.duree_mois || 12;
+        const mensualite = tx > 0 ? P * (tx / 12) / (1 - Math.pow(1 + tx / 12, -n)) : P / n;
+        revenus.push({
+          id: 'pret-entry-' + ov.id,
+          libelle: (d.libelle || 'Prêt') + ' (entrée)',
+          montant: P,
+          mois: d.mois_entree,
+        });
+        // Remboursements : du mois suivant l'entrée, pendant duree_mois
+        const [y, m] = (d.mois_entree || '').split('-').map(Number);
+        if (y && m) {
+          const startD = new Date(y, m - 1 + 1, 1);
+          const endD   = new Date(y, m - 1 + n, 1);
+          const startKey = `${startD.getFullYear()}-${String(startD.getMonth() + 1).padStart(2, '0')}`;
+          const endKey   = `${endD.getFullYear()}-${String(endD.getMonth() + 1).padStart(2, '0')}`;
+          chargesFixesExtras.push({
+            libelle: (d.libelle || 'Prêt') + ' (remboursement)',
+            montant_mensuel: Math.round(mensualite),
+            mois_debut: startKey,
+            mois_fin: endKey,
+          });
+        }
+        break;
+      }
+      case 'subvention_annoncee':
+        subventionsAnnoncees.push({
+          id: 'fictional-' + ov.id,
+          libelle: d.libelle || 'Subvention annoncée',
+          montant: d.montant || 0,
+          mois: d.mois,
+        });
+        break;
+      case 'ligne_gsheet_override':
+        // Remplace le montant d'une catégorie mère du GSheet CR_Prev sur une plage de mois
+        gsheetOverrides.push({
+          categorie: d.categorie,
+          mois_debut: d.mois_debut,
+          mois_fin: d.mois_fin,
+          montant_mensuel: d.montant_mensuel || 0,
+        });
+        break;
     }
   }
 
-  return { salaries, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals, caEstimatif };
+  return { salaries, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals, caEstimatif, revenusRecurrentsExtras, subventionsAnnoncees, gsheetOverrides };
 }
 
 app.get('/api/scenarios/baseline/projection', async (req, res) => {
@@ -2798,6 +2918,9 @@ app.get('/api/scenarios/:id/projection', async (req, res) => {
       fictionalDeals: applied.fictionalDeals,
       crPrevData: base.crPrevData, caEstimatif: applied.caEstimatif,
       includeGSheet, includePipeline,
+      revenusRecurrentsExtras: applied.revenusRecurrentsExtras,
+      subventionsAnnoncees: applied.subventionsAnnoncees,
+      gsheetOverrides: applied.gsheetOverrides,
     });
     const enriched = await enrichWithPnlEbe(result.previsionnel, { includeGSheet });
     res.json({ nom: scenario.nom, horizon: preset, previsionnel: enriched });
