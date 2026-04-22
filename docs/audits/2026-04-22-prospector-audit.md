@@ -157,7 +157,7 @@ Corrections appliquées (voir diff CLAUDE.md).
 
 Choses repérées pendant l'audit qui ne sont **ni mort, ni doc, ni cleanup trivial** :
 
-1. **`server.js` ~4130** (`/import-emelia`) — la dédup historique excluait les statuts `"Non pertinent"` et `"Perdu"` via `.not('status', 'in', ...)`. La nouvelle version (ton commit `a24dcfc`) retire ce filtre et dédup sur **tous les statuts**. C'est voulu selon V11 (pour éviter les doublons vanity vs encoded), mais ça a un effet de bord : un prospect en `"Non pertinent"` bloquera un ré-import ultérieur. Volontaire ?
+1. ~~**`server.js` ~4130** (`/import-emelia`) — la dédup historique excluait les statuts `"Non pertinent"` et `"Perdu"`. La nouvelle version (ton commit `a24dcfc`) retire ce filtre et dédup sur **tous les statuts**.~~ **Confirmé volontaire par Nathan (2026-04-22)**. Un prospect en `"Non pertinent"` ou `"Perdu"` bloquera bien un ré-import futur — comportement attendu pour éviter de retraiter les prospects déjà décidés.
 
 2. **`prospector.js` ~3200** (`_emeliaIsPreselected`) — pattern propre, mais la variable est une "singleton mutable" dans l'IIFE, potentielle fuite d'état si l'utilisateur ouvre le wizard, abandonne, puis revient via un autre chemin. Pas bloquant.
 
@@ -179,7 +179,7 @@ Choses repérées pendant l'audit qui ne sont **ni mort, ni doc, ni cleanup triv
 - [x] ~~Test buildSalesNavUrl préexistant~~ — Corrigé
 - [ ] **Décider du sort de `dist/js/*.js` versionnés** — soit gitignore + build auto en CI, soit hook pré-commit. Laisse tel quel pour l'instant (architectural)
 - [ ] **Audit des dépendances `package.json`** — vérifier `lucide-react`, vieilles deps — hors scope audit
-- [ ] **Point à reviewer §6.1** : `/import-emelia` dédup sur **tous** les statuts (incluant `Non pertinent`/`Perdu`). Voulu ?
+- [x] ~~§6.1 : dédup `/import-emelia` sur tous statuts~~ — Confirmé volontaire par Nathan
 
 ---
 
