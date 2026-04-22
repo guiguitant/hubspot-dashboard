@@ -89,16 +89,16 @@ Tous les endpoints dont le commentaire inline mentionne Dispatch/automation sont
 - ✅ Endpoints `/api/scraping/summaries` + `/api/scraping/summary` supprimés (§1.1)
 - ⚪ Statuts `scrapping_pending` et `Profil incomplet` restent valides dans les constantes `VALID_PROSPECT_STATUSES` / `ACTIVE_PROSPECT_STATUSES` (server.js ~4231, 4240). **Gardés** — prospects historiques avec ces statuts existent encore en DB (cf. `scripts/purge-incomplete-prospects.js`).
 
-### Migrations — **NETTOYAGE VIA MIGRATION 22**
+### Migrations — **NETTOYAGE VIA MIGRATION 22** ✅ appliquée
 
-Migration `22_drop_scraping_infrastructure.sql` créée :
+Migration `22_drop_scraping_infrastructure.sql` :
 - `DROP TABLE scraping_summaries` (orpheline depuis suppression endpoints)
 - `ALTER TABLE prospects DROP COLUMN scrapping_attempts` (plus lue ni écrite)
 - `DROP INDEX idx_prospects_scrapping_pending`
 
-Les migrations 10, 17, 20 restent en place (historique). Le statut `scrapping_pending` et `Profil incomplet` restent dans la CHECK constraint des prospects — prospects legacy existent encore en DB.
+**Appliquée sur Supabase le 2026-04-22 par Nathan** via SQL Editor du dashboard.
 
-**À toi d'exécuter la migration 22 sur Supabase quand tu juges bon** (après backup par précaution).
+Les migrations 10, 17, 20 restent en place (historique). Le statut `scrapping_pending` et `Profil incomplet` restent dans la CHECK constraint des prospects — prospects legacy existent encore en DB.
 
 ### Scripts — **GARDÉS**
 
