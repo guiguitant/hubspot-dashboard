@@ -243,6 +243,35 @@
     }
     .analytics-tab:hover { background: var(--border); color: var(--text); }
     .analytics-tab.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+    /* --- Scenarios horizon presets (style cousin de analytics-preset) --- */
+    .scenario-horizon {
+      padding: 0.3rem 0.75rem;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text-secondary);
+      font-size: 0.78rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .scenario-horizon:hover { background: var(--hover); color: var(--text); }
+    .scenario-horizon.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+    /* --- Scenarios output tabs (Tréso / P&L / EBE) --- */
+    .scenario-tab {
+      padding: 0.5rem 1.2rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .scenario-tab:hover { color: var(--text); }
+    .scenario-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
     #modalMissions.open { display: flex !important; }
 
     /* --- Notion-style buttons --- */
@@ -2075,9 +2104,31 @@
   <!-- PAGE: Scenarios -->
   <div class="app-page" id="page-scenarios">
   <div class="page">
-    <div class="page-icon">&#128202;</div>
     <h1 class="page-title">Scenarios financiers</h1>
     <p class="page-desc">Comparez differents scenarios de tresorerie : embauches, deals, charges, subventions.</p>
+
+    <!-- Horizon + baseline toggles -->
+    <div class="section" style="margin-bottom:1.5rem">
+      <div style="display:flex;flex-wrap:wrap;gap:1.5rem;align-items:center">
+        <div style="display:flex;align-items:center;gap:0.5rem">
+          <span style="font-size:0.8rem;color:var(--text-secondary);font-weight:600">Horizon :</span>
+          <button class="scenario-horizon active" data-horizon="fin-annee" onclick="setScenarioHorizon('fin-annee')">Fin année</button>
+          <button class="scenario-horizon" data-horizon="s1-np1" onclick="setScenarioHorizon('s1-np1')">S1 N+1</button>
+          <button class="scenario-horizon" data-horizon="n-plus-1" onclick="setScenarioHorizon('n-plus-1')">N+1</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:1rem;border-left:1px solid var(--border);padding-left:1.5rem">
+          <span style="font-size:0.8rem;color:var(--text-secondary);font-weight:600">Baseline :</span>
+          <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.85rem;cursor:pointer">
+            <input type="checkbox" id="scenarioToggleGSheet" checked onchange="setScenarioBaselineToggle('gsheet', this.checked)" style="cursor:pointer;accent-color:var(--primary)">
+            Prévisionnel GSheet
+          </label>
+          <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.85rem;cursor:pointer">
+            <input type="checkbox" id="scenarioTogglePipeline" checked onchange="setScenarioBaselineToggle('pipeline', this.checked)" style="cursor:pointer;accent-color:var(--primary)">
+            Pipeline pondéré
+          </label>
+        </div>
+      </div>
+    </div>
 
     <div class="section">
       <div class="section-title" style="display:flex;align-items:center;gap:0.5rem">
@@ -2090,7 +2141,12 @@
     </div>
 
     <div class="section">
-      <div class="section-title">Comparaison des projections</div>
+      <!-- Tabs de visualisation -->
+      <div style="display:flex;gap:0.5rem;margin-bottom:1rem;border-bottom:1px solid var(--border)">
+        <button class="scenario-tab active" data-tab="treso" onclick="setScenarioTab('treso')">Trésorerie</button>
+        <button class="scenario-tab" data-tab="pnl" onclick="setScenarioTab('pnl')">P&L</button>
+        <button class="scenario-tab" data-tab="ebe" onclick="setScenarioTab('ebe')">EBE cumulé</button>
+      </div>
       <div style="position:relative;height:400px;margin-bottom:1rem">
         <canvas id="scenariosChart"></canvas>
       </div>
@@ -6773,11 +6829,46 @@
     let selectedScenarios = new Set();
     let scenariosChart = null;
     let currentScenarioOverrides = []; // overrides en mémoire pour la modale en cours
+    let scenarioHorizon = 'fin-annee';
+    let scenarioToggles = { gsheet: true, pipeline: true };
+    let scenarioActiveTab = 'treso';
 
     const SCENARIO_COLORS = [
       'rgba(59,130,246,1)', 'rgba(234,88,12,1)', 'rgba(139,92,246,1)',
       'rgba(16,185,129,1)', 'rgba(236,72,153,1)', 'rgba(245,158,11,1)',
     ];
+
+    // Mapping tab → champ de la projection à afficher + label
+    const SCENARIO_TAB_CONFIG = {
+      treso: { field: 'soldeFin',   label: 'Trésorerie', tooltip: 'Solde fin de mois' },
+      pnl:   { field: 'pnl_marge',  label: 'P&L',        tooltip: 'Marge mensuelle (CA - charges)' },
+      ebe:   { field: 'ebe_cumule', label: 'EBE cumulé', tooltip: 'EBE cumulé depuis début projection' },
+    };
+
+    function setScenarioHorizon(h) {
+      if (scenarioHorizon === h) return;
+      scenarioHorizon = h;
+      document.querySelectorAll('.scenario-horizon').forEach(b => b.classList.toggle('active', b.dataset.horizon === h));
+      renderScenariosComparison();
+    }
+
+    function setScenarioBaselineToggle(key, checked) {
+      scenarioToggles[key] = checked;
+      renderScenariosComparison();
+    }
+
+    function setScenarioTab(tab) {
+      if (scenarioActiveTab === tab) return;
+      scenarioActiveTab = tab;
+      document.querySelectorAll('.scenario-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+      renderScenariosComparison();
+    }
+
+    function buildScenarioQueryString() {
+      return '?horizon=' + scenarioHorizon
+        + '&includeGSheet=' + (scenarioToggles.gsheet ? 'true' : 'false')
+        + '&includePipeline=' + (scenarioToggles.pipeline ? 'true' : 'false');
+    }
 
     async function refreshScenariosPage() {
       try {
@@ -6830,17 +6921,12 @@
     async function renderScenariosComparison() {
       const detailContainer = document.getElementById('scenariosDetailTable');
 
-      if (selectedScenarios.size === 0) {
-        if (scenariosChart) { scenariosChart.destroy(); scenariosChart = null; }
-        detailContainer.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Selectionnez des scenarios pour voir le comparatif.</p>';
-        return;
-      }
-
-      // Fetch baseline + selected scenarios projections
+      // Fetch baseline + selected scenarios projections (toujours fetch baseline pour pouvoir l'afficher seul)
+      const qs = buildScenarioQueryString();
       const fetches = [
-        fetch('/api/scenarios/baseline/projection').then(r => r.json()),
+        fetch('/api/scenarios/baseline/projection' + qs).then(r => r.json()),
         ...Array.from(selectedScenarios).map(id =>
-          fetch('/api/scenarios/' + id + '/projection').then(r => r.json())
+          fetch('/api/scenarios/' + id + '/projection' + qs).then(r => r.json())
         ),
       ];
 
@@ -6849,55 +6935,57 @@
         const baseline = results[0];
         const scenarios = results.slice(1);
 
-        // --- Chart ---
+        const tabConfig = SCENARIO_TAB_CONFIG[scenarioActiveTab];
+        const valueOf = (m) => m[tabConfig.field] ?? 0;
+
+        // --- Chart (line, multi-scénario) ---
         const labels = baseline.previsionnel.map(m => {
           const date = new Date(m.annee, m.mois - 1);
           return date.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
         });
 
         const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-
-        const SCENARIO_BAR_COLORS = [
-          isDark ? 'rgba(59,130,246,0.6)' : 'rgba(59,130,246,0.5)',
-          isDark ? 'rgba(234,88,12,0.6)' : 'rgba(234,88,12,0.5)',
-          isDark ? 'rgba(139,92,246,0.6)' : 'rgba(139,92,246,0.5)',
-          isDark ? 'rgba(16,185,129,0.6)' : 'rgba(16,185,129,0.5)',
-          isDark ? 'rgba(236,72,153,0.6)' : 'rgba(236,72,153,0.5)',
-          isDark ? 'rgba(245,158,11,0.6)' : 'rgba(245,158,11,0.5)',
-        ];
+        const baselineColor = isDark ? 'rgba(180,180,180,1)' : 'rgba(120,120,120,1)';
 
         const datasets = [
           {
             label: 'Baseline',
-            data: baseline.previsionnel.map(m => m.soldeFin),
-            backgroundColor: isDark ? 'rgba(150,150,150,0.45)' : 'rgba(150,150,150,0.35)',
-            hoverBackgroundColor: isDark ? 'rgba(150,150,150,0.7)' : 'rgba(150,150,150,0.55)',
-            borderRadius: 4,
-            borderSkipped: false,
+            data: baseline.previsionnel.map(valueOf),
+            borderColor: baselineColor,
+            backgroundColor: baselineColor.replace('1)', '0.08)'),
+            borderWidth: 2,
+            tension: 0.25,
+            pointRadius: 2,
+            pointHoverRadius: 5,
+            fill: false,
+            borderDash: [6, 4],
           },
         ];
 
         scenarios.forEach((sc, i) => {
-          const bgColor = SCENARIO_BAR_COLORS[i % SCENARIO_BAR_COLORS.length];
-          const hoverColor = bgColor.replace(/[\d.]+\)$/, '0.85)');
+          const col = SCENARIO_COLORS[i % SCENARIO_COLORS.length];
           datasets.push({
             label: sc.nom,
-            data: sc.previsionnel.map(m => m.soldeFin),
-            backgroundColor: bgColor,
-            hoverBackgroundColor: hoverColor,
-            borderRadius: 4,
-            borderSkipped: false,
+            data: sc.previsionnel.map(valueOf),
+            borderColor: col,
+            backgroundColor: col.replace('1)', '0.08)'),
+            borderWidth: 2,
+            tension: 0.25,
+            pointRadius: 2,
+            pointHoverRadius: 5,
+            fill: false,
           });
         });
 
         if (scenariosChart) scenariosChart.destroy();
         scenariosChart = new Chart(document.getElementById('scenariosChart'), {
-          type: 'bar',
+          type: 'line',
           data: { labels, datasets },
           options: {
             responsive: true,
             maintainAspectRatio: false,
-            animation: { duration: 600, easing: 'easeOutQuart' },
+            animation: { duration: 400, easing: 'easeOutQuart' },
+            interaction: { mode: 'index', intersect: false },
             plugins: {
               legend: {
                 display: true,
@@ -6913,6 +7001,7 @@
                 cornerRadius: 8,
                 padding: 10,
                 callbacks: {
+                  title: (items) => items[0]?.label + ' — ' + tabConfig.tooltip,
                   label: (ctx) => ctx.dataset.label + ' : ' + formatEuro(ctx.raw),
                 },
               },
@@ -6934,11 +7023,11 @@
           },
         });
 
-        // --- Detail table ---
+        // --- Detail table (filtré sur le tab actif) ---
         let html = '<table style="width:100%;border-collapse:collapse;font-size:0.82rem">';
         html += '<thead><tr style="border-bottom:2px solid var(--border)">';
         html += '<th style="text-align:left;padding:0.5rem 0.8rem;color:var(--text-secondary)">Mois</th>';
-        html += '<th style="text-align:right;padding:0.5rem 0.8rem;color:var(--text-secondary)">Baseline</th>';
+        html += '<th style="text-align:right;padding:0.5rem 0.8rem;color:var(--text-secondary)">Baseline (' + tabConfig.label + ')</th>';
         scenarios.forEach((sc) => {
           html += '<th style="text-align:right;padding:0.5rem 0.8rem;color:var(--text-secondary)">' + sc.nom + '</th>';
         });
@@ -6947,12 +7036,12 @@
         for (let i = 0; i < baseline.previsionnel.length; i++) {
           const bm = baseline.previsionnel[i];
           const label = labels[i];
-          const bVal = bm.soldeFin;
+          const bVal = valueOf(bm);
           html += '<tr style="border-bottom:1px solid var(--border)">';
           html += '<td style="padding:0.4rem 0.8rem;font-weight:500">' + label + '</td>';
           html += '<td style="text-align:right;padding:0.4rem 0.8rem">' + formatEuro(bVal) + '</td>';
-          scenarios.forEach((sc, si) => {
-            const sVal = sc.previsionnel[i] ? sc.previsionnel[i].soldeFin : 0;
+          scenarios.forEach((sc) => {
+            const sVal = sc.previsionnel[i] ? valueOf(sc.previsionnel[i]) : 0;
             const delta = sVal - bVal;
             const color = delta > 0 ? 'var(--success, #0f7b6c)' : delta < 0 ? 'var(--danger)' : '';
             const deltaStr = delta !== 0 ? ' <span style="font-size:0.75rem;color:' + color + '">(' + (delta > 0 ? '+' : '') + formatEuro(delta) + ')</span>' : '';
