@@ -9,6 +9,21 @@ const { execFile } = require('child_process');
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
 const { buildSalesNavUrl } = require('./utils/buildSalesNavUrl');
+const multer = require('multer');
+const { parse: parseCsv } = require('csv-parse/sync');
+const { cleanEmeliaRows } = require('./utils/emeliaCleaner');
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['text/csv', 'application/csv', 'text/plain'];
+    if (allowed.includes(file.mimetype) || file.originalname.endsWith('.csv')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Seuls les fichiers .csv sont acceptés'));
+    }
+  },
+});
 
 // --- Supabase ---
 const supabase = createClient(
@@ -4089,6 +4104,93 @@ app.post('/api/prospector/import', accountContext, async (req, res) => {
   }
 });
 
+// POST /api/prospector/import-emelia — Import depuis fichier CSV Emelia
+// dry_run=true : analyse uniquement, aucune insertion en DB
+app.post('/api/prospector/import-emelia', accountContext, upload.single('file'), async (req, res) => {
+  try {
+    const campaign_id = req.body.campaign_id;
+    const isDryRun = req.body.dry_run === 'true' || req.body.dry_run === true;
+
+    if (!campaign_id) return res.status(400).json({ error: 'campaign_id requis' });
+    if (!req.file) return res.status(400).json({ error: 'Fichier requis' });
+
+    const { data: campCheck } = await supabaseAdmin
+      .from('campaigns')
+      .select('id')
+      .eq('id', campaign_id)
+      .eq('account_id', req.accountId)
+      .single();
+    if (!campCheck) return res.status(404).json({ error: 'Campagne introuvable' });
+
+    const csvText = req.file.buffer.toString('utf-8');
+    const rows = parseCsv(csvText, {
+      delimiter: ';',
+      columns: true,
+      skip_empty_lines: true,
+      trim: true,
+    });
+
+    const [{ data: existing, error: existingErr }, { data: allCamps }] = await Promise.all([
+      supabaseAdmin.from('prospects')
+        .select('linkedin_url, first_name, last_name, company, status, campaign_id')
+        .eq('account_id', req.accountId),
+      supabaseAdmin.from('campaigns')
+        .select('id, name')
+        .eq('account_id', req.accountId),
+    ]);
+    if (existingErr) throw existingErr;
+
+    const campNameById = new Map((allCamps || []).map(c => [c.id, c.name]));
+    const enrichedExisting = (existing || []).map(p => ({
+      ...p,
+      campaign_name: p.campaign_id ? (campNameById.get(p.campaign_id) || null) : null,
+    }));
+
+    const { accepted, rejections } = cleanEmeliaRows(rows, enrichedExisting);
+
+    if (isDryRun) {
+      return res.json({
+        imported: accepted.length,
+        rejected: rejections.length,
+        rejections,
+        campaign_name: campNameById.get(campaign_id) || null,
+      });
+    }
+
+    let insertedCount = 0;
+    if (accepted.length > 0) {
+      const toInsert = accepted.map(p => ({
+        ...p,
+        account_id: req.accountId,
+        campaign_id,
+        status: 'Profil à valider',
+      }));
+      const { data: inserted, error: insertErr } = await supabaseAdmin
+        .from('prospects')
+        .insert(toInsert)
+        .select('id');
+      if (insertErr) throw insertErr;
+      insertedCount = inserted?.length ?? 0;
+    }
+
+    // Always log the import attempt
+    await supabaseAdmin.from('imports').insert({
+      account_id: req.accountId,
+      campaign_id,
+      filename: req.file.originalname,
+      total_rows: rows.length,
+      imported: insertedCount,
+      duplicates: rejections.filter(r => r.reason.includes('Doublon')).length,
+      errors: rejections.filter(r => !r.reason.includes('Doublon')).length,
+    });
+
+    res.json({ imported: insertedCount, rejected: rejections.length, rejections });
+  } catch (err) {
+    console.error('Erreur /api/prospector/import-emelia:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/prospector/export — CSV export
 app.get('/api/prospector/export', accountContext, async (req, res) => {
   try {
@@ -4209,275 +4311,6 @@ app.get('/api/prospector/daily-stats', accountContext, async (req, res) => {
     });
   } catch (err) {
     console.error('Erreur /api/prospector/daily-stats:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// POST /api/prospector/sync — Create prospects from Sales Navigator scraping
-// Dedup: skip complet si prospect déjà existant (linkedin_url / sales_nav_url / nom+prénom+company)
-app.post('/api/prospector/sync', accountContext, async (req, res) => {
-  try {
-    const { prospects, campaign_id, partial } = req.body;
-    if (!prospects || !Array.isArray(prospects)) {
-      return res.status(400).json({ error: 'prospects array required' });
-    }
-    if (!campaign_id) {
-      return res.status(400).json({ error: 'campaign_id required at root level (not inside prospects[])' });
-    }
-
-    // IDOR check: vérifier que la campagne appartient à ce compte
-    const { data: campCheck } = await supabaseAdmin
-      .from('campaigns').select('id')
-      .eq('id', campaign_id).eq('account_id', req.accountId).single();
-    if (!campCheck) return res.status(404).json({ error: 'Campaign not found' });
-
-    // Batch limit
-    if (prospects.length > 25) {
-      return res.status(400).json({ error: 'Maximum 25 prospects per batch' });
-    }
-
-    // Guard rail: partial mode requires cooldown_triggered proof (max 5 without it)
-    const MAX_PARTIAL_WITHOUT_COOLDOWN = 5;
-    if (partial && !req.body.cooldown_triggered && prospects.length > MAX_PARTIAL_WITHOUT_COOLDOWN) {
-      return res.status(400).json({
-        error: `Mode partial sans cooldown_triggered limité à ${MAX_PARTIAL_WITHOUT_COOLDOWN} prospects par batch. ` +
-               `Envoyez cooldown_triggered: true si un rate-limit SN a réellement été détecté.`,
-        received: prospects.length,
-        limit: MAX_PARTIAL_WITHOUT_COOLDOWN,
-      });
-    }
-
-    // Guard rail: daily sync limit per campaign (prevents runaway scraping)
-    const MAX_DAILY_SYNC_PER_CAMPAIGN = 50;
-    const todayStart = new Date(todayParis() + 'T00:00:00+02:00').toISOString();
-    const { count: syncedToday } = await supabaseAdmin.from('prospects')
-      .select('id', { count: 'exact', head: true })
-      .eq('campaign_id', campaign_id)
-      .eq('account_id', req.accountId)
-      .gte('created_at', todayStart);
-    const projectedDaily = (syncedToday || 0) + prospects.length;
-    if (projectedDaily > MAX_DAILY_SYNC_PER_CAMPAIGN) {
-      return res.status(400).json({
-        error: `Limite journalière campagne dépassée: ${syncedToday || 0} sync aujourd'hui + ${prospects.length} nouveaux = ${projectedDaily} (max ${MAX_DAILY_SYNC_PER_CAMPAIGN}/jour)`,
-        synced_today: syncedToday || 0,
-        incoming: prospects.length,
-        daily_limit: MAX_DAILY_SYNC_PER_CAMPAIGN,
-      });
-    }
-
-    // Quota check: count new invitations in this batch
-    const newInvitations = prospects.filter(p => p.status === 'Invitation envoyée').length;
-    if (newInvitations > 0) {
-      const invSent = await countTodayInvitations(req.accountId);
-      if (invSent + newInvitations > DAILY_INVITATION_LIMIT) {
-        return res.status(429).json({
-          error: "Quota journalier d'invitations atteint",
-          quota: { sent_today: invSent, limit: DAILY_INVITATION_LIMIT, remaining: Math.max(0, DAILY_INVITATION_LIMIT - invSent) },
-        });
-      }
-    }
-
-    // --- Batch dedup: 1 query instead of 3×N ---
-    const { data: existingProspects } = await supabaseAdmin.from('prospects')
-      .select('id, linkedin_url, sales_nav_url, first_name, last_name, company')
-      .eq('account_id', req.accountId);
-
-    const existingLinkedin = new Set();
-    const existingSalesNav = new Set();
-    const existingNameCompany = new Set();
-    for (const ep of (existingProspects || [])) {
-      if (ep.linkedin_url) existingLinkedin.add(ep.linkedin_url.toLowerCase());
-      if (ep.sales_nav_url) existingSalesNav.add(ep.sales_nav_url.toLowerCase());
-      if (ep.first_name && ep.last_name && ep.company) {
-        existingNameCompany.add(`${ep.first_name.trim().toLowerCase()}|${ep.last_name.trim().toLowerCase()}|${ep.company.trim().toLowerCase()}`);
-      }
-    }
-
-    // Determine target status
-    let targetStatus = 'Profil à valider';
-    if (partial) targetStatus = 'Profil incomplet';
-    if (req.body.scrapping_pending) targetStatus = 'scrapping_pending';
-
-    // Filter & dedup incoming prospects (in-memory, 0 queries)
-    let skipped = 0, errors = 0;
-    const toInsert = [];
-    for (const p of prospects) {
-      // Reject Sales Navigator URLs in linkedin_url field
-      if (p.linkedin_url && p.linkedin_url.includes('linkedin.com/sales/')) {
-        console.error(`Sync rejected: Sales Nav URL in linkedin_url for ${p.first_name} ${p.last_name}`);
-        errors++;
-        continue;
-      }
-
-      const normalized = normalizeLinkedinUrl(p.linkedin_url);
-      let matchReason = null;
-
-      // 3-level dedup against existing DB + within this batch
-      if (normalized && existingLinkedin.has(normalized.toLowerCase())) {
-        matchReason = 'linkedin_url';
-      } else if (p.sales_nav_url && existingSalesNav.has(p.sales_nav_url.toLowerCase())) {
-        matchReason = 'sales_nav_url';
-      } else if (p.first_name && p.last_name && p.company) {
-        const nameKey = `${p.first_name.trim().toLowerCase()}|${p.last_name.trim().toLowerCase()}|${p.company.trim().toLowerCase()}`;
-        if (existingNameCompany.has(nameKey)) matchReason = 'name+company';
-      }
-
-      if (matchReason) {
-        console.log(`[Sync skip] ${p.first_name} ${p.last_name} — match by ${matchReason}`);
-        skipped++;
-        continue;
-      }
-
-      // Prepare row + register in Sets (dedup within batch)
-      toInsert.push({
-        first_name: p.first_name || '',
-        last_name: p.last_name || '',
-        email: p.email || null,
-        phone: p.phone || null,
-        linkedin_url: normalized,
-        sales_nav_url: p.sales_nav_url || null,
-        company: p.company || null,
-        job_title: p.job_title || null,
-        sector: p.sector || null,
-        geography: p.geography || null,
-        account_id: req.accountId,
-        status: targetStatus,
-        campaign_id: campaign_id,
-      });
-
-      if (normalized) existingLinkedin.add(normalized.toLowerCase());
-      if (p.sales_nav_url) existingSalesNav.add(p.sales_nav_url.toLowerCase());
-      if (p.first_name && p.last_name && p.company) {
-        existingNameCompany.add(`${p.first_name.trim().toLowerCase()}|${p.last_name.trim().toLowerCase()}|${p.company.trim().toLowerCase()}`);
-      }
-    }
-
-    // --- Batch insert (1 query instead of N) with fallback ---
-    let created = 0;
-    if (toInsert.length > 0) {
-      const { data: inserted, error: batchErr } = await supabaseAdmin
-        .from('prospects').insert(toInsert).select('id');
-
-      if (!batchErr && inserted) {
-        created = inserted.length;
-      } else {
-        // Fallback: individual inserts if batch fails
-        console.warn('[Sync] Batch insert failed, falling back to individual:', batchErr?.message);
-        for (const row of toInsert) {
-          try {
-            await supabaseAdmin.from('prospects').insert(row).select('id').single();
-            created++;
-          } catch (err) {
-            console.error('Sync error for prospect:', row.first_name, row.last_name, err.message);
-            errors++;
-          }
-        }
-      }
-    }
-
-    res.json({ created, skipped, errors, total: prospects.length });
-  } catch (err) {
-    console.error('Erreur /api/prospector/sync:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /api/prospector/prospects/incomplete — List prospects with missing data
-app.get('/api/prospector/prospects/incomplete', accountContext, async (req, res) => {
-  try {
-    const { campaign_id } = req.query;
-    const limit = Math.min(parseInt(req.query.limit) || 50, 100);
-
-    let query = supabaseAdmin.from('prospects')
-      .select('id, first_name, last_name, linkedin_url, sales_nav_url, company, job_title, email, phone, sector, geography, status, campaign_id, created_at')
-      .eq('account_id', req.accountId)
-      .or('linkedin_url.is.null,job_title.is.null,job_title.eq.,company.is.null,company.eq.')
-      .order('created_at', { ascending: false })
-      .limit(limit);
-
-    if (campaign_id) {
-      query = query.eq('campaign_id', campaign_id);
-    }
-
-    const { data, error } = await query;
-    if (error) throw error;
-    res.json(data || []);
-  } catch (err) {
-    console.error('Erreur /api/prospector/prospects/incomplete:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// PATCH /api/prospector/prospects/:id/enrich — Complete missing data on an existing prospect
-app.patch('/api/prospector/prospects/:id/enrich', accountContext, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { linkedin_url, job_title, company, visit_failed } = req.body;
-
-    // IDOR check: prospect must belong to authenticated account
-    const { data: prospect, error: fetchErr } = await supabaseAdmin.from('prospects')
-      .select('*')
-      .eq('id', id).eq('account_id', req.accountId).single();
-    if (fetchErr || !prospect) return res.status(404).json({ error: 'Prospect not found' });
-
-    // Handle visit_failed: increment scrapping_attempts, maybe transition to "Non pertinent"
-    if (visit_failed) {
-      const MAX_SCRAPPING_ATTEMPTS = 3;
-      const newAttempts = (prospect.scrapping_attempts || 0) + 1;
-      const failUpdates = {
-        scrapping_attempts: newAttempts,
-        updated_at: new Date().toISOString(),
-      };
-      if (newAttempts >= MAX_SCRAPPING_ATTEMPTS && prospect.status === 'scrapping_pending') {
-        failUpdates.status = 'Non pertinent';
-      }
-      const { data: failUpdated, error: failErr } = await supabaseAdmin.from('prospects')
-        .update(failUpdates)
-        .eq('id', id).eq('account_id', req.accountId)
-        .select('*').single();
-      if (failErr) throw failErr;
-      return res.json(failUpdated);
-    }
-
-    // Dedup check on linkedin_url if provided
-    if (linkedin_url) {
-      const normalized = normalizeLinkedinUrl(linkedin_url);
-      const { data: dup } = await supabaseAdmin.from('prospects')
-        .select('id, first_name, last_name, linkedin_url')
-        .eq('account_id', req.accountId)
-        .eq('linkedin_url', normalized)
-        .neq('id', id)
-        .limit(1);
-      if (dup?.length) {
-        return res.status(409).json({ error: 'linkedin_url already used by another prospect', existing: dup[0] });
-      }
-    }
-
-    // Build partial update (only provided fields)
-    const updates = { updated_at: new Date().toISOString() };
-    if (linkedin_url !== undefined) updates.linkedin_url = normalizeLinkedinUrl(linkedin_url);
-    if (job_title !== undefined) updates.job_title = job_title;
-    if (company !== undefined) updates.company = company;
-
-    // Auto-transition: promote to 'Profil à valider' when all 3 fields complete
-    const merged = {
-      linkedin_url: updates.linkedin_url || prospect.linkedin_url,
-      job_title: updates.job_title !== undefined ? updates.job_title : prospect.job_title,
-      company: updates.company !== undefined ? updates.company : prospect.company,
-    };
-    if (['Profil incomplet', 'scrapping_pending'].includes(prospect.status) && merged.linkedin_url && merged.job_title && merged.company) {
-      updates.status = 'Profil à valider';
-    }
-
-    const { data: updated, error: updateErr } = await supabaseAdmin.from('prospects')
-      .update(updates)
-      .eq('id', id).eq('account_id', req.accountId)
-      .select('*').single();
-    if (updateErr) throw updateErr;
-
-    res.json(updated);
-  } catch (err) {
-    console.error('Erreur /api/prospector/prospects/:id/enrich:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
