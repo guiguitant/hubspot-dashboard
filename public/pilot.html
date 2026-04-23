@@ -1884,7 +1884,13 @@
     <h1 class="page-title">Tresorerie</h1>
     <p class="page-desc">Donnees temps reel depuis Qonto + Pennylane + pipeline HubSpot.</p>
 
+    <div style="padding:0.7rem 1rem;background:rgba(217,115,13,0.08);border-left:3px solid rgba(217,115,13,0.7);border-radius:4px;margin-bottom:1rem;font-size:0.85rem;color:var(--text-secondary);line-height:1.5">
+      <strong style="color:var(--text);">Donnees fiables = statuts Notion a jour.</strong>
+      Les factures envoyees / en retard proviennent de Pennylane. Les factures previsionnelles proviennent de Notion pour toute mission dont le statut n'est pas encore <em>Solde envoye</em> / <em>Solde paye</em>. Si un statut Notion n'est pas a jour (facture emise mais statut reste "Solde a envoyer"), la facture sera comptee cote Pennylane mais pas en double.
+    </div>
+
     <div class="error-banner" id="tresoErrorBanner"></div>
+    <div id="tresoPennylaneWarning" style="display:none;padding:0.6rem 1rem;background:rgba(224,62,62,0.08);border-left:3px solid var(--danger);border-radius:4px;margin-bottom:1rem;font-size:0.85rem;color:var(--text)"></div>
 
     <!-- KPIs -->
     <div class="kpi-row" id="tresoKpis">
@@ -1912,7 +1918,14 @@
 
     <!-- Chart: Projection tresorerie -->
     <div class="section">
-      <div class="section-title">Projection de tresorerie (12 mois)</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem;gap:1rem;flex-wrap:wrap">
+        <div class="section-title" style="margin:0">Projection de tresorerie (13 mois)</div>
+        <label style="display:inline-flex;align-items:center;gap:0.4rem;font-size:0.85rem;color:var(--text-secondary);cursor:pointer;user-select:none">
+          <input type="checkbox" id="tresoIncludePipeline" checked onchange="refreshTresoData()" style="cursor:pointer">
+          Inclure pipeline pondere
+          <span id="tresoPipelineSpinner" style="display:none;width:12px;height:12px;border:2px solid rgba(120,119,116,0.25);border-top-color:var(--primary);border-radius:50%;animation:spin 0.7s linear infinite;margin-left:0.25rem"></span>
+        </label>
+      </div>
       <div style="position:relative;height:350px;margin-bottom:1rem">
         <canvas id="tresoChart"></canvas>
       </div>
@@ -6287,10 +6300,25 @@
     async function refreshTresoData() {
       const errorBanner = document.getElementById('tresoErrorBanner');
       errorBanner.style.display = 'none';
+      const includePipelineEl = document.getElementById('tresoIncludePipeline');
+      const spinnerEl = document.getElementById('tresoPipelineSpinner');
+      if (spinnerEl) spinnerEl.style.display = 'inline-block';
+      if (includePipelineEl) includePipelineEl.disabled = true;
       try {
-        const res = await fetch('/api/tresorerie');
+        const includePipeline = includePipelineEl ? includePipelineEl.checked : true;
+        const qs = includePipeline ? '' : '?includePipeline=false';
+        const res = await fetch('/api/tresorerie' + qs);
         if (!res.ok) throw new Error('Erreur chargement tresorerie');
         tresoData = await res.json();
+        const warnEl = document.getElementById('tresoPennylaneWarning');
+        if (warnEl) {
+          if (tresoData.pennylaneError) {
+            warnEl.textContent = 'Pennylane indisponible (' + tresoData.pennylaneError + ') — factures emises non chargees, seules les previsionnelles Notion s’affichent.';
+            warnEl.style.display = 'block';
+          } else {
+            warnEl.style.display = 'none';
+          }
+        }
         renderTresoKpis();
         renderTresoChart();
         renderChargesChart();
@@ -6300,6 +6328,9 @@
         console.error('Erreur tresorerie:', err);
         errorBanner.textContent = err.message;
         errorBanner.style.display = 'block';
+      } finally {
+        if (spinnerEl) spinnerEl.style.display = 'none';
+        if (includePipelineEl) includePipelineEl.disabled = false;
       }
     }
 
@@ -6524,27 +6555,43 @@
       document.getElementById('tresoMoisDetailTitle').textContent = dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1);
 
       const mKey = mois.annee + '-' + String(mois.mois).padStart(2, '0');
+      // Mois courant = mois auquel les factures "late" des mois passés sont forcées par le backend.
+      // Calculé côté client à partir de la date du jour (doit matcher moisCourantKey du backend).
+      const today = new Date();
+      const moisCourantKey = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0');
+      const isMoisCourant = mKey === moisCourantKey;
 
-      // Factures du mois
+      // Factures du mois : dueDate dans le mois affiché, OU facture late forcée sur le mois courant.
       const factures = (tresoData.facturesImpayees || []).filter(f => {
         if (!f.dateEcheance) return false;
         const d = new Date(f.dateEcheance);
-        return (d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')) === mKey;
+        const fMKey = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+        if (fMKey === mKey) return true;
+        // Retard forcé : facture late dont la dueDate est antérieure au mois courant → affichée dans la modale du mois courant
+        if (isMoisCourant && f.status === 'late' && fMKey < moisCourantKey) return true;
+        return false;
       });
       const facturesEnvoyees = factures.filter(f => f.status === 'upcoming');
       const facturesPrev = factures.filter(f => f.status === 'previsionnel');
       const facturesRetard = factures.filter(f => f.status === 'late');
 
-      // Transactions Qonto du mois
+      // Régime d'affichage : mois clos = données Qonto réelles, mois en cours + futur = prévisionnel (CR_Prev + factures + pipeline)
+      const isClos = mois.isClos === true;
+
+      // Transactions Qonto du mois (utilisées uniquement pour les mois clos)
       const chargesDetail = (tresoData.chargesDetailParMois || {})[mKey] || {};
       const creditsDetail = (tresoData.creditsDetailParMois || {})[mKey] || [];
+
+      // Breakdown CR_Prev par catégorie (utilisé uniquement pour mois en cours + futurs)
+      const chargesGSheetDetail = mois.chargesGSheetDetail || {};
 
       const encEnvoye = mois.encaissementsEnvoye || 0;
       const encPrev = mois.encaissementsPrev || 0;
       const encRetard = mois.encaissementsRetard || 0;
       const encQonto = mois.encaissements || 0;
+      const pipelineEnc = mois.pipelinePondereEncaissements || 0;
       const charges = mois.decaissements || 0;
-      const totalEnc = encQonto + encEnvoye + encPrev + encRetard;
+      const totalEnc = encQonto + encEnvoye + encPrev + encRetard + pipelineEnc;
 
       // --- Soldes ---
       let html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.8rem;margin-bottom:1.2rem">';
@@ -6625,6 +6672,10 @@
       if (encRetard > 0) {
         html += accordion('En retard', encRetard, 'rgba(224,62,62,0.7)', '&#9679;', factureTable(facturesRetard));
       }
+      if (pipelineEnc > 0) {
+        // Détail par deal du pipeline non accessible par mois côté modale ; on affiche le total uniquement.
+        html += accordion('Pipeline pondere', pipelineEnc, 'rgba(105,64,165,0.45)', '&#9650;', '');
+      }
 
       // --- REVENUS EXCEPTIONNELS ---
       const revExc = mois.revenusExceptionnels || 0;
@@ -6649,40 +6700,35 @@
       html += '<span style="color:var(--success, #0f7b6c)">' + formatEuro(totalEncAvecRev) + '</span></div>';
 
       // --- CHARGES ---
-      html += '<div style="font-weight:700;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-secondary);margin-bottom:0.4rem">Charges</div>';
+      // Mois clos : transactions Qonto réelles groupées par catégorie bancaire.
+      // Mois en cours + futurs : catégories CR_Prev (budget prévisionnel), sans détail transactionnel.
+      const chargesLabel = isClos ? 'Charges (Qonto réel)' : 'Charges prévisionnelles (CR_Prev)';
+      html += '<div style="font-weight:700;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-secondary);margin-bottom:0.4rem">' + chargesLabel + '</div>';
 
-      // Masse salariale
-      const masseTotal = mois.masseSalariale || 0;
-      const masseDetail = mois.masseSalarialeDetail || [];
-      if (masseTotal > 0) {
-        let masseHtml = '<table style="width:100%;border-collapse:collapse;font-size:0.8rem">';
-        for (const s of masseDetail) {
-          const typeLabels = { salarie: 'Sal.', dirigeant: 'Dir.', alternant: 'Alt.', stagiaire: 'Stag.' };
-          masseHtml += '<tr style="border-bottom:1px solid var(--border)">';
-          masseHtml += '<td style="padding:0.3rem 0.8rem">' + s.nom + '</td>';
-          masseHtml += '<td style="padding:0.3rem 0.5rem;color:var(--text-secondary);font-size:0.75rem">' + (typeLabels[s.type] || s.type) + '</td>';
-          masseHtml += '<td style="padding:0.3rem 0.5rem;text-align:right;color:var(--text-secondary);font-size:0.75rem">' + formatEuro(s.net) + ' + ' + formatEuro(s.charges) + '</td>';
-          masseHtml += '<td style="padding:0.3rem 0.8rem;text-align:right;font-weight:600">' + formatEuro(s.cout) + '</td>';
-          masseHtml += '</tr>';
-        }
-        masseHtml += '</table>';
-        html += accordion('Masse salariale', masseTotal, 'rgba(224,62,62,0.6)', '&#9679;', masseHtml);
-      }
-
-      const categories = Object.keys(chargesDetail).sort((a, b) => {
-        const totalA = chargesDetail[a].reduce((s, t) => s + t.amount, 0);
-        const totalB = chargesDetail[b].reduce((s, t) => s + t.amount, 0);
-        return totalB - totalA;
-      });
-
-      if (categories.length > 0) {
-        for (const cat of categories) {
-          const txs = chargesDetail[cat];
-          const catTotal = txs.reduce((s, t) => s + t.amount, 0);
-          html += accordion(cat, catTotal, 'rgba(217,115,13,0.7)', '&#9679;', txTable(txs));
+      if (isClos) {
+        const categories = Object.keys(chargesDetail).sort((a, b) => {
+          const totalA = chargesDetail[a].reduce((s, t) => s + t.amount, 0);
+          const totalB = chargesDetail[b].reduce((s, t) => s + t.amount, 0);
+          return totalB - totalA;
+        });
+        if (categories.length > 0) {
+          for (const cat of categories) {
+            const txs = chargesDetail[cat];
+            const catTotal = txs.reduce((s, t) => s + t.amount, 0);
+            html += accordion(cat, catTotal, 'rgba(217,115,13,0.7)', '&#9679;', txTable(txs));
+          }
+        } else {
+          html += accordion('Charges Qonto', charges, 'rgba(217,115,13,0.7)', '&#9679;', '');
         }
       } else {
-        html += accordion('Charges (estimation)', charges, 'rgba(217,115,13,0.7)', '&#9679;', '');
+        const gsheetCats = Object.keys(chargesGSheetDetail).sort((a, b) => chargesGSheetDetail[b] - chargesGSheetDetail[a]);
+        if (gsheetCats.length > 0) {
+          for (const cat of gsheetCats) {
+            html += accordion(cat, chargesGSheetDetail[cat], 'rgba(217,115,13,0.7)', '&#9679;', '');
+          }
+        } else {
+          html += accordion('Charges prévisionnelles', charges, 'rgba(217,115,13,0.7)', '&#9679;', '');
+        }
       }
 
       // Total charges
@@ -6949,9 +6995,9 @@
       }
       html += '</tr></tbody></table></div>';
 
-      // Total annuel
+      // Total sur l'horizon affiché
       const totalAnnuel = prev.reduce((s, m) => s + (m.masseSalariale || 0), 0);
-      html += '<div style="text-align:right;padding:0.5rem 0.8rem;font-weight:700;font-size:0.9rem;color:var(--text-secondary)">Total 12 mois : <span style="color:var(--warning)">' + formatEuro(totalAnnuel) + '</span></div>';
+      html += '<div style="text-align:right;padding:0.5rem 0.8rem;font-weight:700;font-size:0.9rem;color:var(--text-secondary)">Total ' + prev.length + ' mois : <span style="color:var(--warning)">' + formatEuro(totalAnnuel) + '</span></div>';
 
       container.innerHTML = html;
     }
