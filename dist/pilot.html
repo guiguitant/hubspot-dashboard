@@ -3020,6 +3020,7 @@
 
         <!-- Overrides sections -->
         <div id="scenarioOverridesSection" style="display:none">
+          <div id="overrideHorizonWarning" style="display:none;padding:0.55rem 0.8rem;border:1px solid var(--warning, #f59e0b);background:var(--warning-bg, rgba(245,158,11,0.1));border-radius:var(--radius);font-size:0.78rem;margin-bottom:0.8rem;color:var(--warning, #f59e0b)"></div>
 
           <!-- ========== SECTION CHARGES ========== -->
           <h3 style="font-size:0.9rem;font-weight:700;margin:0.8rem 0 0.5rem;color:var(--text);border-bottom:2px solid var(--primary);padding-bottom:0.3rem">Charges</h3>
@@ -7060,11 +7061,13 @@
       if (scenarioHorizon === h) return;
       scenarioHorizon = h;
       document.querySelectorAll('.scenario-horizon').forEach(b => b.classList.toggle('active', b.dataset.horizon === h));
+      saveScenariosUiState();
       renderScenariosComparison();
     }
 
     function setScenarioBaselineToggle(key, checked) {
       scenarioToggles[key] = checked;
+      saveScenariosUiState();
       renderScenariosComparison();
     }
 
@@ -7078,6 +7081,7 @@
       document.getElementById('scenarioEbeView').style.display      = tab === 'ebe'   ? '' : 'none';
       // Detail mensuel : utile uniquement sur Trésorerie (P&L/EBE sont déjà cumulés)
       document.getElementById('scenarioMonthlyDetailSection').style.display = tab === 'treso' ? '' : 'none';
+      saveScenariosUiState();
       renderScenariosComparison();
     }
 
@@ -7087,10 +7091,71 @@
         + '&includePipeline=' + (scenarioToggles.pipeline ? 'true' : 'false');
     }
 
+    // Persistance de l'état UI Scénarios en localStorage (horizon, toggles globaux, scénarios cochés, tab actif)
+    // Ne persiste PAS les toggles internes aux scénarios (ceux-là sont en DB).
+    const SCENARIOS_UI_STATE_KEY = 'pilot.scenarios.ui';
+
+    function saveScenariosUiState() {
+      try {
+        const state = {
+          horizon: scenarioHorizon,
+          toggles: scenarioToggles,
+          activeTab: scenarioActiveTab,
+          selectedIds: Array.from(selectedScenarios),
+        };
+        localStorage.setItem(SCENARIOS_UI_STATE_KEY, JSON.stringify(state));
+      } catch { /* quota / privacy mode → silent */ }
+    }
+
+    function loadScenariosUiState() {
+      try {
+        const raw = localStorage.getItem(SCENARIOS_UI_STATE_KEY);
+        if (!raw) return;
+        const state = JSON.parse(raw);
+        if (state.horizon && ['fin-annee', 's1-np1', 'n-plus-1'].includes(state.horizon)) {
+          scenarioHorizon = state.horizon;
+          document.querySelectorAll('.scenario-horizon').forEach(b => b.classList.toggle('active', b.dataset.horizon === scenarioHorizon));
+        }
+        if (state.toggles && typeof state.toggles === 'object') {
+          if (typeof state.toggles.gsheet === 'boolean') {
+            scenarioToggles.gsheet = state.toggles.gsheet;
+            const el = document.getElementById('scenarioToggleGSheet'); if (el) el.checked = state.toggles.gsheet;
+          }
+          if (typeof state.toggles.pipeline === 'boolean') {
+            scenarioToggles.pipeline = state.toggles.pipeline;
+            const el = document.getElementById('scenarioTogglePipeline'); if (el) el.checked = state.toggles.pipeline;
+          }
+        }
+        if (state.activeTab && ['treso', 'pnl', 'ebe'].includes(state.activeTab)) {
+          scenarioActiveTab = state.activeTab;
+          document.querySelectorAll('.scenario-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === scenarioActiveTab));
+          document.getElementById('scenarioTresoView').style.display = scenarioActiveTab === 'treso' ? '' : 'none';
+          document.getElementById('scenarioPnlView').style.display   = scenarioActiveTab === 'pnl'   ? '' : 'none';
+          document.getElementById('scenarioEbeView').style.display   = scenarioActiveTab === 'ebe'   ? '' : 'none';
+          document.getElementById('scenarioMonthlyDetailSection').style.display = scenarioActiveTab === 'treso' ? '' : 'none';
+        }
+        if (Array.isArray(state.selectedIds)) {
+          selectedScenarios = new Set(state.selectedIds);
+        }
+      } catch { /* malformed JSON → ignore */ }
+    }
+
+    // Restaure l'état UI la première fois qu'on affiche la page scénarios
+    let scenariosUiStateLoaded = false;
+
     async function refreshScenariosPage() {
       try {
+        if (!scenariosUiStateLoaded) {
+          loadScenariosUiState();
+          scenariosUiStateLoaded = true;
+        }
         const res = await fetch('/api/scenarios');
         scenariosData = await res.json();
+        // Nettoyer selectedScenarios des IDs qui n'existent plus (scénarios supprimés entre deux sessions)
+        const validIds = new Set((scenariosData || []).map(s => s.id));
+        for (const id of Array.from(selectedScenarios)) {
+          if (!validIds.has(id)) selectedScenarios.delete(id);
+        }
         renderScenariosList();
         await renderScenariosComparison();
       } catch {
@@ -7141,6 +7206,7 @@
       } else {
         selectedScenarios.add(id);
       }
+      saveScenariosUiState();
       renderScenariosList();
       await renderScenariosComparison();
     }
@@ -7548,6 +7614,66 @@
 
     // --- Override helpers ---
 
+    // Calcule le dernier mois affecté par un override (null si indéterminé / sans date)
+    function overrideLastMonthKey(ov) {
+      const d = ov.data || {};
+      switch (ov.type) {
+        case 'charges_fixes':
+          return d.mode === 'oneshot' ? d.mois : d.mois_fin;
+        case 'revenu_recurrent':
+        case 'ligne_gsheet_override':
+          return d.mois_fin;
+        case 'revenu_exceptionnel':
+        case 'subvention_annoncee':
+          return d.mois;
+        case 'pipeline':
+          return d.mode === 'deal' ? d.mois : null;
+        case 'pret': {
+          if (!d.mois_entree || !d.duree_mois) return null;
+          const [y, m] = d.mois_entree.split('-').map(Number);
+          if (!y || !m) return null;
+          const endDate = new Date(y, m - 1 + d.duree_mois, 1);
+          return `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}`;
+        }
+        case 'salaire':
+          return (d.action === 'add' && d.date_sortie) ? d.date_sortie.slice(0, 7) : null;
+        default: return null;
+      }
+    }
+
+    function currentHorizonEndKey() {
+      const y = new Date().getFullYear();
+      if (scenarioHorizon === 's1-np1')   return `${y + 1}-06`;
+      if (scenarioHorizon === 'n-plus-1') return `${y + 1}-12`;
+      return `${y}-12`; // fin-annee (défaut)
+    }
+    function currentMonthKey() {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    }
+
+    // Signale les overrides dont la plage déborde l'horizon (ou sont totalement dans le passé)
+    function checkOverridesHorizon() {
+      const el = document.getElementById('overrideHorizonWarning');
+      if (!el) return;
+      const horizonKey = currentHorizonEndKey();
+      const nowKey = currentMonthKey();
+      const issues = [];
+      for (const ov of currentScenarioOverrides) {
+        const last = overrideLastMonthKey(ov);
+        if (last && last > horizonKey) issues.push({ ov, kind: 'future', last });
+        if (last && last < nowKey)     issues.push({ ov, kind: 'past',   last });
+      }
+      if (issues.length === 0) { el.style.display = 'none'; return; }
+      const futureCount = issues.filter(i => i.kind === 'future').length;
+      const pastCount   = issues.filter(i => i.kind === 'past').length;
+      let txt = '⚠️ ';
+      if (futureCount > 0) txt += futureCount + ' levier(s) se prolongent au-delà de l\'horizon actuel (fin ' + horizonKey + ') — leurs effets futurs ne sont pas projetés. ';
+      if (pastCount > 0)   txt += pastCount   + ' levier(s) sont entièrement dans le passé (avant ' + nowKey + ') — sans impact sur la projection.';
+      el.textContent = txt;
+      el.style.display = 'block';
+    }
+
     function renderAllOverrideLists() {
       const salaires         = currentScenarioOverrides.filter(o => o.type === 'salaire');
       const charges          = currentScenarioOverrides.filter(o => o.type === 'charges_fixes');
@@ -7634,6 +7760,8 @@
         document.getElementById('ovPipelineFactor').value = pct;
         document.getElementById('ovPipelineFactorVal').textContent = pct + '%';
       }
+      // Signale les overrides dont la plage déborde l'horizon
+      checkOverridesHorizon();
     }
 
     function renderOverrideList(containerId, overrides, formatter) {
