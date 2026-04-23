@@ -7331,24 +7331,50 @@
         },
       });
 
+      // Helper : compose le tooltip détaillé d'un mois (Solde début + breakdown encaissements/décaissements)
+      const monthTip = (m) => {
+        const enc = (m.encaissements || 0) + (m.encaissementsFactures || 0) + (m.revenusExceptionnels || 0) + (m.fictionalEncaissements || 0) + (m.revenusRecurrents || 0) + (m.subventionsAnnoncees || 0) + (m.pipelinePondereEncaissements || 0);
+        const lines = ['Solde début : ' + formatEuro(m.soldeDebut || 0)];
+        lines.push('+ Encaissements : ' + formatEuro(enc));
+        if (m.encaissementsFactures)         lines.push('   • Factures Notion : ' + formatEuro(m.encaissementsFactures));
+        if (m.pipelinePondereEncaissements)  lines.push('   • Pipeline pondéré : ' + formatEuro(m.pipelinePondereEncaissements));
+        if (m.encaissements)                 lines.push('   • Qonto / CA estimatif : ' + formatEuro(m.encaissements));
+        if (m.revenusRecurrents)             lines.push('   • Revenus récurrents (scénario) : ' + formatEuro(m.revenusRecurrents));
+        if (m.revenusExceptionnels)          lines.push('   • Revenus exceptionnels : ' + formatEuro(m.revenusExceptionnels));
+        if (m.subventionsAnnoncees)          lines.push('   • Subventions annoncées : ' + formatEuro(m.subventionsAnnoncees));
+        if (m.fictionalEncaissements)        lines.push('   • Deals fictifs (scénario) : ' + formatEuro(m.fictionalEncaissements));
+        lines.push('− Décaissements : ' + formatEuro(m.decaissements || 0));
+        if (m.masseSalariale)   lines.push('   • dont masse salariale : ' + formatEuro(m.masseSalariale));
+        if (m.chargesFixesExtra) lines.push('   • dont charges fixes scénario : ' + formatEuro(m.chargesFixesExtra));
+        lines.push('────────────');
+        lines.push('= Solde fin : ' + formatEuro(m.soldeFin || 0));
+        return lines.join('\n');
+      };
+      const escAttr = (s) => String(s).replace(/"/g, '&quot;');
+
       // Detail mensuel (Tréso seulement)
-      let html = '<table style="width:100%;border-collapse:collapse;font-size:0.82rem">';
+      let html = '<p style="font-size:0.75rem;color:var(--text-secondary);margin:0 0 0.5rem">Survole une cellule pour voir la décomposition du mois.</p>';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:0.82rem">';
       html += '<thead><tr style="border-bottom:2px solid var(--border)">';
       html += '<th style="text-align:left;padding:0.5rem 0.8rem;color:var(--text-secondary)">Mois</th>';
       html += '<th style="text-align:right;padding:0.5rem 0.8rem;color:var(--text-secondary)">Baseline (Solde)</th>';
       scenarios.forEach((sc) => { html += '<th style="text-align:right;padding:0.5rem 0.8rem;color:var(--text-secondary)">' + sc.nom + '</th>'; });
       html += '</tr></thead><tbody>';
       for (let i = 0; i < baseline.previsionnel.length; i++) {
-        const bVal = baseline.previsionnel[i].soldeFin || 0;
+        const bm = baseline.previsionnel[i];
+        const bVal = bm.soldeFin || 0;
+        const bTip = escAttr(monthTip(bm));
         html += '<tr style="border-bottom:1px solid var(--border)">';
         html += '<td style="padding:0.4rem 0.8rem;font-weight:500">' + labels[i] + '</td>';
-        html += '<td style="text-align:right;padding:0.4rem 0.8rem">' + formatEuro(bVal) + '</td>';
+        html += '<td style="text-align:right;padding:0.4rem 0.8rem;cursor:help" title="' + bTip + '">' + formatEuro(bVal) + '</td>';
         scenarios.forEach((sc) => {
-          const sVal = sc.previsionnel[i] ? (sc.previsionnel[i].soldeFin || 0) : 0;
+          const sm = sc.previsionnel[i];
+          const sVal = sm ? (sm.soldeFin || 0) : 0;
           const delta = sVal - bVal;
           const color = delta > 0 ? 'var(--success, #0f7b6c)' : delta < 0 ? 'var(--danger)' : '';
           const deltaStr = delta !== 0 ? ' <span style="font-size:0.75rem;color:' + color + '">(' + (delta > 0 ? '+' : '') + formatEuro(delta) + ')</span>' : '';
-          html += '<td style="text-align:right;padding:0.4rem 0.8rem">' + formatEuro(sVal) + deltaStr + '</td>';
+          const sTip = sm ? escAttr(monthTip(sm)) : '';
+          html += '<td style="text-align:right;padding:0.4rem 0.8rem;cursor:help" title="' + sTip + '">' + formatEuro(sVal) + deltaStr + '</td>';
         });
         html += '</tr>';
       }
@@ -7386,7 +7412,17 @@
       const baseAgg = aggregate(baseline.previsionnel);
       const scAggs  = scenarios.map(sc => ({ nom: sc.nom, agg: aggregate(sc.previsionnel) }));
 
-      let html = '<p style="font-size:0.75rem;color:var(--text-secondary);margin:0 0 0.5rem">Cumul sur la projection — fin d\'horizon : <strong>' + horizonLabel + '</strong></p>';
+      // Tooltips synthétiques par indicateur (source + formule)
+      const ROW_TOOLTIPS = {
+        ca:      'Somme mensuelle de pnl_ca = encaissements totaux (factures Notion + pipeline pondéré HubSpot + revenus exceptionnels + revenus récurrents + deals fictifs) − subventions annoncées (qui ne sont pas du CA P&L)',
+        charges: 'Somme mensuelle de pnl_charges = décaissements (Qonto pour mois passés + GSheet CR_Prév HT pour mois futurs + masse salariale + charges fixes scénario)',
+        marge:   'Marge brute = CA cumulé − Charges cumulées',
+        subv:    'Somme des subventions GSheet Plan_TRE_Prév (lignes commençant par "Subvention") + subventions annoncées du scénario',
+        aides:   'Somme des aides GSheet Plan_TRE_Prév (lignes commençant par "Aide ")',
+        ebe:     'EBE projeté à fin d\'horizon = Marge brute + Subventions + Aides. Lecture directe de ebe_cumule sur le dernier mois.',
+      };
+
+      let html = '<p style="font-size:0.75rem;color:var(--text-secondary);margin:0 0 0.5rem">Cumul sur la projection — fin d\'horizon : <strong>' + horizonLabel + '</strong>. Survole une ligne ou un chiffre pour voir la source.</p>';
       html += '<table style="width:100%;border-collapse:collapse;font-size:0.85rem">';
       html += '<thead><tr style="border-bottom:2px solid var(--border)">';
       html += '<th style="text-align:left;padding:0.55rem 0.9rem;color:var(--text-secondary)">Indicateur</th>';
@@ -7394,19 +7430,23 @@
       scAggs.forEach(sc => { html += '<th style="text-align:right;padding:0.55rem 0.9rem;color:var(--text-secondary)">' + sc.nom + '</th>'; });
       html += '</tr></thead><tbody>';
 
+      const escAttr = (s) => String(s).replace(/"/g, '&quot;');
+
       const renderRow = (label, key, opts = {}) => {
         const bVal = baseAgg[key];
         const isBold = opts.bold;
         const sign = opts.sign || '';
+        const tip  = escAttr(ROW_TOOLTIPS[key] || '');
         html += '<tr style="border-bottom:1px solid var(--border)' + (isBold ? ';font-weight:700;background:var(--hover)' : '') + '">';
-        html += '<td style="padding:0.5rem 0.9rem">' + sign + label + '</td>';
-        html += '<td style="text-align:right;padding:0.5rem 0.9rem">' + formatEuro(bVal) + '</td>';
+        html += '<td style="padding:0.5rem 0.9rem;cursor:help" title="' + tip + '">' + sign + label + '</td>';
+        html += '<td style="text-align:right;padding:0.5rem 0.9rem;cursor:help" title="' + tip + '">' + formatEuro(bVal) + '</td>';
         scAggs.forEach(sc => {
           const sVal = sc.agg[key];
           const delta = sVal - bVal;
           const color = delta > 0 ? 'var(--success, #0f7b6c)' : delta < 0 ? 'var(--danger)' : '';
           const deltaStr = delta !== 0 ? ' <span style="font-size:0.72rem;color:' + color + ';font-weight:500">(' + (delta > 0 ? '+' : '') + formatEuro(delta) + ')</span>' : '';
-          html += '<td style="text-align:right;padding:0.5rem 0.9rem">' + formatEuro(sVal) + deltaStr + '</td>';
+          const cellTip = escAttr(tip + '\n\nDelta vs Baseline : ' + (delta >= 0 ? '+' : '') + formatEuro(delta));
+          html += '<td style="text-align:right;padding:0.5rem 0.9rem;cursor:help" title="' + cellTip + '">' + formatEuro(sVal) + deltaStr + '</td>';
         });
         html += '</tr>';
       };
@@ -7432,12 +7472,32 @@
       const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
       const baselineBg = isDark ? 'rgba(120,120,120,0.10)' : 'rgba(120,120,120,0.06)';
 
+      // Décompose l'EBE en ses composants pour le tooltip
+      const composeTip = (proj, totalEbe) => {
+        const ca       = sumField(proj, 'pnl_ca');
+        const charges  = sumField(proj, 'pnl_charges');
+        const marge    = sumField(proj, 'pnl_marge');
+        const subv     = sumField(proj, 'subventions');
+        const aides    = sumField(proj, 'aides');
+        return [
+          'CA cumulé : ' + formatEuro(ca),
+          'Charges cumulées : −' + formatEuro(charges),
+          'Marge brute : ' + formatEuro(marge),
+          'Subventions : +' + formatEuro(subv),
+          'Aides : +' + formatEuro(aides),
+          '────────────',
+          'EBE projeté : ' + formatEuro(totalEbe),
+        ].join('\n');
+      };
+      const escAttr = (s) => String(s).replace(/"/g, '&quot;');
+
       let html = '';
       // Card Baseline
-      html += '<div class="kpi-block" style="background:' + baselineBg + ';border:1px solid var(--border)">';
+      const baseTip = escAttr(composeTip(baseline.previsionnel, baselineEbe));
+      html += '<div class="kpi-block" style="background:' + baselineBg + ';border:1px solid var(--border);cursor:help" title="' + baseTip + '">';
       html += '<div class="kpi-label">Baseline · ' + horizonLabel + '</div>';
       html += '<div class="kpi-value" style="color:var(--text)">' + formatEuro(baselineEbe) + '</div>';
-      html += '<div class="kpi-sub">EBE projeté à horizon</div>';
+      html += '<div class="kpi-sub">EBE projeté à horizon (survol pour détail)</div>';
       html += '</div>';
 
       scenarios.forEach((sc, i) => {
@@ -7448,7 +7508,8 @@
         const accentBg = col.replace('1)', '0.08)');
         const deltaColor = delta > 0 ? 'var(--success, #0f7b6c)' : delta < 0 ? 'var(--danger)' : 'var(--text-secondary)';
         const sign = delta > 0 ? '+' : '';
-        html += '<div class="kpi-block" style="background:' + accentBg + ';border:1px solid ' + col.replace('1)', '0.5)') + '">';
+        const tip = escAttr(composeTip(sc.previsionnel, ebe) + '\n\nDelta vs Baseline : ' + (delta >= 0 ? '+' : '') + formatEuro(delta) + ' (' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)');
+        html += '<div class="kpi-block" style="background:' + accentBg + ';border:1px solid ' + col.replace('1)', '0.5)') + ';cursor:help" title="' + tip + '">';
         html += '<div class="kpi-label" style="display:flex;align-items:center;gap:0.4rem"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + col + '"></span>' + sc.nom + '</div>';
         html += '<div class="kpi-value" style="color:var(--text)">' + formatEuro(ebe) + '</div>';
         html += '<div class="kpi-sub" style="color:' + deltaColor + ';font-weight:600">' + sign + formatEuro(delta) + ' vs Baseline (' + sign + pct.toFixed(1) + '%)</div>';

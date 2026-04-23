@@ -383,6 +383,7 @@ async function fetchOpenDeals() {
       amount: parseFloat(deal.properties.amount) || 0,
       probability: stageInfo.probability,
       createdate: deal.properties.createdate || null,
+      closedate: deal.properties.closedate || null,
       stageEnteredAt: deal.properties[stageEnteredKey] || null,
     });
   }
@@ -2325,10 +2326,14 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
   const totalAEncaisserNotion = totalEnvoye + totalPrevisionnel;
 
   // Calcul du pipeline pondéré HubSpot (désactivable via includePipeline=false)
+  // Distribué dans pipelinePondereEncaissements[mKey] selon closedate + 45j de délai client.
+  // Si pas de closedate, fallback sur le mois courant + 1.
   const factor = includePipeline ? (pipelineFactor != null ? pipelineFactor : 1) : 0;
   let pipelinePondere = 0;
   const pipelineDetail = [];
+  const pipelinePondereEncaissements = {};
   if (includePipeline) {
+    const fallbackDate = new Date(); fallbackDate.setMonth(fallbackDate.getMonth() + 1);
     for (const stage of KANBAN_STAGES) {
       const deals = pipelineDeals[stage.label] || [];
       for (const deal of deals) {
@@ -2337,7 +2342,13 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
         pipelineDetail.push({
           name: deal.name, amount: deal.amount,
           probability: deal.probability, weighted: Math.round(weighted), stage: stage.label,
+          closedate: deal.closedate,
         });
+        // Distribuer le poids dans le mois d'encaissement attendu (= closedate + 45j)
+        const closing = deal.closedate ? new Date(deal.closedate) : fallbackDate;
+        const cashDate = new Date(closing); cashDate.setDate(cashDate.getDate() + 45);
+        const mKey = `${cashDate.getFullYear()}-${String(cashDate.getMonth() + 1).padStart(2, '0')}`;
+        pipelinePondereEncaissements[mKey] = (pipelinePondereEncaissements[mKey] || 0) + weighted;
       }
     }
   }
@@ -2482,6 +2493,7 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
     const revExc = Math.round(revenusParMois[mKey] || 0);
     const revenusRecurrents = Math.round(revenusRecurrentsParMois[mKey] || 0);
     const subvAnnoncees = Math.round(subvAnnonceesParMois[mKey] || 0);
+    const pipelineEnc = Math.round(pipelinePondereEncaissements[mKey] || 0);
     const masse = masseSalarialeMois(mois.annee, mois.mois, salaries);
     const chargesFixesExtra = Math.round(chargesFixesParMois[mKey] || 0);
 
@@ -2505,20 +2517,21 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
       revenusRecurrents,
       subventionsAnnoncees: subvAnnoncees,
       subventionsAnnonceesDetail: subvAnnonceesDetailParMois[mKey] || [],
+      pipelinePondereEncaissements: pipelineEnc,
       masseSalariale: masse.total,
       masseSalarialeDetail: masse.detail,
       chargesFixesExtra,
       fictionalEncaissements: fictionalEnc,
       decaissements: decaissementsBase + chargesFixesExtra,
       encaissements: encBase,
-      encaissementsTotal: encBase + encaissementsFactures + revExc + fictionalEnc + revenusRecurrents + subvAnnoncees,
+      encaissementsTotal: encBase + encaissementsFactures + revExc + fictionalEnc + revenusRecurrents + subvAnnoncees + pipelineEnc,
     };
   });
 
   // Recalculer les soldes (inclut les nouveaux flux positifs)
   let soldeCumul = qontoData.soldeActuel || 0;
   for (const mois of previsionnelFinal) {
-    const encTotal = mois.encaissements + (mois.encaissementsFactures || 0) + (mois.revenusExceptionnels || 0) + (mois.fictionalEncaissements || 0) + (mois.revenusRecurrents || 0) + (mois.subventionsAnnoncees || 0);
+    const encTotal = mois.encaissements + (mois.encaissementsFactures || 0) + (mois.revenusExceptionnels || 0) + (mois.fictionalEncaissements || 0) + (mois.revenusRecurrents || 0) + (mois.subventionsAnnoncees || 0) + (mois.pipelinePondereEncaissements || 0);
     const variation = encTotal - mois.decaissements;
     mois.soldeDebut = Math.round(soldeCumul);
     soldeCumul += variation;
@@ -2707,7 +2720,7 @@ async function enrichWithPnlEbe(projection, { includeGSheet = true } = {}) {
     // Les subventions annoncées (scénario) sont cash-in pour la tréso mais NE sont PAS du CA P&L ;
     // on les retire du pnl_ca et on les ajoute aux subventions pour l'EBE.
     const subvAnnonceesMois = mois.subventionsAnnoncees || 0;
-    const encTotal = mois.encaissementsTotal ?? ((mois.encaissements || 0) + (mois.encaissementsFactures || 0) + (mois.revenusExceptionnels || 0) + (mois.fictionalEncaissements || 0) + (mois.revenusRecurrents || 0) + subvAnnonceesMois);
+    const encTotal = mois.encaissementsTotal ?? ((mois.encaissements || 0) + (mois.encaissementsFactures || 0) + (mois.revenusExceptionnels || 0) + (mois.fictionalEncaissements || 0) + (mois.revenusRecurrents || 0) + subvAnnonceesMois + (mois.pipelinePondereEncaissements || 0));
     const ca = encTotal - subvAnnonceesMois;
     const charges = mois.decaissements || 0;
     const subvGSheet = Math.round(subvByMonth[mKey] || 0);
