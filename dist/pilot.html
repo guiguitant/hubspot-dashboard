@@ -1912,10 +1912,7 @@
 
     <!-- Chart: Projection tresorerie -->
     <div class="section">
-      <div class="section-title" style="display:flex;align-items:center;gap:0.5rem">
-        Projection de tresorerie (12 mois)
-        <button class="btn" onclick="openRevenusModal()" title="Ajouter un revenu exceptionnel" style="font-size:0.8rem;padding:0.25rem 0.6rem;border-radius:var(--radius);color:var(--primary);font-weight:600">+ Ajouter</button>
-      </div>
+      <div class="section-title">Projection de tresorerie (12 mois)</div>
       <div style="position:relative;height:350px;margin-bottom:1rem">
         <canvas id="tresoChart"></canvas>
       </div>
@@ -2184,7 +2181,7 @@
           <button class="scenario-horizon" data-horizon="n-plus-1" onclick="setScenarioHorizon('n-plus-1')">N+1</button>
         </div>
         <div style="display:flex;align-items:center;gap:1rem;border-left:1px solid var(--border);padding-left:1.5rem">
-          <span style="font-size:0.8rem;color:var(--text-secondary);font-weight:600">Baseline :</span>
+          <span style="font-size:0.8rem;color:var(--text-secondary);font-weight:600" title="Affecte uniquement le Baseline. Chaque scénario a ses propres toggles dans son éditeur (bouton ✎).">Baseline :</span>
           <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.85rem;cursor:pointer">
             <input type="checkbox" id="scenarioToggleGSheet" checked onchange="setScenarioBaselineToggle('gsheet', this.checked)" style="cursor:pointer;accent-color:var(--primary)">
             Prévisionnel GSheet
@@ -2195,6 +2192,7 @@
           </label>
         </div>
       </div>
+      <p style="font-size:0.7rem;color:var(--text-secondary);margin:0.6rem 0 0">Les toggles "Baseline" n'affectent que le Baseline. Chaque scénario a sa propre composition (4 modules incl. CA Notion + Salariés baseline) éditable via le bouton ✎.</p>
     </div>
 
     <!-- Layout 2 colonnes : sidebar liste à gauche, output à droite -->
@@ -2898,37 +2896,6 @@
     </div>
   </div>
 
-  <!-- Modal Revenus Exceptionnels -->
-  <div class="modal-overlay" id="revenusModalOverlay">
-    <div class="modal" style="max-width:550px">
-      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
-        <h2>Revenus exceptionnels</h2>
-        <button onclick="closeRevenusModal()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--text)">&times;</button>
-      </div>
-      <div class="modal-body" style="padding:1rem">
-        <div style="display:grid;grid-template-columns:1fr auto auto;gap:0.5rem;align-items:end;margin-bottom:1rem">
-          <div>
-            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Libelle</label>
-            <input type="text" id="revenuLibelle" placeholder="Ex: Subvention BPI" style="width:100%;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.85rem;font-family:inherit;background:var(--bg);color:var(--text)">
-          </div>
-          <div>
-            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Montant (EUR)</label>
-            <input type="number" id="revenuMontant" placeholder="15000" min="1" step="100" style="width:100px;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.85rem;font-family:inherit;background:var(--bg);color:var(--text)">
-          </div>
-          <div>
-            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Mois</label>
-            <select id="revenuMois" style="padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.85rem;font-family:inherit;background:var(--bg);color:var(--text)"></select>
-          </div>
-        </div>
-        <button class="btn btn-filled" onclick="addRevenu()" style="margin-bottom:1rem;width:100%">Ajouter</button>
-        <div id="revenusListe" style="max-height:250px;overflow-y:auto"></div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn" onclick="closeRevenusModal()">Fermer</button>
-      </div>
-    </div>
-  </div>
-
   <!-- Modal Salaries -->
   <div class="modal-overlay" id="salariesModalOverlay">
     <div class="modal" style="max-width:700px">
@@ -3026,6 +2993,30 @@
           </div>
         </div>
         <input type="hidden" id="scenarioEditId" value="">
+
+        <!-- Modules baseline inclus dans ce scénario (per-scenario toggles, stockés sur la ligne scenarios en DB) -->
+        <div id="scenarioIncludesSection" style="display:none;border:1px solid var(--border);border-radius:var(--radius);padding:0.6rem 0.8rem;background:var(--hover);margin-bottom:0.8rem">
+          <p style="font-size:0.75rem;font-weight:600;color:var(--text);margin:0 0 0.4rem">Modules inclus dans ce scénario</p>
+          <p style="font-size:0.7rem;color:var(--text-secondary);margin:0 0 0.5rem">Décoche pour un scénario from-scratch. Le Qonto réel passé est toujours inclus (c'est la réalité historique).</p>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0.3rem">
+            <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.8rem;cursor:pointer">
+              <input type="checkbox" id="scenarioIncludeGSheet" onchange="saveScenarioInclude('include_gsheet', this.checked)" style="cursor:pointer;accent-color:var(--primary)">
+              Prévisionnel GSheet (charges)
+            </label>
+            <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.8rem;cursor:pointer">
+              <input type="checkbox" id="scenarioIncludePipeline" onchange="saveScenarioInclude('include_pipeline', this.checked)" style="cursor:pointer;accent-color:var(--primary)">
+              Pipeline pondéré HubSpot
+            </label>
+            <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.8rem;cursor:pointer">
+              <input type="checkbox" id="scenarioIncludeCaNotion" onchange="saveScenarioInclude('include_ca_notion', this.checked)" style="cursor:pointer;accent-color:var(--primary)">
+              CA Facturé Notion
+            </label>
+            <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.8rem;cursor:pointer">
+              <input type="checkbox" id="scenarioIncludeSalariesBaseline" onchange="saveScenarioInclude('include_salaries_baseline', this.checked)" style="cursor:pointer;accent-color:var(--primary)">
+              Salariés baseline
+            </label>
+          </div>
+        </div>
 
         <!-- Overrides sections -->
         <div id="scenarioOverridesSection" style="display:none">
@@ -6726,102 +6717,8 @@
       if (e.target === this) closeTresoMoisDetailModal();
     });
 
-    // --- Revenus exceptionnels ---
-    function openRevenusModal() {
-      // Populate mois select with 12 months from previsionnel
-      const select = document.getElementById('revenuMois');
-      select.innerHTML = '';
-      if (tresoData && tresoData.previsionnel) {
-        for (const m of tresoData.previsionnel) {
-          const mKey = m.annee + '-' + String(m.mois).padStart(2, '0');
-          const dateLabel = new Date(m.annee, m.mois - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
-          const opt = document.createElement('option');
-          opt.value = mKey;
-          opt.textContent = dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1);
-          select.appendChild(opt);
-        }
-      }
-      refreshRevenusListe();
-      document.getElementById('revenusModalOverlay').classList.add('active');
-    }
-
-    function closeRevenusModal() {
-      document.getElementById('revenusModalOverlay').classList.remove('active');
-    }
-
-    document.getElementById('revenusModalOverlay').addEventListener('click', function(e) {
-      if (e.target === this) closeRevenusModal();
-    });
-
-    async function addRevenu() {
-      const libelle = document.getElementById('revenuLibelle').value.trim();
-      const montant = parseFloat(document.getElementById('revenuMontant').value);
-      const mois = document.getElementById('revenuMois').value;
-      if (!libelle) return alert('Libelle requis');
-      if (!montant || montant <= 0) return alert('Montant doit etre > 0');
-      if (!mois) return alert('Selectionnez un mois');
-      try {
-        const res = await fetch('/api/revenus-exceptionnels', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ libelle, montant, mois }),
-        });
-        if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
-        document.getElementById('revenuLibelle').value = '';
-        document.getElementById('revenuMontant').value = '';
-        await refreshRevenusListe();
-        // Invalidate tresorerie cache and refresh chart
-        tresoData = null;
-        await refreshTresoData();
-      } catch (err) {
-        alert('Erreur: ' + err.message);
-      }
-    }
-
-    async function deleteRevenu(id) {
-      try {
-        const res = await fetch('/api/revenus-exceptionnels/' + id, { method: 'DELETE' });
-        if (!res.ok) throw new Error('Erreur suppression');
-        await refreshRevenusListe();
-        tresoData = null;
-        await refreshTresoData();
-      } catch (err) {
-        alert('Erreur: ' + err.message);
-      }
-    }
-
-    async function refreshRevenusListe() {
-      const container = document.getElementById('revenusListe');
-      try {
-        const res = await fetch('/api/revenus-exceptionnels');
-        const revenus = await res.json();
-        if (revenus.length === 0) {
-          container.innerHTML = '<p style="color:var(--text-secondary);font-size:0.8rem;text-align:center;padding:0.5rem">Aucun revenu exceptionnel</p>';
-          return;
-        }
-        let html = '<table style="width:100%;border-collapse:collapse;font-size:0.8rem">';
-        html += '<thead><tr style="border-bottom:2px solid var(--border)">';
-        html += '<th style="text-align:left;padding:0.4rem 0.5rem">Libelle</th>';
-        html += '<th style="text-align:right;padding:0.4rem 0.5rem">Montant</th>';
-        html += '<th style="text-align:center;padding:0.4rem 0.5rem">Mois</th>';
-        html += '<th style="width:30px"></th>';
-        html += '</tr></thead><tbody>';
-        for (const r of revenus) {
-          const [y, m] = r.mois.split('-');
-          const dateLabel = new Date(parseInt(y), parseInt(m) - 1).toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
-          html += '<tr style="border-bottom:1px solid var(--border)">';
-          html += '<td style="padding:0.4rem 0.5rem">' + r.libelle + '</td>';
-          html += '<td style="text-align:right;padding:0.4rem 0.5rem;font-weight:600;color:var(--success)">' + formatEuro(r.montant) + '</td>';
-          html += '<td style="text-align:center;padding:0.4rem 0.5rem">' + dateLabel + '</td>';
-          html += '<td style="text-align:center;padding:0.4rem 0.2rem"><button onclick="deleteRevenu(\'' + r.id + '\')" style="background:none;border:none;cursor:pointer;padding:0.3rem;border-radius:4px;transition:all 0.15s;color:var(--text-light)" title="Supprimer" onmouseover="this.style.color=\'var(--danger)\';this.style.background=\'var(--danger-bg)\'" onmouseout="this.style.color=\'var(--text-light)\';this.style.background=\'none\'"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4h12M5 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1M6 7v5M10 7v5"/><path d="M3 4l1 10a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-10"/></svg></button></td>';
-          html += '</tr>';
-        }
-        html += '</tbody></table>';
-        container.innerHTML = html;
-      } catch {
-        container.innerHTML = '<p style="color:var(--danger);font-size:0.8rem">Erreur chargement</p>';
-      }
-    }
+    // --- Revenus exceptionnels : workflow retiré en migration 24.
+    //     Use case "saisie ponctuelle d'un revenu" = désormais un override de scénario (accordion "Revenus exceptionnels" de la modale Scenarios).
 
     // --- Salaries ---
     function openSalariesModal() {
@@ -7532,6 +7429,7 @@
       document.getElementById('scenarioModalTitle').textContent = 'Creer un scenario';
       document.getElementById('scenarioSubmitBtn').textContent = 'Creer';
       document.getElementById('scenarioOverridesSection').style.display = 'none';
+      document.getElementById('scenarioIncludesSection').style.display = 'none';
       currentScenarioOverrides = [];
       document.getElementById('scenarioModalOverlay').classList.add('active');
       setTimeout(() => document.getElementById('scenarioNom').focus(), 100);
@@ -7547,6 +7445,12 @@
         document.getElementById('scenarioModalTitle').textContent = 'Modifier : ' + scenario.nom;
         document.getElementById('scenarioSubmitBtn').textContent = 'Enregistrer';
         document.getElementById('scenarioOverridesSection').style.display = 'block';
+        document.getElementById('scenarioIncludesSection').style.display = 'block';
+        // Pre-fill des toggles de composition (true par défaut si la colonne est null = compat ancien scénario)
+        document.getElementById('scenarioIncludeGSheet').checked            = scenario.include_gsheet !== false;
+        document.getElementById('scenarioIncludePipeline').checked          = scenario.include_pipeline !== false;
+        document.getElementById('scenarioIncludeCaNotion').checked          = scenario.include_ca_notion !== false;
+        document.getElementById('scenarioIncludeSalariesBaseline').checked  = scenario.include_salaries_baseline !== false;
         currentScenarioOverrides = scenario.overrides || [];
         renderAllOverrideLists();
         fetchAndRenderBaselineSalaries();
@@ -7555,6 +7459,27 @@
         document.getElementById('scenarioModalOverlay').classList.add('active');
       } catch {
         alert('Erreur chargement scenario');
+      }
+    }
+
+    // Sauvegarde un toggle d'inclusion du scénario en cours d'édition et recalcule la projection si le scénario est coché dans la liste
+    async function saveScenarioInclude(field, checked) {
+      const scenarioId = document.getElementById('scenarioEditId').value;
+      if (!scenarioId) return;
+      showScenariosLoading();
+      try {
+        await fetch('/api/scenarios/' + scenarioId, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ [field]: checked }),
+        });
+        if (selectedScenarios.has(scenarioId)) {
+          await renderScenariosComparison();
+        }
+      } catch (e) {
+        console.error('Erreur saveScenarioInclude:', e);
+      } finally {
+        hideScenariosLoading();
       }
     }
 

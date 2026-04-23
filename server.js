@@ -2115,43 +2115,10 @@ app.post('/api/auth-masse-salariale', (req, res) => {
   res.status(401).json({ error: 'Mot de passe incorrect' });
 });
 
-// --- Revenus exceptionnels (Supabase) ---
-
-app.get('/api/revenus-exceptionnels', async (req, res) => {
-  const { data, error } = await supabase.from('revenus_exceptionnels').select('*').order('mois');
-  if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
-});
-
-app.post('/api/revenus-exceptionnels', async (req, res) => {
-  const { libelle, montant, mois } = req.body;
-  if (!libelle || typeof libelle !== 'string' || !libelle.trim()) {
-    return res.status(400).json({ error: 'Libelle requis' });
-  }
-  if (!montant || typeof montant !== 'number' || montant <= 0) {
-    return res.status(400).json({ error: 'Montant doit etre > 0' });
-  }
-  if (!mois || !/^\d{4}-\d{2}$/.test(mois)) {
-    return res.status(400).json({ error: 'Mois au format YYYY-MM requis' });
-  }
-  const { data, error } = await supabase.from('revenus_exceptionnels')
-    .insert({ libelle: libelle.trim(), montant, mois })
-    .select()
-    .single();
-  if (error) return res.status(500).json({ error: error.message });
-  tresorerieCacheTime = 0;
-  res.json(data);
-});
-
-app.delete('/api/revenus-exceptionnels/:id', async (req, res) => {
-  const { error, count } = await supabase.from('revenus_exceptionnels')
-    .delete({ count: 'exact' })
-    .eq('id', req.params.id);
-  if (error) return res.status(500).json({ error: error.message });
-  if (count === 0) return res.status(404).json({ error: 'Revenu non trouve' });
-  tresorerieCacheTime = 0;
-  res.json({ ok: true });
-});
+// --- Revenus exceptionnels Supabase : déprécié en migration 24.
+// Table `revenus_exceptionnels` droppée. Use case remplacé par :
+//   • override scénario `revenu_exceptionnel` (cas hypothétique)
+//   • lignes Subvention/Aide du GSheet Plan_TRE_Prév (cas réels avec cat. TVA)
 
 // --- Salariés (Supabase) ---
 
@@ -2242,15 +2209,18 @@ function masseSalarialeMois(annee, mois, salaries) {
   return { total: Math.round(total), detail };
 }
 
-// buildPrevisionnel paramètres baseline :
-// - includeGSheet : si false, les charges futures retombent sur la moyenne Qonto au lieu des valeurs GSheet CR_Prev (défaut true)
-// - includePipeline : si false, le pipeline pondéré HubSpot n'est pas calculé (défaut true)
+// buildPrevisionnel — paramètres de composition baseline :
+// - includeGSheet           : si false, les charges futures retombent sur la moyenne Qonto au lieu des valeurs GSheet CR_Prev (défaut true)
+// - includePipeline         : si false, le pipeline pondéré HubSpot n'est pas calculé ni distribué (défaut true)
+// - includeCaNotion         : si false, les encaissements factures Notion sont à 0 (défaut true).
+//                             Utile pour un scénario "estimation CA annuelle from scratch" sans le CA déjà facturé.
+// - includeSalariesBaseline : si false, masse salariale = 0 (ignore complètement la baseline Supabase `salaries`).
+//                             Permet de recomposer une équipe fictive via les overrides `salaire`. Défaut true.
 // Nouveaux leviers scénarios (Phase B) :
-// - revenusRecurrentsExtras : [{ libelle, montant_mensuel, mois_debut, mois_fin }] — revenus récurrents sur période
-// - subventionsAnnoncees    : [{ libelle, montant, mois }]                            — boosts one-shot catégorisés subv/aide (vs revenu_exceptionnel "exceptionnel")
-// - gsheetOverrides         : [{ categorie, mois_debut, mois_fin, montant_mensuel }]   — override d'une ligne GSheet CR_Prev au niveau catégorie mère
-// Les anciens paramètres (chargesFixesExtras, pipelineFactor, fictionalDeals, caEstimatif) restent actifs pour préserver l'existant.
-async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, salaries, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals, crPrevData, caEstimatif, includeGSheet = true, includePipeline = true, revenusRecurrentsExtras = [], subventionsAnnoncees = [], gsheetOverrides = [] }) {
+// - revenusRecurrentsExtras : [{ libelle, montant_mensuel, mois_debut, mois_fin }]
+// - subventionsAnnoncees    : [{ libelle, montant, mois }] — catégorisées subv pour l'EBE, pas dans CA P&L
+// - gsheetOverrides         : [{ categorie, mois_debut, mois_fin, montant_mensuel }]
+async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, salaries, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals, crPrevData, caEstimatif, includeGSheet = true, includePipeline = true, includeCaNotion = true, includeSalariesBaseline = true, revenusRecurrentsExtras = [], subventionsAnnoncees = [], gsheetOverrides = [] }) {
   // --- A encaisser depuis Notion (factures envoyées + prévisionnelles) ---
   const facturesAEncaisser = [];
   const now = new Date();
@@ -2477,11 +2447,18 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
 
     // --- Encaissements ---
     let encaissementsFactures, factEnvoye, factPrev, factRetard, fictionalEnc;
+    let pipelineEnc = Math.round(pipelinePondereEncaissements[mKey] || 0);
     if (caMensuelHT !== null) {
-      // CA estimatif : remplace Notion + pipeline
+      // CA estimatif : remplace TOUT le CA baseline (Notion + pipeline pondéré + deals fictifs)
       factEnvoye = 0; factPrev = 0; factRetard = 0;
       encaissementsFactures = 0;
       fictionalEnc = 0;
+      pipelineEnc = 0;
+    } else if (!includeCaNotion) {
+      // Scénario "sans CA facturé Notion" : zéro les factures Notion, le pipeline et les deals fictifs restent
+      factEnvoye = 0; factPrev = 0; factRetard = 0;
+      encaissementsFactures = 0;
+      fictionalEnc = Math.round(fictionalEncaissements[mKey] || 0);
     } else {
       factEnvoye = Math.round(encaissementsEnvoye[mKey] || 0);
       factPrev = Math.round(encaissementsPrev[mKey] || 0);
@@ -2493,8 +2470,11 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
     const revExc = Math.round(revenusParMois[mKey] || 0);
     const revenusRecurrents = Math.round(revenusRecurrentsParMois[mKey] || 0);
     const subvAnnoncees = Math.round(subvAnnonceesParMois[mKey] || 0);
-    const pipelineEnc = Math.round(pipelinePondereEncaissements[mKey] || 0);
-    const masse = masseSalarialeMois(mois.annee, mois.mois, salaries);
+    // Masse salariale : si includeSalariesBaseline=false, ne garde que les overrides scénario (id "fictional-*")
+    const effectiveSalaries = includeSalariesBaseline
+      ? salaries
+      : salaries.filter(s => typeof s.id === 'string' && s.id.startsWith('fictional-'));
+    const masse = masseSalarialeMois(mois.annee, mois.mois, effectiveSalaries);
     const chargesFixesExtra = Math.round(chargesFixesParMois[mKey] || 0);
 
     // --- Décaissements : GSheet pour mois futurs, Qonto pour mois courant ---
@@ -2557,8 +2537,8 @@ app.get('/api/tresorerie', async (req, res) => {
       fetchAllNotionMissions(),
     ]);
 
-    const { data: revenusExceptionnels } = await supabase.from('revenus_exceptionnels').select('*');
-    const revenus = revenusExceptionnels || [];
+    // Revenus exceptionnels Supabase droppée en migration 24 (cf. header section plus haut)
+    const revenus = [];
     const { data: salariesList } = await supabase.from('salaries').select('*');
     const allSalaries = salariesList || [];
 
@@ -2619,9 +2599,16 @@ app.get('/api/scenarios/:id', async (req, res) => {
 });
 
 app.put('/api/scenarios/:id', async (req, res) => {
-  const { nom, description } = req.body;
+  const { nom, description, include_gsheet, include_pipeline, include_ca_notion, include_salaries_baseline } = req.body;
+  const update = { updated_at: new Date().toISOString() };
+  if (typeof nom === 'string') update.nom = nom;
+  if (typeof description === 'string' || description === null) update.description = description;
+  if (typeof include_gsheet === 'boolean')            update.include_gsheet = include_gsheet;
+  if (typeof include_pipeline === 'boolean')          update.include_pipeline = include_pipeline;
+  if (typeof include_ca_notion === 'boolean')         update.include_ca_notion = include_ca_notion;
+  if (typeof include_salaries_baseline === 'boolean') update.include_salaries_baseline = include_salaries_baseline;
   const { data, error } = await supabase.from('scenarios')
-    .update({ nom, description, updated_at: new Date().toISOString() })
+    .update(update)
     .eq('id', req.params.id).select().single();
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
@@ -2687,13 +2674,18 @@ function getHorizonMonths(preset) {
 }
 
 // Parse les query params communs aux endpoints de projection (horizon, toggles baseline)
+// Les 4 toggles (gsheet, pipeline, caNotion, salariesBaseline) ne servent que pour
+// /api/scenarios/baseline/projection. Pour /api/scenarios/:id/projection, les flags sont
+// lus directement depuis la ligne `scenarios` du scénario (include_gsheet, etc.).
 function parseProjectionQuery(req) {
   const preset = req.query.horizon || 'fin-annee';
   return {
     preset,
     horizonMonths: getHorizonMonths(preset),
-    includeGSheet: req.query.includeGSheet !== 'false',
-    includePipeline: req.query.includePipeline !== 'false',
+    includeGSheet:           req.query.includeGSheet           !== 'false',
+    includePipeline:         req.query.includePipeline         !== 'false',
+    includeCaNotion:         req.query.includeCaNotion         !== 'false',
+    includeSalariesBaseline: req.query.includeSalariesBaseline !== 'false',
   };
 }
 
@@ -2749,11 +2741,11 @@ async function fetchBaseData(horizonMonths = 12) {
     fetchAllNotionMissions(),
     fetchAndParseCRPrev(),
   ]);
-  const { data: revenusExceptionnels } = await supabase.from('revenus_exceptionnels').select('*');
+  // Revenus exceptionnels Supabase droppée en migration 24 → source = overrides de scénario uniquement
   const { data: salariesList } = await supabase.from('salaries').select('*');
   return {
     qontoData, pipelineDeals, notionMissions, crPrevData,
-    revenus: revenusExceptionnels || [],
+    revenus: [],
     salaries: salariesList || [],
   };
 }
@@ -2894,17 +2886,21 @@ function applyOverrides(baseData, overrides) {
 
 app.get('/api/scenarios/baseline/projection', async (req, res) => {
   try {
-    const { preset, horizonMonths, includeGSheet, includePipeline } = parseProjectionQuery(req);
+    const { preset, horizonMonths, includeGSheet, includePipeline, includeCaNotion, includeSalariesBaseline } = parseProjectionQuery(req);
     const base = await fetchBaseData(horizonMonths);
     const result = await buildPrevisionnel({
       qontoData: base.qontoData, pipelineDeals: base.pipelineDeals,
       notionMissions: base.notionMissions, salaries: base.salaries,
       revenus: base.revenus, chargesFixesExtras: [], pipelineFactor: 1, fictionalDeals: [],
       crPrevData: base.crPrevData, caEstimatif: null,
-      includeGSheet, includePipeline,
+      includeGSheet, includePipeline, includeCaNotion, includeSalariesBaseline,
     });
     const enriched = await enrichWithPnlEbe(result.previsionnel, { includeGSheet });
-    res.json({ nom: 'Baseline', horizon: preset, previsionnel: enriched });
+    res.json({
+      nom: 'Baseline', horizon: preset,
+      include: { gsheet: includeGSheet, pipeline: includePipeline, caNotion: includeCaNotion, salariesBaseline: includeSalariesBaseline },
+      previsionnel: enriched,
+    });
   } catch (err) {
     console.error('Erreur baseline projection:', err.message);
     res.status(500).json({ error: err.message });
@@ -2950,7 +2946,13 @@ app.get('/api/scenarios/:id/projection', async (req, res) => {
 
     const { data: overrides } = await supabase.from('scenario_overrides').select('*').eq('scenario_id', req.params.id).order('created_at');
 
-    const { preset, horizonMonths, includeGSheet, includePipeline } = parseProjectionQuery(req);
+    // Composition : chaque scénario porte ses 4 flags d'inclusion. Seul horizon vient du query string.
+    const { preset, horizonMonths } = parseProjectionQuery(req);
+    const includeGSheet           = scenario.include_gsheet !== false;
+    const includePipeline         = scenario.include_pipeline !== false;
+    const includeCaNotion         = scenario.include_ca_notion !== false;
+    const includeSalariesBaseline = scenario.include_salaries_baseline !== false;
+
     const base = await fetchBaseData(horizonMonths);
     const applied = applyOverrides(base, overrides || []);
 
@@ -2962,13 +2964,17 @@ app.get('/api/scenarios/:id/projection', async (req, res) => {
       pipelineFactor: applied.pipelineFactor,
       fictionalDeals: applied.fictionalDeals,
       crPrevData: base.crPrevData, caEstimatif: applied.caEstimatif,
-      includeGSheet, includePipeline,
+      includeGSheet, includePipeline, includeCaNotion, includeSalariesBaseline,
       revenusRecurrentsExtras: applied.revenusRecurrentsExtras,
       subventionsAnnoncees: applied.subventionsAnnoncees,
       gsheetOverrides: applied.gsheetOverrides,
     });
     const enriched = await enrichWithPnlEbe(result.previsionnel, { includeGSheet });
-    res.json({ nom: scenario.nom, horizon: preset, previsionnel: enriched });
+    res.json({
+      nom: scenario.nom, horizon: preset,
+      include: { gsheet: includeGSheet, pipeline: includePipeline, caNotion: includeCaNotion, salariesBaseline: includeSalariesBaseline },
+      previsionnel: enriched,
+    });
   } catch (err) {
     console.error('Erreur scenario projection:', err.message);
     res.status(500).json({ error: err.message });
