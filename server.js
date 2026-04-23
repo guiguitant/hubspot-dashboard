@@ -2610,7 +2610,10 @@ app.delete('/api/scenarios/:id', async (req, res) => {
 
 app.post('/api/scenarios/:id/overrides', async (req, res) => {
   const { type, data: overrideData } = req.body;
-  const validTypes = ['salaire', 'pipeline', 'charges_fixes', 'revenu_exceptionnel', 'ca_estimatif'];
+  const validTypes = [
+    'salaire', 'pipeline', 'charges_fixes', 'revenu_exceptionnel', 'ca_estimatif',
+    'salaire_augmentation', 'revenu_recurrent', 'pret', 'subvention_annoncee', 'ligne_gsheet_override',
+  ];
   if (!validTypes.includes(type)) return res.status(400).json({ error: 'Type invalide: ' + validTypes.join(', ') });
   if (!overrideData || typeof overrideData !== 'object') return res.status(400).json({ error: 'Data requis (objet JSON)' });
   // Vérifier que le scenario existe
@@ -2881,11 +2884,16 @@ app.get('/api/scenarios/baseline/projection', async (req, res) => {
   }
 });
 
-// Liste des catégories mères du GSheet CR_Prev, utilisée par le levier ligne_gsheet_override
+// Catégories mères du GSheet CR_Prev avec leurs valeurs par mois (pour le levier ligne_gsheet_override).
+// Le frontend s'en sert pour afficher le montant courant moyen sur la période sélectionnée
+// et calculer en live la nouvelle valeur si l'utilisateur opte pour un override en %.
 app.get('/api/cr-prev/categories', async (req, res) => {
   try {
     const data = await fetchAndParseCRPrev();
-    res.json({ categories: Object.keys(data.categories || {}).sort() });
+    const categories = Object.entries(data.categories || {})
+      .map(([name, valuesByMonth]) => ({ name, valuesByMonth }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    res.json({ categories });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
