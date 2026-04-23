@@ -947,6 +947,38 @@ app.get('/api/repeat-clients', async (req, res) => {
   }
 });
 
+// --- Repeat state persistence (dismissed / contacts / deals / notes) — shared across all users ---
+const REPEAT_ALLOWED_FIELDS = ['dismissed', 'contacts', 'deals', 'notes'];
+const REPEAT_STATE_KEY = 'shared';
+
+app.get('/api/repeat-state', async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('repeat_state')
+      .select('dismissed, contacts, deals, notes')
+      .eq('user_key', REPEAT_STATE_KEY)
+      .single();
+    if (error) throw error;
+    res.json(data || { dismissed: {}, contacts: {}, deals: {}, notes: {} });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.patch('/api/repeat-state', async (req, res) => {
+  const { field, value } = req.body;
+  if (!REPEAT_ALLOWED_FIELDS.includes(field)) return res.status(400).json({ error: 'field invalide' });
+  try {
+    const { error } = await supabaseAdmin
+      .from('repeat_state')
+      .upsert({ user_key: REPEAT_STATE_KEY, [field]: value, updated_at: new Date().toISOString() }, { onConflict: 'user_key' });
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // --- Fuzzy string matching ---
 function normalize(str) {
   return str.toLowerCase()

@@ -2328,11 +2328,6 @@
       <div class="repeat-kpis" id="repeatKpis" style="display:none"></div>
       <div class="repeat-toolbar">
         <input class="repeat-search" type="text" id="repeatSearch" placeholder="&#128269; Rechercher un client…" oninput="renderRepeatList()">
-        <div class="repeat-filter-tabs">
-          <button class="repeat-filter-tab active" data-filter="urgent" onclick="setRepeatFilter('urgent',this)">À recontacter</button>
-          <button class="repeat-filter-tab" data-filter="done" onclick="setRepeatFilter('done',this)">En cours / Contactés</button>
-          <button class="repeat-filter-tab" data-filter="all" onclick="setRepeatFilter('all',this)">Tous</button>
-        </div>
         <div class="repeat-partner-filters">
           <span style="font-size:0.7rem;color:var(--text-secondary)">Par :</span>
           <button class="repeat-partner-btn p-Guillaume" data-partner="Guillaume" onclick="toggleRepeatPartner('Guillaume',this)">G</button>
@@ -5182,40 +5177,58 @@
     }
 
     // --- Repeat Clients ---
-    const REPEAT_LS_KEY = 'releaf_repeat_contacts_v1';
-    const REPEAT_DISMISSED_LS_KEY = 'releaf_repeat_dismissed_v1';
     let repeatClientsData = null;
-    let repeatFilter = 'urgent';
+    let repeatFilter = 'all';
     let repeatPartnerFilter = null; // null = tous
     let repeatShowDismissed = false;
     const REPEAT_RECENT_DAYS = 90;
     const REPEAT_RED_MONTHS = 9;
 
-    function getDismissedClients() {
-      try { return JSON.parse(localStorage.getItem(REPEAT_DISMISSED_LS_KEY) || '{}'); } catch { return {}; }
-    }
-    function setClientDismissed(clientKey, dismissed) {
-      const data = getDismissedClients();
-      if (dismissed) data[clientKey] = true;
-      else delete data[clientKey];
-      localStorage.setItem(REPEAT_DISMISSED_LS_KEY, JSON.stringify(data));
-    }
-    function isClientDismissed(clientKey) {
-      return !!getDismissedClients()[clientKey];
+    // --- Repeat state — in-memory cache, synced to Supabase via /api/repeat-state ---
+    let _repeatState = { dismissed: {}, contacts: {}, deals: {}, notes: {} };
+
+    async function fetchRepeatState() {
+      try {
+        const res = await fetch('/api/repeat-state');
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        _repeatState = {
+          dismissed: data.dismissed || {},
+          contacts:  data.contacts  || {},
+          deals:     data.deals     || {},
+          notes:     data.notes     || {},
+        };
+      } catch (e) {
+        console.warn('fetchRepeatState error', e);
+      }
     }
 
-    function getRepeatContacts() {
-      try { return JSON.parse(localStorage.getItem(REPEAT_LS_KEY) || '{}'); } catch { return {}; }
+    function _persistRepeatField(field) {
+      fetch('/api/repeat-state', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ field, value: _repeatState[field] }),
+      }).catch(e => console.warn('repeat-state PATCH error', e));
     }
+
+    // Dismissed
+    function getDismissedClients() { return _repeatState.dismissed; }
+    function setClientDismissed(clientKey, dismissed) {
+      if (dismissed) _repeatState.dismissed[clientKey] = true;
+      else delete _repeatState.dismissed[clientKey];
+      _persistRepeatField('dismissed');
+    }
+    function isClientDismissed(clientKey) { return !!_repeatState.dismissed[clientKey]; }
+
+    // Contacts
+    function getRepeatContacts() { return _repeatState.contacts; }
     function saveRepeatContact(clientKey, date, note) {
-      const data = getRepeatContacts();
-      data[clientKey] = { date, note, savedAt: new Date().toISOString() };
-      localStorage.setItem(REPEAT_LS_KEY, JSON.stringify(data));
+      _repeatState.contacts[clientKey] = { date, note, savedAt: new Date().toISOString() };
+      _persistRepeatField('contacts');
     }
     function clearRepeatContact(clientKey) {
-      const data = getRepeatContacts();
-      delete data[clientKey];
-      localStorage.setItem(REPEAT_LS_KEY, JSON.stringify(data));
+      delete _repeatState.contacts[clientKey];
+      _persistRepeatField('contacts');
     }
 
     function monthsAgo(dateStr) {
@@ -5260,14 +5273,10 @@
     }
 
     // Deals créés depuis la section Repeat — { dealId: { clientName, dealName, amount, createdAt } }
-    const REPEAT_DEALS_LS_KEY = 'releaf_repeat_deals_v1';
-    function getRepeatDeals() {
-      try { return JSON.parse(localStorage.getItem(REPEAT_DEALS_LS_KEY) || '{}'); } catch { return {}; }
-    }
+    function getRepeatDeals() { return _repeatState.deals; }
     function saveRepeatDeal(dealId, clientName, dealName, amount) {
-      const data = getRepeatDeals();
-      data[dealId] = { clientName, dealName, amount: amount || 0, createdAt: new Date().toISOString() };
-      localStorage.setItem(REPEAT_DEALS_LS_KEY, JSON.stringify(data));
+      _repeatState.deals[dealId] = { clientName, dealName, amount: amount || 0, createdAt: new Date().toISOString() };
+      _persistRepeatField('deals');
     }
 
     let _repeatKpiData = null;
@@ -5422,6 +5431,7 @@
     async function fetchRepeatClients() {
       document.getElementById('repeatList').innerHTML = '<div class="repeat-empty">Chargement…</div>';
       try {
+        await fetchRepeatState();
         repeatClientsData = await fetch('/api/repeat-clients').then(r => r.json());
         renderRepeatKpis();
         renderRepeatList();
@@ -5435,12 +5445,6 @@
       fetchRepeatClients();
     }
 
-    function setRepeatFilter(f, btn) {
-      repeatFilter = f;
-      document.querySelectorAll('.repeat-filter-tab').forEach(el => el.classList.remove('active'));
-      btn.classList.add('active');
-      renderRepeatList();
-    }
 
     function toggleRepeatPartner(name, btn) {
       if (repeatPartnerFilter === name) {
@@ -5460,9 +5464,6 @@
         if (search && !c.client.toLowerCase().includes(search)) return false;
         if (repeatPartnerFilter && !(c.partners || []).includes(repeatPartnerFilter)) return false;
         if (!repeatShowDismissed && dismissed[c.client]) return false;
-        const urg = repeatUrgency(c, contacts);
-        if (repeatFilter === 'urgent') return (urg === 'red' || urg === 'orange') && !c.hasActiveMission;
-        if (repeatFilter === 'done')   return urg === 'green' || c.hasActiveMission;
         return true;
       });
     }
@@ -5626,15 +5627,12 @@
     }
 
     // --- Repeat Sidebar ---
-    const REPEAT_NOTES_LS_KEY = 'releaf_repeat_notes_v1';
     let currentRepeatClient = null;
 
-    function getRepeatNotes() {
-      try { return JSON.parse(localStorage.getItem(REPEAT_NOTES_LS_KEY) || '{}'); } catch { return {}; }
-    }
+    function getRepeatNotes() { return _repeatState.notes; }
     function saveRepeatNote(clientKey, note) {
-      const n = getRepeatNotes(); n[clientKey] = note;
-      localStorage.setItem(REPEAT_NOTES_LS_KEY, JSON.stringify(n));
+      _repeatState.notes[clientKey] = note;
+      _persistRepeatField('notes');
     }
 
     function openRepeatSidebar(ck) {
@@ -5907,9 +5905,8 @@
     }
 
     function rsbUnlinkDeal(dealId, ck) {
-      const data = getRepeatDeals();
-      delete data[dealId];
-      localStorage.setItem(REPEAT_DEALS_LS_KEY, JSON.stringify(data));
+      delete _repeatState.deals[dealId];
+      _persistRepeatField('deals');
       rsbRenderLinkedDeals(ck);
       renderRepeatKpis();
     }
