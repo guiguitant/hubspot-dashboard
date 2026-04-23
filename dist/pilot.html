@@ -2144,15 +2144,29 @@
       <!-- Tabs de visualisation -->
       <div style="display:flex;gap:0.5rem;margin-bottom:1rem;border-bottom:1px solid var(--border)">
         <button class="scenario-tab active" data-tab="treso" onclick="setScenarioTab('treso')">Trésorerie</button>
-        <button class="scenario-tab" data-tab="pnl" onclick="setScenarioTab('pnl')">P&L</button>
-        <button class="scenario-tab" data-tab="ebe" onclick="setScenarioTab('ebe')">EBE cumulé</button>
+        <button class="scenario-tab" data-tab="pnl" onclick="setScenarioTab('pnl')">P&L (à fin d'horizon)</button>
+        <button class="scenario-tab" data-tab="ebe" onclick="setScenarioTab('ebe')">EBE projeté</button>
       </div>
-      <div style="position:relative;height:400px;margin-bottom:1rem">
-        <canvas id="scenariosChart"></canvas>
+      <!-- Trésorerie : graphe ligne + table mois par mois -->
+      <div id="scenarioTresoView">
+        <div style="position:relative;height:400px;margin-bottom:1rem">
+          <canvas id="scenariosChart"></canvas>
+        </div>
+      </div>
+      <!-- P&L : tableau comparatif cumulé à fin d'horizon -->
+      <div id="scenarioPnlView" style="display:none">
+        <p style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.6rem">Cumul des flux du mois courant jusqu'à la fin de l'horizon sélectionné. Vue compte de résultat type "balance" à la date d'horizon.</p>
+        <div id="scenariosPnlTable" style="overflow-x:auto"></div>
+      </div>
+      <!-- EBE : cards comparatives -->
+      <div id="scenarioEbeView" style="display:none">
+        <p style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.6rem">EBE projeté à fin d'horizon = CA cumulé − Charges cumulées + Subventions + Aides. Comparé au Baseline.</p>
+        <div id="scenariosEbeCards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem"></div>
       </div>
     </div>
 
-    <div class="section">
+    <!-- Detail mensuel (visible seulement sur l'onglet Trésorerie pour ne pas dupliquer info P&L/EBE) -->
+    <div class="section" id="scenarioMonthlyDetailSection">
       <div class="section-title">Detail mensuel</div>
       <div id="scenariosDetailTable" style="overflow-x:auto">
         <p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Selectionnez des scenarios pour voir le comparatif.</p>
@@ -3072,7 +3086,7 @@
               <span id="accCaEstimatifCount" style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)"></span>
             </button>
             <div id="accCaEstimatif" style="display:none;padding:0.8rem">
-              <p style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:0.5rem">⚠️ Remplace TOTALEMENT le CA baseline (factures Notion + pipeline pondéré + curseur Pipeline éventuel) par un montant estimatif HT étalé sur N mois. Si tu actives ce levier, les modifications de Pipeline et les deals fictifs sont ignorés.</p>
+              <p style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:0.5rem">⚠️ Remplace TOTALEMENT le CA baseline (factures Notion + pipeline pondéré + curseur Pipeline éventuel) par un montant estimatif HT étalé sur N mois (= mois d'encaissement effectif). Si tu actives ce levier, les modifications de Pipeline et les deals fictifs sont ignorés.</p>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
                 <div>
                   <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Montant annuel HT</label>
@@ -3097,6 +3111,7 @@
               <span id="accRevenusCount" style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)"></span>
             </button>
             <div id="accRevenus" style="display:none;padding:0.8rem">
+              <p style="font-size:0.7rem;color:var(--text-secondary);margin:0 0 0.5rem">Le mois indiqué = mois d'encaissement effectif sur le compte.</p>
               <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
                 <div>
                   <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Libelle</label>
@@ -3137,7 +3152,8 @@
                 </div>
               </div>
               <div id="pipelineDealFields" style="display:none">
-                <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
+                <p style="font-size:0.7rem;color:var(--text-secondary);margin:0 0 0.4rem">Le mois saisi = mois de signature/closing. Le délai d'encaissement est appliqué automatiquement pour décaler le cash.</p>
+                <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
                   <div>
                     <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Libellé</label>
                     <input type="text" id="ovPipelineDealNom" placeholder="Deal X" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
@@ -3151,8 +3167,12 @@
                     <input type="number" id="ovPipelineDealProba" min="0" max="100" value="100" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
                   </div>
                   <div>
-                    <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Mois</label>
+                    <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Mois closing</label>
                     <input type="month" id="ovPipelineDealMois" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                  </div>
+                  <div>
+                    <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Délai (j)</label>
+                    <input type="number" id="ovPipelineDealDelai" min="0" max="180" value="45" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
                   </div>
                 </div>
               </div>
@@ -3202,6 +3222,7 @@
               <span id="accRevRecCount" style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)"></span>
             </button>
             <div id="accRevRec" style="display:none;padding:0.8rem">
+              <p style="font-size:0.7rem;color:var(--text-secondary);margin:0 0 0.5rem">Période = mois d'encaissement effectif sur le compte (le délai client est implicite).</p>
               <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
                 <div>
                   <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Libellé</label>
@@ -3269,7 +3290,7 @@
               <span id="accSubvAnnCount" style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)"></span>
             </button>
             <div id="accSubvAnn" style="display:none;padding:0.8rem">
-              <p style="font-size:0.7rem;color:var(--text-secondary);margin:0 0 0.5rem">Subvention attendue, non-facturée. Remonte dans l'EBE mais pas dans le CA P&L.</p>
+              <p style="font-size:0.7rem;color:var(--text-secondary);margin:0 0 0.5rem">Subvention attendue, non-facturée. Mois = mois d'encaissement effectif. Remonte dans l'EBE mais pas dans le CA P&L.</p>
               <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
                 <div>
                   <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Libellé</label>
@@ -3297,7 +3318,7 @@
               <span id="accGSheetOvCount" style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)"></span>
             </button>
             <div id="accGSheetOv" style="display:none;padding:0.8rem">
-              <p style="font-size:0.7rem;color:var(--text-secondary);margin:0 0 0.5rem">Remplace le montant mensuel d'une catégorie mère CR_Prév sur une période. Modifiable en valeur brute ou en pourcentage de l'actuel.</p>
+              <p style="font-size:0.7rem;color:var(--text-secondary);margin:0 0 0.5rem">Remplace le montant mensuel <strong>HT</strong> d'une catégorie mère CR_Prév sur une période. Toutes les valeurs ici sont en HT (la TVA est gérée séparément, voir Phase E à venir).</p>
               <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
                 <div>
                   <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Catégorie</label>
@@ -3314,11 +3335,11 @@
               </div>
               <p id="ovGSheetCurrentDisplay" style="font-size:0.78rem;color:var(--primary);font-weight:600;margin:0 0 0.5rem;min-height:1.1em"></p>
               <div style="display:flex;gap:1rem;margin-bottom:0.4rem;font-size:0.8rem">
-                <label style="cursor:pointer"><input type="radio" name="gsheetOvMode" value="absolute" checked onchange="toggleGSheetMode()"> Valeur brute (€/mois)</label>
-                <label style="cursor:pointer"><input type="radio" name="gsheetOvMode" value="percent" onchange="toggleGSheetMode()"> En % de l'actuel</label>
+                <label style="cursor:pointer"><input type="radio" name="gsheetOvMode" value="absolute" checked onchange="toggleGSheetMode()"> Valeur brute (€ HT/mois)</label>
+                <label style="cursor:pointer"><input type="radio" name="gsheetOvMode" value="percent" onchange="toggleGSheetMode()"> En % de l'actuel HT</label>
               </div>
               <div id="ovGSheetAbsoluteFields" style="margin-bottom:0.4rem">
-                <input type="number" id="ovGSheetMontant" placeholder="Nouveau montant en €/mois" min="0" step="100" oninput="updateGSheetPreview()" style="width:200px;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                <input type="number" id="ovGSheetMontant" placeholder="Nouveau montant HT en €/mois" min="0" step="100" oninput="updateGSheetPreview()" style="width:240px;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
               </div>
               <div id="ovGSheetPercentFields" style="display:none;margin-bottom:0.4rem">
                 <input type="number" id="ovGSheetPercent" placeholder="-20 ou +15" step="1" oninput="updateGSheetPreview()" style="width:120px;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
@@ -7075,6 +7096,12 @@
       if (scenarioActiveTab === tab) return;
       scenarioActiveTab = tab;
       document.querySelectorAll('.scenario-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+      // Toggle des 3 vues
+      document.getElementById('scenarioTresoView').style.display    = tab === 'treso' ? '' : 'none';
+      document.getElementById('scenarioPnlView').style.display      = tab === 'pnl'   ? '' : 'none';
+      document.getElementById('scenarioEbeView').style.display      = tab === 'ebe'   ? '' : 'none';
+      // Detail mensuel : utile uniquement sur Trésorerie (P&L/EBE sont déjà cumulés)
+      document.getElementById('scenarioMonthlyDetailSection').style.display = tab === 'treso' ? '' : 'none';
       renderScenariosComparison();
     }
 
@@ -7133,8 +7160,6 @@
     }
 
     async function renderScenariosComparison() {
-      const detailContainer = document.getElementById('scenariosDetailTable');
-
       // Fetch baseline + selected scenarios projections (toujours fetch baseline pour pouvoir l'afficher seul)
       const qs = buildScenarioQueryString();
       const fetches = [
@@ -7149,126 +7174,200 @@
         const baseline = results[0];
         const scenarios = results.slice(1);
 
-        const tabConfig = SCENARIO_TAB_CONFIG[scenarioActiveTab];
-        const valueOf = (m) => m[tabConfig.field] ?? 0;
-
-        // --- Chart (line, multi-scénario) ---
-        const labels = baseline.previsionnel.map(m => {
-          const date = new Date(m.annee, m.mois - 1);
-          return date.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
-        });
-
-        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-        const baselineColor = isDark ? 'rgba(180,180,180,1)' : 'rgba(120,120,120,1)';
-
-        const datasets = [
-          {
-            label: 'Baseline',
-            data: baseline.previsionnel.map(valueOf),
-            borderColor: baselineColor,
-            backgroundColor: baselineColor.replace('1)', '0.08)'),
-            borderWidth: 2,
-            tension: 0.25,
-            pointRadius: 2,
-            pointHoverRadius: 5,
-            fill: false,
-            borderDash: [6, 4],
-          },
-        ];
-
-        scenarios.forEach((sc, i) => {
-          const col = SCENARIO_COLORS[i % SCENARIO_COLORS.length];
-          datasets.push({
-            label: sc.nom,
-            data: sc.previsionnel.map(valueOf),
-            borderColor: col,
-            backgroundColor: col.replace('1)', '0.08)'),
-            borderWidth: 2,
-            tension: 0.25,
-            pointRadius: 2,
-            pointHoverRadius: 5,
-            fill: false,
-          });
-        });
-
-        if (scenariosChart) scenariosChart.destroy();
-        scenariosChart = new Chart(document.getElementById('scenariosChart'), {
-          type: 'line',
-          data: { labels, datasets },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            animation: { duration: 400, easing: 'easeOutQuart' },
-            interaction: { mode: 'index', intersect: false },
-            plugins: {
-              legend: {
-                display: true,
-                position: 'top',
-                labels: { color: isDark ? '#ccc' : '#555', font: { size: 12 } },
-              },
-              tooltip: {
-                backgroundColor: isDark ? '#333' : '#fff',
-                titleColor: isDark ? '#eee' : '#37352f',
-                bodyColor: isDark ? '#ccc' : '#555',
-                borderColor: isDark ? '#555' : '#e9e9e7',
-                borderWidth: 1,
-                cornerRadius: 8,
-                padding: 10,
-                callbacks: {
-                  title: (items) => items[0]?.label + ' — ' + tabConfig.tooltip,
-                  label: (ctx) => ctx.dataset.label + ' : ' + formatEuro(ctx.raw),
-                },
-              },
-            },
-            scales: {
-              x: {
-                grid: { color: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' },
-                ticks: { color: isDark ? '#aaa' : '#888', font: { size: 11 } },
-              },
-              y: {
-                grid: { color: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' },
-                ticks: {
-                  color: isDark ? '#aaa' : '#888',
-                  font: { size: 11 },
-                  callback: (v) => Math.abs(v) >= 1000 ? Math.round(v / 1000) + 'k' : v + ' EUR',
-                },
-              },
-            },
-          },
-        });
-
-        // --- Detail table (filtré sur le tab actif) ---
-        let html = '<table style="width:100%;border-collapse:collapse;font-size:0.82rem">';
-        html += '<thead><tr style="border-bottom:2px solid var(--border)">';
-        html += '<th style="text-align:left;padding:0.5rem 0.8rem;color:var(--text-secondary)">Mois</th>';
-        html += '<th style="text-align:right;padding:0.5rem 0.8rem;color:var(--text-secondary)">Baseline (' + tabConfig.label + ')</th>';
-        scenarios.forEach((sc) => {
-          html += '<th style="text-align:right;padding:0.5rem 0.8rem;color:var(--text-secondary)">' + sc.nom + '</th>';
-        });
-        html += '</tr></thead><tbody>';
-
-        for (let i = 0; i < baseline.previsionnel.length; i++) {
-          const bm = baseline.previsionnel[i];
-          const label = labels[i];
-          const bVal = valueOf(bm);
-          html += '<tr style="border-bottom:1px solid var(--border)">';
-          html += '<td style="padding:0.4rem 0.8rem;font-weight:500">' + label + '</td>';
-          html += '<td style="text-align:right;padding:0.4rem 0.8rem">' + formatEuro(bVal) + '</td>';
-          scenarios.forEach((sc) => {
-            const sVal = sc.previsionnel[i] ? valueOf(sc.previsionnel[i]) : 0;
-            const delta = sVal - bVal;
-            const color = delta > 0 ? 'var(--success, #0f7b6c)' : delta < 0 ? 'var(--danger)' : '';
-            const deltaStr = delta !== 0 ? ' <span style="font-size:0.75rem;color:' + color + '">(' + (delta > 0 ? '+' : '') + formatEuro(delta) + ')</span>' : '';
-            html += '<td style="text-align:right;padding:0.4rem 0.8rem">' + formatEuro(sVal) + deltaStr + '</td>';
-          });
-          html += '</tr>';
-        }
-        html += '</tbody></table>';
-        detailContainer.innerHTML = html;
-
+        if (scenarioActiveTab === 'treso')   renderTresoView(baseline, scenarios);
+        else if (scenarioActiveTab === 'pnl') renderPnlView(baseline, scenarios);
+        else if (scenarioActiveTab === 'ebe') renderEbeView(baseline, scenarios);
       } catch (err) {
-        detailContainer.innerHTML = '<p style="color:var(--danger);font-size:0.85rem;padding:1rem">Erreur chargement projections</p>';
+        document.getElementById('scenariosDetailTable').innerHTML = '<p style="color:var(--danger);font-size:0.85rem;padding:1rem">Erreur chargement projections</p>';
+        document.getElementById('scenariosPnlTable').innerHTML    = '<p style="color:var(--danger);font-size:0.85rem;padding:1rem">Erreur chargement projections</p>';
+        document.getElementById('scenariosEbeCards').innerHTML    = '<p style="color:var(--danger);font-size:0.85rem;padding:1rem">Erreur chargement projections</p>';
       }
+    }
+
+    // ==== Vue Trésorerie : line chart + table mois par mois (vue "flux dans le temps") ====
+    function renderTresoView(baseline, scenarios) {
+      const detailContainer = document.getElementById('scenariosDetailTable');
+      const labels = baseline.previsionnel.map(m => {
+        const date = new Date(m.annee, m.mois - 1);
+        return date.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
+      });
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const baselineColor = isDark ? 'rgba(180,180,180,1)' : 'rgba(120,120,120,1)';
+
+      const datasets = [{
+        label: 'Baseline',
+        data: baseline.previsionnel.map(m => m.soldeFin ?? 0),
+        borderColor: baselineColor,
+        backgroundColor: baselineColor.replace('1)', '0.08)'),
+        borderWidth: 2, tension: 0.25, pointRadius: 2, pointHoverRadius: 5, fill: false, borderDash: [6, 4],
+      }];
+      scenarios.forEach((sc, i) => {
+        const col = SCENARIO_COLORS[i % SCENARIO_COLORS.length];
+        datasets.push({
+          label: sc.nom,
+          data: sc.previsionnel.map(m => m.soldeFin ?? 0),
+          borderColor: col,
+          backgroundColor: col.replace('1)', '0.08)'),
+          borderWidth: 2, tension: 0.25, pointRadius: 2, pointHoverRadius: 5, fill: false,
+        });
+      });
+
+      if (scenariosChart) scenariosChart.destroy();
+      scenariosChart = new Chart(document.getElementById('scenariosChart'), {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          animation: { duration: 400, easing: 'easeOutQuart' },
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { position: 'top', labels: { color: isDark ? '#ccc' : '#555', font: { size: 12 } } },
+            tooltip: {
+              backgroundColor: isDark ? '#333' : '#fff', titleColor: isDark ? '#eee' : '#37352f',
+              bodyColor: isDark ? '#ccc' : '#555', borderColor: isDark ? '#555' : '#e9e9e7',
+              borderWidth: 1, cornerRadius: 8, padding: 10,
+              callbacks: {
+                title: (items) => items[0]?.label + ' — Solde fin de mois',
+                label: (ctx) => ctx.dataset.label + ' : ' + formatEuro(ctx.raw),
+              },
+            },
+          },
+          scales: {
+            x: { grid: { color: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' }, ticks: { color: isDark ? '#aaa' : '#888', font: { size: 11 } } },
+            y: { grid: { color: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' }, ticks: { color: isDark ? '#aaa' : '#888', font: { size: 11 }, callback: (v) => Math.abs(v) >= 1000 ? Math.round(v / 1000) + 'k' : v + ' EUR' } },
+          },
+        },
+      });
+
+      // Detail mensuel (Tréso seulement)
+      let html = '<table style="width:100%;border-collapse:collapse;font-size:0.82rem">';
+      html += '<thead><tr style="border-bottom:2px solid var(--border)">';
+      html += '<th style="text-align:left;padding:0.5rem 0.8rem;color:var(--text-secondary)">Mois</th>';
+      html += '<th style="text-align:right;padding:0.5rem 0.8rem;color:var(--text-secondary)">Baseline (Solde)</th>';
+      scenarios.forEach((sc) => { html += '<th style="text-align:right;padding:0.5rem 0.8rem;color:var(--text-secondary)">' + sc.nom + '</th>'; });
+      html += '</tr></thead><tbody>';
+      for (let i = 0; i < baseline.previsionnel.length; i++) {
+        const bVal = baseline.previsionnel[i].soldeFin || 0;
+        html += '<tr style="border-bottom:1px solid var(--border)">';
+        html += '<td style="padding:0.4rem 0.8rem;font-weight:500">' + labels[i] + '</td>';
+        html += '<td style="text-align:right;padding:0.4rem 0.8rem">' + formatEuro(bVal) + '</td>';
+        scenarios.forEach((sc) => {
+          const sVal = sc.previsionnel[i] ? (sc.previsionnel[i].soldeFin || 0) : 0;
+          const delta = sVal - bVal;
+          const color = delta > 0 ? 'var(--success, #0f7b6c)' : delta < 0 ? 'var(--danger)' : '';
+          const deltaStr = delta !== 0 ? ' <span style="font-size:0.75rem;color:' + color + '">(' + (delta > 0 ? '+' : '') + formatEuro(delta) + ')</span>' : '';
+          html += '<td style="text-align:right;padding:0.4rem 0.8rem">' + formatEuro(sVal) + deltaStr + '</td>';
+        });
+        html += '</tr>';
+      }
+      html += '</tbody></table>';
+      detailContainer.innerHTML = html;
+    }
+
+    // Helpers : agrège un champ sur toute la projection (cumulatif depuis début projection jusqu'à horizon)
+    function sumField(projection, field) {
+      return projection.reduce((s, m) => s + (m[field] || 0), 0);
+    }
+    // Pour les soldes (ebe_cumule, soldeFin) : prendre la valeur du dernier mois (déjà cumulée)
+    function lastValue(projection, field) {
+      if (!projection || projection.length === 0) return 0;
+      return projection[projection.length - 1][field] || 0;
+    }
+
+    // ==== Vue P&L : tableau comparatif des indicateurs cumulés à fin d'horizon ====
+    function renderPnlView(baseline, scenarios) {
+      const container = document.getElementById('scenariosPnlTable');
+      const horizonLabel = baseline.previsionnel.length > 0
+        ? (() => { const last = baseline.previsionnel[baseline.previsionnel.length - 1]; const d = new Date(last.annee, last.mois - 1); return d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }); })()
+        : '';
+
+      // Agrégats par scénario (cumul sur la projection)
+      const aggregate = (proj) => ({
+        ca:        sumField(proj, 'pnl_ca'),
+        charges:   sumField(proj, 'pnl_charges'),
+        marge:     sumField(proj, 'pnl_marge'),
+        subv:      sumField(proj, 'subventions'),
+        aides:     sumField(proj, 'aides'),
+        ebe:       lastValue(proj, 'ebe_cumule'),
+      });
+
+      const baseAgg = aggregate(baseline.previsionnel);
+      const scAggs  = scenarios.map(sc => ({ nom: sc.nom, agg: aggregate(sc.previsionnel) }));
+
+      let html = '<p style="font-size:0.75rem;color:var(--text-secondary);margin:0 0 0.5rem">Cumul sur la projection — fin d\'horizon : <strong>' + horizonLabel + '</strong></p>';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:0.85rem">';
+      html += '<thead><tr style="border-bottom:2px solid var(--border)">';
+      html += '<th style="text-align:left;padding:0.55rem 0.9rem;color:var(--text-secondary)">Indicateur</th>';
+      html += '<th style="text-align:right;padding:0.55rem 0.9rem;color:var(--text-secondary)">Baseline</th>';
+      scAggs.forEach(sc => { html += '<th style="text-align:right;padding:0.55rem 0.9rem;color:var(--text-secondary)">' + sc.nom + '</th>'; });
+      html += '</tr></thead><tbody>';
+
+      const renderRow = (label, key, opts = {}) => {
+        const bVal = baseAgg[key];
+        const isBold = opts.bold;
+        const sign = opts.sign || '';
+        html += '<tr style="border-bottom:1px solid var(--border)' + (isBold ? ';font-weight:700;background:var(--hover)' : '') + '">';
+        html += '<td style="padding:0.5rem 0.9rem">' + sign + label + '</td>';
+        html += '<td style="text-align:right;padding:0.5rem 0.9rem">' + formatEuro(bVal) + '</td>';
+        scAggs.forEach(sc => {
+          const sVal = sc.agg[key];
+          const delta = sVal - bVal;
+          const color = delta > 0 ? 'var(--success, #0f7b6c)' : delta < 0 ? 'var(--danger)' : '';
+          const deltaStr = delta !== 0 ? ' <span style="font-size:0.72rem;color:' + color + ';font-weight:500">(' + (delta > 0 ? '+' : '') + formatEuro(delta) + ')</span>' : '';
+          html += '<td style="text-align:right;padding:0.5rem 0.9rem">' + formatEuro(sVal) + deltaStr + '</td>';
+        });
+        html += '</tr>';
+      };
+
+      renderRow('CA cumulé',          'ca');
+      renderRow('Charges cumulées',   'charges', { sign: '−' });
+      renderRow('Marge brute',        'marge', { bold: true });
+      renderRow('Subventions',        'subv',  { sign: '+' });
+      renderRow('Aides',              'aides', { sign: '+' });
+      renderRow('EBE projeté',        'ebe',   { bold: true });
+
+      html += '</tbody></table>';
+      container.innerHTML = html;
+    }
+
+    // ==== Vue EBE : cards comparatives ====
+    function renderEbeView(baseline, scenarios) {
+      const container = document.getElementById('scenariosEbeCards');
+      const baselineEbe = lastValue(baseline.previsionnel, 'ebe_cumule');
+      const horizonLabel = baseline.previsionnel.length > 0
+        ? (() => { const last = baseline.previsionnel[baseline.previsionnel.length - 1]; const d = new Date(last.annee, last.mois - 1); return d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }); })()
+        : '';
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const baselineBg = isDark ? 'rgba(120,120,120,0.10)' : 'rgba(120,120,120,0.06)';
+
+      let html = '';
+      // Card Baseline
+      html += '<div class="kpi-block" style="background:' + baselineBg + ';border:1px solid var(--border)">';
+      html += '<div class="kpi-label">Baseline · ' + horizonLabel + '</div>';
+      html += '<div class="kpi-value" style="color:var(--text)">' + formatEuro(baselineEbe) + '</div>';
+      html += '<div class="kpi-sub">EBE projeté à horizon</div>';
+      html += '</div>';
+
+      scenarios.forEach((sc, i) => {
+        const ebe = lastValue(sc.previsionnel, 'ebe_cumule');
+        const delta = ebe - baselineEbe;
+        const pct = baselineEbe !== 0 ? (delta / Math.abs(baselineEbe)) * 100 : (ebe > 0 ? 100 : 0);
+        const col = SCENARIO_COLORS[i % SCENARIO_COLORS.length];
+        const accentBg = col.replace('1)', '0.08)');
+        const deltaColor = delta > 0 ? 'var(--success, #0f7b6c)' : delta < 0 ? 'var(--danger)' : 'var(--text-secondary)';
+        const sign = delta > 0 ? '+' : '';
+        html += '<div class="kpi-block" style="background:' + accentBg + ';border:1px solid ' + col.replace('1)', '0.5)') + '">';
+        html += '<div class="kpi-label" style="display:flex;align-items:center;gap:0.4rem"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + col + '"></span>' + sc.nom + '</div>';
+        html += '<div class="kpi-value" style="color:var(--text)">' + formatEuro(ebe) + '</div>';
+        html += '<div class="kpi-sub" style="color:' + deltaColor + ';font-weight:600">' + sign + formatEuro(delta) + ' vs Baseline (' + sign + pct.toFixed(1) + '%)</div>';
+        html += '</div>';
+      });
+
+      if (scenarios.length === 0) {
+        html += '<p style="grid-column:1/-1;color:var(--text-secondary);font-size:0.85rem;padding:1rem">Sélectionnez des scénarios dans la liste ci-dessus pour les comparer au Baseline.</p>';
+      }
+
+      container.innerHTML = html;
     }
 
     // --- Modal scenario ---
@@ -7418,7 +7517,8 @@
       renderOverrideList('ovPipelineList', pipelines, o => {
         const d = o.data;
         if (d.mode === 'factor') return 'Curseur conversion : ' + Math.round((d.facteur || 0) * 100) + '%';
-        return 'Deal fictif : ' + (d.nom || '-') + ' · ' + formatEuro(d.montant || 0) + ' · ' + (d.probabilite != null ? d.probabilite + '%' : '100%') + ' · ' + (d.mois || '-');
+        const delaiTxt = d.delai_encaissement_jours != null ? ' (+' + d.delai_encaissement_jours + 'j délai)' : '';
+        return 'Deal fictif : ' + (d.nom || '-') + ' · ' + formatEuro(d.montant || 0) + ' · ' + (d.probabilite != null ? d.probabilite + '%' : '100%') + ' · closing ' + (d.mois || '-') + delaiTxt;
       });
       renderOverrideList('ovSalAugList', salAugs, o => {
         const d = o.data;
@@ -7666,14 +7766,16 @@
         const montant = parseFloat(document.getElementById('ovPipelineDealMontant').value);
         const probabilite = parseFloat(document.getElementById('ovPipelineDealProba').value) || 100;
         const mois = document.getElementById('ovPipelineDealMois').value;
+        const delai_encaissement_jours = parseInt(document.getElementById('ovPipelineDealDelai').value, 10);
         if (!nom) return alert('Libellé requis');
         if (!montant || montant <= 0) return alert('Montant invalide');
         if (!mois) return alert('Mois requis');
-        addOverrideToServer('pipeline', { mode: 'deal', nom, montant, probabilite, mois });
+        addOverrideToServer('pipeline', { mode: 'deal', nom, montant, probabilite, mois, delai_encaissement_jours: Number.isFinite(delai_encaissement_jours) ? delai_encaissement_jours : 45 });
         document.getElementById('ovPipelineDealNom').value = '';
         document.getElementById('ovPipelineDealMontant').value = '';
         document.getElementById('ovPipelineDealProba').value = 100;
         document.getElementById('ovPipelineDealMois').value = '';
+        document.getElementById('ovPipelineDealDelai').value = 45;
       }
     }
 
@@ -7819,7 +7921,7 @@
       if (cur.nbMois === 0) {
         display.textContent = 'Aucune donnée GSheet sur cette période pour cette catégorie.';
       } else {
-        display.textContent = 'Actuel : ' + formatEuro(Math.round(cur.avg)) + '/mois moyen sur ' + cur.nbMois + ' mois';
+        display.textContent = 'Actuel : ' + formatEuro(Math.round(cur.avg)) + ' HT/mois moyen sur ' + cur.nbMois + ' mois';
       }
       updateGSheetPreview();
     }
@@ -7836,13 +7938,13 @@
       const mode = document.querySelector('input[name="gsheetOvMode"]:checked')?.value || 'absolute';
       if (mode === 'absolute') {
         const v = parseFloat(document.getElementById('ovGSheetMontant').value);
-        preview.textContent = (v >= 0) ? '→ Nouvelle valeur : ' + formatEuro(v) + '/mois' : '';
+        preview.textContent = (v >= 0) ? '→ Nouvelle valeur : ' + formatEuro(v) + ' HT/mois' : '';
       } else {
         const pct = parseFloat(document.getElementById('ovGSheetPercent').value);
         const cur = getGSheetCurrentAvg();
         if (Number.isFinite(pct) && cur && cur.nbMois > 0) {
           const newVal = Math.round(cur.avg * (1 + pct / 100));
-          preview.textContent = '→ Nouvelle valeur : ' + formatEuro(newVal) + '/mois (' + (pct >= 0 ? '+' : '') + pct + '% de ' + formatEuro(Math.round(cur.avg)) + ')';
+          preview.textContent = '→ Nouvelle valeur : ' + formatEuro(newVal) + ' HT/mois (' + (pct >= 0 ? '+' : '') + pct + '% de ' + formatEuro(Math.round(cur.avg)) + ' HT)';
         } else {
           preview.textContent = '';
         }

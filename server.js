@@ -2417,10 +2417,23 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
   }
 
   // --- Deals fictifs (scénarios) ---
+  // Le mois saisi par l'user = mois de signature/closing. L'encaissement effectif est
+  // décalé de delai_encaissement_jours (défaut 45j, cohérent avec /api/charges convention)
+  // pour modéliser le délai client réaliste.
   const fictionalEncaissements = {};
   if (fictionalDeals && fictionalDeals.length > 0) {
     for (const fd of fictionalDeals) {
-      const mKey = fd.mois;
+      const closingKey = fd.mois;
+      const delaiJours = (fd.delai_encaissement_jours != null) ? fd.delai_encaissement_jours : 45;
+      let mKey = closingKey;
+      if (closingKey && delaiJours) {
+        const [y, m] = closingKey.split('-').map(Number);
+        if (y && m) {
+          const d = new Date(y, m - 1, 1);
+          d.setDate(d.getDate() + delaiJours);
+          mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        }
+      }
       const montant = fd.montant * ((fd.probabilite || 100) / 100);
       fictionalEncaissements[mKey] = (fictionalEncaissements[mKey] || 0) + montant;
     }
@@ -2776,6 +2789,7 @@ function applyOverrides(baseData, overrides) {
             montant: d.montant || 0,
             probabilite: d.probabilite != null ? d.probabilite : 100,
             mois: d.mois,
+            delai_encaissement_jours: d.delai_encaissement_jours,
           });
         }
         break;
