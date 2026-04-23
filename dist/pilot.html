@@ -5190,33 +5190,40 @@
       }, null);
     }
 
-    // Deals créés depuis la section Repeat — { dealId: { clientName, createdAt } }
+    // Deals créés depuis la section Repeat — { dealId: { clientName, dealName, amount, createdAt } }
     const REPEAT_DEALS_LS_KEY = 'releaf_repeat_deals_v1';
     function getRepeatDeals() {
       try { return JSON.parse(localStorage.getItem(REPEAT_DEALS_LS_KEY) || '{}'); } catch { return {}; }
     }
-    function saveRepeatDeal(dealId, clientName) {
+    function saveRepeatDeal(dealId, clientName, dealName, amount) {
       const data = getRepeatDeals();
-      data[dealId] = { clientName, createdAt: new Date().toISOString() };
+      data[dealId] = { clientName, dealName, amount: amount || 0, createdAt: new Date().toISOString() };
       localStorage.setItem(REPEAT_DEALS_LS_KEY, JSON.stringify(data));
     }
 
     let _repeatKpiData = null;
 
     function computeRepeatKpis() {
-      if (!repeatClientsData || !dashboardData || !dashboardData.pipelineDeals) return null;
+      if (!repeatClientsData) return null;
 
-      const allPipelineDeals = Object.values(dashboardData.pipelineDeals).flat();
-      const pipelineDealIds = new Set(allPipelineDeals.map(d => d.id));
       const repeatDeals = getRepeatDeals();
       const contacts = getRepeatContacts();
-      const matchedPairs = [];
 
-      for (const [dealId, { clientName }] of Object.entries(repeatDeals)) {
-        if (!pipelineDealIds.has(dealId)) continue; // deal clos ou supprimé du pipeline
-        const deal = allPipelineDeals.find(d => d.id === dealId);
+      // Build pipeline lookup for amount enrichment (best-effort, not required)
+      const pipelineDealMap = {};
+      if (dashboardData && dashboardData.pipelineDeals) {
+        for (const deal of Object.values(dashboardData.pipelineDeals).flat()) {
+          pipelineDealMap[deal.id] = deal;
+        }
+      }
+
+      const matchedPairs = [];
+      for (const [dealId, { clientName, dealName, amount: lsAmount }] of Object.entries(repeatDeals)) {
         const client = repeatClientsData.find(c => c.client === clientName);
-        if (!deal || !client) continue;
+        if (!client) continue;
+        // Use live pipeline amount if available, fallback to saved amount
+        const liveDeal = pipelineDealMap[dealId];
+        const deal = liveDeal || { id: dealId, name: dealName || clientName, amount: lsAmount || 0 };
         const existing = matchedPairs.find(p => p.client.client === clientName);
         if (existing) existing.deals.push(deal);
         else matchedPairs.push({ client, deals: [deal] });
@@ -5226,7 +5233,7 @@
         .filter(c => contacts[c.client])
         .map(c => ({ client: c, contact: contacts[c.client] }));
 
-      const pipelineCaRepeat = matchedPairs.reduce((s, p) => s + p.deals.reduce((ss, d) => ss + d.amount, 0), 0);
+      const pipelineCaRepeat = matchedPairs.reduce((s, p) => s + p.deals.reduce((ss, d) => ss + (d.amount || 0), 0), 0);
 
       _repeatKpiData = { matchedPairs, contactedList, totalClients: repeatClientsData.length, pipelineCaRepeat };
       return {
@@ -5715,8 +5722,8 @@
         }).then(r => r.json());
 
         if (res.id) {
-          // Track ce deal comme créé depuis repeat
-          saveRepeatDeal(res.id, currentRepeatClient.client);
+          // Track ce deal comme créé depuis repeat (avec montant sauvegardé pour résistance au cache)
+          saveRepeatDeal(res.id, currentRepeatClient.client, name, amount);
           // Add to local pipeline so kanban shows it immediately
           if (dashboardData && dashboardData.pipelineDeals && dashboardData.pipelineDeals[stage]) {
             dashboardData.pipelineDeals[stage].push({
