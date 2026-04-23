@@ -2881,6 +2881,16 @@ app.get('/api/scenarios/baseline/projection', async (req, res) => {
   }
 });
 
+// Liste des catégories mères du GSheet CR_Prev, utilisée par le levier ligne_gsheet_override
+app.get('/api/cr-prev/categories', async (req, res) => {
+  try {
+    const data = await fetchAndParseCRPrev();
+    res.json({ categories: Object.keys(data.categories || {}).sort() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/scenarios/baseline/salaries', async (req, res) => {
   try {
     const { data, error } = await supabase.from('salaries').select('*').order('nom');

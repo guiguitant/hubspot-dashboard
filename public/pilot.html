@@ -3116,6 +3116,205 @@
             </div>
           </div>
 
+          <!-- ============= Pipeline (curseur OU deal fictif) ============= -->
+          <div style="border:1px solid var(--border);border-radius:var(--radius);margin-bottom:0.5rem">
+            <button onclick="toggleAccordion('accPipeline')" style="width:100%;text-align:left;padding:0.6rem 0.8rem;background:var(--hover);border:none;cursor:pointer;font-family:inherit;font-size:0.85rem;font-weight:600;color:var(--text);border-radius:var(--radius);display:flex;align-items:center;gap:0.5rem">
+              <span id="accPipelineChevron" style="font-size:0.6rem;transition:transform 0.2s">&#9654;</span>
+              Pipeline
+              <span id="accPipelineCount" style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)"></span>
+            </button>
+            <div id="accPipeline" style="display:none;padding:0.8rem">
+              <div style="display:flex;gap:1rem;margin-bottom:0.6rem;font-size:0.8rem">
+                <label style="cursor:pointer"><input type="radio" name="pipelineMode" value="factor" checked onchange="togglePipelineMode()"> Curseur conversion</label>
+                <label style="cursor:pointer"><input type="radio" name="pipelineMode" value="deal" onchange="togglePipelineMode()"> Deal fictif</label>
+              </div>
+              <div id="pipelineFactorFields">
+                <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Facteur de conversion du pipeline pondéré (0 à 100%)</label>
+                <div style="display:flex;align-items:center;gap:0.6rem">
+                  <input type="range" id="ovPipelineFactor" min="0" max="100" value="100" oninput="document.getElementById('ovPipelineFactorVal').textContent = this.value + '%'" style="flex:1">
+                  <span id="ovPipelineFactorVal" style="min-width:3rem;font-weight:600;font-size:0.85rem">100%</span>
+                </div>
+              </div>
+              <div id="pipelineDealFields" style="display:none">
+                <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
+                  <div>
+                    <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Libellé</label>
+                    <input type="text" id="ovPipelineDealNom" placeholder="Deal X" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                  </div>
+                  <div>
+                    <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Montant</label>
+                    <input type="number" id="ovPipelineDealMontant" placeholder="50000" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                  </div>
+                  <div>
+                    <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Proba %</label>
+                    <input type="number" id="ovPipelineDealProba" min="0" max="100" value="100" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                  </div>
+                  <div>
+                    <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Mois</label>
+                    <input type="month" id="ovPipelineDealMois" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                  </div>
+                </div>
+              </div>
+              <button class="btn" onclick="addOverridePipeline()" style="font-size:0.8rem;padding:0.3rem 0.8rem;color:var(--primary);font-weight:600;margin-top:0.4rem">+ Ajouter</button>
+              <div id="ovPipelineList" style="margin-top:0.5rem"></div>
+            </div>
+          </div>
+
+          <!-- ============= Augmentation salariale ============= -->
+          <div style="border:1px solid var(--border);border-radius:var(--radius);margin-bottom:0.5rem">
+            <button onclick="toggleAccordion('accSalAug')" style="width:100%;text-align:left;padding:0.6rem 0.8rem;background:var(--hover);border:none;cursor:pointer;font-family:inherit;font-size:0.85rem;font-weight:600;color:var(--text);border-radius:var(--radius);display:flex;align-items:center;gap:0.5rem">
+              <span id="accSalAugChevron" style="font-size:0.6rem;transition:transform 0.2s">&#9654;</span>
+              Augmentation salariale
+              <span id="accSalAugCount" style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)"></span>
+            </button>
+            <div id="accSalAug" style="display:none;padding:0.8rem">
+              <div style="display:grid;grid-template-columns:1fr 1fr 2fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Augmentation (%)</label>
+                  <input type="number" id="ovSalAugPercent" placeholder="5" min="0" step="0.1" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">À partir du</label>
+                  <input type="date" id="ovSalAugDate" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Salariés concernés</label>
+                  <select id="ovSalAugTargets" multiple size="3" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)"></select>
+                </div>
+              </div>
+              <p style="font-size:0.7rem;color:var(--text-secondary);margin:0 0 0.4rem">Ctrl/Cmd + clic pour sélection multiple. Aucune sélection = tous les salariés.</p>
+              <button class="btn" onclick="addOverrideSalaireAugmentation()" style="font-size:0.8rem;padding:0.3rem 0.8rem;color:var(--primary);font-weight:600">+ Ajouter</button>
+              <div id="ovSalAugList" style="margin-top:0.5rem"></div>
+            </div>
+          </div>
+
+          <!-- ============= Revenu récurrent ============= -->
+          <div style="border:1px solid var(--border);border-radius:var(--radius);margin-bottom:0.5rem">
+            <button onclick="toggleAccordion('accRevRec')" style="width:100%;text-align:left;padding:0.6rem 0.8rem;background:var(--hover);border:none;cursor:pointer;font-family:inherit;font-size:0.85rem;font-weight:600;color:var(--text);border-radius:var(--radius);display:flex;align-items:center;gap:0.5rem">
+              <span id="accRevRecChevron" style="font-size:0.6rem;transition:transform 0.2s">&#9654;</span>
+              Revenu récurrent
+              <span id="accRevRecCount" style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)"></span>
+            </button>
+            <div id="accRevRec" style="display:none;padding:0.8rem">
+              <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Libellé</label>
+                  <input type="text" id="ovRevRecLib" placeholder="Contrat MRR" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">€/mois</label>
+                  <input type="number" id="ovRevRecMontant" placeholder="5000" min="0" step="100" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Début</label>
+                  <input type="month" id="ovRevRecDebut" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Fin</label>
+                  <input type="month" id="ovRevRecFin" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+              </div>
+              <button class="btn" onclick="addOverrideRevenuRecurrent()" style="font-size:0.8rem;padding:0.3rem 0.8rem;color:var(--primary);font-weight:600">+ Ajouter</button>
+              <div id="ovRevRecList" style="margin-top:0.5rem"></div>
+            </div>
+          </div>
+
+          <!-- ============= Prêt ============= -->
+          <div style="border:1px solid var(--border);border-radius:var(--radius);margin-bottom:0.5rem">
+            <button onclick="toggleAccordion('accPret')" style="width:100%;text-align:left;padding:0.6rem 0.8rem;background:var(--hover);border:none;cursor:pointer;font-family:inherit;font-size:0.85rem;font-weight:600;color:var(--text);border-radius:var(--radius);display:flex;align-items:center;gap:0.5rem">
+              <span id="accPretChevron" style="font-size:0.6rem;transition:transform 0.2s">&#9654;</span>
+              Prêt bancaire
+              <span id="accPretCount" style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)"></span>
+            </button>
+            <div id="accPret" style="display:none;padding:0.8rem">
+              <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Libellé</label>
+                  <input type="text" id="ovPretLib" placeholder="Prêt BPI" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Principal €</label>
+                  <input type="number" id="ovPretMontant" placeholder="100000" min="0" step="1000" oninput="updatePretApercu()" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Entrée</label>
+                  <input type="month" id="ovPretMois" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Taux % / an</label>
+                  <input type="number" id="ovPretTaux" placeholder="3.5" min="0" step="0.1" oninput="updatePretApercu()" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Durée mois</label>
+                  <input type="number" id="ovPretDuree" placeholder="60" min="1" step="1" oninput="updatePretApercu()" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+              </div>
+              <p id="pretApercu" style="font-size:0.75rem;color:var(--text-secondary);margin:0 0 0.4rem"></p>
+              <button class="btn" onclick="addOverridePret()" style="font-size:0.8rem;padding:0.3rem 0.8rem;color:var(--primary);font-weight:600">+ Ajouter</button>
+              <div id="ovPretList" style="margin-top:0.5rem"></div>
+            </div>
+          </div>
+
+          <!-- ============= Subvention annoncée ============= -->
+          <div style="border:1px solid var(--border);border-radius:var(--radius);margin-bottom:0.5rem">
+            <button onclick="toggleAccordion('accSubvAnn')" style="width:100%;text-align:left;padding:0.6rem 0.8rem;background:var(--hover);border:none;cursor:pointer;font-family:inherit;font-size:0.85rem;font-weight:600;color:var(--text);border-radius:var(--radius);display:flex;align-items:center;gap:0.5rem">
+              <span id="accSubvAnnChevron" style="font-size:0.6rem;transition:transform 0.2s">&#9654;</span>
+              Subvention annoncée
+              <span id="accSubvAnnCount" style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)"></span>
+            </button>
+            <div id="accSubvAnn" style="display:none;padding:0.8rem">
+              <p style="font-size:0.7rem;color:var(--text-secondary);margin:0 0 0.5rem">Subvention attendue, non-facturée. Remonte dans l'EBE mais pas dans le CA P&L.</p>
+              <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Libellé</label>
+                  <input type="text" id="ovSubvAnnLib" placeholder="Subvention ADEME" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Montant</label>
+                  <input type="number" id="ovSubvAnnMontant" placeholder="20000" min="0" step="1000" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Mois</label>
+                  <input type="month" id="ovSubvAnnMois" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+              </div>
+              <button class="btn" onclick="addOverrideSubventionAnnoncee()" style="font-size:0.8rem;padding:0.3rem 0.8rem;color:var(--primary);font-weight:600">+ Ajouter</button>
+              <div id="ovSubvAnnList" style="margin-top:0.5rem"></div>
+            </div>
+          </div>
+
+          <!-- ============= Override ligne GSheet ============= -->
+          <div style="border:1px solid var(--border);border-radius:var(--radius);margin-bottom:0.5rem">
+            <button onclick="toggleAccordion('accGSheetOv')" style="width:100%;text-align:left;padding:0.6rem 0.8rem;background:var(--hover);border:none;cursor:pointer;font-family:inherit;font-size:0.85rem;font-weight:600;color:var(--text);border-radius:var(--radius);display:flex;align-items:center;gap:0.5rem">
+              <span id="accGSheetOvChevron" style="font-size:0.6rem;transition:transform 0.2s">&#9654;</span>
+              Override ligne GSheet
+              <span id="accGSheetOvCount" style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary)"></span>
+            </button>
+            <div id="accGSheetOv" style="display:none;padding:0.8rem">
+              <p style="font-size:0.7rem;color:var(--text-secondary);margin:0 0 0.5rem">Remplace le montant mensuel d'une catégorie mère CR_Prév sur une période.</p>
+              <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Catégorie</label>
+                  <select id="ovGSheetCategorie" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)"><option value="">Chargement...</option></select>
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">€/mois</label>
+                  <input type="number" id="ovGSheetMontant" placeholder="8000" min="0" step="100" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Début</label>
+                  <input type="month" id="ovGSheetDebut" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Fin</label>
+                  <input type="month" id="ovGSheetFin" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+              </div>
+              <button class="btn" onclick="addOverrideLigneGSheet()" style="font-size:0.8rem;padding:0.3rem 0.8rem;color:var(--primary);font-weight:600">+ Ajouter</button>
+              <div id="ovGSheetOvList" style="margin-top:0.5rem"></div>
+            </div>
+          </div>
+
         </div>
       </div>
       <div class="modal-footer">
@@ -7084,6 +7283,8 @@
         currentScenarioOverrides = scenario.overrides || [];
         renderAllOverrideLists();
         fetchAndRenderBaselineSalaries();
+        populateSalAugTargets();
+        populateGSheetCategories();
         document.getElementById('scenarioModalOverlay').classList.add('active');
       } catch {
         alert('Erreur chargement scenario');
@@ -7156,15 +7357,27 @@
     // --- Override helpers ---
 
     function renderAllOverrideLists() {
-      const salaires = currentScenarioOverrides.filter(o => o.type === 'salaire');
-      const charges = currentScenarioOverrides.filter(o => o.type === 'charges_fixes');
-      const caEstimatifs = currentScenarioOverrides.filter(o => o.type === 'ca_estimatif');
-      const revenus = currentScenarioOverrides.filter(o => o.type === 'revenu_exceptionnel');
+      const salaires         = currentScenarioOverrides.filter(o => o.type === 'salaire');
+      const charges          = currentScenarioOverrides.filter(o => o.type === 'charges_fixes');
+      const caEstimatifs     = currentScenarioOverrides.filter(o => o.type === 'ca_estimatif');
+      const revenus          = currentScenarioOverrides.filter(o => o.type === 'revenu_exceptionnel');
+      const pipelines        = currentScenarioOverrides.filter(o => o.type === 'pipeline');
+      const salAugs          = currentScenarioOverrides.filter(o => o.type === 'salaire_augmentation');
+      const revRecs          = currentScenarioOverrides.filter(o => o.type === 'revenu_recurrent');
+      const prets            = currentScenarioOverrides.filter(o => o.type === 'pret');
+      const subvAnns         = currentScenarioOverrides.filter(o => o.type === 'subvention_annoncee');
+      const gsheetOverrides  = currentScenarioOverrides.filter(o => o.type === 'ligne_gsheet_override');
 
-      document.getElementById('accSalaireCount').textContent = salaires.length > 0 ? salaires.length + ' delta(s)' : '';
-      document.getElementById('accChargesCount').textContent = charges.length > 0 ? charges.length + ' depense(s)' : '';
-      document.getElementById('accCaEstimatifCount').textContent = caEstimatifs.length > 0 ? 'Actif' : '';
-      document.getElementById('accRevenusCount').textContent = revenus.length > 0 ? revenus.length + ' revenu(s)' : '';
+      document.getElementById('accSalaireCount').textContent     = salaires.length        > 0 ? salaires.length + ' delta(s)'  : '';
+      document.getElementById('accChargesCount').textContent     = charges.length         > 0 ? charges.length + ' dépense(s)' : '';
+      document.getElementById('accCaEstimatifCount').textContent = caEstimatifs.length    > 0 ? 'Actif'                        : '';
+      document.getElementById('accRevenusCount').textContent     = revenus.length         > 0 ? revenus.length + ' revenu(s)'  : '';
+      document.getElementById('accPipelineCount').textContent    = pipelines.length       > 0 ? pipelines.length + ' ajustement(s)' : '';
+      document.getElementById('accSalAugCount').textContent      = salAugs.length         > 0 ? salAugs.length + ' augmentation(s)' : '';
+      document.getElementById('accRevRecCount').textContent      = revRecs.length         > 0 ? revRecs.length + ' flux'       : '';
+      document.getElementById('accPretCount').textContent        = prets.length           > 0 ? prets.length + ' prêt(s)'      : '';
+      document.getElementById('accSubvAnnCount').textContent     = subvAnns.length        > 0 ? subvAnns.length + ' subv.'     : '';
+      document.getElementById('accGSheetOvCount').textContent    = gsheetOverrides.length > 0 ? gsheetOverrides.length + ' override(s)' : '';
 
       renderOverrideList('ovSalaireList', salaires, o => {
         const d = o.data;
@@ -7187,6 +7400,32 @@
         const d = o.data;
         return (d.libelle || '-') + ' : ' + formatEuro(d.montant || 0) + ' en ' + (d.mois || '-');
       });
+      renderOverrideList('ovPipelineList', pipelines, o => {
+        const d = o.data;
+        if (d.mode === 'factor') return 'Curseur conversion : ' + Math.round((d.facteur || 0) * 100) + '%';
+        return 'Deal fictif : ' + (d.nom || '-') + ' · ' + formatEuro(d.montant || 0) + ' · ' + (d.probabilite != null ? d.probabilite + '%' : '100%') + ' · ' + (d.mois || '-');
+      });
+      renderOverrideList('ovSalAugList', salAugs, o => {
+        const d = o.data;
+        const targets = (d.salarie_ids && d.salarie_ids.length) ? d.salarie_ids.length + ' salarié(s)' : 'tous';
+        return '+' + (d.percent || 0) + '% à partir du ' + (d.date_debut || '?') + ' (' + targets + ')';
+      });
+      renderOverrideList('ovRevRecList', revRecs, o => {
+        const d = o.data;
+        return (d.libelle || '-') + ' : ' + formatEuro(d.montant_mensuel || 0) + '/mois de ' + (d.mois_debut || '?') + ' à ' + (d.mois_fin || '?');
+      });
+      renderOverrideList('ovPretList', prets, o => {
+        const d = o.data;
+        return (d.libelle || '-') + ' : ' + formatEuro(d.montant || 0) + ' en ' + (d.mois_entree || '-') + ' · ' + (d.taux_annuel || 0) + '%/an · ' + (d.duree_mois || 0) + ' mois';
+      });
+      renderOverrideList('ovSubvAnnList', subvAnns, o => {
+        const d = o.data;
+        return (d.libelle || '-') + ' : ' + formatEuro(d.montant || 0) + ' en ' + (d.mois || '-');
+      });
+      renderOverrideList('ovGSheetOvList', gsheetOverrides, o => {
+        const d = o.data;
+        return (d.categorie || '-') + ' → ' + formatEuro(d.montant_mensuel || 0) + '/mois de ' + (d.mois_debut || '?') + ' à ' + (d.mois_fin || '?');
+      });
 
       // Pre-fill CA estimatif fields if override exists
       if (caEstimatifs.length > 0) {
@@ -7194,6 +7433,13 @@
         document.getElementById('ovCaMontant').value = d.montant_annuel || '';
         document.getElementById('ovCaNbMois').value = d.nb_mois || 12;
         updateCaEstimatifApercu();
+      }
+      // Pre-fill pipeline factor slider if override exists
+      const factorOv = pipelines.find(o => o.data.mode === 'factor');
+      if (factorOv) {
+        const pct = Math.round((factorOv.data.facteur || 0) * 100);
+        document.getElementById('ovPipelineFactor').value = pct;
+        document.getElementById('ovPipelineFactorVal').textContent = pct + '%';
       }
     }
 
@@ -7213,6 +7459,15 @@
       container.innerHTML = html;
     }
 
+    // Si le scénario en cours d'édition est sélectionné dans la liste, re-fetch sa projection
+    // pour que le graphe reflète immédiatement l'ajout/suppression de levier.
+    function maybeReloadProjection() {
+      const scenarioId = document.getElementById('scenarioEditId').value;
+      if (scenarioId && selectedScenarios.has(scenarioId)) {
+        renderScenariosComparison();
+      }
+    }
+
     async function deleteOverride(oid) {
       const scenarioId = document.getElementById('scenarioEditId').value;
       if (!scenarioId) return;
@@ -7220,6 +7475,7 @@
         await fetch('/api/scenarios/' + scenarioId + '/overrides/' + oid, { method: 'DELETE' });
         currentScenarioOverrides = currentScenarioOverrides.filter(o => o.id !== oid);
         renderAllOverrideLists();
+        maybeReloadProjection();
       } catch {
         alert('Erreur suppression override');
       }
@@ -7238,6 +7494,7 @@
         if (override.error) return alert(override.error);
         currentScenarioOverrides.push(override);
         renderAllOverrideLists();
+        maybeReloadProjection();
       } catch {
         alert('Erreur ajout override');
       }
@@ -7372,6 +7629,153 @@
       document.getElementById('ovRevLib').value = '';
       document.getElementById('ovRevMontant').value = '';
       document.getElementById('ovRevMois').value = '';
+    }
+
+    // --- Pipeline (factor OU deal) ---
+    function togglePipelineMode() {
+      const mode = document.querySelector('input[name="pipelineMode"]:checked').value;
+      document.getElementById('pipelineFactorFields').style.display = mode === 'factor' ? 'block' : 'none';
+      document.getElementById('pipelineDealFields').style.display = mode === 'deal' ? 'block' : 'none';
+    }
+
+    async function addOverridePipeline() {
+      const mode = document.querySelector('input[name="pipelineMode"]:checked').value;
+      if (mode === 'factor') {
+        const facteur = parseFloat(document.getElementById('ovPipelineFactor').value) / 100;
+        // Un seul facteur par scénario : supprimer l'existant
+        const existing = currentScenarioOverrides.filter(o => o.type === 'pipeline' && o.data.mode === 'factor');
+        for (const o of existing) await deleteOverride(o.id);
+        addOverrideToServer('pipeline', { mode: 'factor', facteur });
+      } else {
+        const nom = document.getElementById('ovPipelineDealNom').value.trim();
+        const montant = parseFloat(document.getElementById('ovPipelineDealMontant').value);
+        const probabilite = parseFloat(document.getElementById('ovPipelineDealProba').value) || 100;
+        const mois = document.getElementById('ovPipelineDealMois').value;
+        if (!nom) return alert('Libellé requis');
+        if (!montant || montant <= 0) return alert('Montant invalide');
+        if (!mois) return alert('Mois requis');
+        addOverrideToServer('pipeline', { mode: 'deal', nom, montant, probabilite, mois });
+        document.getElementById('ovPipelineDealNom').value = '';
+        document.getElementById('ovPipelineDealMontant').value = '';
+        document.getElementById('ovPipelineDealProba').value = 100;
+        document.getElementById('ovPipelineDealMois').value = '';
+      }
+    }
+
+    // --- Augmentation salariale ---
+    async function populateSalAugTargets() {
+      const sel = document.getElementById('ovSalAugTargets');
+      if (!sel) return;
+      try {
+        const res = await fetch('/api/scenarios/baseline/salaries');
+        const salaries = await res.json();
+        sel.innerHTML = (salaries || []).map(s => '<option value="' + s.id + '">' + (s.nom || 'Sans nom') + (s.poste ? ' — ' + s.poste : '') + '</option>').join('');
+      } catch { /* silent */ }
+    }
+
+    function addOverrideSalaireAugmentation() {
+      const percent = parseFloat(document.getElementById('ovSalAugPercent').value);
+      const date_debut = document.getElementById('ovSalAugDate').value;
+      if (!percent || percent <= 0) return alert('Pourcentage invalide');
+      if (!date_debut) return alert('Date début requise');
+      const sel = document.getElementById('ovSalAugTargets');
+      const salarie_ids = Array.from(sel.selectedOptions).map(o => o.value);
+      addOverrideToServer('salaire_augmentation', { percent, date_debut, salarie_ids });
+      document.getElementById('ovSalAugPercent').value = '';
+      document.getElementById('ovSalAugDate').value = '';
+      sel.selectedIndex = -1;
+    }
+
+    // --- Revenu récurrent ---
+    function addOverrideRevenuRecurrent() {
+      const libelle = document.getElementById('ovRevRecLib').value.trim();
+      const montant_mensuel = parseFloat(document.getElementById('ovRevRecMontant').value);
+      const mois_debut = document.getElementById('ovRevRecDebut').value;
+      const mois_fin = document.getElementById('ovRevRecFin').value;
+      if (!libelle) return alert('Libellé requis');
+      if (!montant_mensuel || montant_mensuel <= 0) return alert('Montant invalide');
+      if (!mois_debut || !mois_fin) return alert('Début et fin requis');
+      addOverrideToServer('revenu_recurrent', { libelle, montant_mensuel, mois_debut, mois_fin });
+      document.getElementById('ovRevRecLib').value = '';
+      document.getElementById('ovRevRecMontant').value = '';
+      document.getElementById('ovRevRecDebut').value = '';
+      document.getElementById('ovRevRecFin').value = '';
+    }
+
+    // --- Prêt : preview mensualité + add ---
+    function updatePretApercu() {
+      const P = parseFloat(document.getElementById('ovPretMontant').value) || 0;
+      const tx = (parseFloat(document.getElementById('ovPretTaux').value) || 0) / 100;
+      const n = parseInt(document.getElementById('ovPretDuree').value) || 0;
+      const el = document.getElementById('pretApercu');
+      if (P > 0 && n > 0) {
+        const mensualite = tx > 0 ? P * (tx / 12) / (1 - Math.pow(1 + tx / 12, -n)) : P / n;
+        const total = mensualite * n;
+        el.textContent = 'Mensualité : ' + formatEuro(Math.round(mensualite)) + ' × ' + n + ' mois = ' + formatEuro(Math.round(total)) + ' total (intérêts inclus)';
+      } else {
+        el.textContent = '';
+      }
+    }
+
+    function addOverridePret() {
+      const libelle = document.getElementById('ovPretLib').value.trim();
+      const montant = parseFloat(document.getElementById('ovPretMontant').value);
+      const mois_entree = document.getElementById('ovPretMois').value;
+      const taux_annuel = parseFloat(document.getElementById('ovPretTaux').value) || 0;
+      const duree_mois = parseInt(document.getElementById('ovPretDuree').value);
+      if (!libelle) return alert('Libellé requis');
+      if (!montant || montant <= 0) return alert('Montant invalide');
+      if (!mois_entree) return alert('Mois d\'entrée requis');
+      if (!duree_mois || duree_mois <= 0) return alert('Durée invalide');
+      addOverrideToServer('pret', { libelle, montant, mois_entree, taux_annuel, duree_mois });
+      document.getElementById('ovPretLib').value = '';
+      document.getElementById('ovPretMontant').value = '';
+      document.getElementById('ovPretMois').value = '';
+      document.getElementById('ovPretTaux').value = '';
+      document.getElementById('ovPretDuree').value = '';
+      document.getElementById('pretApercu').textContent = '';
+    }
+
+    // --- Subvention annoncée ---
+    function addOverrideSubventionAnnoncee() {
+      const libelle = document.getElementById('ovSubvAnnLib').value.trim();
+      const montant = parseFloat(document.getElementById('ovSubvAnnMontant').value);
+      const mois = document.getElementById('ovSubvAnnMois').value;
+      if (!libelle) return alert('Libellé requis');
+      if (!montant || montant <= 0) return alert('Montant invalide');
+      if (!mois) return alert('Mois requis');
+      addOverrideToServer('subvention_annoncee', { libelle, montant, mois });
+      document.getElementById('ovSubvAnnLib').value = '';
+      document.getElementById('ovSubvAnnMontant').value = '';
+      document.getElementById('ovSubvAnnMois').value = '';
+    }
+
+    // --- Ligne GSheet override ---
+    async function populateGSheetCategories() {
+      const sel = document.getElementById('ovGSheetCategorie');
+      if (!sel) return;
+      try {
+        const res = await fetch('/api/cr-prev/categories');
+        const data = await res.json();
+        sel.innerHTML = '<option value="">— Choisir —</option>' + (data.categories || []).map(c => '<option value="' + c + '">' + c + '</option>').join('');
+      } catch {
+        sel.innerHTML = '<option value="">Erreur chargement</option>';
+      }
+    }
+
+    function addOverrideLigneGSheet() {
+      const categorie = document.getElementById('ovGSheetCategorie').value;
+      const montant_mensuel = parseFloat(document.getElementById('ovGSheetMontant').value);
+      const mois_debut = document.getElementById('ovGSheetDebut').value;
+      const mois_fin = document.getElementById('ovGSheetFin').value;
+      if (!categorie) return alert('Catégorie requise');
+      if (!(montant_mensuel >= 0)) return alert('Montant invalide');
+      if (!mois_debut || !mois_fin) return alert('Début et fin requis');
+      addOverrideToServer('ligne_gsheet_override', { categorie, montant_mensuel, mois_debut, mois_fin });
+      document.getElementById('ovGSheetCategorie').selectedIndex = 0;
+      document.getElementById('ovGSheetMontant').value = '';
+      document.getElementById('ovGSheetDebut').value = '';
+      document.getElementById('ovGSheetFin').value = '';
     }
 
 
