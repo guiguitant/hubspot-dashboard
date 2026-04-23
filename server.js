@@ -383,6 +383,7 @@ async function fetchOpenDeals() {
       amount: parseFloat(deal.properties.amount) || 0,
       probability: stageInfo.probability,
       createdate: deal.properties.createdate || null,
+      closedate: deal.properties.closedate || null,
       stageEnteredAt: deal.properties[stageEnteredKey] || null,
     });
   }
@@ -1779,9 +1780,17 @@ function extractSupplierFromLabel(label) {
 }
 
 // Fetch customer invoices (factures clients)
+// Cache 10 min : Pennylane pagine à 400ms/page, un refresh tréso sans cache prend plusieurs secondes.
+let customerInvoicesCache = null;
+let customerInvoicesCacheTime = 0;
+const CUSTOMER_INVOICES_CACHE_TTL = 10 * 60 * 1000;
+
 async function fetchCustomerInvoices() {
+  if (customerInvoicesCache && (Date.now() - customerInvoicesCacheTime) < CUSTOMER_INVOICES_CACHE_TTL) {
+    return customerInvoicesCache;
+  }
   const invoices = await pennylaneFetchAll('/customer_invoices', {});
-  return invoices.map(inv => ({
+  const mapped = invoices.map(inv => ({
     id: inv.id,
     label: inv.label || '',
     customerName: extractCustomerFromLabel(inv.label),
@@ -1794,6 +1803,9 @@ async function fetchCustomerInvoices() {
     paid: inv.paid || false,
     invoiceNumber: inv.invoice_number || '',
   }));
+  customerInvoicesCache = mapped;
+  customerInvoicesCacheTime = Date.now();
+  return mapped;
 }
 
 // Fetch supplier invoices (factures fournisseurs / charges)
@@ -1830,8 +1842,11 @@ async function fetchRecentTransactions() {
 }
 
 // Cache for tresorerie data (avoid hammering API)
+// Deux slots : sans M-1 (scénarios), avec M-1 (/api/tresorerie)
 let tresorerieCache = null;
 let tresorerieCacheTime = 0;
+let tresorerieCacheWithPrev = null;
+let tresorerieCacheWithPrevTime = 0;
 const TRESORERIE_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 // Fetch all Qonto transactions with pagination (up to 6 months back)
@@ -1855,10 +1870,20 @@ async function fetchQontoTransactions(iban, monthsBack = 6) {
 }
 
 // Build treasury data from Qonto
-async function buildTresorerieFromQonto() {
-  // Return cache if fresh
-  if (tresorerieCache && (Date.now() - tresorerieCacheTime) < TRESORERIE_CACHE_TTL) {
-    return tresorerieCache;
+// horizonMonths : nombre de mois projetés dans `previsionnel` (défaut 12, utilisé par /api/tresorerie).
+// includePreviousMonth : si true, ajoute aussi M-1 au début de previsionnel (utilisé par /api/tresorerie
+//   pour afficher le dernier mois clos à côté du mois en cours). Les endpoints scénarios utilisent false
+//   car l'horizon ne concerne que le présent et le futur.
+// Le cache ne s'applique qu'au horizon par défaut sans M-1, pour éviter les résultats tronqués.
+async function buildTresorerieFromQonto(horizonMonths = 12, { includePreviousMonth = false } = {}) {
+  // Return cache if fresh (deux slots distincts selon includePreviousMonth)
+  if (horizonMonths === 12) {
+    if (!includePreviousMonth && tresorerieCache && (Date.now() - tresorerieCacheTime) < TRESORERIE_CACHE_TTL) {
+      return tresorerieCache;
+    }
+    if (includePreviousMonth && tresorerieCacheWithPrev && (Date.now() - tresorerieCacheWithPrevTime) < TRESORERIE_CACHE_TTL) {
+      return tresorerieCacheWithPrev;
+    }
   }
 
   // Fetch bank balance + transactions from Qonto
@@ -1913,7 +1938,7 @@ async function buildTresorerieFromQonto() {
   const moisCourantKey = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
   const chargesMoisCourant = chargesParMois[moisCourantKey] || 0;
 
-  // --- Estimer les charges récurrentes mensuelles ---
+  // --- Estimer les charges récurrentes mensuelles (utilisé par les KPIs top du tab Tréso) ---
   // On prend la moyenne des 3 derniers mois complets
   const chargesRecurrentes = [];
   for (let i = 1; i <= 3; i++) {
@@ -1925,43 +1950,52 @@ async function buildTresorerieFromQonto() {
     ? chargesRecurrentes.reduce((s, v) => s + v, 0) / chargesRecurrentes.length
     : chargesMoisCourant;
 
-  // --- Prévisionnel mois par mois (12 mois) ---
+  // --- Prévisionnel mois par mois : M-1 (clos, Qonto réel) + M (en cours) + (horizonMonths-1) futurs ---
+  // Contrat :
+  // - Mois CLOS (mKey < moisCourantKey) : encaissements/decaissements = Qonto réel
+  // - Mois EN COURS + FUTURS : encaissements/decaissements = 0, seront remplis côté buildPrevisionnel
+  //   (CR_Prev pour charges, factures Notion + pipeline pondéré pour encaissements)
+  // soldeDebutFirstMonth = soldeDebut du premier mois de la projection (M-1), dérivé à rebours
+  // depuis le solde Qonto actuel en décumulant les transactions réelles. Le cumul des soldes
+  // mois par mois sera refait dans buildPrevisionnel à partir de ce point de départ.
   const previsionnel = [];
-  let soldeProjection = solde || 0;
-
-  for (let i = 0; i < 12; i++) {
+  const startOffset = includePreviousMonth ? -1 : 0;
+  for (let i = startOffset; i < horizonMonths; i++) {
     const mDate = new Date(currentYear, currentMonth - 1 + i, 1);
     const mois = mDate.getMonth() + 1;
     const annee = mDate.getFullYear();
     const mKey = `${annee}-${String(mois).padStart(2, '0')}`;
     const label = `${String(mois).padStart(2, '0')}/${annee}`;
+    const isClos = mKey < moisCourantKey;
 
-    let encaissementsMois = 0;
-    let decaissementsMois = 0;
-
-    if (i === 0) {
-      // Mois courant: données réelles Qonto
-      encaissementsMois = encaissementsParMois[mKey] || 0;
-      decaissementsMois = chargesParMois[mKey] || 0;
-    } else {
-      // Mois futurs: estimation basée sur la moyenne
-      decaissementsMois = chargesMoyennes;
-    }
-
-    const variation = encaissementsMois - decaissementsMois;
-    soldeProjection += variation;
+    const encaissementsMois = isClos ? (encaissementsParMois[mKey] || 0) : 0;
+    const decaissementsMois = isClos ? (chargesParMois[mKey] || 0) : 0;
 
     previsionnel.push({
       mois,
       annee,
       label,
-      soldeDebut: soldeProjection - variation,
+      isClos,
       encaissements: Math.round(encaissementsMois),
       decaissements: Math.round(decaissementsMois),
-      variation: Math.round(variation),
-      soldeFin: Math.round(soldeProjection),
+      // soldeDebut / soldeFin seront calculés dans buildPrevisionnel à partir de soldeDebutFirstMonth
+      soldeDebut: 0,
+      soldeFin: 0,
+      variation: 0,
     });
   }
+
+  // Calcul du soldeDebut du premier mois (M-1) à rebours depuis le solde Qonto actuel :
+  //   soldeDebut(M)   = soldeActuel - Σ(transactions signées dans M)
+  //   soldeDebut(M-1) = soldeDebut(M) - (enc réel M-1 - dec réel M-1)
+  let soldeDebutMoisCourant = (solde || 0)
+    - (encaissementsParMois[moisCourantKey] || 0)
+    + (chargesParMois[moisCourantKey] || 0);
+  const firstMois = previsionnel[0];
+  const firstMKey = `${firstMois.annee}-${String(firstMois.mois).padStart(2, '0')}`;
+  const soldeDebutFirstMonth = firstMKey < moisCourantKey
+    ? soldeDebutMoisCourant - ((encaissementsParMois[firstMKey] || 0) - (chargesParMois[firstMKey] || 0))
+    : soldeDebutMoisCourant;
 
   // --- Ventilation des charges par catégorie ---
   const ventilationCharges = Object.entries(chargesParCategorie)
@@ -1970,6 +2004,8 @@ async function buildTresorerieFromQonto() {
 
   const result = {
     soldeActuel: solde,
+    soldeDebutFirstMonth: Math.round(soldeDebutFirstMonth),
+    moisCourantKey,
     chargesMoisCourant: Math.round(chargesMoisCourant),
     chargesMoyennes: Math.round(chargesMoyennes),
     ventilationCharges,
@@ -1980,9 +2016,16 @@ async function buildTresorerieFromQonto() {
     creditsDetailParMois,
   };
 
-  // Update cache
-  tresorerieCache = result;
-  tresorerieCacheTime = Date.now();
+  // Update cache (slot dédié selon includePreviousMonth)
+  if (horizonMonths === 12) {
+    if (includePreviousMonth) {
+      tresorerieCacheWithPrev = result;
+      tresorerieCacheWithPrevTime = Date.now();
+    } else {
+      tresorerieCache = result;
+      tresorerieCacheTime = Date.now();
+    }
+  }
 
   return result;
 }
@@ -2245,43 +2288,10 @@ app.post('/api/auth-masse-salariale', (req, res) => {
   res.status(401).json({ error: 'Mot de passe incorrect' });
 });
 
-// --- Revenus exceptionnels (Supabase) ---
-
-app.get('/api/revenus-exceptionnels', async (req, res) => {
-  const { data, error } = await supabase.from('revenus_exceptionnels').select('*').order('mois');
-  if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
-});
-
-app.post('/api/revenus-exceptionnels', async (req, res) => {
-  const { libelle, montant, mois } = req.body;
-  if (!libelle || typeof libelle !== 'string' || !libelle.trim()) {
-    return res.status(400).json({ error: 'Libelle requis' });
-  }
-  if (!montant || typeof montant !== 'number' || montant <= 0) {
-    return res.status(400).json({ error: 'Montant doit etre > 0' });
-  }
-  if (!mois || !/^\d{4}-\d{2}$/.test(mois)) {
-    return res.status(400).json({ error: 'Mois au format YYYY-MM requis' });
-  }
-  const { data, error } = await supabase.from('revenus_exceptionnels')
-    .insert({ libelle: libelle.trim(), montant, mois })
-    .select()
-    .single();
-  if (error) return res.status(500).json({ error: error.message });
-  tresorerieCacheTime = 0;
-  res.json(data);
-});
-
-app.delete('/api/revenus-exceptionnels/:id', async (req, res) => {
-  const { error, count } = await supabase.from('revenus_exceptionnels')
-    .delete({ count: 'exact' })
-    .eq('id', req.params.id);
-  if (error) return res.status(500).json({ error: error.message });
-  if (count === 0) return res.status(404).json({ error: 'Revenu non trouve' });
-  tresorerieCacheTime = 0;
-  res.json({ ok: true });
-});
+// --- Revenus exceptionnels Supabase : déprécié en migration 24.
+// Table `revenus_exceptionnels` droppée. Use case remplacé par :
+//   • override scénario `revenu_exceptionnel` (cas hypothétique)
+//   • lignes Subvention/Aide du GSheet Plan_TRE_Prév (cas réels avec cat. TVA)
 
 // --- Salariés (Supabase) ---
 
@@ -2317,7 +2327,7 @@ app.post('/api/salaries', async (req, res) => {
     .select()
     .single();
   if (error) return res.status(500).json({ error: error.message });
-  tresorerieCacheTime = 0;
+  tresorerieCacheTime = 0; tresorerieCacheWithPrevTime = 0;
   res.json(data);
 });
 
@@ -2329,7 +2339,7 @@ app.put('/api/salaries/:id', async (req, res) => {
     .select()
     .single();
   if (error) return res.status(500).json({ error: error.message });
-  tresorerieCacheTime = 0;
+  tresorerieCacheTime = 0; tresorerieCacheWithPrevTime = 0;
   res.json(data);
 });
 
@@ -2339,7 +2349,7 @@ app.delete('/api/salaries/:id', async (req, res) => {
     .eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   if (count === 0) return res.status(404).json({ error: 'Salarie non trouve' });
-  tresorerieCacheTime = 0;
+  tresorerieCacheTime = 0; tresorerieCacheWithPrevTime = 0;
   res.json({ ok: true });
 });
 
@@ -2354,24 +2364,78 @@ function masseSalarialeMois(annee, mois, salaries) {
     const sortie = s.date_sortie ? new Date(s.date_sortie) : null;
     if (entree > mDate) continue;
     if (sortie && sortie < new Date(annee, mois - 1, 1)) continue;
-    const cout = s.net_mensuel + s.charges_mensuelles;
+    // Applique les augmentations scénario (cumulatives) dont la date_debut est atteinte
+    let multiplier = 1;
+    if (s.augmentations && s.augmentations.length > 0) {
+      for (const aug of s.augmentations) {
+        if (aug.date_debut && new Date(aug.date_debut) <= mDate) {
+          multiplier *= (1 + (aug.percent || 0) / 100);
+        }
+      }
+    }
+    const net = s.net_mensuel * multiplier;
+    const charges = s.charges_mensuelles * multiplier;
+    const cout = net + charges;
     total += cout;
-    detail.push({ nom: s.nom, poste: s.poste, type: s.type, net: s.net_mensuel, charges: s.charges_mensuelles, cout: Math.round(cout) });
+    detail.push({ nom: s.nom, poste: s.poste, type: s.type, net: Math.round(net), charges: Math.round(charges), cout: Math.round(cout) });
   }
   return { total: Math.round(total), detail };
 }
 
-async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, salaries, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals, crPrevData, caEstimatif }) {
-  // --- A encaisser depuis Notion (factures envoyées + prévisionnelles) ---
+// buildPrevisionnel — paramètres de composition baseline :
+// - includeGSheet           : si false, les charges futures retombent sur la moyenne Qonto au lieu des valeurs GSheet CR_Prev (défaut true)
+// - includePipeline         : si false, le pipeline pondéré HubSpot n'est pas calculé ni distribué (défaut true)
+// - includeCaNotion         : si false, les encaissements factures Notion sont à 0 (défaut true).
+//                             Utile pour un scénario "estimation CA annuelle from scratch" sans le CA déjà facturé.
+// - includeSalariesBaseline : si false, masse salariale = 0 (ignore complètement la baseline Supabase `salaries`).
+//                             Permet de recomposer une équipe fictive via les overrides `salaire`. Défaut true.
+// Nouveaux leviers scénarios (Phase B) :
+// - revenusRecurrentsExtras : [{ libelle, montant_mensuel, mois_debut, mois_fin }]
+// - subventionsAnnoncees    : [{ libelle, montant, mois }] — catégorisées subv pour l'EBE, pas dans CA P&L
+// - gsheetOverrides         : [{ categorie, mois_debut, mois_fin, montant_mensuel }]
+async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, salaries, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals, crPrevData, caEstimatif, customerInvoices = [], includeGSheet = true, includePipeline = true, includeCaNotion = true, includeSalariesBaseline = true, revenusRecurrentsExtras = [], subventionsAnnoncees = [], gsheetOverrides = [] }) {
+  // --- A encaisser : deux sources ---
+  // 1) Factures ÉMISES depuis Pennylane (source de vérité pour late/upcoming, avec deadline et remaining_amount réels)
+  // 2) Factures PRÉVISIONNELLES depuis Notion (missions dont la facture n'est pas encore émise)
+  // Règle de déduplication : une mission Notion avec statut "Solde envoye" / "Acompte envoye" est IGNORÉE
+  // ici car sa facture doit exister côté Pennylane. Si le statut Notion n'est pas à jour (facture émise
+  // mais statut Notion resté "a envoyer"), la facture sera comptée une seule fois côté Pennylane,
+  // pas en double. Propriété volontaire : discipline Notion ↔ vérité Pennylane.
   const facturesAEncaisser = [];
   const now = new Date();
 
+  // --- 1) Pennylane : factures émises, non payées ---
+  for (const inv of (customerInvoices || [])) {
+    if (inv.paid) continue;
+    if (inv.status === 'cancelled' || inv.status === 'incomplete') continue;
+    if (!inv.remainingAmount || inv.remainingAmount <= 0) continue;
+    if (inv.status !== 'upcoming' && inv.status !== 'late') continue;
+    const isLate = inv.status === 'late' || (inv.dueDate && new Date(inv.dueDate) < now);
+    facturesAEncaisser.push({
+      client: inv.customerName || inv.label || '-',
+      mission: inv.invoiceNumber || inv.label || '-',
+      type: 'Facture',
+      montant: inv.remainingAmount,
+      dateEmission: inv.date,
+      dateEcheance: inv.dueDate,
+      status: isLate ? 'late' : 'upcoming',
+      previsionnel: false,
+      source: 'pennylane',
+    });
+  }
+
+  // --- 2) Notion : missions pas encore facturées (prévisionnelles uniquement) ---
   for (const m of notionMissions) {
     if (m.ca <= 0) continue;
     const status = (m.facturation || '').toLowerCase()
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
+    // Statuts exclus ici : "solde paye" (terminée), "solde envoye" (facture émise → côté Pennylane),
+    // "acompte envoye" (facture acompte émise → côté Pennylane pour l'acompte, mais on garde la mission
+    // pour le solde tant qu'il n'est pas envoyé).
     if (status.includes('solde paye')) continue;
+    const soldeEnvoye = status.includes('solde envoye');
+    const acompteEnvoye = status.includes('acompte envoye');
 
     function echeanceJ45(dateStr) {
       if (!dateStr) return null;
@@ -2380,48 +2444,34 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
       return d.toISOString().split('T')[0];
     }
 
-    // --- ACOMPTE ---
-    if (m.montantAcompte > 0) {
-      if (status.includes('acompte envoye')) {
-        const dateEmission = m.dateFactureAcompte;
-        const dateEcheance = echeanceJ45(dateEmission);
-        const isLate = dateEcheance && new Date(dateEcheance) < now;
-        facturesAEncaisser.push({
-          client: m.client || m.nom, mission: m.nom, type: 'Acompte',
-          montant: m.montantAcompte, dateEmission, dateEcheance,
-          status: isLate ? 'late' : 'upcoming', previsionnel: false,
-        });
-      } else if (status.includes('acompte a envoyer') || status === 'non defini') {
-        const dateEmission = m.dateFactureAcompte;
-        const dateEcheance = echeanceJ45(dateEmission);
-        facturesAEncaisser.push({
-          client: m.client || m.nom, mission: m.nom, type: 'Acompte',
-          montant: m.montantAcompte, dateEmission, dateEcheance,
-          status: 'previsionnel', previsionnel: true,
-        });
-      }
+    // --- ACOMPTE : prévisionnel uniquement si pas encore émis ni payé ---
+    if (m.montantAcompte > 0
+        && !acompteEnvoye
+        && !status.includes('acompte paye')
+        && (status.includes('acompte a envoyer') || status === 'non defini' || status === '')) {
+      const dateEmission = m.dateFactureAcompte;
+      const dateEcheance = echeanceJ45(dateEmission);
+      facturesAEncaisser.push({
+        client: m.client || m.nom, mission: m.nom, type: 'Acompte',
+        montant: m.montantAcompte, dateEmission, dateEcheance,
+        status: 'previsionnel', previsionnel: true,
+        source: 'notion',
+      });
     }
 
-    // --- SOLDE ---
+    // --- SOLDE : prévisionnel uniquement si la facture solde n'est pas émise ---
+    if (soldeEnvoye) continue; // le solde est côté Pennylane
     const montantSolde = m.ca - m.montantAcompte;
     if (montantSolde > 0) {
-      if (status.includes('solde envoye')) {
-        const dateEmission = m.dateFactureFinale;
-        const dateEcheance = echeanceJ45(dateEmission);
-        const isLate = dateEcheance && new Date(dateEcheance) < now;
-        facturesAEncaisser.push({
-          client: m.client || m.nom, mission: m.nom, type: 'Solde',
-          montant: montantSolde, dateEmission, dateEcheance,
-          status: isLate ? 'late' : 'upcoming', previsionnel: false,
-        });
-      } else if (status.includes('acompte paye') || status.includes('solde a envoyer')
-                 || status.includes('acompte envoye') || status.includes('acompte a envoyer') || status === 'non defini') {
+      if (status.includes('acompte paye') || status.includes('solde a envoyer')
+                 || acompteEnvoye || status.includes('acompte a envoyer') || status === 'non defini' || status === '') {
         const dateEmission = m.dateFactureFinale;
         const dateEcheance = echeanceJ45(dateEmission);
         facturesAEncaisser.push({
           client: m.client || m.nom, mission: m.nom, type: 'Solde',
           montant: montantSolde, dateEmission, dateEcheance,
           status: 'previsionnel', previsionnel: true,
+          source: 'notion',
         });
       }
     }
@@ -2436,19 +2486,31 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
   const totalPrevisionnel = facturesAEncaisser.filter(f => f.previsionnel).reduce((s, f) => s + f.montant, 0);
   const totalAEncaisserNotion = totalEnvoye + totalPrevisionnel;
 
-  // Calcul du pipeline pondéré HubSpot
-  const factor = pipelineFactor != null ? pipelineFactor : 1;
+  // Calcul du pipeline pondéré HubSpot (désactivable via includePipeline=false)
+  // Distribué dans pipelinePondereEncaissements[mKey] selon closedate + 45j de délai client.
+  // Si pas de closedate, fallback sur le mois courant + 1.
+  const factor = includePipeline ? (pipelineFactor != null ? pipelineFactor : 1) : 0;
   let pipelinePondere = 0;
   const pipelineDetail = [];
-  for (const stage of KANBAN_STAGES) {
-    const deals = pipelineDeals[stage.label] || [];
-    for (const deal of deals) {
-      const weighted = deal.amount * (deal.probability / 100) * factor;
-      pipelinePondere += weighted;
-      pipelineDetail.push({
-        name: deal.name, amount: deal.amount,
-        probability: deal.probability, weighted: Math.round(weighted), stage: stage.label,
-      });
+  const pipelinePondereEncaissements = {};
+  if (includePipeline) {
+    const fallbackDate = new Date(); fallbackDate.setMonth(fallbackDate.getMonth() + 1);
+    for (const stage of KANBAN_STAGES) {
+      const deals = pipelineDeals[stage.label] || [];
+      for (const deal of deals) {
+        const weighted = deal.amount * (deal.probability / 100) * factor;
+        pipelinePondere += weighted;
+        pipelineDetail.push({
+          name: deal.name, amount: deal.amount,
+          probability: deal.probability, weighted: Math.round(weighted), stage: stage.label,
+          closedate: deal.closedate,
+        });
+        // Distribuer le poids dans le mois d'encaissement attendu (= closedate + 45j)
+        const closing = deal.closedate ? new Date(deal.closedate) : fallbackDate;
+        const cashDate = new Date(closing); cashDate.setDate(cashDate.getDate() + 45);
+        const mKey = `${cashDate.getFullYear()}-${String(cashDate.getMonth() + 1).padStart(2, '0')}`;
+        pipelinePondereEncaissements[mKey] = (pipelinePondereEncaissements[mKey] || 0) + weighted;
+      }
     }
   }
 
@@ -2468,10 +2530,13 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
     if (isRetard) mKey = moisCourantKey;
     encaissementsParMoisFactures[mKey] = (encaissementsParMoisFactures[mKey] || 0) + f.montant;
 
-    if (f.status === 'late' || isRetard) {
-      encaissementsRetard[mKey] = (encaissementsRetard[mKey] || 0) + f.montant;
-    } else if (f.previsionnel) {
+    // Bucketing : les prévisionnelles ne sont jamais classées "En retard" — elles n'ont pas été émises,
+    // donc aucune échéance de paiement. Leur mKey est forcé sur le mois courant si la date planifiée est
+    // passée (retard de facturation interne → on l'affiche comme à encaisser ce mois-ci).
+    if (f.previsionnel) {
       encaissementsPrev[mKey] = (encaissementsPrev[mKey] || 0) + f.montant;
+    } else if (f.status === 'late' || isRetard) {
+      encaissementsRetard[mKey] = (encaissementsRetard[mKey] || 0) + f.montant;
     } else {
       encaissementsEnvoye[mKey] = (encaissementsEnvoye[mKey] || 0) + f.montant;
     }
@@ -2502,22 +2567,69 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
     }
   }
 
+  // --- Revenus récurrents (scénarios) — analog à chargesFixesExtras côté encaissements ---
+  const revenusRecurrentsParMois = {};
+  if (revenusRecurrentsExtras && revenusRecurrentsExtras.length > 0) {
+    for (const rr of revenusRecurrentsExtras) {
+      for (const mois of qontoData.previsionnel) {
+        const mKey = `${mois.annee}-${String(mois.mois).padStart(2, '0')}`;
+        if (mKey >= rr.mois_debut && mKey <= rr.mois_fin) {
+          revenusRecurrentsParMois[mKey] = (revenusRecurrentsParMois[mKey] || 0) + rr.montant_mensuel;
+        }
+      }
+    }
+  }
+
+  // --- Subventions annoncées (scénarios) — one-shot, catégorisées subv pour remonter dans l'EBE ---
+  const subvAnnonceesParMois = {};
+  const subvAnnonceesDetailParMois = {};
+  if (subventionsAnnoncees && subventionsAnnoncees.length > 0) {
+    for (const s of subventionsAnnoncees) {
+      subvAnnonceesParMois[s.mois] = (subvAnnonceesParMois[s.mois] || 0) + (s.montant || 0);
+      if (!subvAnnonceesDetailParMois[s.mois]) subvAnnonceesDetailParMois[s.mois] = [];
+      subvAnnonceesDetailParMois[s.mois].push(s);
+    }
+  }
+
   // --- Deals fictifs (scénarios) ---
+  // Le mois saisi par l'user = mois de signature/closing. L'encaissement effectif est
+  // décalé de delai_encaissement_jours (défaut 45j, cohérent avec /api/charges convention)
+  // pour modéliser le délai client réaliste.
   const fictionalEncaissements = {};
   if (fictionalDeals && fictionalDeals.length > 0) {
     for (const fd of fictionalDeals) {
-      const mKey = fd.mois;
+      const closingKey = fd.mois;
+      const delaiJours = (fd.delai_encaissement_jours != null) ? fd.delai_encaissement_jours : 45;
+      let mKey = closingKey;
+      if (closingKey && delaiJours) {
+        const [y, m] = closingKey.split('-').map(Number);
+        if (y && m) {
+          const d = new Date(y, m - 1, 1);
+          d.setDate(d.getDate() + delaiJours);
+          mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        }
+      }
       const montant = fd.montant * ((fd.probabilite || 100) / 100);
       fictionalEncaissements[mKey] = (fictionalEncaissements[mKey] || 0) + montant;
     }
   }
 
-  // --- Charges GSheet par mois (pour remplacer la moyenne Qonto sur les mois futurs) ---
+  // --- Charges GSheet par mois (source principale pour mois en cours + futurs, désactivable via includeGSheet=false) ---
+  // gsheetOverrides permet de remplacer la valeur d'une catégorie mère sur une plage de mois
+  // chargesGSheetDetailParMois : détail par catégorie pour l'affichage dans la modale mois
   const chargesGSheetParMois = {};
-  if (crPrevData && crPrevData.categories) {
-    for (const [, moisData] of Object.entries(crPrevData.categories)) {
+  const chargesGSheetDetailParMois = {};
+  if (includeGSheet && crPrevData && crPrevData.categories) {
+    const findOverride = (cat, mKey) => (gsheetOverrides || []).find(o =>
+      o.categorie === cat && mKey >= o.mois_debut && mKey <= o.mois_fin
+    );
+    for (const [cat, moisData] of Object.entries(crPrevData.categories)) {
       for (const [mKey, val] of Object.entries(moisData)) {
-        chargesGSheetParMois[mKey] = (chargesGSheetParMois[mKey] || 0) + val;
+        const override = findOverride(cat, mKey);
+        const finalVal = override ? (override.montant_mensuel || 0) : val;
+        chargesGSheetParMois[mKey] = (chargesGSheetParMois[mKey] || 0) + finalVal;
+        if (!chargesGSheetDetailParMois[mKey]) chargesGSheetDetailParMois[mKey] = {};
+        chargesGSheetDetailParMois[mKey][cat] = Math.round(finalVal);
       }
     }
   }
@@ -2529,35 +2641,65 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
 
   const previsionnelFinal = qontoData.previsionnel.map((mois) => {
     const mKey = `${mois.annee}-${String(mois.mois).padStart(2, '0')}`;
-    const isFuture = mKey > moisCourantKey;
+    // Régime : isClos (mois passé clos) → encaissements/charges = Qonto réel uniquement.
+    //          !isClos (mois en cours + futurs) → CR_Prev pour charges, factures Notion + pipeline pour encaissements.
+    const isClos = mois.isClos === true;
 
     // --- Encaissements ---
-    let encaissementsFactures, factEnvoye, factPrev, factRetard, fictionalEnc;
-    if (caMensuelHT !== null) {
-      // CA estimatif : remplace Notion + pipeline
+    // Pour un mois clos, on ne rajoute rien aux encaissements Qonto déjà agrégés (factures + pipeline sont
+    // déjà capturés en réel dans le cash-in Qonto du mois). On garde factures/pipeline à 0.
+    let encaissementsFactures, factEnvoye, factPrev, factRetard, fictionalEnc, pipelineEnc;
+    if (isClos) {
       factEnvoye = 0; factPrev = 0; factRetard = 0;
       encaissementsFactures = 0;
       fictionalEnc = 0;
+      pipelineEnc = 0;
+    } else if (caMensuelHT !== null) {
+      // CA estimatif (scénario) : remplace TOUT le CA baseline (Notion + pipeline pondéré + deals fictifs)
+      factEnvoye = 0; factPrev = 0; factRetard = 0;
+      encaissementsFactures = 0;
+      fictionalEnc = 0;
+      pipelineEnc = 0;
+    } else if (!includeCaNotion) {
+      // Scénario "sans CA facturé Notion" : zéro les factures Notion, le pipeline et les deals fictifs restent
+      factEnvoye = 0; factPrev = 0; factRetard = 0;
+      encaissementsFactures = 0;
+      fictionalEnc = Math.round(fictionalEncaissements[mKey] || 0);
+      pipelineEnc = Math.round(pipelinePondereEncaissements[mKey] || 0);
     } else {
       factEnvoye = Math.round(encaissementsEnvoye[mKey] || 0);
       factPrev = Math.round(encaissementsPrev[mKey] || 0);
       factRetard = Math.round(encaissementsRetard[mKey] || 0);
       encaissementsFactures = factEnvoye + factPrev + factRetard;
       fictionalEnc = Math.round(fictionalEncaissements[mKey] || 0);
+      pipelineEnc = Math.round(pipelinePondereEncaissements[mKey] || 0);
     }
 
-    const revExc = Math.round(revenusParMois[mKey] || 0);
-    const masse = masseSalarialeMois(mois.annee, mois.mois, salaries);
-    const chargesFixesExtra = Math.round(chargesFixesParMois[mKey] || 0);
+    // Revenus exceptionnels / récurrents / subventions : overrides scénario only (0 pour /api/tresorerie)
+    // Pour mois clos : on les zéro (les entrées réelles sont déjà dans le cash-in Qonto du mois).
+    const revExc            = isClos ? 0 : Math.round(revenusParMois[mKey] || 0);
+    const revenusRecurrents = isClos ? 0 : Math.round(revenusRecurrentsParMois[mKey] || 0);
+    const subvAnnoncees     = isClos ? 0 : Math.round(subvAnnonceesParMois[mKey] || 0);
 
-    // --- Décaissements : GSheet pour mois futurs, Qonto pour mois courant ---
-    let decaissementsBase = mois.decaissements;
-    if (isFuture && chargesGSheetParMois[mKey] != null) {
+    // Masse salariale : si includeSalariesBaseline=false, ne garde que les overrides scénario (id "fictional-*")
+    const effectiveSalaries = includeSalariesBaseline
+      ? salaries
+      : salaries.filter(s => typeof s.id === 'string' && s.id.startsWith('fictional-'));
+    const masse = masseSalarialeMois(mois.annee, mois.mois, effectiveSalaries);
+    const chargesFixesExtra = isClos ? 0 : Math.round(chargesFixesParMois[mKey] || 0);
+
+    // --- Décaissements : Qonto réel pour mois clos, CR_Prev pour mois en cours + futurs ---
+    let decaissementsBase = mois.decaissements; // = Qonto réel pour isClos, 0 pour !isClos
+    let chargesGSheetDetail = null;
+    if (!isClos && chargesGSheetParMois[mKey] != null) {
       decaissementsBase = Math.round(chargesGSheetParMois[mKey]);
+      chargesGSheetDetail = chargesGSheetDetailParMois[mKey] || {};
     }
 
     // --- Encaissements base ---
-    const encBase = caMensuelHT !== null && isFuture ? caMensuelHT : mois.encaissements;
+    // Pour mois clos : Qonto réel (mois.encaissements = cash-in Qonto du mois).
+    // Pour !isClos : 0, sauf en scénario CA estimatif où on force caMensuelHT.
+    const encBase = (caMensuelHT !== null && !isClos) ? caMensuelHT : mois.encaissements;
 
     return {
       ...mois,
@@ -2567,20 +2709,29 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
       encaissementsRetard: factRetard,
       revenusExceptionnels: revExc,
       revenusExceptionnelsDetail: revenusDetailParMois[mKey] || [],
+      revenusRecurrents,
+      subventionsAnnoncees: subvAnnoncees,
+      subventionsAnnonceesDetail: subvAnnonceesDetailParMois[mKey] || [],
+      pipelinePondereEncaissements: pipelineEnc,
       masseSalariale: masse.total,
       masseSalarialeDetail: masse.detail,
       chargesFixesExtra,
       fictionalEncaissements: fictionalEnc,
       decaissements: decaissementsBase + chargesFixesExtra,
+      chargesGSheetDetail, // null pour mois clos, { categorie: montant } sinon
       encaissements: encBase,
-      encaissementsTotal: encBase + encaissementsFactures + revExc + fictionalEnc,
+      encaissementsTotal: encBase + encaissementsFactures + revExc + fictionalEnc + revenusRecurrents + subvAnnoncees + pipelineEnc,
     };
   });
 
-  // Recalculer les soldes
-  let soldeCumul = qontoData.soldeActuel || 0;
+  // Recalculer les soldes en cumulant depuis soldeDebutFirstMonth (début du premier mois = M-1).
+  // Pour les mois clos, la variation cumulée reproduit l'évolution réelle Qonto et ramène le cumul
+  // au soldeActuel au 1er du mois en cours. Pour le mois courant et les futurs, on projette.
+  let soldeCumul = qontoData.soldeDebutFirstMonth != null
+    ? qontoData.soldeDebutFirstMonth
+    : (qontoData.soldeActuel || 0);
   for (const mois of previsionnelFinal) {
-    const encTotal = mois.encaissements + (mois.encaissementsFactures || 0) + (mois.revenusExceptionnels || 0) + (mois.fictionalEncaissements || 0);
+    const encTotal = mois.encaissements + (mois.encaissementsFactures || 0) + (mois.revenusExceptionnels || 0) + (mois.fictionalEncaissements || 0) + (mois.revenusRecurrents || 0) + (mois.subventionsAnnoncees || 0) + (mois.pipelinePondereEncaissements || 0);
     const variation = encTotal - mois.decaissements;
     mois.soldeDebut = Math.round(soldeCumul);
     soldeCumul += variation;
@@ -2600,14 +2751,22 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
 
 app.get('/api/tresorerie', async (req, res) => {
   try {
-    const [qontoData, pipelineDeals, notionMissions] = await Promise.all([
-      buildTresorerieFromQonto(),
+    // Toggle "Pipeline pondéré" côté UI (default ON, désactivable via ?includePipeline=false)
+    const includePipeline = req.query.includePipeline !== 'false';
+    // customerInvoices (Pennylane) : tolère un échec — sans, les factures émises retomberaient sur Notion.
+    // Au lieu de faire ça silencieusement, on signale l'échec pour que le frontend puisse afficher un warning.
+    let customerInvoices = [];
+    let pennylaneError = null;
+    const [qontoData, pipelineDeals, notionMissions, pennylaneRes] = await Promise.all([
+      buildTresorerieFromQonto(12, { includePreviousMonth: true }),
       fetchOpenDeals(),
       fetchAllNotionMissions(),
+      fetchCustomerInvoices().catch(err => { pennylaneError = err.message; return []; }),
     ]);
+    customerInvoices = pennylaneRes;
 
-    const { data: revenusExceptionnels } = await supabase.from('revenus_exceptionnels').select('*');
-    const revenus = revenusExceptionnels || [];
+    // Revenus exceptionnels Supabase droppée en migration 24 (cf. header section plus haut)
+    const revenus = [];
     const { data: salariesList } = await supabase.from('salaries').select('*');
     const allSalaries = salariesList || [];
 
@@ -2617,6 +2776,8 @@ app.get('/api/tresorerie', async (req, res) => {
       salaries: allSalaries, revenus,
       chargesFixesExtras: [], pipelineFactor: 1, fictionalDeals: [],
       crPrevData, caEstimatif: null,
+      customerInvoices,
+      includePipeline,
     });
 
     res.json({
@@ -2634,6 +2795,7 @@ app.get('/api/tresorerie', async (req, res) => {
       previsionnel: result.previsionnel,
       pipelinePondere: Math.round(result.pipelinePondere),
       pipelineDetail: result.pipelineDetail,
+      pennylaneError,
       fetchedAt: new Date().toISOString(),
     });
   } catch (err) {
@@ -2668,9 +2830,16 @@ app.get('/api/scenarios/:id', async (req, res) => {
 });
 
 app.put('/api/scenarios/:id', async (req, res) => {
-  const { nom, description } = req.body;
+  const { nom, description, include_gsheet, include_pipeline, include_ca_notion, include_salaries_baseline } = req.body;
+  const update = { updated_at: new Date().toISOString() };
+  if (typeof nom === 'string') update.nom = nom;
+  if (typeof description === 'string' || description === null) update.description = description;
+  if (typeof include_gsheet === 'boolean')            update.include_gsheet = include_gsheet;
+  if (typeof include_pipeline === 'boolean')          update.include_pipeline = include_pipeline;
+  if (typeof include_ca_notion === 'boolean')         update.include_ca_notion = include_ca_notion;
+  if (typeof include_salaries_baseline === 'boolean') update.include_salaries_baseline = include_salaries_baseline;
   const { data, error } = await supabase.from('scenarios')
-    .update({ nom, description, updated_at: new Date().toISOString() })
+    .update(update)
     .eq('id', req.params.id).select().single();
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
@@ -2685,7 +2854,10 @@ app.delete('/api/scenarios/:id', async (req, res) => {
 
 app.post('/api/scenarios/:id/overrides', async (req, res) => {
   const { type, data: overrideData } = req.body;
-  const validTypes = ['salaire', 'pipeline', 'charges_fixes', 'revenu_exceptionnel', 'ca_estimatif'];
+  const validTypes = [
+    'salaire', 'pipeline', 'charges_fixes', 'revenu_exceptionnel', 'ca_estimatif',
+    'salaire_augmentation', 'revenu_recurrent', 'pret', 'subvention_annoncee', 'ligne_gsheet_override',
+  ];
   if (!validTypes.includes(type)) return res.status(400).json({ error: 'Type invalide: ' + validTypes.join(', ') });
   if (!overrideData || typeof overrideData !== 'object') return res.status(400).json({ error: 'Data requis (objet JSON)' });
   // Vérifier que le scenario existe
@@ -2720,29 +2892,106 @@ app.delete('/api/scenarios/:id/overrides/:oid', async (req, res) => {
 
 // --- Projections ---
 
-async function fetchBaseData() {
-  const [qontoData, pipelineDeals, notionMissions, crPrevData] = await Promise.all([
-    buildTresorerieFromQonto(),
+// Convertit un preset d'horizon en nombre de mois à projeter (à partir du mois en cours, inclus)
+function getHorizonMonths(preset) {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+  let endYear, endMonth;
+  if (preset === 's1-np1')       { endYear = currentYear + 1; endMonth = 6;  }
+  else if (preset === 'n-plus-1'){ endYear = currentYear + 1; endMonth = 12; }
+  else                           { endYear = currentYear;     endMonth = 12; } // fin-annee (défaut)
+  return Math.max(1, (endYear - currentYear) * 12 + (endMonth - currentMonth) + 1);
+}
+
+// Parse les query params communs aux endpoints de projection (horizon, toggles baseline)
+// Les 4 toggles (gsheet, pipeline, caNotion, salariesBaseline) ne servent que pour
+// /api/scenarios/baseline/projection. Pour /api/scenarios/:id/projection, les flags sont
+// lus directement depuis la ligne `scenarios` du scénario (include_gsheet, etc.).
+function parseProjectionQuery(req) {
+  const preset = req.query.horizon || 'fin-annee';
+  return {
+    preset,
+    horizonMonths: getHorizonMonths(preset),
+    includeGSheet:           req.query.includeGSheet           !== 'false',
+    includePipeline:         req.query.includePipeline         !== 'false',
+    includeCaNotion:         req.query.includeCaNotion         !== 'false',
+    includeSalariesBaseline: req.query.includeSalariesBaseline !== 'false',
+  };
+}
+
+// Enrichit chaque mois de la projection avec les champs P&L et EBE cumulé pour les tabs de visualisation.
+// Les subventions/aides viennent de Plan_TRE_Prév (cached 10 min). Si includeGSheet=false, subv+aide=0.
+async function enrichWithPnlEbe(projection, { includeGSheet = true } = {}) {
+  const subvByMonth = {};
+  const aideByMonth = {};
+  if (includeGSheet) {
+    const planData = await fetchAndParsePlanTresorerie();
+    for (const fin of (planData.financements || [])) {
+      planData.months.forEach((m, i) => {
+        const key = `${m.year}-${String(m.month).padStart(2, '0')}`;
+        const val = fin.values[i] || 0;
+        if (val === 0) return;
+        if (fin.category === 'subvention') subvByMonth[key] = (subvByMonth[key] || 0) + val;
+        if (fin.category === 'aide')       aideByMonth[key] = (aideByMonth[key] || 0) + val;
+      });
+    }
+  }
+  let ebeCumul = 0;
+  return projection.map((mois) => {
+    const mKey = `${mois.annee}-${String(mois.mois).padStart(2, '0')}`;
+    // Les subventions annoncées (scénario) sont cash-in pour la tréso mais NE sont PAS du CA P&L ;
+    // on les retire du pnl_ca et on les ajoute aux subventions pour l'EBE.
+    const subvAnnonceesMois = mois.subventionsAnnoncees || 0;
+    const encTotal = mois.encaissementsTotal ?? ((mois.encaissements || 0) + (mois.encaissementsFactures || 0) + (mois.revenusExceptionnels || 0) + (mois.fictionalEncaissements || 0) + (mois.revenusRecurrents || 0) + subvAnnonceesMois + (mois.pipelinePondereEncaissements || 0));
+    const ca = encTotal - subvAnnonceesMois;
+    const charges = mois.decaissements || 0;
+    const subvGSheet = Math.round(subvByMonth[mKey] || 0);
+    const aide = Math.round(aideByMonth[mKey] || 0);
+    const subv = subvGSheet + subvAnnonceesMois;
+    const marge = ca - charges;
+    const ebeMensuel = marge + subv + aide;
+    ebeCumul += ebeMensuel;
+    return {
+      ...mois,
+      pnl_ca:       Math.round(ca),
+      pnl_charges:  Math.round(charges),
+      pnl_marge:    Math.round(marge),
+      subventions:  Math.round(subv),
+      aides:        aide,
+      ebe_mensuel:  Math.round(ebeMensuel),
+      ebe_cumule:   Math.round(ebeCumul),
+    };
+  });
+}
+
+async function fetchBaseData(horizonMonths = 12) {
+  const [qontoData, pipelineDeals, notionMissions, crPrevData, customerInvoices] = await Promise.all([
+    buildTresorerieFromQonto(horizonMonths),
     fetchOpenDeals(),
     fetchAllNotionMissions(),
     fetchAndParseCRPrev(),
+    fetchCustomerInvoices().catch(err => { console.warn('Pennylane fetch échoué dans fetchBaseData:', err.message); return []; }),
   ]);
-  const { data: revenusExceptionnels } = await supabase.from('revenus_exceptionnels').select('*');
+  // Revenus exceptionnels Supabase droppée en migration 24 → source = overrides de scénario uniquement
   const { data: salariesList } = await supabase.from('salaries').select('*');
   return {
-    qontoData, pipelineDeals, notionMissions, crPrevData,
-    revenus: revenusExceptionnels || [],
+    qontoData, pipelineDeals, notionMissions, crPrevData, customerInvoices,
+    revenus: [],
     salaries: salariesList || [],
   };
 }
 
 function applyOverrides(baseData, overrides) {
-  let salaries = [...baseData.salaries];
+  let salaries = baseData.salaries.map(s => ({ ...s })); // clone shallow pour éviter de muter baseData
   let revenus = [...baseData.revenus];
   let chargesFixesExtras = [];
   let pipelineFactor = 1;
   let fictionalDeals = [];
   let caEstimatif = null;
+  let revenusRecurrentsExtras = [];
+  let subventionsAnnoncees = [];
+  let gsheetOverrides = [];
 
   for (const ov of overrides) {
     const d = ov.data;
@@ -2777,6 +3026,7 @@ function applyOverrides(baseData, overrides) {
             montant: d.montant || 0,
             probabilite: d.probabilite != null ? d.probabilite : 100,
             mois: d.mois,
+            delai_encaissement_jours: d.delai_encaissement_jours,
           });
         }
         break;
@@ -2798,24 +3048,109 @@ function applyOverrides(baseData, overrides) {
           mois: d.mois,
         });
         break;
+      case 'salaire_augmentation':
+        // % d'augmentation cumulative à partir d'une date. Si salarie_ids vide/absent → applique à tous.
+        salaries = salaries.map(s => {
+          const targets = d.salarie_ids;
+          if (targets && targets.length && !targets.includes(s.id)) return s;
+          const aug = { percent: d.percent || 0, date_debut: d.date_debut };
+          return { ...s, augmentations: [...(s.augmentations || []), aug] };
+        });
+        break;
+      case 'revenu_recurrent':
+        revenusRecurrentsExtras.push({
+          libelle: d.libelle || 'Revenu récurrent',
+          montant_mensuel: d.montant_mensuel || 0,
+          mois_debut: d.mois_debut,
+          mois_fin: d.mois_fin,
+        });
+        break;
+      case 'pret': {
+        // Décompose en : revenu one-shot (entrée) + charge récurrente (mensualité amortissable)
+        const P = d.montant || 0;
+        const tx = (d.taux_annuel || 0) / 100;
+        const n = d.duree_mois || 12;
+        const mensualite = tx > 0 ? P * (tx / 12) / (1 - Math.pow(1 + tx / 12, -n)) : P / n;
+        revenus.push({
+          id: 'pret-entry-' + ov.id,
+          libelle: (d.libelle || 'Prêt') + ' (entrée)',
+          montant: P,
+          mois: d.mois_entree,
+        });
+        // Remboursements : du mois suivant l'entrée, pendant duree_mois
+        const [y, m] = (d.mois_entree || '').split('-').map(Number);
+        if (y && m) {
+          const startD = new Date(y, m - 1 + 1, 1);
+          const endD   = new Date(y, m - 1 + n, 1);
+          const startKey = `${startD.getFullYear()}-${String(startD.getMonth() + 1).padStart(2, '0')}`;
+          const endKey   = `${endD.getFullYear()}-${String(endD.getMonth() + 1).padStart(2, '0')}`;
+          chargesFixesExtras.push({
+            libelle: (d.libelle || 'Prêt') + ' (remboursement)',
+            montant_mensuel: Math.round(mensualite),
+            mois_debut: startKey,
+            mois_fin: endKey,
+          });
+        }
+        break;
+      }
+      case 'subvention_annoncee':
+        subventionsAnnoncees.push({
+          id: 'fictional-' + ov.id,
+          libelle: d.libelle || 'Subvention annoncée',
+          montant: d.montant || 0,
+          mois: d.mois,
+        });
+        break;
+      case 'ligne_gsheet_override':
+        // Remplace le montant d'une catégorie mère du GSheet CR_Prev sur une plage de mois
+        gsheetOverrides.push({
+          categorie: d.categorie,
+          mois_debut: d.mois_debut,
+          mois_fin: d.mois_fin,
+          montant_mensuel: d.montant_mensuel || 0,
+        });
+        break;
     }
   }
 
-  return { salaries, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals, caEstimatif };
+  return { salaries, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals, caEstimatif, revenusRecurrentsExtras, subventionsAnnoncees, gsheetOverrides };
 }
 
 app.get('/api/scenarios/baseline/projection', async (req, res) => {
   try {
-    const base = await fetchBaseData();
+    const { preset, horizonMonths, includeGSheet, includePipeline, includeCaNotion, includeSalariesBaseline } = parseProjectionQuery(req);
+    const base = await fetchBaseData(horizonMonths);
     const result = await buildPrevisionnel({
       qontoData: base.qontoData, pipelineDeals: base.pipelineDeals,
       notionMissions: base.notionMissions, salaries: base.salaries,
       revenus: base.revenus, chargesFixesExtras: [], pipelineFactor: 1, fictionalDeals: [],
       crPrevData: base.crPrevData, caEstimatif: null,
+      customerInvoices: base.customerInvoices,
+      includeGSheet, includePipeline, includeCaNotion, includeSalariesBaseline,
     });
-    res.json({ nom: 'Baseline', previsionnel: result.previsionnel });
+    const enriched = await enrichWithPnlEbe(result.previsionnel, { includeGSheet });
+    res.json({
+      nom: 'Baseline', horizon: preset,
+      include: { gsheet: includeGSheet, pipeline: includePipeline, caNotion: includeCaNotion, salariesBaseline: includeSalariesBaseline },
+      previsionnel: enriched,
+    });
   } catch (err) {
     console.error('Erreur baseline projection:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Catégories mères du GSheet CR_Prev avec leurs valeurs par mois (pour le levier ligne_gsheet_override).
+// Le frontend s'en sert pour afficher le montant courant moyen sur la période sélectionnée
+// et calculer en live la nouvelle valeur si l'utilisateur opte pour un override en %.
+app.get('/api/cr-prev/categories', async (req, res) => {
+  try {
+    const data = await fetchAndParseCRPrev();
+    const categories = Object.entries(data.categories || {})
+      .map(([name, valuesByMonth]) => ({ name, valuesByMonth }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    res.json({ categories });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
@@ -2834,14 +3169,24 @@ app.get('/api/scenarios/baseline/salaries', async (req, res) => {
 app.get('/api/scenarios/:id/projection', async (req, res) => {
   try {
     // Vérifier que l'id n'est pas "baseline"
-    if (req.params.id === 'baseline') return res.redirect('/api/scenarios/baseline/projection');
+    if (req.params.id === 'baseline') {
+      const qs = req.url.split('?')[1] || '';
+      return res.redirect('/api/scenarios/baseline/projection' + (qs ? '?' + qs : ''));
+    }
 
     const { data: scenario, error } = await supabase.from('scenarios').select('*').eq('id', req.params.id).single();
     if (error || !scenario) return res.status(404).json({ error: 'Scenario non trouve' });
 
     const { data: overrides } = await supabase.from('scenario_overrides').select('*').eq('scenario_id', req.params.id).order('created_at');
 
-    const base = await fetchBaseData();
+    // Composition : chaque scénario porte ses 4 flags d'inclusion. Seul horizon vient du query string.
+    const { preset, horizonMonths } = parseProjectionQuery(req);
+    const includeGSheet           = scenario.include_gsheet !== false;
+    const includePipeline         = scenario.include_pipeline !== false;
+    const includeCaNotion         = scenario.include_ca_notion !== false;
+    const includeSalariesBaseline = scenario.include_salaries_baseline !== false;
+
+    const base = await fetchBaseData(horizonMonths);
     const applied = applyOverrides(base, overrides || []);
 
     const result = await buildPrevisionnel({
@@ -2852,8 +3197,18 @@ app.get('/api/scenarios/:id/projection', async (req, res) => {
       pipelineFactor: applied.pipelineFactor,
       fictionalDeals: applied.fictionalDeals,
       crPrevData: base.crPrevData, caEstimatif: applied.caEstimatif,
+      customerInvoices: base.customerInvoices,
+      includeGSheet, includePipeline, includeCaNotion, includeSalariesBaseline,
+      revenusRecurrentsExtras: applied.revenusRecurrentsExtras,
+      subventionsAnnoncees: applied.subventionsAnnoncees,
+      gsheetOverrides: applied.gsheetOverrides,
     });
-    res.json({ nom: scenario.nom, previsionnel: result.previsionnel });
+    const enriched = await enrichWithPnlEbe(result.previsionnel, { includeGSheet });
+    res.json({
+      nom: scenario.nom, horizon: preset,
+      include: { gsheet: includeGSheet, pipeline: includePipeline, caNotion: includeCaNotion, salariesBaseline: includeSalariesBaseline },
+      previsionnel: enriched,
+    });
   } catch (err) {
     console.error('Erreur scenario projection:', err.message);
     res.status(500).json({ error: err.message });
