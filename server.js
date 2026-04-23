@@ -2033,6 +2033,7 @@ async function buildTresorerieFromQonto(horizonMonths = 12, { includePreviousMon
 // --- Google Sheets ---
 const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID || '1btTMlLB4cNIN_PAkKOujBkOGU8DX526keOi-fvbPlsU';
 const GID_MASSE_SALARIALE = 798407110;
+const GID_SALARIES_META = 1450270387;
 const GID_PLAN_TRESORERIE = 2116491556;
 const GID_PROJETS = 0;
 
@@ -2169,6 +2170,111 @@ function parseMasseSalariale(csvText) {
   };
 }
 
+// --- Caches GSheet pour la masse salariale (30 min) ---
+let masseSalarialeCache = null;
+let masseSalarialeCacheTime = 0;
+let salariesMetaCache = null;
+let salariesMetaCacheTime = 0;
+const MASSE_SALARIALE_CACHE_TTL = 30 * 60 * 1000;
+
+// Lit l'onglet GSheet Masse_salariale et produit une structure indexée par mois :
+// {
+//   months: [{ month, year, label, mKey }],  // trié chronologiquement
+//   byMonth: {
+//     'YYYY-MM': {
+//       total: 12345,
+//       detail: [{ nom, net, charges, prime, aide, remuneration, gratification, cout }]  // un par employé
+//     }
+//   }
+// }
+// Sert à la fois au display (tab Masse salariale) et aux overrides scénarios (delta par employé).
+async function fetchAndParseMasseSalarialeDetailed() {
+  if (masseSalarialeCache && (Date.now() - masseSalarialeCacheTime) < MASSE_SALARIALE_CACHE_TTL) {
+    return masseSalarialeCache;
+  }
+  const csv = await fetchGoogleSheetCSV(GID_MASSE_SALARIALE);
+  const data = parseMasseSalariale(csv);
+  if (data.error) throw new Error(data.error);
+
+  // Catégories déjà parsées : { name: "Salaires nets", total: [vals], items: [{ name: "Juliette", values: [vals] }] }
+  // On indexe par mois puis par nom d'employé, en agrégeant les montants par type.
+  const monthsSorted = data.months.map(m => ({
+    month: m.month, year: m.year, label: m.label,
+    mKey: `${m.year}-${String(m.month).padStart(2, '0')}`,
+  }));
+  const byMonth = {};
+  for (const m of monthsSorted) byMonth[m.mKey] = { total: 0, detail: {} };
+
+  for (const cat of data.categories) {
+    const typeKey = (() => {
+      const n = cat.name.toLowerCase();
+      if (n.startsWith('salaires nets'))        return 'net';
+      if (n.startsWith('charges soci'))         return 'charges';
+      if (n.startsWith('primes'))               return 'prime';
+      if (n.startsWith('aide'))                 return 'aide';
+      if (n.startsWith('rémunération'))         return 'remuneration';
+      if (n.startsWith('gratification'))        return 'gratification';
+      return null;
+    })();
+    if (!typeKey) continue;
+    for (const item of cat.items) {
+      monthsSorted.forEach((m, i) => {
+        const val = item.values[i] || 0;
+        if (val === 0) return;
+        const slot = byMonth[m.mKey];
+        if (!slot.detail[item.name]) {
+          slot.detail[item.name] = { nom: item.name, net: 0, charges: 0, prime: 0, aide: 0, remuneration: 0, gratification: 0, cout: 0 };
+        }
+        slot.detail[item.name][typeKey] += val;
+        slot.detail[item.name].cout += val;
+        slot.total += val;
+      });
+    }
+  }
+
+  // Convertir chaque detail en array trié par coût descendant (pour l'affichage)
+  for (const mKey of Object.keys(byMonth)) {
+    const entries = Object.values(byMonth[mKey].detail).sort((a, b) => b.cout - a.cout);
+    byMonth[mKey].detail = entries.map(e => ({ ...e, net: Math.round(e.net), charges: Math.round(e.charges), prime: Math.round(e.prime), aide: Math.round(e.aide), remuneration: Math.round(e.remuneration), gratification: Math.round(e.gratification), cout: Math.round(e.cout) }));
+    byMonth[mKey].total = Math.round(byMonth[mKey].total);
+  }
+
+  const result = { months: monthsSorted, byMonth };
+  masseSalarialeCache = result;
+  masseSalarialeCacheTime = Date.now();
+  return result;
+}
+
+// Lit l'onglet GSheet Salaires (metadata employés) : nom, type de contrat, date début/fin.
+// Retourne [{ nom, type, date_debut, date_fin, isDirigeant }]. Utile pour la multi-select
+// "Salariés concernés" de l'override salaire_augmentation.
+async function fetchAndParseSalariesMeta() {
+  if (salariesMetaCache && (Date.now() - salariesMetaCacheTime) < MASSE_SALARIALE_CACHE_TTL) {
+    return salariesMetaCache;
+  }
+  const csv = await fetchGoogleSheetCSV(GID_SALARIES_META);
+  const rows = parseCSV(csv);
+  const result = [];
+  let seenDirigeantsHeader = false;
+  // Col A = nom, B = type, C = date début, D = date fin. Header est ligne 1-2. Ligne "Dirigeants" = séparateur.
+  for (let r = 2; r < rows.length; r++) {
+    const nom = (rows[r][0] || '').trim();
+    if (!nom) continue;
+    if (/dirigeants/i.test(nom) && !/^\S/.test(rows[r][1] || '')) {
+      seenDirigeantsHeader = true;
+      continue;
+    }
+    const type = (rows[r][1] || '').trim();
+    const date_debut = (rows[r][2] || '').trim() || null;
+    const date_fin = (rows[r][3] || '').trim() || null;
+    if (!type && !date_debut) continue; // ligne vide ou séparateur
+    result.push({ nom, type, date_debut, date_fin, isDirigeant: seenDirigeantsHeader });
+  }
+  salariesMetaCache = result;
+  salariesMetaCacheTime = Date.now();
+  return result;
+}
+
 function parsePlanTresorerie(csvText) {
   const rows = parseCSV(csvText);
   const monthInfo = findMonthColumns(rows);
@@ -2293,93 +2399,117 @@ app.post('/api/auth-masse-salariale', (req, res) => {
 //   • override scénario `revenu_exceptionnel` (cas hypothétique)
 //   • lignes Subvention/Aide du GSheet Plan_TRE_Prév (cas réels avec cat. TVA)
 
-// --- Salariés (Supabase) ---
-
-app.get('/api/salaries', async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('salaries').select('*').order('nom');
-    if (error) {
-      console.error('[GET /api/salaries] Supabase error:', error);
-      return res.status(500).json({ error: error.message });
-    }
-    res.json(data);
-  } catch (err) {
-    console.error('[GET /api/salaries] Exception:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/salaries', async (req, res) => {
-  const { nom, poste, type, net_mensuel, charges_mensuelles, date_entree, date_sortie } = req.body;
-  if (!nom || !nom.trim()) return res.status(400).json({ error: 'Nom requis' });
-  if (!['salarie', 'dirigeant', 'stagiaire', 'alternant'].includes(type)) {
-    return res.status(400).json({ error: 'Type invalide' });
-  }
-  if (typeof net_mensuel !== 'number' || net_mensuel < 0) {
-    return res.status(400).json({ error: 'Net mensuel invalide' });
-  }
-  if (typeof charges_mensuelles !== 'number' || charges_mensuelles < 0) {
-    return res.status(400).json({ error: 'Charges mensuelles invalides' });
-  }
-  if (!date_entree) return res.status(400).json({ error: 'Date entree requise' });
-  const { data, error } = await supabase.from('salaries')
-    .insert({ nom: nom.trim(), poste: poste || null, type, net_mensuel, charges_mensuelles, date_entree, date_sortie: date_sortie || null })
-    .select()
-    .single();
-  if (error) return res.status(500).json({ error: error.message });
-  tresorerieCacheTime = 0; tresorerieCacheWithPrevTime = 0;
-  res.json(data);
-});
-
-app.put('/api/salaries/:id', async (req, res) => {
-  const { nom, poste, type, net_mensuel, charges_mensuelles, date_entree, date_sortie } = req.body;
-  const { data, error } = await supabase.from('salaries')
-    .update({ nom, poste, type, net_mensuel, charges_mensuelles, date_entree, date_sortie })
-    .eq('id', req.params.id)
-    .select()
-    .single();
-  if (error) return res.status(500).json({ error: error.message });
-  tresorerieCacheTime = 0; tresorerieCacheWithPrevTime = 0;
-  res.json(data);
-});
-
-app.delete('/api/salaries/:id', async (req, res) => {
-  const { error, count } = await supabase.from('salaries')
-    .delete({ count: 'exact' })
-    .eq('id', req.params.id);
-  if (error) return res.status(500).json({ error: error.message });
-  if (count === 0) return res.status(404).json({ error: 'Salarie non trouve' });
-  tresorerieCacheTime = 0; tresorerieCacheWithPrevTime = 0;
-  res.json({ ok: true });
-});
+// --- Salariés : CRUD Supabase supprimé en Phase F ---
+// Source de vérité = GSheet "Masse_salariale" (montants mensuels) + "Salaires" (metadata employés).
+// Pour consulter la liste des employés : GET /api/scenarios/baseline/salaries.
+// Pour le détail mensuel : consommé via fetchAndParseMasseSalarialeDetailed() dans la chaîne de projection.
 
 // --- Fonction réutilisable : buildPrevisionnel() ---
 // Extrait la logique de projection pour réutiliser dans les scénarios
-function masseSalarialeMois(annee, mois, salaries) {
+// Helper : retourne le slot baseline d'un mois depuis le GSheet Masse_salariale.
+// Extrapolation : si mKey est au-delà du dernier mois connu, on duplique le dernier ; si avant le premier, on retourne vide.
+function getBaselineMasseSlot(masseSalarialeData, mKey) {
+  if (!masseSalarialeData || !masseSalarialeData.byMonth) return { total: 0, detail: [] };
+  const direct = masseSalarialeData.byMonth[mKey];
+  if (direct) return direct;
+  const months = Object.keys(masseSalarialeData.byMonth).sort();
+  if (months.length === 0) return { total: 0, detail: [] };
+  const lastKey = months[months.length - 1];
+  if (mKey > lastKey) return masseSalarialeData.byMonth[lastKey];
+  return { total: 0, detail: [] };
+}
+
+// Calcule la masse salariale d'un mois donné :
+// - baseline : lue directement depuis l'onglet GSheet "Masse_salariale" (source de vérité)
+// - overrides scénario : add/modify/remove (par nom) + salaire_augmentation (par nom, depuis une date)
+// Retourne { total, detail, baseline: { total, detail }, delta } où delta = total - (baseline si includeBaseline).
+// Le delta est ce qu'il faut ajouter aux décaissements (la baseline est déjà dans CR_Prev "Frais de personnel").
+function masseSalarialeMois(annee, mois, masseSalarialeData, masseOverrides = {}, includeBaseline = true) {
+  const mKey = `${annee}-${String(mois).padStart(2, '0')}`;
   const mDate = new Date(annee, mois - 1, 15);
-  let total = 0;
-  const detail = [];
-  for (const s of salaries) {
-    const entree = new Date(s.date_entree);
-    const sortie = s.date_sortie ? new Date(s.date_sortie) : null;
-    if (entree > mDate) continue;
-    if (sortie && sortie < new Date(annee, mois - 1, 1)) continue;
-    // Applique les augmentations scénario (cumulatives) dont la date_debut est atteinte
-    let multiplier = 1;
-    if (s.augmentations && s.augmentations.length > 0) {
-      for (const aug of s.augmentations) {
-        if (aug.date_debut && new Date(aug.date_debut) <= mDate) {
-          multiplier *= (1 + (aug.percent || 0) / 100);
-        }
-      }
+  const baseline = getBaselineMasseSlot(masseSalarialeData, mKey);
+  const baselineTotal = baseline.total || 0;
+
+  // Map keyée par nom d'employé. Chaque entrée : { nom, net, charges, prime, aide, remuneration, gratification, cout, source }
+  const detailMap = new Map();
+  if (includeBaseline) {
+    for (const d of (baseline.detail || [])) {
+      detailMap.set(d.nom, { ...d, source: 'baseline' });
     }
-    const net = s.net_mensuel * multiplier;
-    const charges = s.charges_mensuelles * multiplier;
-    const cout = net + charges;
-    total += cout;
-    detail.push({ nom: s.nom, poste: s.poste, type: s.type, net: Math.round(net), charges: Math.round(charges), cout: Math.round(cout) });
   }
-  return { total: Math.round(total), detail };
+
+  // Removals & modifications par nom (rétrocompat : si un override utilise salarie_id d'un ancien uuid Supabase,
+  // on essaie aussi de matcher contre .nom de l'override — voir applyOverrides).
+  const removedNames = masseOverrides.removedNames || [];
+  for (const nom of removedNames) detailMap.delete(nom);
+
+  for (const mod of (masseOverrides.modifications || [])) {
+    const existing = detailMap.get(mod.nom);
+    if (!existing) continue;
+    const net = mod.net_mensuel != null ? mod.net_mensuel : existing.net;
+    const charges = mod.charges_mensuelles != null ? mod.charges_mensuelles : existing.charges;
+    const cout = net + charges + (existing.prime || 0) + (existing.aide || 0) + (existing.remuneration || 0) + (existing.gratification || 0);
+    detailMap.set(mod.nom, { ...existing, net, charges, cout, source: 'override-modify' });
+  }
+
+  // Additions (new employees). Dates d'entrée/sortie à respecter.
+  for (const add of (masseOverrides.additions || [])) {
+    if (add.date_entree && new Date(add.date_entree) > mDate) continue;
+    if (add.date_sortie && new Date(add.date_sortie) < new Date(annee, mois - 1, 1)) continue;
+    const net = add.net_mensuel || 0;
+    const charges = add.charges_mensuelles || 0;
+    detailMap.set(add.nom, {
+      nom: add.nom,
+      net, charges,
+      prime: 0, aide: 0, remuneration: 0, gratification: 0,
+      cout: net + charges,
+      source: 'override-add',
+    });
+  }
+
+  // Augmentations multiplicatives, cumulatives, uniquement si date_debut <= mDate.
+  for (const aug of (masseOverrides.augmentations || [])) {
+    if (aug.date_debut && new Date(aug.date_debut) > mDate) continue;
+    const multiplier = 1 + (aug.percent || 0) / 100;
+    const targets = aug.targetNames || [];
+    const applyAll = !targets || targets.length === 0;
+    for (const [nom, entry] of detailMap) {
+      if (!applyAll && !targets.includes(nom)) continue;
+      detailMap.set(nom, {
+        ...entry,
+        net:           (entry.net || 0) * multiplier,
+        charges:       (entry.charges || 0) * multiplier,
+        prime:         (entry.prime || 0) * multiplier,
+        aide:          (entry.aide || 0) * multiplier,
+        remuneration:  (entry.remuneration || 0) * multiplier,
+        gratification: (entry.gratification || 0) * multiplier,
+        cout:          (entry.cout || 0) * multiplier,
+        source: entry.source === 'baseline' ? 'baseline-aug' : entry.source,
+      });
+    }
+  }
+
+  const detail = Array.from(detailMap.values())
+    .sort((a, b) => (b.cout || 0) - (a.cout || 0))
+    .map(e => ({
+      nom: e.nom,
+      net: Math.round(e.net || 0),
+      charges: Math.round(e.charges || 0),
+      prime: Math.round(e.prime || 0),
+      aide: Math.round(e.aide || 0),
+      remuneration: Math.round(e.remuneration || 0),
+      gratification: Math.round(e.gratification || 0),
+      cout: Math.round(e.cout || 0),
+      source: e.source,
+    }));
+  const total = detail.reduce((s, e) => s + e.cout, 0);
+
+  return {
+    total: Math.round(total),
+    detail,
+    baseline: { total: Math.round(baselineTotal), detail: baseline.detail || [] },
+    delta: Math.round(total - (includeBaseline ? baselineTotal : 0)),
+  };
 }
 
 // buildPrevisionnel — paramètres de composition baseline :
@@ -2393,7 +2523,7 @@ function masseSalarialeMois(annee, mois, salaries) {
 // - revenusRecurrentsExtras : [{ libelle, montant_mensuel, mois_debut, mois_fin }]
 // - subventionsAnnoncees    : [{ libelle, montant, mois }] — catégorisées subv pour l'EBE, pas dans CA P&L
 // - gsheetOverrides         : [{ categorie, mois_debut, mois_fin, montant_mensuel }]
-async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, salaries, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals, crPrevData, caEstimatif, customerInvoices = [], includeGSheet = true, includePipeline = true, includeCaNotion = true, includeSalariesBaseline = true, revenusRecurrentsExtras = [], subventionsAnnoncees = [], gsheetOverrides = [] }) {
+async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, masseSalarialeData, masseOverrides = {}, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals, crPrevData, caEstimatif, customerInvoices = [], includeGSheet = true, includePipeline = true, includeCaNotion = true, includeSalariesBaseline = true, revenusRecurrentsExtras = [], subventionsAnnoncees = [], gsheetOverrides = [] }) {
   // --- A encaisser : deux sources ---
   // 1) Factures ÉMISES depuis Pennylane (source de vérité pour late/upcoming, avec deadline et remaining_amount réels)
   // 2) Factures PRÉVISIONNELLES depuis Notion (missions dont la facture n'est pas encore émise)
@@ -2681,11 +2811,12 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
     const revenusRecurrents = isClos ? 0 : Math.round(revenusRecurrentsParMois[mKey] || 0);
     const subvAnnoncees     = isClos ? 0 : Math.round(subvAnnonceesParMois[mKey] || 0);
 
-    // Masse salariale : si includeSalariesBaseline=false, ne garde que les overrides scénario (id "fictional-*")
-    const effectiveSalaries = includeSalariesBaseline
-      ? salaries
-      : salaries.filter(s => typeof s.id === 'string' && s.id.startsWith('fictional-'));
-    const masse = masseSalarialeMois(mois.annee, mois.mois, effectiveSalaries);
+    // Masse salariale baseline depuis GSheet Masse_salariale + overrides scénario (add/modify/remove/augmentation).
+    // Pour les mois CLOS (passés), on n'expose que la baseline (pas d'override appliqué — les vraies charges
+    // sont dans mois.decaissements Qonto).
+    const masse = isClos
+      ? masseSalarialeMois(mois.annee, mois.mois, masseSalarialeData, {}, includeSalariesBaseline)
+      : masseSalarialeMois(mois.annee, mois.mois, masseSalarialeData, masseOverrides, includeSalariesBaseline);
     const chargesFixesExtra = isClos ? 0 : Math.round(chargesFixesParMois[mKey] || 0);
 
     // --- Décaissements : Qonto réel pour mois clos, CR_Prev pour mois en cours + futurs ---
@@ -2701,6 +2832,11 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
     // Pour !isClos : 0, sauf en scénario CA estimatif où on force caMensuelHT.
     const encBase = (caMensuelHT !== null && !isClos) ? caMensuelHT : mois.encaissements;
 
+    // Delta masse salariale à appliquer aux décaissements : uniquement pour mois non-clos,
+    // car CR_Prev "Frais de personnel" contient déjà la baseline. Le delta reflète les overrides
+    // scénario (add/modify/remove/augmentation) + le retrait de baseline si includeSalariesBaseline=false.
+    const masseDelta = isClos ? 0 : (masse.delta || 0);
+
     return {
       ...mois,
       encaissementsFactures,
@@ -2715,9 +2851,11 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, sal
       pipelinePondereEncaissements: pipelineEnc,
       masseSalariale: masse.total,
       masseSalarialeDetail: masse.detail,
+      masseSalarialeBaseline: masse.baseline ? masse.baseline.total : 0,
+      masseSalarialeDelta: masseDelta,
       chargesFixesExtra,
       fictionalEncaissements: fictionalEnc,
-      decaissements: decaissementsBase + chargesFixesExtra,
+      decaissements: decaissementsBase + chargesFixesExtra + masseDelta,
       chargesGSheetDetail, // null pour mois clos, { categorie: montant } sinon
       encaissements: encBase,
       encaissementsTotal: encBase + encaissementsFactures + revExc + fictionalEnc + revenusRecurrents + subvAnnoncees + pipelineEnc,
@@ -2757,23 +2895,25 @@ app.get('/api/tresorerie', async (req, res) => {
     // Au lieu de faire ça silencieusement, on signale l'échec pour que le frontend puisse afficher un warning.
     let customerInvoices = [];
     let pennylaneError = null;
-    const [qontoData, pipelineDeals, notionMissions, pennylaneRes] = await Promise.all([
+    let masseSalarialeData = null;
+    let masseSalarialeError = null;
+    const [qontoData, pipelineDeals, notionMissions, pennylaneRes, masseRes] = await Promise.all([
       buildTresorerieFromQonto(12, { includePreviousMonth: true }),
       fetchOpenDeals(),
       fetchAllNotionMissions(),
       fetchCustomerInvoices().catch(err => { pennylaneError = err.message; return []; }),
+      fetchAndParseMasseSalarialeDetailed().catch(err => { masseSalarialeError = err.message; return null; }),
     ]);
     customerInvoices = pennylaneRes;
+    masseSalarialeData = masseRes;
 
     // Revenus exceptionnels Supabase droppée en migration 24 (cf. header section plus haut)
     const revenus = [];
-    const { data: salariesList } = await supabase.from('salaries').select('*');
-    const allSalaries = salariesList || [];
 
     const crPrevData = await fetchAndParseCRPrev();
     const result = await buildPrevisionnel({
       qontoData, pipelineDeals, notionMissions,
-      salaries: allSalaries, revenus,
+      masseSalarialeData, masseOverrides: {}, revenus,
       chargesFixesExtras: [], pipelineFactor: 1, fictionalDeals: [],
       crPrevData, caEstimatif: null,
       customerInvoices,
@@ -2796,6 +2936,7 @@ app.get('/api/tresorerie', async (req, res) => {
       pipelinePondere: Math.round(result.pipelinePondere),
       pipelineDetail: result.pipelineDetail,
       pennylaneError,
+      masseSalarialeError,
       fetchedAt: new Date().toISOString(),
     });
   } catch (err) {
@@ -2966,24 +3107,27 @@ async function enrichWithPnlEbe(projection, { includeGSheet = true } = {}) {
 }
 
 async function fetchBaseData(horizonMonths = 12) {
-  const [qontoData, pipelineDeals, notionMissions, crPrevData, customerInvoices] = await Promise.all([
+  const [qontoData, pipelineDeals, notionMissions, crPrevData, customerInvoices, masseSalarialeData] = await Promise.all([
     buildTresorerieFromQonto(horizonMonths),
     fetchOpenDeals(),
     fetchAllNotionMissions(),
     fetchAndParseCRPrev(),
     fetchCustomerInvoices().catch(err => { console.warn('Pennylane fetch échoué dans fetchBaseData:', err.message); return []; }),
+    fetchAndParseMasseSalarialeDetailed().catch(err => { console.warn('Masse_salariale GSheet échoué dans fetchBaseData:', err.message); return null; }),
   ]);
   // Revenus exceptionnels Supabase droppée en migration 24 → source = overrides de scénario uniquement
-  const { data: salariesList } = await supabase.from('salaries').select('*');
+  // Masse salariale : Phase F → GSheet Masse_salariale (table Supabase `salaries` dépréciée, migration 25)
   return {
-    qontoData, pipelineDeals, notionMissions, crPrevData, customerInvoices,
+    qontoData, pipelineDeals, notionMissions, crPrevData, customerInvoices, masseSalarialeData,
     revenus: [],
-    salaries: salariesList || [],
   };
 }
 
 function applyOverrides(baseData, overrides) {
-  let salaries = baseData.salaries.map(s => ({ ...s })); // clone shallow pour éviter de muter baseData
+  // masseOverrides : structure consommée par masseSalarialeMois (identification par nom d'employé GSheet).
+  // Rétrocompat : si un override utilise salarie_id (ancien uuid Supabase), on le traite comme nom
+  //               (le frontend doit maintenant fournir le nom comme identifiant, cf. migration Phase F).
+  const masseOverrides = { additions: [], modifications: [], removedNames: [], augmentations: [] };
   let revenus = [...baseData.revenus];
   let chargesFixesExtras = [];
   let pipelineFactor = 1;
@@ -2998,9 +3142,8 @@ function applyOverrides(baseData, overrides) {
     switch (ov.type) {
       case 'salaire':
         if (d.action === 'add') {
-          salaries.push({
-            id: 'fictional-' + ov.id,
-            nom: d.nom || 'Nouveau',
+          masseOverrides.additions.push({
+            nom: d.nom || ('Nouveau ' + ov.id),
             poste: d.poste || null,
             type: d.type || 'salarie',
             net_mensuel: d.net_mensuel || 0,
@@ -3008,12 +3151,15 @@ function applyOverrides(baseData, overrides) {
             date_entree: d.date_entree || new Date().toISOString().split('T')[0],
             date_sortie: d.date_sortie || null,
           });
-        } else if (d.action === 'remove' && d.salarie_id) {
-          salaries = salaries.filter(s => s.id !== d.salarie_id);
-        } else if (d.action === 'modify' && d.salarie_id) {
-          salaries = salaries.map(s => {
-            if (s.id !== d.salarie_id) return s;
-            return { ...s, ...d, id: s.id };
+        } else if (d.action === 'remove') {
+          const nom = d.nom || d.salarie_id;
+          if (nom) masseOverrides.removedNames.push(nom);
+        } else if (d.action === 'modify') {
+          const nom = d.nom || d.salarie_id;
+          if (nom) masseOverrides.modifications.push({
+            nom,
+            net_mensuel: d.net_mensuel,
+            charges_mensuelles: d.charges_mensuelles,
           });
         }
         break;
@@ -3049,12 +3195,12 @@ function applyOverrides(baseData, overrides) {
         });
         break;
       case 'salaire_augmentation':
-        // % d'augmentation cumulative à partir d'une date. Si salarie_ids vide/absent → applique à tous.
-        salaries = salaries.map(s => {
-          const targets = d.salarie_ids;
-          if (targets && targets.length && !targets.includes(s.id)) return s;
-          const aug = { percent: d.percent || 0, date_debut: d.date_debut };
-          return { ...s, augmentations: [...(s.augmentations || []), aug] };
+        // % d'augmentation cumulative à partir d'une date. targetNames vide/absent → applique à tous.
+        // Rétrocompat : accepte salarie_noms (nouveau) ou salarie_ids (ancien = pré Phase F, interprété comme noms).
+        masseOverrides.augmentations.push({
+          percent: d.percent || 0,
+          date_debut: d.date_debut,
+          targetNames: d.salarie_noms || d.salarie_ids || [],
         });
         break;
       case 'revenu_recurrent':
@@ -3113,7 +3259,7 @@ function applyOverrides(baseData, overrides) {
     }
   }
 
-  return { salaries, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals, caEstimatif, revenusRecurrentsExtras, subventionsAnnoncees, gsheetOverrides };
+  return { masseOverrides, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals, caEstimatif, revenusRecurrentsExtras, subventionsAnnoncees, gsheetOverrides };
 }
 
 app.get('/api/scenarios/baseline/projection', async (req, res) => {
@@ -3122,7 +3268,8 @@ app.get('/api/scenarios/baseline/projection', async (req, res) => {
     const base = await fetchBaseData(horizonMonths);
     const result = await buildPrevisionnel({
       qontoData: base.qontoData, pipelineDeals: base.pipelineDeals,
-      notionMissions: base.notionMissions, salaries: base.salaries,
+      notionMissions: base.notionMissions,
+      masseSalarialeData: base.masseSalarialeData, masseOverrides: {},
       revenus: base.revenus, chargesFixesExtras: [], pipelineFactor: 1, fictionalDeals: [],
       crPrevData: base.crPrevData, caEstimatif: null,
       customerInvoices: base.customerInvoices,
@@ -3157,9 +3304,47 @@ app.get('/api/cr-prev/categories', async (req, res) => {
 
 app.get('/api/scenarios/baseline/salaries', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('salaries').select('*').order('nom');
-    if (error) return res.status(500).json({ error: error.message });
-    res.json(data || []);
+    // Phase F : source = GSheet (onglets "Salaires" pour la metadata + "Masse_salariale" pour les coûts).
+    // Rétrocompat frontend : id === nom (les overrides historiques référencent id, désormais traité comme nom).
+    const [meta, masseData] = await Promise.all([
+      fetchAndParseSalariesMeta().catch(() => []),
+      fetchAndParseMasseSalarialeDetailed().catch(() => null),
+    ]);
+    // Coût mensuel moyen par employé : moyenne des 3 derniers mois connus > 0 dans Masse_salariale.
+    const coutByNom = {};
+    if (masseData && masseData.byMonth) {
+      const recent = Object.keys(masseData.byMonth).sort().slice(-3);
+      const seen = {};
+      for (const mKey of recent) {
+        for (const emp of (masseData.byMonth[mKey].detail || [])) {
+          if (!seen[emp.nom]) seen[emp.nom] = { total: 0, count: 0, lastNet: 0, lastCharges: 0 };
+          seen[emp.nom].total += emp.cout;
+          seen[emp.nom].count += 1;
+          seen[emp.nom].lastNet = emp.net;
+          seen[emp.nom].lastCharges = emp.charges;
+        }
+      }
+      for (const nom of Object.keys(seen)) {
+        const s = seen[nom];
+        coutByNom[nom] = { avg: Math.round(s.total / s.count), net: s.lastNet, charges: s.lastCharges };
+      }
+    }
+    const out = meta.map(m => {
+      const cout = coutByNom[m.nom] || { avg: 0, net: 0, charges: 0 };
+      return {
+        id: m.nom, // rétrocompat : les overrides historiques utilisent id, maintenant === nom
+        nom: m.nom,
+        poste: null,
+        type: m.type || (m.isDirigeant ? 'dirigeant' : 'salarie'),
+        date_entree: m.date_debut,
+        date_sortie: m.date_fin,
+        net_mensuel: cout.net,
+        charges_mensuelles: cout.charges,
+        cout_moyen_mensuel: cout.avg,
+        isDirigeant: !!m.isDirigeant,
+      };
+    });
+    res.json(out);
   } catch (err) {
     console.error('Erreur baseline salaries:', err.message);
     res.status(500).json({ error: err.message });
@@ -3192,7 +3377,8 @@ app.get('/api/scenarios/:id/projection', async (req, res) => {
     const result = await buildPrevisionnel({
       qontoData: base.qontoData, pipelineDeals: base.pipelineDeals,
       notionMissions: base.notionMissions,
-      salaries: applied.salaries, revenus: applied.revenus,
+      masseSalarialeData: base.masseSalarialeData, masseOverrides: applied.masseOverrides,
+      revenus: applied.revenus,
       chargesFixesExtras: applied.chargesFixesExtras,
       pipelineFactor: applied.pipelineFactor,
       fictionalDeals: applied.fictionalDeals,

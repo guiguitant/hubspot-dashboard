@@ -1485,7 +1485,13 @@
     .repeat-partner-btn.active.p-Guillaume { background: #7c3aed; }
     .repeat-partner-btn.active.p-Nathan    { background: #0369a1; }
     .repeat-partner-btn.active.p-Vincent   { background: #b45309; }
-    .repeat-partner-btn:not(.active):hover { border-color: var(--primary); color: var(--primary); }
+    .repeat-partner-btn.excluded {
+      border-color: #ef4444;
+      background: #fef2f2;
+      color: #ef4444;
+      text-decoration: line-through;
+    }
+    .repeat-partner-btn:not(.active):not(.excluded):hover { border-color: var(--primary); color: var(--primary); }
 
     .repeat-partner-chip {
       display: inline-block;
@@ -1628,6 +1634,26 @@
     }
     .repeat-contacted-chip button:hover { color: #ef4444; }
 
+    .repeat-dismiss-btn {
+      flex-shrink: 0; opacity: 0; pointer-events: none;
+      background: none; border: none; cursor: pointer;
+      font-size: 0.82rem; color: var(--text-secondary);
+      padding: 0.2rem 0.35rem; border-radius: var(--radius);
+      transition: opacity 0.15s, color 0.15s, background 0.15s;
+    }
+    .repeat-row:hover .repeat-dismiss-btn { opacity: 1; pointer-events: all; }
+    .repeat-dismiss-btn:hover { color: #ef4444; background: #fef2f2; }
+
+    .repeat-row.dismissed { opacity: 0.4; filter: grayscale(0.6); border-left-color: var(--border) !important; }
+    .repeat-row.dismissed .repeat-dismiss-btn { opacity: 1; pointer-events: all; color: #16a34a; }
+    .repeat-row.dismissed .repeat-dismiss-btn:hover { color: #16a34a; background: #f0fdf4; }
+
+    .repeat-dismissed-footer {
+      text-align: center; padding: 0.6rem 0 0.2rem;
+      font-size: 0.75rem; color: var(--text-secondary);
+    }
+    .repeat-dismissed-footer a { color: var(--primary); cursor: pointer; text-decoration: underline; }
+
     .repeat-inline-form {
       display: flex;
       align-items: center;
@@ -1708,6 +1734,91 @@
     .repeat-kpi-card.kpi-green .repeat-kpi-value { color: #16a34a; }
     .repeat-kpi-card.kpi-blue  .repeat-kpi-value { color: #1d4ed8; }
     .repeat-kpi-card.kpi-amber .repeat-kpi-value { color: #b45309; }
+
+    /* Partner stats */
+    .repeat-partner-stats-wrapper {
+      margin-bottom: 1rem;
+    }
+    .rps-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      padding: 0.25rem 0;
+      margin-bottom: 0.5rem;
+      transition: color 0.15s;
+    }
+    .rps-toggle:hover { color: var(--primary); }
+    .rps-toggle-chevron {
+      display: inline-block;
+      font-size: 0.6rem;
+      transition: transform 0.2s;
+    }
+    .rps-toggle.open .rps-toggle-chevron { transform: rotate(90deg); }
+    .repeat-partner-stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.75rem;
+    }
+    .rps-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.7rem 0.9rem;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .rps-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    .rps-card.p-Guillaume { border-left-color: #7c3aed; }
+    .rps-card.p-Nathan    { border-left-color: #0369a1; }
+    .rps-card.p-Vincent   { border-left-color: #b45309; }
+    .rps-card.active { background: var(--primary-bg); border-color: var(--primary); }
+    .rps-card.excluded {
+      background: #fef2f2;
+      border-color: #fecaca;
+      border-left-color: #ef4444 !important;
+      opacity: 0.7;
+    }
+    .rps-card.excluded .rps-name { text-decoration: line-through; color: #ef4444; }
+    .rps-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.4rem;
+    }
+    .rps-name {
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .rps-ca {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--text-secondary);
+    }
+    .rps-metrics {
+      display: flex;
+      gap: 0.9rem;
+      font-size: 0.7rem;
+    }
+    .rps-metric {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.1;
+    }
+    .rps-metric-value { font-size: 1rem; font-weight: 800; color: var(--text); }
+    .rps-metric-value.urgent { color: #ef4444; }
+    .rps-metric-value.recent { color: #16a34a; }
+    .rps-metric-label { font-size: 0.62rem; color: var(--text-secondary); font-weight: 500; }
 
     .repeat-empty {
       text-align: center;
@@ -2402,13 +2513,15 @@
         <button class="btn" onclick="refreshRepeatClients()" style="font-size:0.75rem;padding:0.25rem 0.6rem">&#8635; Actualiser</button>
       </div>
       <div class="repeat-kpis" id="repeatKpis" style="display:none"></div>
+      <div class="repeat-partner-stats-wrapper">
+        <button class="rps-toggle" id="rpsToggle" type="button" onclick="toggleRepeatPartnerStats()">
+          <span class="rps-toggle-chevron" id="rpsChevron">&#9654;</span>
+          <span>Stats par associé</span>
+        </button>
+        <div class="repeat-partner-stats" id="repeatPartnerStats" style="display:none"></div>
+      </div>
       <div class="repeat-toolbar">
         <input class="repeat-search" type="text" id="repeatSearch" placeholder="&#128269; Rechercher un client…" oninput="renderRepeatList()">
-        <div class="repeat-filter-tabs">
-          <button class="repeat-filter-tab active" data-filter="urgent" onclick="setRepeatFilter('urgent',this)">À recontacter</button>
-          <button class="repeat-filter-tab" data-filter="done" onclick="setRepeatFilter('done',this)">En cours / Contactés</button>
-          <button class="repeat-filter-tab" data-filter="all" onclick="setRepeatFilter('all',this)">Tous</button>
-        </div>
         <div class="repeat-partner-filters">
           <span style="font-size:0.7rem;color:var(--text-secondary)">Par :</span>
           <button class="repeat-partner-btn p-Guillaume" data-partner="Guillaume" onclick="toggleRepeatPartner('Guillaume',this)">G</button>
@@ -2907,7 +3020,7 @@
     <div class="section">
       <div class="section-title" style="display:flex;align-items:center;gap:0.5rem">
         Equipe
-        <button class="btn" onclick="openSalariesModal()" style="font-size:0.8rem;padding:0.25rem 0.6rem;border-radius:var(--radius);color:var(--primary);font-weight:600">+ Ajouter</button>
+        <span style="font-size:0.75rem;color:var(--text-secondary);font-weight:400">— lecture seule, source : GSheet <em>Masse_salariale</em> + <em>Salaires</em></span>
       </div>
       <div id="salariesTableSection">
         <p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p>
@@ -3656,62 +3769,7 @@
     </div>
   </div>
 
-  <!-- Modal Salaries -->
-  <div class="modal-overlay" id="salariesModalOverlay">
-    <div class="modal" style="max-width:700px">
-      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
-        <h2>Gestion des salaries</h2>
-        <button onclick="closeSalariesModal()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--text)">&times;</button>
-      </div>
-      <div class="modal-body" style="padding:1rem">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:0.5rem">
-          <div>
-            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Nom</label>
-            <input type="text" id="salNom" placeholder="Ex: Jean Dupont" style="width:100%;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.85rem;font-family:inherit;background:var(--bg);color:var(--text)">
-          </div>
-          <div>
-            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Poste</label>
-            <input type="text" id="salPoste" placeholder="Ex: Developpeur" style="width:100%;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.85rem;font-family:inherit;background:var(--bg);color:var(--text)">
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem">
-          <div>
-            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Type</label>
-            <select id="salType" style="width:100%;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.85rem;font-family:inherit;background:var(--bg);color:var(--text)">
-              <option value="salarie">Salarie</option>
-              <option value="dirigeant">Dirigeant</option>
-              <option value="alternant">Alternant</option>
-              <option value="stagiaire">Stagiaire</option>
-            </select>
-          </div>
-          <div>
-            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Net mensuel (EUR)</label>
-            <input type="number" id="salNet" placeholder="2500" min="0" step="100" style="width:100%;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.85rem;font-family:inherit;background:var(--bg);color:var(--text)">
-          </div>
-          <div>
-            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Charges mensuelles (EUR)</label>
-            <input type="number" id="salCharges" placeholder="2000" min="0" step="100" style="width:100%;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.85rem;font-family:inherit;background:var(--bg);color:var(--text)">
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:0.5rem">
-          <div>
-            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Date entree</label>
-            <input type="date" id="salEntree" style="width:100%;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.85rem;font-family:inherit;background:var(--bg);color:var(--text)">
-          </div>
-          <div>
-            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Date sortie</label>
-            <input type="date" id="salSortie" style="width:100%;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.85rem;font-family:inherit;background:var(--bg);color:var(--text)">
-          </div>
-        </div>
-        <input type="hidden" id="salEditId" value="">
-        <button class="btn btn-filled" id="salSubmitBtn" onclick="submitSalarie()" style="margin-bottom:1rem;width:100%">Ajouter</button>
-        <div id="salariesListe" style="max-height:300px;overflow-y:auto"></div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn" onclick="closeSalariesModal()">Fermer</button>
-      </div>
-    </div>
-  </div>
+  <!-- Modal Salaries : retirée en Phase F (source GSheet, lecture seule). -->
 
   <!-- Modal Mot de passe Masse salariale -->
   <div class="modal-overlay" id="masseSalarialeAuthOverlay">
@@ -5537,25 +5595,68 @@
     }
 
     // --- Repeat Clients ---
-    const REPEAT_LS_KEY = 'releaf_repeat_contacts_v1';
     let repeatClientsData = null;
-    let repeatFilter = 'urgent';
-    let repeatPartnerFilter = null; // null = tous
+    let repeatFilter = 'all';
+    // { Guillaume: null | 'include' | 'exclude', Nathan: ..., Vincent: ... }
+    let repeatPartnerFilters = { Guillaume: null, Nathan: null, Vincent: null };
+    function _partnerMatches(partners) {
+      const ps = partners || [];
+      for (const name of Object.keys(repeatPartnerFilters)) {
+        const state = repeatPartnerFilters[name];
+        if (state === 'include' && !ps.includes(name)) return false;
+        if (state === 'exclude' && ps.includes(name)) return false;
+      }
+      return true;
+    }
+    let repeatShowDismissed = false;
     const REPEAT_RECENT_DAYS = 90;
     const REPEAT_RED_MONTHS = 9;
 
-    function getRepeatContacts() {
-      try { return JSON.parse(localStorage.getItem(REPEAT_LS_KEY) || '{}'); } catch { return {}; }
+    // --- Repeat state — in-memory cache, synced to Supabase via /api/repeat-state ---
+    let _repeatState = { dismissed: {}, contacts: {}, deals: {}, notes: {} };
+
+    async function fetchRepeatState() {
+      try {
+        const res = await fetch('/api/repeat-state');
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        _repeatState = {
+          dismissed: data.dismissed || {},
+          contacts:  data.contacts  || {},
+          deals:     data.deals     || {},
+          notes:     data.notes     || {},
+        };
+      } catch (e) {
+        console.warn('fetchRepeatState error', e);
+      }
     }
+
+    function _persistRepeatField(field) {
+      fetch('/api/repeat-state', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ field, value: _repeatState[field] }),
+      }).catch(e => console.warn('repeat-state PATCH error', e));
+    }
+
+    // Dismissed
+    function getDismissedClients() { return _repeatState.dismissed; }
+    function setClientDismissed(clientKey, dismissed) {
+      if (dismissed) _repeatState.dismissed[clientKey] = true;
+      else delete _repeatState.dismissed[clientKey];
+      _persistRepeatField('dismissed');
+    }
+    function isClientDismissed(clientKey) { return !!_repeatState.dismissed[clientKey]; }
+
+    // Contacts
+    function getRepeatContacts() { return _repeatState.contacts; }
     function saveRepeatContact(clientKey, date, note) {
-      const data = getRepeatContacts();
-      data[clientKey] = { date, note, savedAt: new Date().toISOString() };
-      localStorage.setItem(REPEAT_LS_KEY, JSON.stringify(data));
+      _repeatState.contacts[clientKey] = { date, note, savedAt: new Date().toISOString() };
+      _persistRepeatField('contacts');
     }
     function clearRepeatContact(clientKey) {
-      const data = getRepeatContacts();
-      delete data[clientKey];
-      localStorage.setItem(REPEAT_LS_KEY, JSON.stringify(data));
+      delete _repeatState.contacts[clientKey];
+      _persistRepeatField('contacts');
     }
 
     function monthsAgo(dateStr) {
@@ -5600,14 +5701,10 @@
     }
 
     // Deals créés depuis la section Repeat — { dealId: { clientName, dealName, amount, createdAt } }
-    const REPEAT_DEALS_LS_KEY = 'releaf_repeat_deals_v1';
-    function getRepeatDeals() {
-      try { return JSON.parse(localStorage.getItem(REPEAT_DEALS_LS_KEY) || '{}'); } catch { return {}; }
-    }
+    function getRepeatDeals() { return _repeatState.deals; }
     function saveRepeatDeal(dealId, clientName, dealName, amount) {
-      const data = getRepeatDeals();
-      data[dealId] = { clientName, dealName, amount: amount || 0, createdAt: new Date().toISOString() };
-      localStorage.setItem(REPEAT_DEALS_LS_KEY, JSON.stringify(data));
+      _repeatState.deals[dealId] = { clientName, dealName, amount: amount || 0, createdAt: new Date().toISOString() };
+      _persistRepeatField('deals');
     }
 
     let _repeatKpiData = null;
@@ -5653,9 +5750,78 @@
       };
     }
 
+    let _repeatPartnerStatsOpen = false;
+
+    function toggleRepeatPartnerStats() {
+      _repeatPartnerStatsOpen = !_repeatPartnerStatsOpen;
+      document.getElementById('rpsToggle').classList.toggle('open', _repeatPartnerStatsOpen);
+      document.getElementById('repeatPartnerStats').style.display = _repeatPartnerStatsOpen ? 'grid' : 'none';
+      if (_repeatPartnerStatsOpen) renderRepeatPartnerStats();
+    }
+
+    function renderRepeatPartnerStats() {
+      const el = document.getElementById('repeatPartnerStats');
+      if (!el || !repeatClientsData) return;
+      if (!_repeatPartnerStatsOpen) return;
+      const dismissed = getDismissedClients();
+      const contacts = getRepeatContacts();
+      const PARTNERS = ['Guillaume', 'Nathan', 'Vincent'];
+
+      const stats = PARTNERS.map(name => {
+        const mine = repeatClientsData.filter(c => (c.partners || []).includes(name) && !dismissed[c.client]);
+        const urgent = mine.filter(c => {
+          if (c.hasActiveMission) return false;
+          const u = repeatUrgency(c, contacts);
+          return u === 'red' || u === 'orange';
+        }).length;
+        const recent = mine.filter(c => {
+          const ct = contacts[c.client];
+          if (!ct || !ct.date) return false;
+          const ago = monthsAgo(ct.date);
+          return ago !== null && ago < REPEAT_RECENT_DAYS / 30.44;
+        }).length;
+        const totalCa = mine.reduce((s, c) => s + (c.totalCa || 0), 0);
+        return { name, total: mine.length, urgent, recent, totalCa };
+      });
+
+      el.innerHTML = stats.map(s => {
+        const st = repeatPartnerFilters[s.name];
+        const stateCls = st === 'include' ? ' active' : st === 'exclude' ? ' excluded' : '';
+        const tip = st === 'include' ? 'Inclure uniquement' : st === 'exclude' ? 'Exclure' : 'Clic : inclure · 2e clic : exclure';
+        return `
+          <div class="rps-card p-${s.name}${stateCls}" onclick="toggleRepeatPartnerFromStats('${s.name}')" title="${tip}">
+            <div class="rps-header">
+              <div class="rps-name">${s.name}</div>
+              <div class="rps-ca">${formatEuro(s.totalCa)}</div>
+            </div>
+            <div class="rps-metrics">
+              <div class="rps-metric">
+                <div class="rps-metric-value">${s.total}</div>
+                <div class="rps-metric-label">clients</div>
+              </div>
+              <div class="rps-metric">
+                <div class="rps-metric-value urgent">${s.urgent}</div>
+                <div class="rps-metric-label">à contacter</div>
+              </div>
+              <div class="rps-metric">
+                <div class="rps-metric-value recent">${s.recent}</div>
+                <div class="rps-metric-label">récents (90j)</div>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function toggleRepeatPartnerFromStats(name) {
+      const btn = document.querySelector(`.repeat-partner-btn[data-partner="${name}"]`);
+      if (btn) toggleRepeatPartner(name, btn);
+    }
+
     function renderRepeatKpis() {
       const kpis = computeRepeatKpis();
       const el = document.getElementById('repeatKpis');
+      renderRepeatPartnerStats();
       if (!kpis) { el.style.display = 'none'; return; }
 
       const { clientsWithDeal, pipelineCaRepeat, totalClients, clientsContacted } = kpis;
@@ -5762,6 +5928,7 @@
     async function fetchRepeatClients() {
       document.getElementById('repeatList').innerHTML = '<div class="repeat-empty">Chargement…</div>';
       try {
+        await fetchRepeatState();
         repeatClientsData = await fetch('/api/repeat-clients').then(r => r.json());
         renderRepeatKpis();
         renderRepeatList();
@@ -5775,43 +5942,55 @@
       fetchRepeatClients();
     }
 
-    function setRepeatFilter(f, btn) {
-      repeatFilter = f;
-      document.querySelectorAll('.repeat-filter-tab').forEach(el => el.classList.remove('active'));
-      btn.classList.add('active');
+
+    function toggleRepeatPartner(name, btn) {
+      // Cycle: null → include → exclude → null
+      const current = repeatPartnerFilters[name];
+      const next = current === null ? 'include' : current === 'include' ? 'exclude' : null;
+      repeatPartnerFilters[name] = next;
+      _syncPartnerBtn(btn, next);
+      renderRepeatPartnerStats();
       renderRepeatList();
     }
 
-    function toggleRepeatPartner(name, btn) {
-      if (repeatPartnerFilter === name) {
-        repeatPartnerFilter = null;
-        btn.classList.remove('active');
-      } else {
-        repeatPartnerFilter = name;
-        document.querySelectorAll('.repeat-partner-btn').forEach(el => el.classList.remove('active'));
-        btn.classList.add('active');
-      }
-      renderRepeatList();
+    function _syncPartnerBtn(btn, state) {
+      btn.classList.toggle('active', state === 'include');
+      btn.classList.toggle('excluded', state === 'exclude');
+      btn.title = state === 'include' ? 'Inclure uniquement' : state === 'exclude' ? 'Exclure' : 'Clic : inclure · 2e clic : exclure';
+    }
+
+    function _buildRepeatList(contacts, search) {
+      const dismissed = getDismissedClients();
+      return repeatClientsData.filter(c => {
+        if (search && !c.client.toLowerCase().includes(search)) return false;
+        if (!_partnerMatches(c.partners)) return false;
+        if (!repeatShowDismissed && dismissed[c.client]) return false;
+        return true;
+      });
     }
 
     function renderRepeatList() {
       if (!repeatClientsData) return;
       const contacts = getRepeatContacts();
+      const dismissed = getDismissedClients();
       const search = (document.getElementById('repeatSearch').value || '').toLowerCase().trim();
+      const list = _buildRepeatList(contacts, search);
 
-      let list = repeatClientsData.filter(c => {
+      // Count dismissed in current view (ignoring dismissed filter)
+      const dismissedCount = repeatClientsData.filter(c => {
         if (search && !c.client.toLowerCase().includes(search)) return false;
-        if (repeatPartnerFilter && !(c.partners || []).includes(repeatPartnerFilter)) return false;
-        const urg = repeatUrgency(c, contacts);
-        if (repeatFilter === 'urgent') return (urg === 'red' || urg === 'orange') && !c.hasActiveMission;
-        if (repeatFilter === 'done')   return urg === 'green' || c.hasActiveMission;
-        return true;
-      });
+        if (!_partnerMatches(c.partners)) return false;
+        return !!dismissed[c.client];
+      }).length;
 
       document.getElementById('repeatStats').textContent = `${list.length} client${list.length > 1 ? 's' : ''}`;
 
-      if (!list.length) {
+      if (!list.length && !dismissedCount) {
         document.getElementById('repeatList').innerHTML = '<div class="repeat-empty">Aucun client dans cette catégorie</div>';
+        return;
+      }
+      if (!list.length) {
+        document.getElementById('repeatList').innerHTML = _repeatDismissedFooter(dismissedCount);
         return;
       }
 
@@ -5823,22 +6002,44 @@
       if (!showAll) {
         html += `<button class="repeat-show-more" onclick="repeatShowAll()">${list.length - SHOW_INIT} clients de plus…</button>`;
       }
+      if (dismissedCount) html += _repeatDismissedFooter(dismissedCount);
       document.getElementById('repeatList').innerHTML = html;
+    }
+
+    function _repeatDismissedFooter(count) {
+      if (!count) return '';
+      if (repeatShowDismissed) {
+        return `<div class="repeat-dismissed-footer"><a onclick="repeatToggleDismissed()">Masquer les ${count} non pertinent${count > 1 ? 's' : ''}</a></div>`;
+      }
+      return `<div class="repeat-dismissed-footer">${count} client${count > 1 ? 's' : ''} masqué${count > 1 ? 's' : ''} · <a onclick="repeatToggleDismissed()">Voir</a></div>`;
+    }
+
+    function repeatToggleDismissed() {
+      repeatShowDismissed = !repeatShowDismissed;
+      renderRepeatList();
     }
 
     function repeatShowAll() {
       if (!repeatClientsData) return;
       const contacts = getRepeatContacts();
       const search = (document.getElementById('repeatSearch').value || '').toLowerCase().trim();
-      const list = repeatClientsData.filter(c => {
-        if (search && !c.client.toLowerCase().includes(search)) return false;
-        if (repeatPartnerFilter && !(c.partners || []).includes(repeatPartnerFilter)) return false;
-        const urg = repeatUrgency(c, contacts);
-        if (repeatFilter === 'urgent') return (urg === 'red' || urg === 'orange') && !c.hasActiveMission;
-        if (repeatFilter === 'done')   return urg === 'green' || c.hasActiveMission;
-        return true;
-      });
-      document.getElementById('repeatList').innerHTML = list.map(c => renderRepeatRow(c, contacts)).join('');
+      const list = _buildRepeatList(contacts, search);
+      const dismissed = getDismissedClients();
+      const dismissedCount = repeatClientsData.filter(c => !!dismissed[c.client]).length;
+      let html = list.map(c => renderRepeatRow(c, contacts)).join('');
+      if (dismissedCount) html += _repeatDismissedFooter(dismissedCount);
+      document.getElementById('repeatList').innerHTML = html;
+    }
+
+    function dismissRepeatClient(ck) {
+      const clientKey = decodeURIComponent(ck);
+      const isDismissed = isClientDismissed(clientKey);
+      setClientDismissed(clientKey, !isDismissed);
+      // If sidebar is open for this client, refresh it
+      if (currentRepeatClient && currentRepeatClient.client === clientKey) {
+        renderRepeatSidebarBody(currentRepeatClient);
+      }
+      renderRepeatList();
     }
 
     function renderRepeatRow(client, contacts) {
@@ -5846,6 +6047,7 @@
       const last = repeatLastMission(client);
       const contacted = contacts[client.client];
       const ck = encodeURIComponent(client.client);
+      const dismissed = isClientDismissed(client.client);
 
       const natureTag = last && last.nature && last.nature !== 'Non défini'
         ? `<span class="repeat-nature-tag">${last.nature}</span>` : '';
@@ -5879,7 +6081,9 @@
         </div>
       ` : `<button class="repeat-contact-btn" onclick="openRepeatContactForm('${ck}')">Marquer contacté</button>`;
 
-      return `<div class="repeat-row urgency-${urg}" data-client-key="${ck}" id="rrow-${ck}" onclick="openRepeatSidebar('${ck}')">
+      const dismissBtn = `<button class="repeat-dismiss-btn" title="${dismissed ? 'Réactiver ce client' : 'Marquer non pertinent'}" onclick="event.stopPropagation();dismissRepeatClient('${ck}')">${dismissed ? '↩' : '🚫'}</button>`;
+
+      return `<div class="repeat-row urgency-${urg}${dismissed ? ' dismissed' : ''}" data-client-key="${ck}" id="rrow-${ck}" onclick="openRepeatSidebar('${ck}')">
         <div class="repeat-dot"></div>
         <div class="repeat-main">
           <div class="repeat-client-name" style="display:flex;align-items:center;gap:0.4rem">${client.client}${activeBadge}${partnerChips}</div>
@@ -5890,7 +6094,8 @@
           <div class="repeat-missions-ca">${formatEuro(client.totalCa)}</div>
         </div>
         <div class="repeat-last-col">${lastStr}</div>
-        <div class="repeat-actions" id="raction-${ck}" onclick="event.stopPropagation()">${actionHtml}</div>
+        <div class="repeat-actions" id="raction-${ck}" onclick="event.stopPropagation()">${dismissed ? '' : actionHtml}</div>
+        ${dismissBtn}
       </div>`;
     }
 
@@ -5923,15 +6128,12 @@
     }
 
     // --- Repeat Sidebar ---
-    const REPEAT_NOTES_LS_KEY = 'releaf_repeat_notes_v1';
     let currentRepeatClient = null;
 
-    function getRepeatNotes() {
-      try { return JSON.parse(localStorage.getItem(REPEAT_NOTES_LS_KEY) || '{}'); } catch { return {}; }
-    }
+    function getRepeatNotes() { return _repeatState.notes; }
     function saveRepeatNote(clientKey, note) {
-      const n = getRepeatNotes(); n[clientKey] = note;
-      localStorage.setItem(REPEAT_NOTES_LS_KEY, JSON.stringify(n));
+      _repeatState.notes[clientKey] = note;
+      _persistRepeatField('notes');
     }
 
     function openRepeatSidebar(ck) {
@@ -5943,6 +6145,7 @@
       document.getElementById('repeatSidebarOverlay').classList.add('open');
       document.getElementById('repeatSidebar').classList.add('open');
       document.getElementById('rsbClientName').textContent = client.client;
+      _rsbUpdateDismissBtn();
 
       const KNOWN_P2 = ['Guillaume','Nathan','Vincent'];
       const pChipsHeader = (client.partners || []).map(p => {
@@ -5963,6 +6166,23 @@
       currentRepeatClient = null;
       document.getElementById('repeatSidebarOverlay').classList.remove('open');
       document.getElementById('repeatSidebar').classList.remove('open');
+    }
+
+    function _rsbUpdateDismissBtn() {
+      if (!currentRepeatClient) return;
+      const btn = document.getElementById('rsbDismissBtn');
+      if (!btn) return;
+      const dismissed = isClientDismissed(currentRepeatClient.client);
+      btn.textContent = dismissed ? '↩ Réactiver' : '🚫 Non pertinent';
+      btn.style.borderColor = dismissed ? '#16a34a' : '';
+      btn.style.color = dismissed ? '#16a34a' : '';
+    }
+
+    function rsbToggleDismiss() {
+      if (!currentRepeatClient) return;
+      const ck = encodeURIComponent(currentRepeatClient.client);
+      dismissRepeatClient(ck);
+      _rsbUpdateDismissBtn();
     }
 
     function renderRepeatSidebarBody(client) {
@@ -6082,6 +6302,7 @@
         return;
       }
 
+      // Enrich with live pipeline data if available
       const pipelineDealMap = {};
       if (dashboardData && dashboardData.pipelineDeals) {
         for (const [stage, deals] of Object.entries(dashboardData.pipelineDeals)) {
@@ -6130,8 +6351,9 @@
         dd.style.display = 'block'; return;
       }
 
-      const clientName = currentRepeatClient ? currentRepeatClient.client : '';
+      // Already linked IDs
       const ck = currentRepeatClient ? encodeURIComponent(currentRepeatClient.client) : '';
+      const clientName = currentRepeatClient ? currentRepeatClient.client : '';
       const alreadyLinked = new Set(Object.entries(getRepeatDeals()).filter(([,v]) => v.clientName === clientName).map(([id]) => id));
 
       const allDeals = [];
@@ -6174,6 +6396,7 @@
       }
       const deal = pipelineDealMap[dealId];
       saveRepeatDeal(dealId, clientName, deal ? deal.name : clientName, deal ? deal.amount : 0);
+      // Close search
       const wrap = document.getElementById('rsbLinkSearchWrap');
       const btn = document.getElementById('rsbLinkToggleBtn');
       if (wrap) wrap.style.display = 'none';
@@ -6183,9 +6406,8 @@
     }
 
     function rsbUnlinkDeal(dealId, ck) {
-      const data = getRepeatDeals();
-      delete data[dealId];
-      localStorage.setItem(REPEAT_DEALS_LS_KEY, JSON.stringify(data));
+      delete _repeatState.deals[dealId];
+      _persistRepeatField('deals');
       rsbRenderLinkedDeals(ck);
       renderRepeatKpis();
     }
@@ -8450,139 +8672,9 @@
     // --- Revenus exceptionnels : workflow retiré en migration 24.
     //     Use case "saisie ponctuelle d'un revenu" = désormais un override de scénario (accordion "Revenus exceptionnels" de la modale Scenarios).
 
-    // --- Salaries ---
-    function openSalariesModal() {
-      resetSalForm();
-      refreshSalariesListe();
-      document.getElementById('salariesModalOverlay').classList.add('active');
-    }
-
-    function closeSalariesModal() {
-      resetSalForm();
-      document.getElementById('salariesModalOverlay').classList.remove('active');
-    }
-
-    document.getElementById('salariesModalOverlay').addEventListener('click', function(e) {
-      if (e.target === this) closeSalariesModal();
-    });
-
-    function resetSalForm() {
-      document.getElementById('salEditId').value = '';
-      document.getElementById('salNom').value = '';
-      document.getElementById('salPoste').value = '';
-      document.getElementById('salType').value = 'salarie';
-      document.getElementById('salNet').value = '';
-      document.getElementById('salCharges').value = '';
-      document.getElementById('salEntree').value = '';
-      document.getElementById('salSortie').value = '';
-      document.getElementById('salSubmitBtn').textContent = 'Ajouter';
-    }
-
-    function editSalarie(id, nom, poste, type, net, charges, entree, sortie) {
-      document.getElementById('salEditId').value = id;
-      document.getElementById('salNom').value = nom;
-      document.getElementById('salPoste').value = poste || '';
-      document.getElementById('salType').value = type;
-      document.getElementById('salNet').value = net;
-      document.getElementById('salCharges').value = charges;
-      document.getElementById('salEntree').value = entree;
-      document.getElementById('salSortie').value = sortie || '';
-      document.getElementById('salSubmitBtn').textContent = 'Modifier';
-      document.getElementById('salNom').focus();
-    }
-
-    async function submitSalarie() {
-      const editId = document.getElementById('salEditId').value;
-      const nom = document.getElementById('salNom').value.trim();
-      const poste = document.getElementById('salPoste').value.trim();
-      const type = document.getElementById('salType').value;
-      const net_mensuel = parseFloat(document.getElementById('salNet').value);
-      const charges_mensuelles = parseFloat(document.getElementById('salCharges').value) || 0;
-      const date_entree = document.getElementById('salEntree').value;
-      const date_sortie = document.getElementById('salSortie').value || null;
-      if (!nom) return alert('Nom requis');
-      if (isNaN(net_mensuel) || net_mensuel < 0) return alert('Net mensuel invalide');
-      if (charges_mensuelles < 0) return alert('Charges mensuelles invalides');
-      if (!date_entree) return alert('Date entree requise');
-      try {
-        const url = editId ? '/api/salaries/' + editId : '/api/salaries';
-        const method = editId ? 'PUT' : 'POST';
-        const res = await fetch(url, {
-          method,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ nom, poste, type, net_mensuel, charges_mensuelles, date_entree, date_sortie }),
-        });
-        if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
-        resetSalForm();
-        await refreshSalariesListe();
-        tresoData = null;
-        if (currentPage === 'masse-salariale') await refreshMasseSalarialePage();
-        else await refreshTresoData();
-      } catch (err) {
-        alert('Erreur: ' + err.message);
-      }
-    }
-
-    async function deleteSalarie(id) {
-      if (!confirm('Supprimer ce salarie ?')) return;
-      try {
-        const res = await fetch('/api/salaries/' + id, { method: 'DELETE' });
-        if (!res.ok) throw new Error('Erreur suppression');
-        await refreshSalariesListe();
-        tresoData = null;
-        if (currentPage === 'masse-salariale') await refreshMasseSalarialePage();
-        else await refreshTresoData();
-      } catch (err) {
-        alert('Erreur: ' + err.message);
-      }
-    }
-
-    async function refreshSalariesListe() {
-      const container = document.getElementById('salariesListe');
-      try {
-        const res = await fetch('/api/salaries');
-        const salaries = await res.json();
-        if (salaries.length === 0) {
-          container.innerHTML = '<p style="color:var(--text-secondary);font-size:0.8rem;text-align:center;padding:0.5rem">Aucun salarie enregistre</p>';
-          return;
-        }
-        const typeLabels = { salarie: 'Salarie', dirigeant: 'Dirigeant', alternant: 'Alternant', stagiaire: 'Stagiaire' };
-        let html = '<table style="width:100%;border-collapse:collapse;font-size:0.8rem">';
-        html += '<thead><tr style="border-bottom:2px solid var(--border)">';
-        html += '<th style="text-align:left;padding:0.4rem 0.4rem">Nom</th>';
-        html += '<th style="text-align:left;padding:0.4rem 0.4rem">Poste</th>';
-        html += '<th style="text-align:center;padding:0.4rem 0.4rem">Type</th>';
-        html += '<th style="text-align:right;padding:0.4rem 0.4rem">Net</th>';
-        html += '<th style="text-align:right;padding:0.4rem 0.4rem">Charges</th>';
-        html += '<th style="text-align:right;padding:0.4rem 0.4rem">Cout total</th>';
-        html += '<th style="text-align:center;padding:0.4rem 0.4rem">Entree</th>';
-        html += '<th style="width:55px"></th>';
-        html += '</tr></thead><tbody>';
-        for (const s of salaries) {
-          const cout = Math.round(s.net_mensuel + s.charges_mensuelles);
-          const entree = new Date(s.date_entree).toLocaleDateString('fr-FR');
-          const escNom = (s.nom || '').replace(/'/g, "\\'");
-          const escPoste = (s.poste || '').replace(/'/g, "\\'");
-          html += '<tr style="border-bottom:1px solid var(--border)">';
-          html += '<td style="padding:0.4rem">' + s.nom + '</td>';
-          html += '<td style="padding:0.4rem;color:var(--text-secondary)">' + (s.poste || '-') + '</td>';
-          html += '<td style="text-align:center;padding:0.4rem"><span style="font-size:0.7rem;padding:0.15rem 0.4rem;border-radius:3px;background:var(--primary-bg);color:var(--primary)">' + typeLabels[s.type] + '</span></td>';
-          html += '<td style="text-align:right;padding:0.4rem">' + formatEuro(s.net_mensuel) + '</td>';
-          html += '<td style="text-align:right;padding:0.4rem">' + formatEuro(s.charges_mensuelles) + '</td>';
-          html += '<td style="text-align:right;padding:0.4rem;font-weight:600;color:var(--warning)">' + formatEuro(cout) + '</td>';
-          html += '<td style="text-align:center;padding:0.4rem">' + entree + '</td>';
-          html += '<td style="text-align:center;padding:0.4rem 0.2rem;white-space:nowrap">';
-          html += '<button onclick="editSalarie(\'' + s.id + "','" + escNom + "','" + escPoste + "','" + s.type + "'," + s.net_mensuel + ',' + s.charges_mensuelles + ",'" + s.date_entree + "','" + (s.date_sortie || '') + '\')" style="background:none;border:none;cursor:pointer;padding:0.3rem;border-radius:4px;transition:all 0.15s;color:var(--text-light)" title="Modifier" onmouseover="this.style.color=\'var(--primary)\';this.style.background=\'var(--primary-bg)\'" onmouseout="this.style.color=\'var(--text-light)\';this.style.background=\'none\'"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11.5 1.5l3 3L5 14H2v-3L11.5 1.5z"/></svg></button>';
-          html += '<button onclick="deleteSalarie(\'' + s.id + '\')" style="background:none;border:none;cursor:pointer;padding:0.3rem;border-radius:4px;transition:all 0.15s;color:var(--text-light)" title="Supprimer" onmouseover="this.style.color=\'var(--danger)\';this.style.background=\'var(--danger-bg)\'" onmouseout="this.style.color=\'var(--text-light)\';this.style.background=\'none\'"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4h12M5 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1M6 7v5M10 7v5"/><path d="M3 4l1 10a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-10"/></svg></button>';
-          html += '</td>';
-          html += '</tr>';
-        }
-        html += '</tbody></table>';
-        container.innerHTML = html;
-      } catch {
-        container.innerHTML = '<p style="color:var(--danger);font-size:0.8rem">Erreur chargement</p>';
-      }
-    }
+    // --- Salaries : lecture seule depuis GSheet (Phase F). CRUD Supabase retiré. ---
+    // Les anciens helpers openSalariesModal/editSalarie/deleteSalarie/submitSalarie/resetSalForm/refreshSalariesListe
+    // sont supprimés ; la source de vérité est désormais le GSheet Masse_salariale + Salaires.
 
     async function refreshMasseSalarialePage() {
       await renderSalariesTable();
@@ -8594,59 +8686,51 @@
       const container = document.getElementById('salariesTableSection');
       if (!container) return;
       try {
-        const res = await fetch('/api/salaries');
+        const res = await fetch('/api/scenarios/baseline/salaries');
         const salaries = await res.json();
-        if (salaries.length === 0) {
-          container.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:0.5rem">Aucun salarie. Cliquez sur "+ Ajouter" pour commencer.</p>';
+        if (!Array.isArray(salaries) || salaries.length === 0) {
+          container.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:0.5rem">Aucun employe remonte depuis le GSheet "Salaires".</p>';
           return;
         }
-        const typeLabels = { salarie: 'Salarie', dirigeant: 'Dirigeant', alternant: 'Alternant', stagiaire: 'Stagiaire' };
         const typeColors = { salarie: 'var(--primary)', dirigeant: 'var(--purple)', alternant: 'var(--warning)', stagiaire: 'var(--text-secondary)' };
         const typeBgs = { salarie: 'var(--primary-bg)', dirigeant: 'var(--purple-bg)', alternant: 'var(--warning-bg)', stagiaire: 'var(--hover)' };
         let html = '<table style="width:100%;border-collapse:collapse;font-size:0.85rem">';
         html += '<thead><tr style="border-bottom:2px solid var(--border)">';
         html += '<th style="text-align:left;padding:0.6rem 0.8rem">Nom</th>';
-        html += '<th style="text-align:left;padding:0.6rem 0.5rem">Poste</th>';
         html += '<th style="text-align:center;padding:0.6rem 0.5rem">Type</th>';
         html += '<th style="text-align:right;padding:0.6rem 0.5rem">Net mensuel</th>';
         html += '<th style="text-align:right;padding:0.6rem 0.5rem">Charges</th>';
-        html += '<th style="text-align:right;padding:0.6rem 0.5rem">Cout total</th>';
+        html += '<th style="text-align:right;padding:0.6rem 0.5rem">Cout moyen</th>';
         html += '<th style="text-align:center;padding:0.6rem 0.5rem">Entree</th>';
         html += '<th style="text-align:center;padding:0.6rem 0.5rem">Sortie</th>';
-        html += '<th style="width:60px"></th>';
         html += '</tr></thead><tbody>';
         let totalNet = 0, totalCharges = 0, totalCout = 0;
         for (const s of salaries) {
-          const cout = Math.round(s.net_mensuel + s.charges_mensuelles);
-          const entree = new Date(s.date_entree).toLocaleDateString('fr-FR');
+          const cout = Math.round(s.cout_moyen_mensuel || (s.net_mensuel + s.charges_mensuelles));
+          const entree = s.date_entree ? new Date(s.date_entree).toLocaleDateString('fr-FR') : '-';
           const sortie = s.date_sortie ? new Date(s.date_sortie).toLocaleDateString('fr-FR') : '-';
           const isActif = !s.date_sortie || new Date(s.date_sortie) >= new Date();
-          totalNet += isActif ? s.net_mensuel : 0;
-          totalCharges += isActif ? s.charges_mensuelles : 0;
+          totalNet += isActif ? (s.net_mensuel || 0) : 0;
+          totalCharges += isActif ? (s.charges_mensuelles || 0) : 0;
           totalCout += isActif ? cout : 0;
-          const escNom = (s.nom || '').replace(/'/g, "\\'");
-          const escPoste = (s.poste || '').replace(/'/g, "\\'");
+          const typeKey = (s.type || '').toLowerCase();
+          const typeLabel = s.isDirigeant ? 'Dirigeant' : (s.type || 'Salarie');
           html += '<tr style="border-bottom:1px solid var(--border);' + (isActif ? '' : 'opacity:0.5;') + '">';
-          html += '<td style="padding:0.5rem 0.8rem;font-weight:600">' + s.nom + '</td>';
-          html += '<td style="padding:0.5rem;color:var(--text-secondary)">' + (s.poste || '-') + '</td>';
-          html += '<td style="text-align:center;padding:0.5rem"><span style="font-size:0.75rem;padding:0.2rem 0.5rem;border-radius:3px;background:' + (typeBgs[s.type] || 'var(--hover)') + ';color:' + (typeColors[s.type] || 'var(--text)') + ';font-weight:500">' + typeLabels[s.type] + '</span></td>';
-          html += '<td style="text-align:right;padding:0.5rem">' + formatEuro(s.net_mensuel) + '</td>';
-          html += '<td style="text-align:right;padding:0.5rem">' + formatEuro(s.charges_mensuelles) + '</td>';
+          html += '<td style="padding:0.5rem 0.8rem;font-weight:600">' + (s.nom || '-') + '</td>';
+          html += '<td style="text-align:center;padding:0.5rem"><span style="font-size:0.75rem;padding:0.2rem 0.5rem;border-radius:3px;background:' + (typeBgs[typeKey] || typeBgs.salarie) + ';color:' + (typeColors[typeKey] || typeColors.salarie) + ';font-weight:500">' + typeLabel + '</span></td>';
+          html += '<td style="text-align:right;padding:0.5rem">' + formatEuro(s.net_mensuel || 0) + '</td>';
+          html += '<td style="text-align:right;padding:0.5rem">' + formatEuro(s.charges_mensuelles || 0) + '</td>';
           html += '<td style="text-align:right;padding:0.5rem;font-weight:600;color:var(--warning)">' + formatEuro(cout) + '</td>';
           html += '<td style="text-align:center;padding:0.5rem">' + entree + '</td>';
           html += '<td style="text-align:center;padding:0.5rem">' + sortie + '</td>';
-          html += '<td style="text-align:center;padding:0.5rem 0.3rem;white-space:nowrap">';
-          html += '<button onclick="openSalariesModal();editSalarie(\'' + s.id + "','" + escNom + "','" + escPoste + "','" + s.type + "'," + s.net_mensuel + ',' + s.charges_mensuelles + ",'" + s.date_entree + "','" + (s.date_sortie || '') + '\')" style="background:none;border:none;cursor:pointer;padding:0.3rem;border-radius:4px;transition:all 0.15s;color:var(--text-light)" title="Modifier" onmouseover="this.style.color=\'var(--primary)\';this.style.background=\'var(--primary-bg)\'" onmouseout="this.style.color=\'var(--text-light)\';this.style.background=\'none\'"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11.5 1.5l3 3L5 14H2v-3L11.5 1.5z"/></svg></button>';
-          html += '<button onclick="deleteSalarie(\'' + s.id + '\')" style="background:none;border:none;cursor:pointer;padding:0.3rem;border-radius:4px;transition:all 0.15s;color:var(--text-light)" title="Supprimer" onmouseover="this.style.color=\'var(--danger)\';this.style.background=\'var(--danger-bg)\'" onmouseout="this.style.color=\'var(--text-light)\';this.style.background=\'none\'"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4h12M5 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1M6 7v5M10 7v5"/><path d="M3 4l1 10a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-10"/></svg></button>';
-          html += '</td>';
           html += '</tr>';
         }
         html += '<tr style="border-top:2px solid var(--text)">';
-        html += '<td colspan="3" style="padding:0.6rem 0.8rem;font-weight:700">Total (actifs)</td>';
+        html += '<td colspan="2" style="padding:0.6rem 0.8rem;font-weight:700">Total (actifs)</td>';
         html += '<td style="text-align:right;padding:0.6rem 0.5rem;font-weight:700">' + formatEuro(totalNet) + '</td>';
         html += '<td style="text-align:right;padding:0.6rem 0.5rem;font-weight:700">' + formatEuro(totalCharges) + '</td>';
         html += '<td style="text-align:right;padding:0.6rem 0.5rem;font-weight:700;color:var(--warning)">' + formatEuro(totalCout) + '</td>';
-        html += '<td colspan="3"></td>';
+        html += '<td colspan="2"></td>';
         html += '</tr>';
         html += '</tbody></table>';
         container.innerHTML = html;
@@ -11329,6 +11413,7 @@
         <div class="repeat-sidebar-client" id="rsbClientName">—</div>
         <div class="repeat-sidebar-meta" id="rsbClientMeta"></div>
       </div>
+      <button id="rsbDismissBtn" onclick="rsbToggleDismiss()" title="Marquer non pertinent" style="background:none;border:1px solid var(--border);border-radius:var(--radius);font-size:0.72rem;font-weight:600;padding:0.22rem 0.55rem;cursor:pointer;color:var(--text-secondary);transition:all .12s;white-space:nowrap">🚫 Non pertinent</button>
       <button class="repeat-sidebar-close" onclick="closeRepeatSidebar()">&times;</button>
     </div>
     <div class="repeat-sidebar-body" id="rsbBody">
