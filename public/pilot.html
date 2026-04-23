@@ -1532,6 +1532,26 @@
     }
     .repeat-contacted-chip button:hover { color: #ef4444; }
 
+    .repeat-dismiss-btn {
+      flex-shrink: 0; opacity: 0; pointer-events: none;
+      background: none; border: none; cursor: pointer;
+      font-size: 0.82rem; color: var(--text-secondary);
+      padding: 0.2rem 0.35rem; border-radius: var(--radius);
+      transition: opacity 0.15s, color 0.15s, background 0.15s;
+    }
+    .repeat-row:hover .repeat-dismiss-btn { opacity: 1; pointer-events: all; }
+    .repeat-dismiss-btn:hover { color: #ef4444; background: #fef2f2; }
+
+    .repeat-row.dismissed { opacity: 0.4; filter: grayscale(0.6); border-left-color: var(--border) !important; }
+    .repeat-row.dismissed .repeat-dismiss-btn { opacity: 1; pointer-events: all; color: #16a34a; }
+    .repeat-row.dismissed .repeat-dismiss-btn:hover { color: #16a34a; background: #f0fdf4; }
+
+    .repeat-dismissed-footer {
+      text-align: center; padding: 0.6rem 0 0.2rem;
+      font-size: 0.75rem; color: var(--text-secondary);
+    }
+    .repeat-dismissed-footer a { color: var(--primary); cursor: pointer; text-decoration: underline; }
+
     .repeat-inline-form {
       display: flex;
       align-items: center;
@@ -5163,11 +5183,26 @@
 
     // --- Repeat Clients ---
     const REPEAT_LS_KEY = 'releaf_repeat_contacts_v1';
+    const REPEAT_DISMISSED_LS_KEY = 'releaf_repeat_dismissed_v1';
     let repeatClientsData = null;
     let repeatFilter = 'urgent';
     let repeatPartnerFilter = null; // null = tous
+    let repeatShowDismissed = false;
     const REPEAT_RECENT_DAYS = 90;
     const REPEAT_RED_MONTHS = 9;
+
+    function getDismissedClients() {
+      try { return JSON.parse(localStorage.getItem(REPEAT_DISMISSED_LS_KEY) || '{}'); } catch { return {}; }
+    }
+    function setClientDismissed(clientKey, dismissed) {
+      const data = getDismissedClients();
+      if (dismissed) data[clientKey] = true;
+      else delete data[clientKey];
+      localStorage.setItem(REPEAT_DISMISSED_LS_KEY, JSON.stringify(data));
+    }
+    function isClientDismissed(clientKey) {
+      return !!getDismissedClients()[clientKey];
+    }
 
     function getRepeatContacts() {
       try { return JSON.parse(localStorage.getItem(REPEAT_LS_KEY) || '{}'); } catch { return {}; }
@@ -5419,24 +5454,41 @@
       renderRepeatList();
     }
 
-    function renderRepeatList() {
-      if (!repeatClientsData) return;
-      const contacts = getRepeatContacts();
-      const search = (document.getElementById('repeatSearch').value || '').toLowerCase().trim();
-
-      let list = repeatClientsData.filter(c => {
+    function _buildRepeatList(contacts, search) {
+      const dismissed = getDismissedClients();
+      return repeatClientsData.filter(c => {
         if (search && !c.client.toLowerCase().includes(search)) return false;
         if (repeatPartnerFilter && !(c.partners || []).includes(repeatPartnerFilter)) return false;
+        if (!repeatShowDismissed && dismissed[c.client]) return false;
         const urg = repeatUrgency(c, contacts);
         if (repeatFilter === 'urgent') return (urg === 'red' || urg === 'orange') && !c.hasActiveMission;
         if (repeatFilter === 'done')   return urg === 'green' || c.hasActiveMission;
         return true;
       });
+    }
+
+    function renderRepeatList() {
+      if (!repeatClientsData) return;
+      const contacts = getRepeatContacts();
+      const dismissed = getDismissedClients();
+      const search = (document.getElementById('repeatSearch').value || '').toLowerCase().trim();
+      const list = _buildRepeatList(contacts, search);
+
+      // Count dismissed in current view (ignoring dismissed filter)
+      const dismissedCount = repeatClientsData.filter(c => {
+        if (search && !c.client.toLowerCase().includes(search)) return false;
+        if (repeatPartnerFilter && !(c.partners || []).includes(repeatPartnerFilter)) return false;
+        return !!dismissed[c.client];
+      }).length;
 
       document.getElementById('repeatStats').textContent = `${list.length} client${list.length > 1 ? 's' : ''}`;
 
-      if (!list.length) {
+      if (!list.length && !dismissedCount) {
         document.getElementById('repeatList').innerHTML = '<div class="repeat-empty">Aucun client dans cette catégorie</div>';
+        return;
+      }
+      if (!list.length) {
+        document.getElementById('repeatList').innerHTML = _repeatDismissedFooter(dismissedCount);
         return;
       }
 
@@ -5448,22 +5500,44 @@
       if (!showAll) {
         html += `<button class="repeat-show-more" onclick="repeatShowAll()">${list.length - SHOW_INIT} clients de plus…</button>`;
       }
+      if (dismissedCount) html += _repeatDismissedFooter(dismissedCount);
       document.getElementById('repeatList').innerHTML = html;
+    }
+
+    function _repeatDismissedFooter(count) {
+      if (!count) return '';
+      if (repeatShowDismissed) {
+        return `<div class="repeat-dismissed-footer"><a onclick="repeatToggleDismissed()">Masquer les ${count} non pertinent${count > 1 ? 's' : ''}</a></div>`;
+      }
+      return `<div class="repeat-dismissed-footer">${count} client${count > 1 ? 's' : ''} masqué${count > 1 ? 's' : ''} · <a onclick="repeatToggleDismissed()">Voir</a></div>`;
+    }
+
+    function repeatToggleDismissed() {
+      repeatShowDismissed = !repeatShowDismissed;
+      renderRepeatList();
     }
 
     function repeatShowAll() {
       if (!repeatClientsData) return;
       const contacts = getRepeatContacts();
       const search = (document.getElementById('repeatSearch').value || '').toLowerCase().trim();
-      const list = repeatClientsData.filter(c => {
-        if (search && !c.client.toLowerCase().includes(search)) return false;
-        if (repeatPartnerFilter && !(c.partners || []).includes(repeatPartnerFilter)) return false;
-        const urg = repeatUrgency(c, contacts);
-        if (repeatFilter === 'urgent') return (urg === 'red' || urg === 'orange') && !c.hasActiveMission;
-        if (repeatFilter === 'done')   return urg === 'green' || c.hasActiveMission;
-        return true;
-      });
-      document.getElementById('repeatList').innerHTML = list.map(c => renderRepeatRow(c, contacts)).join('');
+      const list = _buildRepeatList(contacts, search);
+      const dismissed = getDismissedClients();
+      const dismissedCount = repeatClientsData.filter(c => !!dismissed[c.client]).length;
+      let html = list.map(c => renderRepeatRow(c, contacts)).join('');
+      if (dismissedCount) html += _repeatDismissedFooter(dismissedCount);
+      document.getElementById('repeatList').innerHTML = html;
+    }
+
+    function dismissRepeatClient(ck) {
+      const clientKey = decodeURIComponent(ck);
+      const isDismissed = isClientDismissed(clientKey);
+      setClientDismissed(clientKey, !isDismissed);
+      // If sidebar is open for this client, refresh it
+      if (currentRepeatClient && currentRepeatClient.client === clientKey) {
+        renderRepeatSidebarBody(currentRepeatClient);
+      }
+      renderRepeatList();
     }
 
     function renderRepeatRow(client, contacts) {
@@ -5471,6 +5545,7 @@
       const last = repeatLastMission(client);
       const contacted = contacts[client.client];
       const ck = encodeURIComponent(client.client);
+      const dismissed = isClientDismissed(client.client);
 
       const natureTag = last && last.nature && last.nature !== 'Non défini'
         ? `<span class="repeat-nature-tag">${last.nature}</span>` : '';
@@ -5504,7 +5579,9 @@
         </div>
       ` : `<button class="repeat-contact-btn" onclick="openRepeatContactForm('${ck}')">Marquer contacté</button>`;
 
-      return `<div class="repeat-row urgency-${urg}" data-client-key="${ck}" id="rrow-${ck}" onclick="openRepeatSidebar('${ck}')">
+      const dismissBtn = `<button class="repeat-dismiss-btn" title="${dismissed ? 'Réactiver ce client' : 'Marquer non pertinent'}" onclick="event.stopPropagation();dismissRepeatClient('${ck}')">${dismissed ? '↩' : '🚫'}</button>`;
+
+      return `<div class="repeat-row urgency-${urg}${dismissed ? ' dismissed' : ''}" data-client-key="${ck}" id="rrow-${ck}" onclick="openRepeatSidebar('${ck}')">
         <div class="repeat-dot"></div>
         <div class="repeat-main">
           <div class="repeat-client-name" style="display:flex;align-items:center;gap:0.4rem">${client.client}${activeBadge}${partnerChips}</div>
@@ -5515,7 +5592,8 @@
           <div class="repeat-missions-ca">${formatEuro(client.totalCa)}</div>
         </div>
         <div class="repeat-last-col">${lastStr}</div>
-        <div class="repeat-actions" id="raction-${ck}" onclick="event.stopPropagation()">${actionHtml}</div>
+        <div class="repeat-actions" id="raction-${ck}" onclick="event.stopPropagation()">${dismissed ? '' : actionHtml}</div>
+        ${dismissBtn}
       </div>`;
     }
 
@@ -5568,6 +5646,7 @@
       document.getElementById('repeatSidebarOverlay').classList.add('open');
       document.getElementById('repeatSidebar').classList.add('open');
       document.getElementById('rsbClientName').textContent = client.client;
+      _rsbUpdateDismissBtn();
 
       const KNOWN_P2 = ['Guillaume','Nathan','Vincent'];
       const pChipsHeader = (client.partners || []).map(p => {
@@ -5588,6 +5667,23 @@
       currentRepeatClient = null;
       document.getElementById('repeatSidebarOverlay').classList.remove('open');
       document.getElementById('repeatSidebar').classList.remove('open');
+    }
+
+    function _rsbUpdateDismissBtn() {
+      if (!currentRepeatClient) return;
+      const btn = document.getElementById('rsbDismissBtn');
+      if (!btn) return;
+      const dismissed = isClientDismissed(currentRepeatClient.client);
+      btn.textContent = dismissed ? '↩ Réactiver' : '🚫 Non pertinent';
+      btn.style.borderColor = dismissed ? '#16a34a' : '';
+      btn.style.color = dismissed ? '#16a34a' : '';
+    }
+
+    function rsbToggleDismiss() {
+      if (!currentRepeatClient) return;
+      const ck = encodeURIComponent(currentRepeatClient.client);
+      dismissRepeatClient(ck);
+      _rsbUpdateDismissBtn();
     }
 
     function renderRepeatSidebarBody(client) {
@@ -10331,6 +10427,7 @@
         <div class="repeat-sidebar-client" id="rsbClientName">—</div>
         <div class="repeat-sidebar-meta" id="rsbClientMeta"></div>
       </div>
+      <button id="rsbDismissBtn" onclick="rsbToggleDismiss()" title="Marquer non pertinent" style="background:none;border:1px solid var(--border);border-radius:var(--radius);font-size:0.72rem;font-weight:600;padding:0.22rem 0.55rem;cursor:pointer;color:var(--text-secondary);transition:all .12s;white-space:nowrap">🚫 Non pertinent</button>
       <button class="repeat-sidebar-close" onclick="closeRepeatSidebar()">&times;</button>
     </div>
     <div class="repeat-sidebar-body" id="rsbBody">
