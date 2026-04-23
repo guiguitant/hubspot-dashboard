@@ -1802,6 +1802,40 @@
       display: none;
     }
 
+    .rsb-linked-deal {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.45rem 0.65rem;
+      background: var(--primary-bg); border: 1px solid rgba(34,197,94,.25);
+      border-radius: var(--radius); font-size: 0.8rem;
+    }
+    .rsb-linked-deal-name { flex: 1; font-weight: 600; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rsb-linked-deal-amount { color: var(--primary); font-weight: 700; font-size: 0.78rem; white-space: nowrap; }
+    .rsb-linked-deal-stage { font-size: 0.68rem; color: var(--text-secondary); white-space: nowrap; }
+    .rsb-link-search-wrap { position: relative; }
+    .rsb-link-search-wrap input {
+      font-size: 0.82rem; padding: 0.35rem 0.55rem;
+      border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--bg); color: var(--text);
+      width: 100%; box-sizing: border-box;
+    }
+    .rsb-link-search-wrap input:focus { outline: none; border-color: var(--primary); }
+    .rsb-link-dropdown {
+      position: absolute; top: calc(100% + 2px); left: 0; right: 0;
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); box-shadow: 0 6px 18px rgba(0,0,0,.15);
+      z-index: 100; max-height: 200px; overflow-y: auto;
+    }
+    .rsb-link-dropdown-item {
+      padding: 0.45rem 0.65rem; font-size: 0.8rem; cursor: pointer;
+      display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .rsb-link-dropdown-item:last-child { border-bottom: none; }
+    .rsb-link-dropdown-item:hover { background: var(--primary-bg); }
+    .rsb-link-dropdown-item .link-item-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rsb-link-dropdown-item .link-item-amt { color: var(--primary); font-weight: 700; white-space: nowrap; font-size: 0.75rem; }
+    .rsb-link-dropdown-empty { padding: 0.6rem 0.65rem; font-size: 0.78rem; color: var(--text-secondary); text-align: center; }
+
     /* --- Deal Sidebar --- */
     .deal-sidebar-overlay {
       display: none;
@@ -5624,6 +5658,16 @@
         </div>
 
         <div>
+          <div class="rsb-section-label">Deals pipeline liés</div>
+          <div id="rsbLinkedDeals" style="display:flex;flex-direction:column;gap:0.35rem;margin-bottom:0.5rem"></div>
+          <div class="rsb-link-search-wrap" id="rsbLinkSearchWrap" style="display:none">
+            <input type="text" id="rsbLinkSearch" placeholder="&#128269; Rechercher un deal dans le pipeline…" oninput="rsbFilterLinkDeals()" onblur="setTimeout(()=>rsbHideLinkDropdown(),200)">
+            <div class="rsb-link-dropdown" id="rsbLinkDropdown" style="display:none"></div>
+          </div>
+          <button class="rsb-btn-sm" id="rsbLinkToggleBtn" onclick="rsbToggleLinkSearch('${ck}')" style="margin-top:0.1rem">&#128279; Lier un deal existant</button>
+        </div>
+
+        <div>
           <div class="rsb-section-label">Ajouter au pipeline HubSpot</div>
           <div class="rsb-deal-form">
             <input type="text" id="rsbDealName" placeholder="Nom du deal" value="${client.client} — ">
@@ -5646,6 +5690,129 @@
       // Pre-fill closedate to 3 months from now
       const in3m = new Date(); in3m.setMonth(in3m.getMonth() + 3);
       document.getElementById('rsbDealClosedate').value = in3m.toISOString().slice(0,10);
+
+      // Render linked deals
+      rsbRenderLinkedDeals(ck);
+    }
+
+    function rsbRenderLinkedDeals(ck) {
+      const clientName = decodeURIComponent(ck);
+      const repeatDeals = getRepeatDeals();
+      const el = document.getElementById('rsbLinkedDeals');
+      if (!el) return;
+
+      const linked = Object.entries(repeatDeals).filter(([, v]) => v.clientName === clientName);
+      if (!linked.length) {
+        el.innerHTML = '<div style="font-size:0.78rem;color:var(--text-secondary)">Aucun deal lié</div>';
+        return;
+      }
+
+      const pipelineDealMap = {};
+      if (dashboardData && dashboardData.pipelineDeals) {
+        for (const [stage, deals] of Object.entries(dashboardData.pipelineDeals)) {
+          for (const d of deals) pipelineDealMap[d.id] = { ...d, stage };
+        }
+      }
+
+      el.innerHTML = linked.map(([dealId, { dealName, amount }]) => {
+        const live = pipelineDealMap[dealId];
+        const name = (live && live.name) || dealName || clientName;
+        const amt = (live && live.amount != null) ? live.amount : (amount || 0);
+        const stage = live ? live.stage : '';
+        return `
+          <div class="rsb-linked-deal">
+            <div class="rsb-linked-deal-name" title="${name}">${name}</div>
+            ${stage ? `<span class="rsb-linked-deal-stage">${stage}</span>` : ''}
+            <span class="rsb-linked-deal-amount">${amt > 0 ? formatEuro(amt) : '—'}</span>
+            <button class="rsb-btn-sm danger" style="flex-shrink:0;padding:0.12rem 0.4rem" onclick="rsbUnlinkDeal('${dealId}','${ck}')">✕</button>
+          </div>`;
+      }).join('');
+    }
+
+    function rsbToggleLinkSearch(ck) {
+      const wrap = document.getElementById('rsbLinkSearchWrap');
+      const btn = document.getElementById('rsbLinkToggleBtn');
+      if (!wrap) return;
+      const isOpen = wrap.style.display !== 'none';
+      if (isOpen) {
+        wrap.style.display = 'none';
+        btn.textContent = '🔗 Lier un deal existant';
+      } else {
+        wrap.style.display = '';
+        btn.textContent = 'Annuler';
+        const input = document.getElementById('rsbLinkSearch');
+        if (input) { input.value = ''; input.focus(); rsbFilterLinkDeals(); }
+      }
+    }
+
+    function rsbFilterLinkDeals() {
+      const q = (document.getElementById('rsbLinkSearch').value || '').toLowerCase().trim();
+      const dd = document.getElementById('rsbLinkDropdown');
+      if (!dd) return;
+
+      if (!dashboardData || !dashboardData.pipelineDeals) {
+        dd.innerHTML = '<div class="rsb-link-dropdown-empty">Pipeline non chargé</div>';
+        dd.style.display = 'block'; return;
+      }
+
+      const clientName = currentRepeatClient ? currentRepeatClient.client : '';
+      const ck = currentRepeatClient ? encodeURIComponent(currentRepeatClient.client) : '';
+      const alreadyLinked = new Set(Object.entries(getRepeatDeals()).filter(([,v]) => v.clientName === clientName).map(([id]) => id));
+
+      const allDeals = [];
+      for (const [stage, deals] of Object.entries(dashboardData.pipelineDeals)) {
+        for (const d of deals) allDeals.push({ ...d, stage });
+      }
+
+      const filtered = allDeals.filter(d => {
+        if (alreadyLinked.has(d.id)) return false;
+        if (!q) return true;
+        return (d.name || '').toLowerCase().includes(q);
+      }).slice(0, 12);
+
+      if (!filtered.length) {
+        dd.innerHTML = `<div class="rsb-link-dropdown-empty">${q ? 'Aucun résultat' : 'Tous les deals sont déjà liés'}</div>`;
+        dd.style.display = 'block'; return;
+      }
+
+      dd.innerHTML = filtered.map(d => `
+        <div class="rsb-link-dropdown-item" onmousedown="rsbLinkDeal('${d.id}','${ck}')">
+          <span class="link-item-name" title="${d.name}">${d.name}</span>
+          <span style="font-size:0.68rem;color:var(--text-secondary)">${d.stage}</span>
+          <span class="link-item-amt">${d.amount > 0 ? formatEuro(d.amount) : '—'}</span>
+        </div>`).join('');
+      dd.style.display = 'block';
+    }
+
+    function rsbHideLinkDropdown() {
+      const dd = document.getElementById('rsbLinkDropdown');
+      if (dd) dd.style.display = 'none';
+    }
+
+    function rsbLinkDeal(dealId, ck) {
+      const clientName = decodeURIComponent(ck);
+      const pipelineDealMap = {};
+      if (dashboardData && dashboardData.pipelineDeals) {
+        for (const deals of Object.values(dashboardData.pipelineDeals)) {
+          for (const d of deals) pipelineDealMap[d.id] = d;
+        }
+      }
+      const deal = pipelineDealMap[dealId];
+      saveRepeatDeal(dealId, clientName, deal ? deal.name : clientName, deal ? deal.amount : 0);
+      const wrap = document.getElementById('rsbLinkSearchWrap');
+      const btn = document.getElementById('rsbLinkToggleBtn');
+      if (wrap) wrap.style.display = 'none';
+      if (btn) btn.textContent = '🔗 Lier un deal existant';
+      rsbRenderLinkedDeals(ck);
+      renderRepeatKpis();
+    }
+
+    function rsbUnlinkDeal(dealId, ck) {
+      const data = getRepeatDeals();
+      delete data[dealId];
+      localStorage.setItem(REPEAT_DEALS_LS_KEY, JSON.stringify(data));
+      rsbRenderLinkedDeals(ck);
+      renderRepeatKpis();
     }
 
     function rsbShowContactForm(ck) {
