@@ -427,6 +427,8 @@ const STAGE_ID_MAP = {
   'RDV Propale':    'presentationscheduled',
   'Négociation':    'decisionmakerboughtin',
   'Contrat envoyé': 'contractsent',
+  'closedwon':      'closedwon',
+  'closedlost':     'closedlost',
 };
 
 app.post('/api/deals', async (req, res) => {
@@ -451,13 +453,19 @@ app.post('/api/deals', async (req, res) => {
 
 app.patch('/api/deals/:id', async (req, res) => {
   const { id } = req.params;
-  const { amount, stage } = req.body;
+  const { amount, stage, closedate, description } = req.body;
   const properties = {};
   if (amount !== undefined) properties.amount = String(parseFloat(amount));
+  if (closedate !== undefined) properties.closedate = closedate;
+  if (description !== undefined) properties.description = description;
   if (stage !== undefined) {
-    const stageId = STAGE_ID_MAP[stage];
-    if (!stageId) return res.status(400).json({ error: 'Stage invalide' });
-    properties.dealstage = stageId;
+    if (stage === 'closedwon' || stage === 'closedlost') {
+      properties.dealstage = stage;
+    } else {
+      const stageId = STAGE_ID_MAP[stage];
+      if (!stageId) return res.status(400).json({ error: 'Stage invalide' });
+      properties.dealstage = stageId;
+    }
   }
   if (!Object.keys(properties).length) return res.status(400).json({ error: 'Rien à modifier' });
   try {
@@ -477,6 +485,29 @@ app.get('/api/deals/metadata', async (req, res) => {
     const map = {};
     for (const row of data) map[row.deal_id] = row;
     res.json(map);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/deals/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const props = ['dealname', 'amount', 'dealstage', 'closedate', 'createdate', 'description', 'hs_deal_stage_probability', 'pipeline'];
+    const data = await hubspotRequest(`/crm/v3/objects/deals/${id}?properties=${props.join(',')}`);
+    const stageId = data.properties.dealstage;
+    const stageInfo = KANBAN_STAGES.find(s => s.id === stageId);
+    res.json({
+      id: data.id,
+      name: data.properties.dealname || '',
+      amount: parseFloat(data.properties.amount) || 0,
+      stage: stageInfo ? stageInfo.label : (stageId || ''),
+      stageId,
+      closedate: data.properties.closedate || null,
+      createdate: data.properties.createdate || null,
+      description: data.properties.description || '',
+      probability: stageInfo ? stageInfo.probability : (parseFloat(data.properties.hs_deal_stage_probability) || 0),
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -830,12 +861,20 @@ async function fetchAllNotionMissions() {
         ? props['Nb_jrs_solde_retard'].formula.number || 0 : 0,
       natureMission: props['Nature_mission'] && props['Nature_mission'].select
         ? props['Nature_mission'].select.name : 'Non défini',
+      partnerCommercial: props['Partner_commercial'] && props['Partner_commercial'].people
+        ? props['Partner_commercial'].people.map(p => p.name.split(' ')[0]) : [],
+      partnerOperationnel: props['Partner_Opérationnel'] && props['Partner_Opérationnel'].people
+        ? props['Partner_Opérationnel'].people.map(p => p.name.split(' ')[0]) : [],
       acquisition: props['Acquisition'] && props['Acquisition'].select
         ? props['Acquisition'].select.name : 'Non défini',
       typeCa: props['type_ca'] && props['type_ca'].select
         ? props['type_ca'].select.name : 'Non défini',
       subventionne: props['CA Subventionné ?'] && props['CA Subventionné ?'].formula
         ? props['CA Subventionné ?'].formula.string || 'Non' : 'Non',
+      contact: props['Contact'] && props['Contact'].rich_text
+        ? props['Contact'].rich_text.map(t => t.plain_text).join('') : '',
+      secteur: props["Secteur d'activité"] && props["Secteur d'activité"].multi_select
+        ? props["Secteur d'activité"].multi_select.map(s => s.name) : [],
     };
   });
 
@@ -843,6 +882,70 @@ async function fetchAllNotionMissions() {
   notionMissionsCacheTime = Date.now();
   return notionMissionsCache;
 }
+
+// --- Repeat clients (grouping of finished Notion missions by client) ---
+app.get('/api/repeat-clients', async (req, res) => {
+  try {
+    const missions = await fetchAllNotionMissions();
+    const ACTIVE_STATES = ['En cours', 'Planning', 'En pause', 'En attente'];
+    // Exclude only cancelled missions
+    const relevant = missions.filter(m => m.etat !== 'Annulé');
+
+    const byClient = {};
+    for (const m of relevant) {
+      const key = (m.client || '').trim();
+      if (!key) continue;
+      if (!byClient[key]) {
+        byClient[key] = {
+          client: key,
+          contact: m.contact || '',
+          secteur: m.secteur || [],
+          partners: [],
+          missions: [],
+          totalCa: 0,
+          lastMissionEndDate: null,
+          hasActiveMission: false,
+        };
+      }
+      const endDate = m.dates && m.dates.end ? m.dates.end
+        : (m.etat === 'Terminé' && m.anneeFinal ? `${m.anneeFinal}-12-31` : null);
+
+      byClient[key].missions.push({
+        nom: m.nom,
+        ca: m.ca,
+        nature: m.natureMission,
+        endDate,
+        etat: m.etat,
+        partnerCommercial: m.partnerCommercial || [],
+        partnerOperationnel: m.partnerOperationnel || [],
+      });
+      byClient[key].totalCa += m.ca;
+
+      if (ACTIVE_STATES.includes(m.etat)) byClient[key].hasActiveMission = true;
+
+      if (endDate && (!byClient[key].lastMissionEndDate || endDate > byClient[key].lastMissionEndDate)) {
+        byClient[key].lastMissionEndDate = endDate;
+      }
+      if (m.contact && !byClient[key].contact) byClient[key].contact = m.contact;
+      for (const s of (m.secteur || [])) {
+        if (!byClient[key].secteur.includes(s)) byClient[key].secteur.push(s);
+      }
+      for (const p of [...(m.partnerCommercial || []), ...(m.partnerOperationnel || [])]) {
+        if (p && !byClient[key].partners.includes(p)) byClient[key].partners.push(p);
+      }
+    }
+
+    const clients = Object.values(byClient).sort((a, b) => {
+      if (!a.lastMissionEndDate) return 1;
+      if (!b.lastMissionEndDate) return -1;
+      return a.lastMissionEndDate.localeCompare(b.lastMissionEndDate);
+    });
+
+    res.json(clients);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // --- Fuzzy string matching ---
 function normalize(str) {

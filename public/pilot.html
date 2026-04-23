@@ -1323,6 +1323,690 @@
     }
     @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
+    /* --- Repeat Clients --- */
+    .repeat-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+    }
+    .repeat-search {
+      flex: 1;
+      min-width: 180px;
+      max-width: 280px;
+      font-size: 0.82rem;
+      padding: 0.35rem 0.7rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg);
+      color: var(--text);
+    }
+    .repeat-search:focus { outline: none; border-color: var(--primary); }
+
+    .repeat-filter-tabs {
+      display: flex;
+      gap: 0.25rem;
+    }
+    .repeat-filter-tab {
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 0.28rem 0.65rem;
+      border-radius: 20px;
+      border: 1.5px solid var(--border);
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .repeat-filter-tab.active {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: white;
+    }
+    .repeat-filter-tab:hover:not(.active) { border-color: var(--primary); color: var(--primary); }
+
+    .repeat-partner-filters {
+      display: flex;
+      gap: 0.25rem;
+      align-items: center;
+    }
+    .repeat-partner-btn {
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 0.22rem 0.55rem;
+      border-radius: 20px;
+      border: 1.5px solid var(--border);
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .repeat-partner-btn.active {
+      border-color: transparent;
+      color: white;
+    }
+    .repeat-partner-btn.active.p-Guillaume { background: #7c3aed; }
+    .repeat-partner-btn.active.p-Nathan    { background: #0369a1; }
+    .repeat-partner-btn.active.p-Vincent   { background: #b45309; }
+    .repeat-partner-btn:not(.active):hover { border-color: var(--primary); color: var(--primary); }
+
+    .repeat-partner-chip {
+      display: inline-block;
+      font-size: 0.63rem;
+      font-weight: 700;
+      padding: 0.05rem 0.3rem;
+      border-radius: 8px;
+      color: white;
+    }
+    .rpc-Guillaume { background: #7c3aed; }
+    .rpc-Nathan    { background: #0369a1; }
+    .rpc-Vincent   { background: #b45309; }
+    .rpc-other     { background: #6b7280; }
+
+    .repeat-stats {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      margin-left: auto;
+    }
+
+    .repeat-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+
+    .repeat-group-label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-secondary);
+      padding: 0.5rem 0 0.2rem;
+    }
+
+    .repeat-row {
+      display: flex;
+      align-items: center;
+      gap: 0.9rem;
+      padding: 0.7rem 0.9rem;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      border-left: 3px solid transparent;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .repeat-row:hover { box-shadow: 0 1px 6px rgba(0,0,0,0.07); }
+    .repeat-row.urgency-red    { border-left-color: #ef4444; }
+    .repeat-row.urgency-orange { border-left-color: #f59e0b; }
+    .repeat-row.urgency-green  { border-left-color: #22c55e; }
+
+    .repeat-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .urgency-red    .repeat-dot { background: #ef4444; }
+    .urgency-orange .repeat-dot { background: #f59e0b; }
+    .urgency-green  .repeat-dot { background: #22c55e; }
+
+    .repeat-main { flex: 1; min-width: 0; }
+    .repeat-client-name {
+      font-size: 0.86rem;
+      font-weight: 700;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .repeat-client-sub {
+      font-size: 0.73rem;
+      color: var(--text-secondary);
+      margin-top: 0.1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .repeat-missions-col {
+      text-align: right;
+      flex-shrink: 0;
+      font-size: 0.78rem;
+    }
+    .repeat-missions-count {
+      font-weight: 600;
+      color: var(--text);
+    }
+    .repeat-missions-ca {
+      color: var(--text-secondary);
+      font-size: 0.72rem;
+    }
+
+    .repeat-last-col {
+      text-align: right;
+      flex-shrink: 0;
+      font-size: 0.75rem;
+      min-width: 90px;
+    }
+    .repeat-last-nature {
+      color: var(--text);
+      font-weight: 500;
+    }
+    .repeat-last-age {
+      color: var(--text-secondary);
+      font-size: 0.7rem;
+    }
+
+    .repeat-actions { flex-shrink: 0; }
+    .repeat-contact-btn {
+      font-size: 0.73rem;
+      font-weight: 600;
+      padding: 0.28rem 0.65rem;
+      border-radius: var(--radius);
+      border: 1.5px solid var(--primary);
+      background: transparent;
+      color: var(--primary);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s;
+    }
+    .repeat-contact-btn:hover { background: var(--primary-bg); }
+    .repeat-contacted-chip {
+      font-size: 0.72rem;
+      color: #16a34a;
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+      white-space: nowrap;
+    }
+    .repeat-contacted-chip button {
+      background: none;
+      border: none;
+      font-size: 0.65rem;
+      color: var(--text-secondary);
+      cursor: pointer;
+      padding: 0;
+      line-height: 1;
+    }
+    .repeat-contacted-chip button:hover { color: #ef4444; }
+
+    .repeat-inline-form {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+    }
+    .repeat-inline-form input[type="date"],
+    .repeat-inline-form input[type="text"] {
+      font-size: 0.75rem;
+      padding: 0.2rem 0.4rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg);
+      color: var(--text);
+    }
+    .repeat-inline-form input[type="text"] { width: 140px; }
+    .repeat-inline-form button {
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 0.22rem 0.5rem;
+      border-radius: var(--radius);
+      cursor: pointer;
+      border: none;
+    }
+    .repeat-inline-form .btn-confirm { background: var(--primary); color: white; }
+    .repeat-inline-form .btn-cancel  { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
+
+    .repeat-show-more {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 0.4rem 0;
+      text-decoration: underline;
+      text-align: left;
+    }
+    .repeat-show-more:hover { color: var(--primary); }
+
+    .repeat-row { cursor: pointer; }
+
+    /* Repeat KPIs */
+    .repeat-kpis {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    .repeat-kpi-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.75rem 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+      cursor: pointer;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .repeat-kpi-card:hover { border-color: var(--primary); box-shadow: 0 2px 8px rgba(0,61,46,0.08); }
+    .repeat-kpi-card.highlight { border-left: 3px solid var(--primary); }
+    .repeat-kpi-value {
+      font-size: 1.5rem;
+      font-weight: 800;
+      color: var(--text);
+      line-height: 1;
+    }
+    .repeat-kpi-label {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+    .repeat-kpi-sub {
+      font-size: 0.68rem;
+      color: var(--text-secondary);
+      margin-top: 0.1rem;
+    }
+    .repeat-kpi-card.kpi-green .repeat-kpi-value { color: #16a34a; }
+    .repeat-kpi-card.kpi-blue  .repeat-kpi-value { color: #1d4ed8; }
+    .repeat-kpi-card.kpi-amber .repeat-kpi-value { color: #b45309; }
+
+    .repeat-empty {
+      text-align: center;
+      padding: 2rem 0;
+      color: var(--text-secondary);
+      font-size: 0.85rem;
+    }
+
+    .repeat-nature-tag {
+      display: inline-block;
+      font-size: 0.65rem;
+      font-weight: 600;
+      padding: 0.08rem 0.35rem;
+      border-radius: 10px;
+      background: var(--bg);
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
+    }
+
+    /* --- Repeat Sidebar --- */
+    .repeat-sidebar {
+      position: fixed;
+      top: 0;
+      right: -460px;
+      width: 440px;
+      height: 100vh;
+      background: var(--bg);
+      border-left: 1px solid var(--border);
+      box-shadow: -6px 0 32px rgba(0,0,0,0.13);
+      z-index: 300;
+      transition: right 0.24s cubic-bezier(0.4,0,0.2,1);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .repeat-sidebar.open { right: 0; }
+
+    .repeat-sidebar-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      padding: 1.1rem 1.25rem 0.9rem;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      gap: 0.75rem;
+    }
+    .repeat-sidebar-title-wrap { flex: 1; min-width: 0; }
+    .repeat-sidebar-client {
+      font-size: 0.97rem;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.2;
+    }
+    .repeat-sidebar-meta {
+      font-size: 0.73rem;
+      color: var(--text-secondary);
+      margin-top: 0.2rem;
+    }
+    .repeat-sidebar-close {
+      background: none; border: none; font-size: 1.3rem;
+      cursor: pointer; color: var(--text-secondary); line-height: 1;
+      padding: 0; flex-shrink: 0; margin-top: -1px;
+    }
+    .repeat-sidebar-close:hover { color: var(--text); }
+
+    .repeat-sidebar-body {
+      flex: 1; overflow-y: auto;
+      padding: 1rem 1.25rem;
+      display: flex; flex-direction: column; gap: 1.2rem;
+    }
+    .repeat-sidebar-body::-webkit-scrollbar { width: 4px; }
+    .repeat-sidebar-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .rsb-section-label {
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-secondary);
+      margin-bottom: 0.5rem;
+    }
+
+    .rsb-contact-block {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.65rem 0.85rem;
+    }
+    .rsb-contact-date {
+      font-size: 0.83rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .rsb-contact-note {
+      font-size: 0.78rem;
+      color: var(--text-secondary);
+      margin-top: 0.15rem;
+    }
+    .rsb-contact-actions {
+      display: flex; gap: 0.4rem; margin-top: 0.5rem;
+    }
+    .rsb-btn-sm {
+      font-size: 0.72rem; font-weight: 600;
+      padding: 0.22rem 0.55rem;
+      border-radius: var(--radius); cursor: pointer;
+      border: 1.5px solid var(--border);
+      background: transparent; color: var(--text-secondary);
+      transition: all 0.12s;
+    }
+    .rsb-btn-sm:hover { border-color: var(--primary); color: var(--primary); }
+    .rsb-btn-sm.primary { border-color: var(--primary); background: var(--primary); color: white; }
+    .rsb-btn-sm.primary:hover { opacity: 0.88; }
+    .rsb-btn-sm.danger { border-color: #ef4444; color: #ef4444; }
+    .rsb-btn-sm.danger:hover { background: #fef2f2; }
+
+    .rsb-contact-form {
+      display: flex; flex-direction: column; gap: 0.45rem;
+      padding: 0.65rem 0.85rem;
+      background: var(--bg-secondary);
+      border: 1px solid var(--primary);
+      border-radius: var(--radius);
+    }
+    .rsb-contact-form input, .rsb-contact-form textarea {
+      font-size: 0.8rem; padding: 0.3rem 0.5rem;
+      border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--bg); color: var(--text); width: 100%; box-sizing: border-box;
+    }
+    .rsb-contact-form textarea { min-height: 52px; resize: vertical; }
+    .rsb-contact-form input:focus, .rsb-contact-form textarea:focus {
+      outline: none; border-color: var(--primary);
+    }
+    .rsb-form-row { display: flex; gap: 0.4rem; }
+
+    .rsb-mission-item {
+      display: flex; align-items: flex-start;
+      justify-content: space-between; gap: 0.5rem;
+      padding: 0.5rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .rsb-mission-item:last-child { border-bottom: none; }
+    .rsb-mission-name {
+      font-size: 0.8rem; font-weight: 500; color: var(--text);
+      line-height: 1.3;
+    }
+    .rsb-mission-sub {
+      font-size: 0.7rem; color: var(--text-secondary); margin-top: 0.1rem;
+    }
+    .rsb-mission-amount {
+      font-size: 0.8rem; font-weight: 600; color: var(--text);
+      flex-shrink: 0; text-align: right;
+    }
+
+    .rsb-notes-textarea {
+      width: 100%; box-sizing: border-box;
+      font-size: 0.82rem; padding: 0.5rem 0.65rem;
+      border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--bg); color: var(--text);
+      resize: vertical; min-height: 80px;
+    }
+    .rsb-notes-textarea:focus { outline: none; border-color: var(--primary); }
+
+    .rsb-deal-form {
+      display: flex; flex-direction: column; gap: 0.5rem;
+    }
+    .rsb-deal-form input, .rsb-deal-form select {
+      font-size: 0.82rem; padding: 0.35rem 0.55rem;
+      border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--bg); color: var(--text);
+      width: 100%; box-sizing: border-box;
+    }
+    .rsb-deal-form input:focus, .rsb-deal-form select:focus {
+      outline: none; border-color: var(--primary);
+    }
+    .rsb-deal-create-btn {
+      font-size: 0.82rem; font-weight: 700;
+      padding: 0.45rem 0.8rem;
+      background: var(--primary); color: white;
+      border: none; border-radius: var(--radius);
+      cursor: pointer; width: 100%;
+      transition: opacity 0.15s;
+    }
+    .rsb-deal-create-btn:hover { opacity: 0.88; }
+    .rsb-deal-create-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .rsb-deal-success {
+      font-size: 0.78rem; color: #16a34a;
+      background: #f0fdf4; border: 1px solid #86efac;
+      border-radius: var(--radius); padding: 0.4rem 0.65rem;
+      display: none;
+    }
+
+    /* --- Deal Sidebar --- */
+    .deal-sidebar-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.18);
+      z-index: 299;
+    }
+    .deal-sidebar-overlay.open { display: block; }
+
+    .deal-sidebar {
+      position: fixed;
+      top: 0;
+      right: -440px;
+      width: 420px;
+      height: 100vh;
+      background: var(--bg);
+      border-left: 1px solid var(--border);
+      box-shadow: -6px 0 32px rgba(0,0,0,0.13);
+      z-index: 300;
+      transition: right 0.24s cubic-bezier(0.4,0,0.2,1);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .deal-sidebar.open { right: 0; }
+
+    .deal-sidebar-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 1.1rem 1.25rem 0.9rem;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .deal-sidebar-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.3;
+      flex: 1;
+    }
+    .deal-sidebar-close {
+      background: none;
+      border: none;
+      font-size: 1.3rem;
+      cursor: pointer;
+      color: var(--text-secondary);
+      line-height: 1;
+      padding: 0;
+      flex-shrink: 0;
+      margin-top: -1px;
+    }
+    .deal-sidebar-close:hover { color: var(--text); }
+
+    .deal-sidebar-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1rem 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .deal-sidebar-body::-webkit-scrollbar { width: 4px; }
+    .deal-sidebar-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .deal-sidebar-field {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+    .deal-sidebar-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-secondary);
+    }
+    .deal-sidebar-value {
+      font-size: 0.88rem;
+      color: var(--text);
+    }
+    .deal-sidebar-input {
+      font-size: 0.85rem;
+      padding: 0.35rem 0.55rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg);
+      color: var(--text);
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .deal-sidebar-input:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px rgba(0,61,46,0.1);
+    }
+    .deal-sidebar-textarea {
+      resize: vertical;
+      min-height: 72px;
+    }
+    .deal-sidebar-save-row {
+      display: flex;
+      justify-content: flex-end;
+    }
+    .deal-sidebar-save-btn {
+      font-size: 0.78rem;
+      padding: 0.3rem 0.8rem;
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .deal-sidebar-save-btn:hover { opacity: 0.88; }
+    .deal-sidebar-save-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .deal-sidebar-footer {
+      padding: 0.9rem 1.25rem;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 0.6rem;
+      flex-shrink: 0;
+    }
+    .deal-sidebar-won-btn {
+      flex: 1;
+      padding: 0.55rem 0.5rem;
+      border-radius: var(--radius);
+      border: 1.5px solid #22c55e;
+      background: #f0fdf4;
+      color: #16a34a;
+      font-size: 0.82rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .deal-sidebar-won-btn:hover { background: #dcfce7; }
+    [data-theme="dark"] .deal-sidebar-won-btn { background: rgba(34,197,94,0.1); }
+    [data-theme="dark"] .deal-sidebar-won-btn:hover { background: rgba(34,197,94,0.18); }
+
+    .deal-sidebar-lost-btn {
+      flex: 1;
+      padding: 0.55rem 0.5rem;
+      border-radius: var(--radius);
+      border: 1.5px solid #ef4444;
+      background: #fef2f2;
+      color: #dc2626;
+      font-size: 0.82rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .deal-sidebar-lost-btn:hover { background: #fee2e2; }
+    [data-theme="dark"] .deal-sidebar-lost-btn { background: rgba(239,68,68,0.1); }
+    [data-theme="dark"] .deal-sidebar-lost-btn:hover { background: rgba(239,68,68,0.18); }
+
+    .deal-sidebar-stage-badge {
+      display: inline-block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 0.2rem 0.55rem;
+      border-radius: 12px;
+      background: var(--primary-bg);
+      color: var(--primary);
+    }
+
+    /* Forecast checkbox on card */
+    .kanban-card-forecast-cb {
+      position: absolute;
+      top: 0.4rem;
+      right: 0.4rem;
+      width: 16px;
+      height: 16px;
+      border: 1.5px solid var(--border);
+      border-radius: 3px;
+      background: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.6rem;
+      color: white;
+      flex-shrink: 0;
+      z-index: 2;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    .kanban-card-forecast-cb:hover { border-color: var(--primary); }
+    .kanban-card-forecast-cb.checked {
+      background: var(--primary);
+      border-color: var(--primary);
+    }
+    [data-theme="dark"] .kanban-card-forecast-cb { background: var(--card); }
+    .kanban-card { position: relative; }
+
+    .deal-sidebar-loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 0;
+      color: var(--text-secondary);
+      font-size: 0.85rem;
+    }
+
   </style>
 </head>
 <body>
@@ -1577,6 +2261,35 @@
         <button class="btn" onclick="clearForecast()">Tout deselectionner</button>
       </div>
       <div class="kanban-board" id="kanbanBoard"></div>
+    </div>
+
+    <hr class="divider">
+
+    <!-- Repeat clients -->
+    <div class="section" id="sectionRepeat">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.75rem">
+        <div class="section-title" style="margin-bottom:0">Repeat &mdash; Clients à recontacter</div>
+        <button class="btn" onclick="refreshRepeatClients()" style="font-size:0.75rem;padding:0.25rem 0.6rem">&#8635; Actualiser</button>
+      </div>
+      <div class="repeat-kpis" id="repeatKpis" style="display:none"></div>
+      <div class="repeat-toolbar">
+        <input class="repeat-search" type="text" id="repeatSearch" placeholder="&#128269; Rechercher un client…" oninput="renderRepeatList()">
+        <div class="repeat-filter-tabs">
+          <button class="repeat-filter-tab active" data-filter="urgent" onclick="setRepeatFilter('urgent',this)">À recontacter</button>
+          <button class="repeat-filter-tab" data-filter="done" onclick="setRepeatFilter('done',this)">En cours / Contactés</button>
+          <button class="repeat-filter-tab" data-filter="all" onclick="setRepeatFilter('all',this)">Tous</button>
+        </div>
+        <div class="repeat-partner-filters">
+          <span style="font-size:0.7rem;color:var(--text-secondary)">Par :</span>
+          <button class="repeat-partner-btn p-Guillaume" data-partner="Guillaume" onclick="toggleRepeatPartner('Guillaume',this)">G</button>
+          <button class="repeat-partner-btn p-Nathan"    data-partner="Nathan"    onclick="toggleRepeatPartner('Nathan',this)">N</button>
+          <button class="repeat-partner-btn p-Vincent"   data-partner="Vincent"   onclick="toggleRepeatPartner('Vincent',this)">V</button>
+        </div>
+        <span class="repeat-stats" id="repeatStats"></span>
+      </div>
+      <div class="repeat-list" id="repeatList">
+        <div class="repeat-empty">Chargement…</div>
+      </div>
     </div>
 
     <hr class="divider">
@@ -3134,7 +3847,7 @@
       }
 
       if (page === 'cockpit') refreshCockpit();
-      if (page === 'dashboard') { fetchDealMetadata().then(() => renderKanban()); if (dashboardData) render(); else { refreshData(); } refreshEmeliaCampaign(); }
+      if (page === 'dashboard') { fetchDealMetadata().then(() => renderKanban()); if (dashboardData) render(); else { refreshData(); } refreshEmeliaCampaign(); if (!repeatClientsData) fetchRepeatClients(); }
       if (page === 'facturation') { if (factData) { loadFactOverrides().then(() => { renderFactAlerts(); renderFactKpis(); renderFactTable(); }); } else refreshFactData(); }
       if (page === 'tresorerie') { if (tresoData) { renderTresoKpis(); renderTresoChart(); renderChargesChart(); renderChargesDetail(); renderMasseSalariale(); } else refreshTresoData(); }
       if (page === 'masse-salariale') refreshMasseSalarialePage();
@@ -3854,6 +4567,7 @@
 
     function renderKanban() {
       if (!dashboardData || !dashboardData.pipelineDeals) return;
+      if (repeatClientsData) renderRepeatKpis();
       const board = document.getElementById('kanbanBoard');
       let html = '';
       pipelineNewDeals = [];
@@ -3919,6 +4633,7 @@
             }).join('')
           }<span class="deal-tag-add" onclick="openTagMenu(event,'${deal.id}')">+</span><span style="flex:1"></span>${redownloadBtn}${proposalChip}</div>`;
 
+          const cbChecked = selectedDealIds.has(deal.id) ? ' checked' : '';
           html += `<div class="kanban-card${selected}"
               draggable="true"
               data-deal-id="${deal.id}"
@@ -3926,8 +4641,9 @@
               data-deal-stage="${stageName}"
               ondragstart="onDragStart(event)"
               ondragend="onDragEnd(event)"
-              onclick="toggleDeal(this)">
-            <div class="kanban-card-name">${deal.name}${badge}</div>
+              onclick="openDealSidebar('${deal.id}')">
+            <div class="kanban-card-forecast-cb${cbChecked}" onclick="toggleDealForecast(event,'${deal.id}')" title="Ajouter au forecast">&#10003;</div>
+            <div class="kanban-card-name" style="padding-right:1.4rem">${deal.name}${badge}</div>
             ${tagsHtml}
             <div class="kanban-card-meta">
               <span class="kanban-card-amount" onclick="startEditAmount(event, this, '${deal.id}', ${deal.amount})" title="Cliquer pour modifier">${formatEuro(deal.amount)}</span>
@@ -4216,17 +4932,192 @@
       if (e.target === e.currentTarget) closeNewDealModal();
     });
 
-    function toggleDeal(el) {
-      const id = el.dataset.dealId;
-      if (selectedDealIds.has(id)) {
-        selectedDealIds.delete(id);
-        el.classList.remove('selected');
+    function toggleDealForecast(event, dealId) {
+      event.stopPropagation();
+      const card = document.querySelector(`[data-deal-id="${dealId}"]`);
+      const cb = card ? card.querySelector('.kanban-card-forecast-cb') : null;
+      if (selectedDealIds.has(dealId)) {
+        selectedDealIds.delete(dealId);
+        if (card) card.classList.remove('selected');
+        if (cb) cb.classList.remove('checked');
       } else {
-        selectedDealIds.add(id);
-        el.classList.add('selected');
+        selectedDealIds.add(dealId);
+        if (card) card.classList.add('selected');
+        if (cb) cb.classList.add('checked');
       }
       updateForecastBar();
       render();
+    }
+
+    // --- Deal Sidebar ---
+    let currentSidebarDealId = null;
+
+    async function openDealSidebar(dealId) {
+      currentSidebarDealId = dealId;
+      document.getElementById('dealSidebarOverlay').classList.add('open');
+      document.getElementById('dealSidebar').classList.add('open');
+
+      // Show loading
+      const localDeal = findDealInPipeline(dealId);
+      document.getElementById('sidebarDealName').textContent = localDeal ? localDeal.name : '…';
+      document.getElementById('sidebarBody').innerHTML = '<div class="deal-sidebar-loading">Chargement…</div>';
+
+      try {
+        const [dealRes, metaRes] = await Promise.all([
+          fetch(`/api/deals/${dealId}`).then(r => r.json()),
+          Promise.resolve(dealMetadata[dealId] || {}),
+        ]);
+        if (dealId !== currentSidebarDealId) return; // sidebar was closed/changed
+        renderSidebarBody(dealRes, metaRes);
+        document.getElementById('sidebarDealName').textContent = dealRes.name;
+      } catch (e) {
+        if (dealId !== currentSidebarDealId) return;
+        document.getElementById('sidebarBody').innerHTML = '<div class="deal-sidebar-loading">Erreur de chargement</div>';
+      }
+    }
+
+    function findDealInPipeline(dealId) {
+      if (!dashboardData || !dashboardData.pipelineDeals) return null;
+      for (const deals of Object.values(dashboardData.pipelineDeals)) {
+        const d = deals.find(x => x.id === dealId);
+        if (d) return d;
+      }
+      return null;
+    }
+
+    function renderSidebarBody(deal, meta) {
+      const tags = meta.tags || [];
+      const tagsHtml = tags.length
+        ? tags.map(t => { const s = TAG_STYLES[t] || {}; return `<span class="deal-tag" style="background:${s.bg||'#eee'};color:${s.color||'#555'}">${t}</span>`; }).join('')
+        : '<span style="color:var(--text-secondary);font-size:0.8rem">Aucun tag</span>';
+
+      const closedateVal = deal.closedate ? deal.closedate.slice(0, 10) : '';
+      const createdStr = deal.createdate ? new Date(deal.createdate).toLocaleDateString('fr-FR') : '—';
+
+      document.getElementById('sidebarBody').innerHTML = `
+        <div class="deal-sidebar-field">
+          <div class="deal-sidebar-label">Stage</div>
+          <div><span class="deal-sidebar-stage-badge">${deal.stage || '—'}</span></div>
+        </div>
+
+        <div class="deal-sidebar-field">
+          <div class="deal-sidebar-label">Montant</div>
+          <input class="deal-sidebar-input" id="sbAmount" type="number" value="${deal.amount}" min="0" step="100">
+        </div>
+
+        <div class="deal-sidebar-field">
+          <div class="deal-sidebar-label">Date de clôture prévue</div>
+          <input class="deal-sidebar-input" id="sbClosedate" type="date" value="${closedateVal}">
+        </div>
+
+        <div class="deal-sidebar-field">
+          <div class="deal-sidebar-label">Notes</div>
+          <textarea class="deal-sidebar-input deal-sidebar-textarea" id="sbDescription" placeholder="Ajouter des notes…">${deal.description || ''}</textarea>
+        </div>
+
+        <div class="deal-sidebar-save-row">
+          <button class="deal-sidebar-save-btn" id="sbSaveBtn" onclick="saveSidebarChanges('${deal.id}')">Enregistrer</button>
+        </div>
+
+        <div class="deal-sidebar-field">
+          <div class="deal-sidebar-label">Tags</div>
+          <div style="display:flex;flex-wrap:wrap;gap:0.3rem">${tagsHtml}</div>
+        </div>
+
+        <div style="display:flex;gap:1.5rem">
+          <div class="deal-sidebar-field">
+            <div class="deal-sidebar-label">Créé le</div>
+            <div class="deal-sidebar-value">${createdStr}</div>
+          </div>
+          <div class="deal-sidebar-field">
+            <div class="deal-sidebar-label">Probabilité</div>
+            <div class="deal-sidebar-value">${deal.probability}%</div>
+          </div>
+        </div>
+
+        ${meta.proposal_sent_at ? `<div class="deal-sidebar-field">
+          <div class="deal-sidebar-label">Propale envoyée</div>
+          <div class="deal-sidebar-value">${formatShortDate(meta.proposal_sent_at)}${meta.proposal_mission ? ' · ' + meta.proposal_mission : ''}</div>
+        </div>` : ''}
+      `;
+    }
+
+    async function saveSidebarChanges(dealId) {
+      const btn = document.getElementById('sbSaveBtn');
+      const amount = parseFloat(document.getElementById('sbAmount').value);
+      const closedate = document.getElementById('sbClosedate').value;
+      const description = document.getElementById('sbDescription').value;
+
+      btn.disabled = true;
+      btn.textContent = '…';
+      try {
+        const patch = {};
+        if (!isNaN(amount)) patch.amount = amount;
+        if (closedate) patch.closedate = closedate;
+        patch.description = description;
+
+        await fetch(`/api/deals/${dealId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        }).then(r => { if (!r.ok) throw new Error(); });
+
+        // Update local state
+        if (!isNaN(amount)) {
+          for (const deals of Object.values(dashboardData.pipelineDeals)) {
+            const d = deals.find(x => x.id === dealId);
+            if (d) { d.amount = amount; break; }
+          }
+        }
+        renderKanban();
+        btn.textContent = 'Enregistré ✓';
+        setTimeout(() => { if (btn) btn.textContent = 'Enregistrer'; btn.disabled = false; }, 1500);
+      } catch {
+        btn.textContent = 'Erreur';
+        btn.disabled = false;
+        setTimeout(() => { if (btn) btn.textContent = 'Enregistrer'; }, 1500);
+      }
+    }
+
+    async function markCurrentDeal(outcome) {
+      const dealId = currentSidebarDealId;
+      if (!dealId) return;
+      const label = outcome === 'closedwon' ? 'Gagné' : 'Perdu';
+      if (!confirm(`Marquer ce deal comme ${label} dans HubSpot ?`)) return;
+
+      const wonBtn = document.getElementById('sidebarWonBtn');
+      const lostBtn = document.getElementById('sidebarLostBtn');
+      wonBtn.disabled = true;
+      lostBtn.disabled = true;
+
+      try {
+        await fetch(`/api/deals/${dealId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stage: outcome }),
+        }).then(r => { if (!r.ok) throw new Error(); });
+
+        // Remove deal from local pipeline
+        for (const [stage, deals] of Object.entries(dashboardData.pipelineDeals)) {
+          const idx = deals.findIndex(d => d.id === dealId);
+          if (idx !== -1) { deals.splice(idx, 1); break; }
+        }
+        selectedDealIds.delete(dealId);
+        closeDealSidebar();
+        renderKanban();
+        updateForecastBar();
+        render();
+      } catch {
+        wonBtn.disabled = false;
+        lostBtn.disabled = false;
+        alert('Erreur lors de la mise à jour dans HubSpot');
+      }
+    }
+
+    function closeDealSidebar() {
+      currentSidebarDealId = null;
+      document.getElementById('dealSidebarOverlay').classList.remove('open');
+      document.getElementById('dealSidebar').classList.remove('open');
     }
 
     function clearForecast() {
@@ -4234,6 +5125,624 @@
       document.querySelectorAll('.kanban-card.selected').forEach(el => el.classList.remove('selected'));
       updateForecastBar();
       render();
+    }
+
+    // --- Repeat Clients ---
+    const REPEAT_LS_KEY = 'releaf_repeat_contacts_v1';
+    let repeatClientsData = null;
+    let repeatFilter = 'urgent';
+    let repeatPartnerFilter = null; // null = tous
+    const REPEAT_RECENT_DAYS = 90;
+    const REPEAT_RED_MONTHS = 9;
+
+    function getRepeatContacts() {
+      try { return JSON.parse(localStorage.getItem(REPEAT_LS_KEY) || '{}'); } catch { return {}; }
+    }
+    function saveRepeatContact(clientKey, date, note) {
+      const data = getRepeatContacts();
+      data[clientKey] = { date, note, savedAt: new Date().toISOString() };
+      localStorage.setItem(REPEAT_LS_KEY, JSON.stringify(data));
+    }
+    function clearRepeatContact(clientKey) {
+      const data = getRepeatContacts();
+      delete data[clientKey];
+      localStorage.setItem(REPEAT_LS_KEY, JSON.stringify(data));
+    }
+
+    function monthsAgo(dateStr) {
+      if (!dateStr) return null;
+      const d = new Date(dateStr);
+      if (isNaN(d)) return null;
+      const now = new Date();
+      return (now - d) / (1000 * 60 * 60 * 24 * 30.44);
+    }
+
+    function repeatUrgency(client, contacts) {
+      // Client with an active mission = green, no urgency
+      if (client.hasActiveMission) return 'green';
+      const c = contacts[client.client];
+      if (c && c.date) {
+        const ago = monthsAgo(c.date);
+        if (ago !== null && ago < REPEAT_RECENT_DAYS / 30.44) return 'green';
+      }
+      const mAgo = monthsAgo(client.lastMissionEndDate);
+      if (mAgo === null) return 'orange';
+      if (mAgo > REPEAT_RED_MONTHS) return 'red';
+      if (mAgo > 3) return 'orange';
+      return 'green';
+    }
+
+    function fmtMonthsAgo(dateStr) {
+      const m = monthsAgo(dateStr);
+      if (m === null) return '—';
+      if (m < 1) return 'Ce mois-ci';
+      if (m < 2) return 'Il y a 1 mois';
+      return `Il y a ${Math.round(m)} mois`;
+    }
+
+    function repeatLastMission(client) {
+      if (!client.missions.length) return null;
+      return client.missions.reduce((best, m) => {
+        if (!best) return m;
+        if (!m.endDate) return best;
+        if (!best.endDate) return m;
+        return m.endDate > best.endDate ? m : best;
+      }, null);
+    }
+
+    // Deals créés depuis la section Repeat — { dealId: { clientName, createdAt } }
+    const REPEAT_DEALS_LS_KEY = 'releaf_repeat_deals_v1';
+    function getRepeatDeals() {
+      try { return JSON.parse(localStorage.getItem(REPEAT_DEALS_LS_KEY) || '{}'); } catch { return {}; }
+    }
+    function saveRepeatDeal(dealId, clientName) {
+      const data = getRepeatDeals();
+      data[dealId] = { clientName, createdAt: new Date().toISOString() };
+      localStorage.setItem(REPEAT_DEALS_LS_KEY, JSON.stringify(data));
+    }
+
+    let _repeatKpiData = null;
+
+    function computeRepeatKpis() {
+      if (!repeatClientsData || !dashboardData || !dashboardData.pipelineDeals) return null;
+
+      const allPipelineDeals = Object.values(dashboardData.pipelineDeals).flat();
+      const pipelineDealIds = new Set(allPipelineDeals.map(d => d.id));
+      const repeatDeals = getRepeatDeals();
+      const contacts = getRepeatContacts();
+      const matchedPairs = [];
+
+      for (const [dealId, { clientName }] of Object.entries(repeatDeals)) {
+        if (!pipelineDealIds.has(dealId)) continue; // deal clos ou supprimé du pipeline
+        const deal = allPipelineDeals.find(d => d.id === dealId);
+        const client = repeatClientsData.find(c => c.client === clientName);
+        if (!deal || !client) continue;
+        const existing = matchedPairs.find(p => p.client.client === clientName);
+        if (existing) existing.deals.push(deal);
+        else matchedPairs.push({ client, deals: [deal] });
+      }
+
+      const contactedList = repeatClientsData
+        .filter(c => contacts[c.client])
+        .map(c => ({ client: c, contact: contacts[c.client] }));
+
+      const pipelineCaRepeat = matchedPairs.reduce((s, p) => s + p.deals.reduce((ss, d) => ss + d.amount, 0), 0);
+
+      _repeatKpiData = { matchedPairs, contactedList, totalClients: repeatClientsData.length, pipelineCaRepeat };
+      return {
+        clientsWithDeal: matchedPairs.length,
+        pipelineCaRepeat,
+        totalClients: repeatClientsData.length,
+        clientsContacted: contactedList.length,
+      };
+    }
+
+    function renderRepeatKpis() {
+      const kpis = computeRepeatKpis();
+      const el = document.getElementById('repeatKpis');
+      if (!kpis) { el.style.display = 'none'; return; }
+
+      const { clientsWithDeal, pipelineCaRepeat, totalClients, clientsContacted } = kpis;
+      const repeatRate = totalClients > 0 ? Math.round((clientsContacted / totalClients) * 100) : 0;
+
+      el.style.display = 'grid';
+      el.innerHTML = `
+        <div class="repeat-kpi-card kpi-green highlight" onclick="openRepeatKpiModal('pipeline')" style="cursor:pointer" title="Voir le détail">
+          <div class="repeat-kpi-value">${clientsWithDeal}</div>
+          <div class="repeat-kpi-label">Client${clientsWithDeal > 1 ? 's' : ''} en pipeline</div>
+          <div class="repeat-kpi-sub">deals actifs chez d'anciens clients ↗</div>
+        </div>
+        <div class="repeat-kpi-card kpi-blue" onclick="openRepeatKpiModal('pipeline')" style="cursor:pointer" title="Voir le détail">
+          <div class="repeat-kpi-value">${formatEuro(pipelineCaRepeat)}</div>
+          <div class="repeat-kpi-label">CA pipeline repeat</div>
+          <div class="repeat-kpi-sub">montant brut des deals ↗</div>
+        </div>
+        <div class="repeat-kpi-card kpi-amber" onclick="openRepeatKpiModal('contacts')" style="cursor:pointer" title="Voir le détail">
+          <div class="repeat-kpi-value">${repeatRate}%</div>
+          <div class="repeat-kpi-label">Clients contactés</div>
+          <div class="repeat-kpi-sub">${clientsContacted} / ${totalClients} clients ↗</div>
+        </div>
+      `;
+    }
+
+    function openRepeatKpiModal(type) {
+      if (!_repeatKpiData) return;
+      const overlay = document.getElementById('repeatKpiModalOverlay');
+      const title = document.getElementById('repeatKpiModalTitle');
+      const body = document.getElementById('repeatKpiModalBody');
+
+      if (type === 'pipeline') {
+        const { matchedPairs, pipelineCaRepeat } = _repeatKpiData;
+        title.textContent = `Deals pipeline — anciens clients (${matchedPairs.length})`;
+
+        if (!matchedPairs.length) {
+          body.innerHTML = '<p style="color:var(--text-secondary);padding:1rem">Aucun deal pipeline ne correspond à un ancien client.</p>';
+        } else {
+          const rows = matchedPairs.flatMap(({ client, deals }) =>
+            deals.map(d => ({ clientName: client.client, dealName: d.name, stage: d.stage || d.stageEnteredAt, amount: d.amount }))
+          ).sort((a, b) => b.amount - a.amount);
+
+          body.innerHTML = `
+            <table style="width:100%;font-size:0.83rem;border-collapse:collapse">
+              <thead>
+                <tr style="border-bottom:1px solid var(--border)">
+                  <th style="text-align:left;padding:0.5rem 1rem;font-size:0.7rem;color:var(--text-secondary);font-weight:600;text-transform:uppercase">Client Notion</th>
+                  <th style="text-align:left;padding:0.5rem 1rem;font-size:0.7rem;color:var(--text-secondary);font-weight:600;text-transform:uppercase">Deal HubSpot</th>
+                  <th style="text-align:right;padding:0.5rem 1rem;font-size:0.7rem;color:var(--text-secondary);font-weight:600;text-transform:uppercase">Montant</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows.map(r => `
+                  <tr style="border-bottom:1px solid var(--border)">
+                    <td style="padding:0.55rem 1rem;font-weight:600;color:var(--text)">${r.clientName}</td>
+                    <td style="padding:0.55rem 1rem;color:var(--text-secondary)">${r.dealName}</td>
+                    <td style="padding:0.55rem 1rem;text-align:right;font-weight:700;color:var(--primary)">${formatEuro(r.amount)}</td>
+                  </tr>`).join('')}
+                <tr style="background:var(--bg-secondary)">
+                  <td colspan="2" style="padding:0.55rem 1rem;font-weight:700;color:var(--text)">Total</td>
+                  <td style="padding:0.55rem 1rem;text-align:right;font-weight:800;color:var(--primary)">${formatEuro(pipelineCaRepeat)}</td>
+                </tr>
+              </tbody>
+            </table>
+            <p style="font-size:0.7rem;color:var(--text-secondary);padding:0.5rem 1rem 0.75rem">Le matching est basé sur le nom du client Notion vs le nom du deal HubSpot. Si un deal n'apparaît pas, vérifiez que le nom du deal contient le nom du client.</p>`;
+        }
+
+      } else if (type === 'contacts') {
+        const { contactedList, totalClients } = _repeatKpiData;
+        title.textContent = `Clients contactés (${contactedList.length}/${totalClients})`;
+
+        if (!contactedList.length) {
+          body.innerHTML = '<p style="color:var(--text-secondary);padding:1rem">Aucun contact enregistré pour l\'instant.</p>';
+        } else {
+          const sorted = [...contactedList].sort((a, b) => b.contact.date.localeCompare(a.contact.date));
+          body.innerHTML = `
+            <table style="width:100%;font-size:0.83rem;border-collapse:collapse">
+              <thead>
+                <tr style="border-bottom:1px solid var(--border)">
+                  <th style="text-align:left;padding:0.5rem 1rem;font-size:0.7rem;color:var(--text-secondary);font-weight:600;text-transform:uppercase">Client</th>
+                  <th style="text-align:left;padding:0.5rem 1rem;font-size:0.7rem;color:var(--text-secondary);font-weight:600;text-transform:uppercase">Date</th>
+                  <th style="text-align:left;padding:0.5rem 1rem;font-size:0.7rem;color:var(--text-secondary);font-weight:600;text-transform:uppercase">Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${sorted.map(({ client, contact }) => `
+                  <tr style="border-bottom:1px solid var(--border)">
+                    <td style="padding:0.55rem 1rem;font-weight:600;color:var(--text)">${client.client}</td>
+                    <td style="padding:0.55rem 1rem;color:var(--text-secondary);white-space:nowrap">${new Date(contact.date).toLocaleDateString('fr-FR', {day:'2-digit',month:'short',year:'numeric'})}</td>
+                    <td style="padding:0.55rem 1rem;color:var(--text-secondary)">${contact.note || '—'}</td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>`;
+        }
+      }
+
+      overlay.classList.add('active');
+    }
+
+    function closeRepeatKpiModal() {
+      document.getElementById('repeatKpiModalOverlay').classList.remove('active');
+    }
+
+    async function fetchRepeatClients() {
+      document.getElementById('repeatList').innerHTML = '<div class="repeat-empty">Chargement…</div>';
+      try {
+        repeatClientsData = await fetch('/api/repeat-clients').then(r => r.json());
+        renderRepeatKpis();
+        renderRepeatList();
+      } catch {
+        document.getElementById('repeatList').innerHTML = '<div class="repeat-empty">Erreur de chargement</div>';
+      }
+    }
+
+    function refreshRepeatClients() {
+      repeatClientsData = null;
+      fetchRepeatClients();
+    }
+
+    function setRepeatFilter(f, btn) {
+      repeatFilter = f;
+      document.querySelectorAll('.repeat-filter-tab').forEach(el => el.classList.remove('active'));
+      btn.classList.add('active');
+      renderRepeatList();
+    }
+
+    function toggleRepeatPartner(name, btn) {
+      if (repeatPartnerFilter === name) {
+        repeatPartnerFilter = null;
+        btn.classList.remove('active');
+      } else {
+        repeatPartnerFilter = name;
+        document.querySelectorAll('.repeat-partner-btn').forEach(el => el.classList.remove('active'));
+        btn.classList.add('active');
+      }
+      renderRepeatList();
+    }
+
+    function renderRepeatList() {
+      if (!repeatClientsData) return;
+      const contacts = getRepeatContacts();
+      const search = (document.getElementById('repeatSearch').value || '').toLowerCase().trim();
+
+      let list = repeatClientsData.filter(c => {
+        if (search && !c.client.toLowerCase().includes(search)) return false;
+        if (repeatPartnerFilter && !(c.partners || []).includes(repeatPartnerFilter)) return false;
+        const urg = repeatUrgency(c, contacts);
+        if (repeatFilter === 'urgent') return (urg === 'red' || urg === 'orange') && !c.hasActiveMission;
+        if (repeatFilter === 'done')   return urg === 'green' || c.hasActiveMission;
+        return true;
+      });
+
+      document.getElementById('repeatStats').textContent = `${list.length} client${list.length > 1 ? 's' : ''}`;
+
+      if (!list.length) {
+        document.getElementById('repeatList').innerHTML = '<div class="repeat-empty">Aucun client dans cette catégorie</div>';
+        return;
+      }
+
+      const SHOW_INIT = 15;
+      const showAll = list.length <= SHOW_INIT;
+      const visible = showAll ? list : list.slice(0, SHOW_INIT);
+
+      let html = visible.map(c => renderRepeatRow(c, contacts)).join('');
+      if (!showAll) {
+        html += `<button class="repeat-show-more" onclick="repeatShowAll()">${list.length - SHOW_INIT} clients de plus…</button>`;
+      }
+      document.getElementById('repeatList').innerHTML = html;
+    }
+
+    function repeatShowAll() {
+      if (!repeatClientsData) return;
+      const contacts = getRepeatContacts();
+      const search = (document.getElementById('repeatSearch').value || '').toLowerCase().trim();
+      const list = repeatClientsData.filter(c => {
+        if (search && !c.client.toLowerCase().includes(search)) return false;
+        if (repeatPartnerFilter && !(c.partners || []).includes(repeatPartnerFilter)) return false;
+        const urg = repeatUrgency(c, contacts);
+        if (repeatFilter === 'urgent') return (urg === 'red' || urg === 'orange') && !c.hasActiveMission;
+        if (repeatFilter === 'done')   return urg === 'green' || c.hasActiveMission;
+        return true;
+      });
+      document.getElementById('repeatList').innerHTML = list.map(c => renderRepeatRow(c, contacts)).join('');
+    }
+
+    function renderRepeatRow(client, contacts) {
+      const urg = repeatUrgency(client, contacts);
+      const last = repeatLastMission(client);
+      const contacted = contacts[client.client];
+      const ck = encodeURIComponent(client.client);
+
+      const natureTag = last && last.nature && last.nature !== 'Non défini'
+        ? `<span class="repeat-nature-tag">${last.nature}</span>` : '';
+      const secteurStr = client.secteur.length ? client.secteur[0] : '';
+
+      const activeBadge = client.hasActiveMission
+        ? `<span style="font-size:0.65rem;font-weight:700;padding:0.06rem 0.35rem;border-radius:10px;background:#dbeafe;color:#1d4ed8;border:1px solid #bfdbfe">Mission en cours</span>`
+        : '';
+
+      const KNOWN = ['Guillaume','Nathan','Vincent'];
+      const partnerChips = (client.partners || []).map(p => {
+        const cls = KNOWN.includes(p) ? `rpc-${p}` : 'rpc-other';
+        return `<span class="repeat-partner-chip ${cls}">${p[0]}</span>`;
+      }).join('');
+
+      const subParts = [
+        client.contact ? `&#128100; ${client.contact}` : '',
+        secteurStr,
+      ].filter(Boolean).join(' · ');
+
+      const lastStr = last ? `
+        <div class="repeat-last-nature">${last.nature !== 'Non défini' ? last.nature : '—'}</div>
+        <div class="repeat-last-age">${fmtMonthsAgo(last.endDate)}</div>
+      ` : '<div class="repeat-last-age">—</div>';
+
+      const actionHtml = contacted ? `
+        <div class="repeat-contacted-chip">
+          &#10003; ${new Date(contacted.date).toLocaleDateString('fr-FR', { day:'2-digit', month:'short' })}
+          ${contacted.note ? `<span title="${contacted.note}">· ${contacted.note.slice(0,20)}${contacted.note.length > 20 ? '…' : ''}</span>` : ''}
+          <button onclick="undoRepeatContact('${ck}')" title="Annuler">✕</button>
+        </div>
+      ` : `<button class="repeat-contact-btn" onclick="openRepeatContactForm('${ck}')">Marquer contacté</button>`;
+
+      return `<div class="repeat-row urgency-${urg}" data-client-key="${ck}" id="rrow-${ck}" onclick="openRepeatSidebar('${ck}')">
+        <div class="repeat-dot"></div>
+        <div class="repeat-main">
+          <div class="repeat-client-name" style="display:flex;align-items:center;gap:0.4rem">${client.client}${activeBadge}${partnerChips}</div>
+          ${subParts ? `<div class="repeat-client-sub">${subParts}</div>` : ''}
+        </div>
+        <div class="repeat-missions-col">
+          <div class="repeat-missions-count">${client.missions.length} mission${client.missions.length > 1 ? 's' : ''}</div>
+          <div class="repeat-missions-ca">${formatEuro(client.totalCa)}</div>
+        </div>
+        <div class="repeat-last-col">${lastStr}</div>
+        <div class="repeat-actions" id="raction-${ck}" onclick="event.stopPropagation()">${actionHtml}</div>
+      </div>`;
+    }
+
+    function openRepeatContactForm(ck) {
+      const clientKey = decodeURIComponent(ck);
+      const today = new Date().toISOString().slice(0, 10);
+      const actionEl = document.getElementById(`raction-${ck}`);
+      actionEl.innerHTML = `
+        <div class="repeat-inline-form">
+          <input type="date" id="rdate-${ck}" value="${today}">
+          <input type="text" id="rnote-${ck}" placeholder="Note (optionnel)">
+          <button class="btn-confirm" onclick="confirmRepeatContact('${ck}')">&#10003;</button>
+          <button class="btn-cancel" onclick="renderRepeatList()">✕</button>
+        </div>`;
+      document.getElementById(`rnote-${ck}`).focus();
+    }
+
+    function confirmRepeatContact(ck) {
+      const clientKey = decodeURIComponent(ck);
+      const date = document.getElementById(`rdate-${ck}`).value;
+      const note = document.getElementById(`rnote-${ck}`).value.trim();
+      if (!date) return;
+      saveRepeatContact(clientKey, date, note);
+      renderRepeatList();
+    }
+
+    function undoRepeatContact(ck) {
+      clearRepeatContact(decodeURIComponent(ck));
+      renderRepeatList();
+    }
+
+    // --- Repeat Sidebar ---
+    const REPEAT_NOTES_LS_KEY = 'releaf_repeat_notes_v1';
+    let currentRepeatClient = null;
+
+    function getRepeatNotes() {
+      try { return JSON.parse(localStorage.getItem(REPEAT_NOTES_LS_KEY) || '{}'); } catch { return {}; }
+    }
+    function saveRepeatNote(clientKey, note) {
+      const n = getRepeatNotes(); n[clientKey] = note;
+      localStorage.setItem(REPEAT_NOTES_LS_KEY, JSON.stringify(n));
+    }
+
+    function openRepeatSidebar(ck) {
+      const clientKey = decodeURIComponent(ck);
+      const client = repeatClientsData && repeatClientsData.find(c => c.client === clientKey);
+      if (!client) return;
+      currentRepeatClient = client;
+
+      document.getElementById('repeatSidebarOverlay').classList.add('open');
+      document.getElementById('repeatSidebar').classList.add('open');
+      document.getElementById('rsbClientName').textContent = client.client;
+
+      const KNOWN_P2 = ['Guillaume','Nathan','Vincent'];
+      const pChipsHeader = (client.partners || []).map(p => {
+        const cls = KNOWN_P2.includes(p) ? `rpc-${p}` : 'rpc-other';
+        return `<span class="repeat-partner-chip ${cls}">${p}</span>`;
+      }).join(' ');
+      const metaParts = [
+        pChipsHeader,
+        client.contact ? `&#128100; ${client.contact}` : '',
+        client.secteur.length ? client.secteur.join(', ') : '',
+      ].filter(Boolean).join(' · ');
+      document.getElementById('rsbClientMeta').innerHTML = metaParts;
+
+      renderRepeatSidebarBody(client);
+    }
+
+    function closeRepeatSidebar() {
+      currentRepeatClient = null;
+      document.getElementById('repeatSidebarOverlay').classList.remove('open');
+      document.getElementById('repeatSidebar').classList.remove('open');
+    }
+
+    function renderRepeatSidebarBody(client) {
+      const contacts = getRepeatContacts();
+      const notes = getRepeatNotes();
+      const contacted = contacts[client.client];
+      const note = notes[client.client] || '';
+      const ck = encodeURIComponent(client.client);
+
+      // Missions sorted by endDate desc
+      const missions = [...client.missions].sort((a, b) => {
+        if (!a.endDate) return 1;
+        if (!b.endDate) return -1;
+        return b.endDate.localeCompare(a.endDate);
+      });
+
+      const contactHtml = contacted ? `
+        <div class="rsb-contact-block">
+          <div class="rsb-contact-date">&#10003; Contacté le ${new Date(contacted.date).toLocaleDateString('fr-FR', {day:'2-digit',month:'long',year:'numeric'})}</div>
+          ${contacted.note ? `<div class="rsb-contact-note">${contacted.note}</div>` : ''}
+          <div class="rsb-contact-actions">
+            <button class="rsb-btn-sm" onclick="rsbUpdateContact('${ck}')">Modifier</button>
+            <button class="rsb-btn-sm danger" onclick="rsbClearContact('${ck}')">Supprimer</button>
+          </div>
+        </div>
+      ` : `
+        <div style="color:var(--text-secondary);font-size:0.8rem;margin-bottom:0.4rem">Aucun contact enregistré</div>
+        <button class="rsb-btn-sm primary" onclick="rsbShowContactForm('${ck}')">+ Enregistrer un contact</button>
+      `;
+
+      const KNOWN_P = ['Guillaume','Nathan','Vincent'];
+      const missionsHtml = missions.map(m => {
+        const allP = [...new Set([...(m.partnerCommercial||[]), ...(m.partnerOperationnel||[])])];
+        const pChips = allP.map(p => {
+          const cls = KNOWN_P.includes(p) ? `rpc-${p}` : 'rpc-other';
+          return `<span class="repeat-partner-chip ${cls}">${p}</span>`;
+        }).join(' ');
+        const etatColor = m.etat === 'Terminé' ? '#16a34a' : m.etat === 'En cours' ? '#1d4ed8' : '#6b7280';
+        return `
+        <div class="rsb-mission-item">
+          <div style="flex:1;min-width:0">
+            <div class="rsb-mission-name">${m.nom}</div>
+            <div class="rsb-mission-sub" style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap">
+              ${m.nature !== 'Non défini' ? m.nature : ''}
+              ${m.endDate ? '· ' + new Date(m.endDate).toLocaleDateString('fr-FR', {month:'short',year:'numeric'}) : ''}
+              <span style="font-size:0.62rem;font-weight:600;color:${etatColor}">${m.etat}</span>
+              ${pChips}
+            </div>
+          </div>
+          <div class="rsb-mission-amount">${m.ca > 0 ? formatEuro(m.ca) : '—'}</div>
+        </div>`;
+      }).join('');
+
+      document.getElementById('rsbBody').innerHTML = `
+        <div>
+          <div class="rsb-section-label">Dernier contact</div>
+          <div id="rsbContactBlock">${contactHtml}</div>
+        </div>
+
+        <div>
+          <div class="rsb-section-label">Missions (${missions.length}) · ${formatEuro(client.totalCa)} total</div>
+          <div>${missionsHtml}</div>
+        </div>
+
+        <div>
+          <div class="rsb-section-label">Notes internes</div>
+          <textarea class="rsb-notes-textarea" id="rsbNotes" placeholder="Notes libres sur ce client…" onblur="rsbSaveNote('${ck}')">${note}</textarea>
+        </div>
+
+        <div>
+          <div class="rsb-section-label">Ajouter au pipeline HubSpot</div>
+          <div class="rsb-deal-form">
+            <input type="text" id="rsbDealName" placeholder="Nom du deal" value="${client.client} — ">
+            <div style="display:flex;gap:0.5rem">
+              <input type="number" id="rsbDealAmount" placeholder="Montant €" min="0" step="500" style="flex:1">
+              <select id="rsbDealStage" style="flex:1.2">
+                <option value="RDV Qualif">RDV Qualif</option>
+                <option value="RDV Propale">RDV Propale</option>
+                <option value="Négociation">Négociation</option>
+                <option value="Contrat envoyé">Contrat envoyé</option>
+              </select>
+            </div>
+            <input type="date" id="rsbDealClosedate" placeholder="Date de clôture prévue">
+            <button class="rsb-deal-create-btn" id="rsbDealBtn" onclick="rsbCreateDeal()">&#43; Créer le deal dans le pipeline</button>
+            <div class="rsb-deal-success" id="rsbDealSuccess">&#10003; Deal créé avec succès !</div>
+          </div>
+        </div>
+      `;
+
+      // Pre-fill closedate to 3 months from now
+      const in3m = new Date(); in3m.setMonth(in3m.getMonth() + 3);
+      document.getElementById('rsbDealClosedate').value = in3m.toISOString().slice(0,10);
+    }
+
+    function rsbShowContactForm(ck) {
+      const clientKey = decodeURIComponent(ck);
+      const today = new Date().toISOString().slice(0,10);
+      document.getElementById('rsbContactBlock').innerHTML = `
+        <div class="rsb-contact-form">
+          <input type="date" id="rsbCDate" value="${today}">
+          <textarea id="rsbCNote" placeholder="Note sur ce contact (optionnel)…"></textarea>
+          <div class="rsb-form-row">
+            <button class="rsb-btn-sm primary" onclick="rsbConfirmContact('${ck}')">Enregistrer</button>
+            <button class="rsb-btn-sm" onclick="renderRepeatSidebarBody(currentRepeatClient)">Annuler</button>
+          </div>
+        </div>`;
+      document.getElementById('rsbCNote').focus();
+    }
+
+    function rsbConfirmContact(ck) {
+      const clientKey = decodeURIComponent(ck);
+      const date = document.getElementById('rsbCDate').value;
+      const note = document.getElementById('rsbCNote').value.trim();
+      if (!date) return;
+      saveRepeatContact(clientKey, date, note);
+      renderRepeatSidebarBody(currentRepeatClient);
+      renderRepeatList();
+    }
+
+    function rsbUpdateContact(ck) {
+      const clientKey = decodeURIComponent(ck);
+      const contacts = getRepeatContacts();
+      const existing = contacts[clientKey] || {};
+      document.getElementById('rsbContactBlock').innerHTML = `
+        <div class="rsb-contact-form">
+          <input type="date" id="rsbCDate" value="${existing.date || ''}">
+          <textarea id="rsbCNote" placeholder="Note…">${existing.note || ''}</textarea>
+          <div class="rsb-form-row">
+            <button class="rsb-btn-sm primary" onclick="rsbConfirmContact('${ck}')">Enregistrer</button>
+            <button class="rsb-btn-sm" onclick="renderRepeatSidebarBody(currentRepeatClient)">Annuler</button>
+          </div>
+        </div>`;
+    }
+
+    function rsbClearContact(ck) {
+      clearRepeatContact(decodeURIComponent(ck));
+      renderRepeatSidebarBody(currentRepeatClient);
+      renderRepeatList();
+    }
+
+    function rsbSaveNote(ck) {
+      const clientKey = decodeURIComponent(ck);
+      const note = (document.getElementById('rsbNotes') || {}).value || '';
+      saveRepeatNote(clientKey, note);
+    }
+
+    async function rsbCreateDeal() {
+      const name = (document.getElementById('rsbDealName').value || '').trim();
+      const amount = parseFloat(document.getElementById('rsbDealAmount').value) || 0;
+      const stage = document.getElementById('rsbDealStage').value;
+      const closedate = document.getElementById('rsbDealClosedate').value;
+      if (!name) { document.getElementById('rsbDealName').focus(); return; }
+
+      const btn = document.getElementById('rsbDealBtn');
+      btn.disabled = true; btn.textContent = 'Création…';
+
+      try {
+        const body = { name, stage };
+        if (amount > 0) body.amount = amount;
+        if (closedate) body.closedate = closedate;
+
+        const res = await fetch('/api/deals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }).then(r => r.json());
+
+        if (res.id) {
+          // Track ce deal comme créé depuis repeat
+          saveRepeatDeal(res.id, currentRepeatClient.client);
+          // Add to local pipeline so kanban shows it immediately
+          if (dashboardData && dashboardData.pipelineDeals && dashboardData.pipelineDeals[stage]) {
+            dashboardData.pipelineDeals[stage].push({
+              id: res.id,
+              name,
+              amount,
+              probability: { 'RDV Qualif':30,'RDV Propale':50,'Négociation':60,'Contrat envoyé':80 }[stage] || 30,
+              createdate: new Date().toISOString(),
+              stageEnteredAt: new Date().toISOString(),
+            });
+            renderKanban(); // déclenche aussi renderRepeatKpis()
+          }
+          const successEl = document.getElementById('rsbDealSuccess');
+          successEl.style.display = 'block';
+          btn.textContent = '+ Créer le deal dans le pipeline';
+          btn.disabled = false;
+          document.getElementById('rsbDealName').value = `${currentRepeatClient.client} — `;
+          document.getElementById('rsbDealAmount').value = '';
+          setTimeout(() => { if (successEl) successEl.style.display = 'none'; }, 3000);
+        } else {
+          throw new Error(res.error || 'Erreur');
+        }
+      } catch (e) {
+        btn.textContent = 'Erreur — réessayer';
+        btn.disabled = false;
+      }
     }
 
     // --- Drag & drop stage ---
@@ -8626,6 +10135,47 @@
   <!-- Dropdown deal search — rendu hors du formulaire pour éviter les problèmes de z-index/overflow -->
   <div id="propDealDropdown" style="display:none;position:fixed;background:var(--card);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.2);z-index:9999;overflow:hidden"></div>
 
+  <!-- Repeat KPI Modal -->
+  <div class="modal-overlay" id="repeatKpiModalOverlay" onclick="closeRepeatKpiModal()">
+    <div class="modal" style="max-width:600px" onclick="event.stopPropagation()">
+      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
+        <h2 id="repeatKpiModalTitle" style="font-size:0.95rem;margin:0"></h2>
+        <button onclick="closeRepeatKpiModal()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--text-secondary);line-height:1">&times;</button>
+      </div>
+      <div class="modal-body" id="repeatKpiModalBody" style="padding:0;max-height:60vh;overflow-y:auto"></div>
+    </div>
+  </div>
+
+  <!-- Repeat Client Sidebar -->
+  <div class="deal-sidebar-overlay" id="repeatSidebarOverlay" onclick="closeRepeatSidebar()"></div>
+  <div class="repeat-sidebar" id="repeatSidebar">
+    <div class="repeat-sidebar-header">
+      <div class="repeat-sidebar-title-wrap">
+        <div class="repeat-sidebar-client" id="rsbClientName">—</div>
+        <div class="repeat-sidebar-meta" id="rsbClientMeta"></div>
+      </div>
+      <button class="repeat-sidebar-close" onclick="closeRepeatSidebar()">&times;</button>
+    </div>
+    <div class="repeat-sidebar-body" id="rsbBody">
+      <div class="repeat-empty">Chargement…</div>
+    </div>
+  </div>
+
+  <!-- Deal Sidebar -->
+  <div class="deal-sidebar-overlay" id="dealSidebarOverlay" onclick="closeDealSidebar()"></div>
+  <div class="deal-sidebar" id="dealSidebar">
+    <div class="deal-sidebar-header">
+      <div class="deal-sidebar-title" id="sidebarDealName">—</div>
+      <button class="deal-sidebar-close" onclick="closeDealSidebar()">&times;</button>
+    </div>
+    <div class="deal-sidebar-body" id="sidebarBody">
+      <div class="deal-sidebar-loading">Chargement…</div>
+    </div>
+    <div class="deal-sidebar-footer">
+      <button class="deal-sidebar-won-btn" id="sidebarWonBtn" onclick="markCurrentDeal('closedwon')">&#10003; Marquer Gagné</button>
+      <button class="deal-sidebar-lost-btn" id="sidebarLostBtn" onclick="markCurrentDeal('closedlost')">&#10007; Marquer Perdu</button>
+    </div>
+  </div>
 
 </body>
 </html>
