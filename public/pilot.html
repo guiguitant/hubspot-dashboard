@@ -1389,7 +1389,13 @@
     .repeat-partner-btn.active.p-Guillaume { background: #7c3aed; }
     .repeat-partner-btn.active.p-Nathan    { background: #0369a1; }
     .repeat-partner-btn.active.p-Vincent   { background: #b45309; }
-    .repeat-partner-btn:not(.active):hover { border-color: var(--primary); color: var(--primary); }
+    .repeat-partner-btn.excluded {
+      border-color: #ef4444;
+      background: #fef2f2;
+      color: #ef4444;
+      text-decoration: line-through;
+    }
+    .repeat-partner-btn:not(.active):not(.excluded):hover { border-color: var(--primary); color: var(--primary); }
 
     .repeat-partner-chip {
       display: inline-block;
@@ -1632,6 +1638,91 @@
     .repeat-kpi-card.kpi-green .repeat-kpi-value { color: #16a34a; }
     .repeat-kpi-card.kpi-blue  .repeat-kpi-value { color: #1d4ed8; }
     .repeat-kpi-card.kpi-amber .repeat-kpi-value { color: #b45309; }
+
+    /* Partner stats */
+    .repeat-partner-stats-wrapper {
+      margin-bottom: 1rem;
+    }
+    .rps-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      padding: 0.25rem 0;
+      margin-bottom: 0.5rem;
+      transition: color 0.15s;
+    }
+    .rps-toggle:hover { color: var(--primary); }
+    .rps-toggle-chevron {
+      display: inline-block;
+      font-size: 0.6rem;
+      transition: transform 0.2s;
+    }
+    .rps-toggle.open .rps-toggle-chevron { transform: rotate(90deg); }
+    .repeat-partner-stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.75rem;
+    }
+    .rps-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.7rem 0.9rem;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .rps-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    .rps-card.p-Guillaume { border-left-color: #7c3aed; }
+    .rps-card.p-Nathan    { border-left-color: #0369a1; }
+    .rps-card.p-Vincent   { border-left-color: #b45309; }
+    .rps-card.active { background: var(--primary-bg); border-color: var(--primary); }
+    .rps-card.excluded {
+      background: #fef2f2;
+      border-color: #fecaca;
+      border-left-color: #ef4444 !important;
+      opacity: 0.7;
+    }
+    .rps-card.excluded .rps-name { text-decoration: line-through; color: #ef4444; }
+    .rps-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.4rem;
+    }
+    .rps-name {
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .rps-ca {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--text-secondary);
+    }
+    .rps-metrics {
+      display: flex;
+      gap: 0.9rem;
+      font-size: 0.7rem;
+    }
+    .rps-metric {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.1;
+    }
+    .rps-metric-value { font-size: 1rem; font-weight: 800; color: var(--text); }
+    .rps-metric-value.urgent { color: #ef4444; }
+    .rps-metric-value.recent { color: #16a34a; }
+    .rps-metric-label { font-size: 0.62rem; color: var(--text-secondary); font-weight: 500; }
 
     .repeat-empty {
       text-align: center;
@@ -2326,6 +2417,13 @@
         <button class="btn" onclick="refreshRepeatClients()" style="font-size:0.75rem;padding:0.25rem 0.6rem">&#8635; Actualiser</button>
       </div>
       <div class="repeat-kpis" id="repeatKpis" style="display:none"></div>
+      <div class="repeat-partner-stats-wrapper">
+        <button class="rps-toggle" id="rpsToggle" type="button" onclick="toggleRepeatPartnerStats()">
+          <span class="rps-toggle-chevron" id="rpsChevron">&#9654;</span>
+          <span>Stats par associé</span>
+        </button>
+        <div class="repeat-partner-stats" id="repeatPartnerStats" style="display:none"></div>
+      </div>
       <div class="repeat-toolbar">
         <input class="repeat-search" type="text" id="repeatSearch" placeholder="&#128269; Rechercher un client…" oninput="renderRepeatList()">
         <div class="repeat-partner-filters">
@@ -5179,7 +5277,17 @@
     // --- Repeat Clients ---
     let repeatClientsData = null;
     let repeatFilter = 'all';
-    let repeatPartnerFilter = null; // null = tous
+    // { Guillaume: null | 'include' | 'exclude', Nathan: ..., Vincent: ... }
+    let repeatPartnerFilters = { Guillaume: null, Nathan: null, Vincent: null };
+    function _partnerMatches(partners) {
+      const ps = partners || [];
+      for (const name of Object.keys(repeatPartnerFilters)) {
+        const state = repeatPartnerFilters[name];
+        if (state === 'include' && !ps.includes(name)) return false;
+        if (state === 'exclude' && ps.includes(name)) return false;
+      }
+      return true;
+    }
     let repeatShowDismissed = false;
     const REPEAT_RECENT_DAYS = 90;
     const REPEAT_RED_MONTHS = 9;
@@ -5322,9 +5430,78 @@
       };
     }
 
+    let _repeatPartnerStatsOpen = false;
+
+    function toggleRepeatPartnerStats() {
+      _repeatPartnerStatsOpen = !_repeatPartnerStatsOpen;
+      document.getElementById('rpsToggle').classList.toggle('open', _repeatPartnerStatsOpen);
+      document.getElementById('repeatPartnerStats').style.display = _repeatPartnerStatsOpen ? 'grid' : 'none';
+      if (_repeatPartnerStatsOpen) renderRepeatPartnerStats();
+    }
+
+    function renderRepeatPartnerStats() {
+      const el = document.getElementById('repeatPartnerStats');
+      if (!el || !repeatClientsData) return;
+      if (!_repeatPartnerStatsOpen) return;
+      const dismissed = getDismissedClients();
+      const contacts = getRepeatContacts();
+      const PARTNERS = ['Guillaume', 'Nathan', 'Vincent'];
+
+      const stats = PARTNERS.map(name => {
+        const mine = repeatClientsData.filter(c => (c.partners || []).includes(name) && !dismissed[c.client]);
+        const urgent = mine.filter(c => {
+          if (c.hasActiveMission) return false;
+          const u = repeatUrgency(c, contacts);
+          return u === 'red' || u === 'orange';
+        }).length;
+        const recent = mine.filter(c => {
+          const ct = contacts[c.client];
+          if (!ct || !ct.date) return false;
+          const ago = monthsAgo(ct.date);
+          return ago !== null && ago < REPEAT_RECENT_DAYS / 30.44;
+        }).length;
+        const totalCa = mine.reduce((s, c) => s + (c.totalCa || 0), 0);
+        return { name, total: mine.length, urgent, recent, totalCa };
+      });
+
+      el.innerHTML = stats.map(s => {
+        const st = repeatPartnerFilters[s.name];
+        const stateCls = st === 'include' ? ' active' : st === 'exclude' ? ' excluded' : '';
+        const tip = st === 'include' ? 'Inclure uniquement' : st === 'exclude' ? 'Exclure' : 'Clic : inclure · 2e clic : exclure';
+        return `
+          <div class="rps-card p-${s.name}${stateCls}" onclick="toggleRepeatPartnerFromStats('${s.name}')" title="${tip}">
+            <div class="rps-header">
+              <div class="rps-name">${s.name}</div>
+              <div class="rps-ca">${formatEuro(s.totalCa)}</div>
+            </div>
+            <div class="rps-metrics">
+              <div class="rps-metric">
+                <div class="rps-metric-value">${s.total}</div>
+                <div class="rps-metric-label">clients</div>
+              </div>
+              <div class="rps-metric">
+                <div class="rps-metric-value urgent">${s.urgent}</div>
+                <div class="rps-metric-label">à contacter</div>
+              </div>
+              <div class="rps-metric">
+                <div class="rps-metric-value recent">${s.recent}</div>
+                <div class="rps-metric-label">récents (90j)</div>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function toggleRepeatPartnerFromStats(name) {
+      const btn = document.querySelector(`.repeat-partner-btn[data-partner="${name}"]`);
+      if (btn) toggleRepeatPartner(name, btn);
+    }
+
     function renderRepeatKpis() {
       const kpis = computeRepeatKpis();
       const el = document.getElementById('repeatKpis');
+      renderRepeatPartnerStats();
       if (!kpis) { el.style.display = 'none'; return; }
 
       const { clientsWithDeal, pipelineCaRepeat, totalClients, clientsContacted } = kpis;
@@ -5447,22 +5624,26 @@
 
 
     function toggleRepeatPartner(name, btn) {
-      if (repeatPartnerFilter === name) {
-        repeatPartnerFilter = null;
-        btn.classList.remove('active');
-      } else {
-        repeatPartnerFilter = name;
-        document.querySelectorAll('.repeat-partner-btn').forEach(el => el.classList.remove('active'));
-        btn.classList.add('active');
-      }
+      // Cycle: null → include → exclude → null
+      const current = repeatPartnerFilters[name];
+      const next = current === null ? 'include' : current === 'include' ? 'exclude' : null;
+      repeatPartnerFilters[name] = next;
+      _syncPartnerBtn(btn, next);
+      renderRepeatPartnerStats();
       renderRepeatList();
+    }
+
+    function _syncPartnerBtn(btn, state) {
+      btn.classList.toggle('active', state === 'include');
+      btn.classList.toggle('excluded', state === 'exclude');
+      btn.title = state === 'include' ? 'Inclure uniquement' : state === 'exclude' ? 'Exclure' : 'Clic : inclure · 2e clic : exclure';
     }
 
     function _buildRepeatList(contacts, search) {
       const dismissed = getDismissedClients();
       return repeatClientsData.filter(c => {
         if (search && !c.client.toLowerCase().includes(search)) return false;
-        if (repeatPartnerFilter && !(c.partners || []).includes(repeatPartnerFilter)) return false;
+        if (!_partnerMatches(c.partners)) return false;
         if (!repeatShowDismissed && dismissed[c.client]) return false;
         return true;
       });
@@ -5478,7 +5659,7 @@
       // Count dismissed in current view (ignoring dismissed filter)
       const dismissedCount = repeatClientsData.filter(c => {
         if (search && !c.client.toLowerCase().includes(search)) return false;
-        if (repeatPartnerFilter && !(c.partners || []).includes(repeatPartnerFilter)) return false;
+        if (!_partnerMatches(c.partners)) return false;
         return !!dismissed[c.client];
       }).length;
 
