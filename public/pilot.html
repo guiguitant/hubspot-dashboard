@@ -1411,6 +1411,22 @@
     .fact-year-tag.y2025 { background: var(--warning-bg); color: var(--warning); }
     .fact-year-tag.y2026 { background: var(--primary-bg); color: var(--primary); }
 
+    /* Patch 2 : colonne Penny (matching Notion ↔ Pennylane) */
+    .fact-penny {
+      display: inline-block;
+      padding: 0.15rem 0.35rem;
+      border-radius: 3px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .fact-penny-linked  { background: rgba(15,123,108,0.12);  color: var(--success, #0f7b6c); }
+    .fact-penny-suggest { background: rgba(217,115,13,0.12);  color: var(--warning, #d9730d); }
+    .fact-penny-none    { background: rgba(224,62,62,0.08);   color: var(--danger, #e03e3e); }
+    .fact-penny-waiting { background: rgba(128,128,128,0.10); color: var(--text-secondary, #787878); }
+    .fact-penny:hover   { filter: brightness(0.92); }
+
     tr.row-2025 { opacity: 0.7; }
 
     @media (max-width: 768px) {
@@ -2666,6 +2682,10 @@
             <option value="Paye">Paye</option>
           </select>
         </div>
+        <div style="margin-left:auto;display:flex;gap:0.4rem">
+          <button class="btn" id="btnPennylaneDump" onclick="downloadPennylaneDump()" style="font-size:0.75rem;padding:0.3rem 0.6rem;color:var(--primary);font-weight:600" title="Dump brut de toutes les entités Pennylane accessibles (factures clients/fournisseurs, transactions, clients, produits, etc.)">📥 Dump Pennylane</button>
+          <button class="btn" id="btnMatchingCsv" onclick="downloadMatchingCSV()" style="font-size:0.75rem;padding:0.3rem 0.6rem;color:var(--primary);font-weight:600" title="Exporte un CSV d'audit Notion↔Pennylane↔Qonto (12 mois) pour valider le matching auto">📊 CSV matching (PoC)</button>
+        </div>
       </div>
       <div class="table-wrapper">
         <div id="factContent">
@@ -3064,8 +3084,19 @@
             Pipeline pondéré
           </label>
         </div>
+        <div style="display:flex;align-items:center;gap:1rem;border-left:1px solid var(--border);padding-left:1.5rem">
+          <span style="font-size:0.8rem;color:var(--text-secondary);font-weight:600" title="Mode 'Tout Prévi' utilise CR_Prev pour les mois passés (vue budget annuel). Mode 'Réel + Prévi' garde Qonto réel pour les charges passées (réalité bancaire).">Mois passés :</span>
+          <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.85rem;cursor:pointer">
+            <input type="radio" name="scenarioPastMode" value="previ" checked onchange="setScenarioPastMode('previ')" style="cursor:pointer;accent-color:var(--primary)">
+            Tout Prévi
+          </label>
+          <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.85rem;cursor:pointer">
+            <input type="radio" name="scenarioPastMode" value="real" onchange="setScenarioPastMode('real')" style="cursor:pointer;accent-color:var(--primary)">
+            Réel + Prévi
+          </label>
+        </div>
       </div>
-      <p style="font-size:0.7rem;color:var(--text-secondary);margin:0.6rem 0 0">Les toggles "Baseline" n'affectent que le Baseline. Chaque scénario a sa propre composition (4 modules incl. CA Notion + Salariés baseline) éditable via le bouton ✎.</p>
+      <p style="font-size:0.7rem;color:var(--text-secondary);margin:0.6rem 0 0">Les toggles "Baseline" n'affectent que le Baseline. Chaque scénario a sa propre composition (4 modules incl. CA Notion + Salariés baseline) éditable via le bouton ✎. Le mode <em>Mois passés</em> s'applique à la baseline ET à tous les scénarios affichés.</p>
     </div>
 
     <!-- Layout 2 colonnes : sidebar liste à gauche, output à droite -->
@@ -3103,7 +3134,7 @@
           <!-- P&L : tableau comparatif cumulé à fin d'horizon -->
           <div id="scenarioPnlView" style="display:none">
             <p style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.6rem">Cumul des flux du mois courant jusqu'à la fin de l'horizon sélectionné. Vue compte de résultat type "balance" à la date d'horizon.</p>
-            <div id="scenariosPnlTable" style="overflow-x:auto"></div>
+            <div id="scenariosPnlTable" style="overflow:visible"></div>
           </div>
           <!-- EBE : cards comparatives -->
           <div id="scenarioEbeView" style="display:none">
@@ -3115,7 +3146,7 @@
         <!-- Detail mensuel (visible seulement sur l'onglet Trésorerie pour ne pas dupliquer info P&L/EBE) -->
         <div class="section" id="scenarioMonthlyDetailSection">
           <div class="section-title">Detail mensuel</div>
-          <div id="scenariosDetailTable" style="overflow-x:auto">
+          <div id="scenariosDetailTable" style="overflow:visible">
             <p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Sélectionnez des scénarios pour voir le comparatif.</p>
           </div>
         </div>
@@ -3740,6 +3771,22 @@
     </div>
   </div>
 
+  <!-- Modal Matching Notion ↔ Pennylane (Patch 2) -->
+  <div class="modal-overlay" id="factMatchingModalOverlay">
+    <div class="modal" style="max-width:780px">
+      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
+        <h2 id="factMatchingModalTitle">Matching Pennylane</h2>
+        <button onclick="closeFactMatchingModal()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--text)">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:1rem" id="factMatchingModalBody">
+        <p style="color:var(--text-secondary);font-size:0.85rem">Chargement...</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeFactMatchingModal()">Fermer</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal Factures Impayees -->
   <div class="modal-overlay" id="facturesImpayeesModalOverlay">
     <div class="modal">
@@ -3817,15 +3864,15 @@
           <p style="font-size:0.75rem;font-weight:600;color:var(--text);margin:0 0 0.4rem">Modules inclus dans ce scénario</p>
           <p style="font-size:0.7rem;color:var(--text-secondary);margin:0 0 0.5rem">Décoche pour un scénario from-scratch. Le Qonto réel passé est toujours inclus (c'est la réalité historique).</p>
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0.3rem">
-            <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.8rem;cursor:pointer">
+            <label id="scenarioIncludeGSheetLabel" style="display:flex;align-items:center;gap:0.4rem;font-size:0.8rem;cursor:pointer">
               <input type="checkbox" id="scenarioIncludeGSheet" onchange="saveScenarioInclude('include_gsheet', this.checked)" style="cursor:pointer;accent-color:var(--primary)">
               Prévisionnel GSheet (charges)
             </label>
-            <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.8rem;cursor:pointer">
+            <label id="scenarioIncludePipelineLabel" style="display:flex;align-items:center;gap:0.4rem;font-size:0.8rem;cursor:pointer">
               <input type="checkbox" id="scenarioIncludePipeline" onchange="saveScenarioInclude('include_pipeline', this.checked)" style="cursor:pointer;accent-color:var(--primary)">
               Pipeline pondéré HubSpot
             </label>
-            <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.8rem;cursor:pointer">
+            <label id="scenarioIncludeCaNotionLabel" style="display:flex;align-items:center;gap:0.4rem;font-size:0.8rem;cursor:pointer">
               <input type="checkbox" id="scenarioIncludeCaNotion" onchange="saveScenarioInclude('include_ca_notion', this.checked)" style="cursor:pointer;accent-color:var(--primary)">
               CA Facturé Notion
             </label>
@@ -3833,6 +3880,9 @@
               <input type="checkbox" id="scenarioIncludeSalariesBaseline" onchange="saveScenarioInclude('include_salaries_baseline', this.checked)" style="cursor:pointer;accent-color:var(--primary)">
               Salariés baseline
             </label>
+          </div>
+          <div id="caEstimatifGuardWarning" style="display:none;margin-top:0.5rem;padding:0.45rem 0.7rem;border-radius:var(--radius);background:rgba(245,158,11,0.1);border-left:3px solid var(--warning, #f59e0b);font-size:0.72rem;color:var(--warning, #f59e0b);line-height:1.4">
+            Un CA estimatif est défini : il remplace entièrement le CA baseline (CR_Prev Enc.* + Pipeline pondéré + Factures Notion). Les toggles <em>Pipeline pondéré</em> et <em>CA Facturé Notion</em> sont désactivés tant qu'il est présent.
           </div>
         </div>
 
@@ -3959,6 +4009,26 @@
                   </div>
                 </div>
               </div>
+              <!-- Bloc TVA (commun récurrent + ponctuel) -->
+              <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end;padding:0.5rem;background:var(--hover);border-radius:var(--radius)">
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Catégorie TVA (optionnel)</label>
+                  <select id="ovChargeCategorieTva" onchange="onChargeCategorieChange()" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                    <option value="">— Aucune (défaut 20%)</option>
+                  </select>
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">TVA %</label>
+                  <input type="number" id="ovChargeTvaTaux" value="20" min="0" max="30" step="0.5" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Saisie</label>
+                  <select id="ovChargeMontantMode" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                    <option value="HT" selected>HT</option>
+                    <option value="TTC">TTC</option>
+                  </select>
+                </div>
+              </div>
               <button class="btn" onclick="addOverrideCharge()" style="font-size:0.8rem;padding:0.3rem 0.8rem;color:var(--primary);font-weight:600">+ Ajouter</button>
               <div id="ovChargesList" style="margin-top:0.5rem"></div>
             </div>
@@ -3978,12 +4048,25 @@
               <p style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:0.5rem">⚠️ Remplace TOTALEMENT le CA baseline (factures Notion + pipeline pondéré + curseur Pipeline éventuel) par un montant estimatif HT étalé sur N mois (= mois d'encaissement effectif). Si tu actives ce levier, les modifications de Pipeline et les deals fictifs sont ignorés.</p>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end">
                 <div>
-                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Montant annuel HT</label>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Montant annuel</label>
                   <input type="number" id="ovCaMontant" placeholder="500000" min="0" step="1000" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
                 </div>
                 <div>
                   <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Nombre de mois</label>
                   <input type="number" id="ovCaNbMois" placeholder="12" min="1" max="24" value="12" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end;padding:0.5rem;background:var(--hover);border-radius:var(--radius)">
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">TVA %</label>
+                  <input type="number" id="ovCaTvaTaux" value="20" min="0" max="30" step="0.5" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Saisie</label>
+                  <select id="ovCaMontantMode" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                    <option value="HT" selected>HT</option>
+                    <option value="TTC">TTC</option>
+                  </select>
                 </div>
               </div>
               <div id="caEstimatifApercu" style="font-size:0.8rem;color:var(--primary);font-weight:600;margin-bottom:0.5rem"></div>
@@ -4013,6 +4096,26 @@
                 <div>
                   <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Mois (YYYY-MM)</label>
                   <input type="month" id="ovRevMois" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+              </div>
+              <!-- Bloc TVA (revenu exceptionnel). Défaut 0% = hors TVA (indemnité/dommage). Saisir un taux > 0 pour un revenu TVA-able (facturation exceptionnelle). -->
+              <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;align-items:end;padding:0.5rem;background:var(--hover);border-radius:var(--radius)">
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Catégorie TVA (optionnel)</label>
+                  <select id="ovRevCategorieTva" onchange="onRevCategorieChange()" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                    <option value="">— Aucune (défaut 0% hors TVA)</option>
+                  </select>
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">TVA %</label>
+                  <input type="number" id="ovRevTvaTaux" value="0" min="0" max="30" step="0.5" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem;color:var(--text-secondary);display:block;margin-bottom:0.2rem">Saisie</label>
+                  <select id="ovRevMontantMode" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text)">
+                    <option value="HT" selected>HT</option>
+                    <option value="TTC">TTC</option>
+                  </select>
                 </div>
               </div>
               <button class="btn" onclick="addOverrideRevenu()" style="font-size:0.8rem;padding:0.3rem 0.8rem;color:var(--primary);font-weight:600">+ Ajouter</button>
@@ -7783,52 +7886,59 @@
     }
 
     // Transform missions into invoice lines
+    // Redesign Patch 1 : skip les lignes à montant < 5€ pour éviter le bruit dans l'UI
+    // (paiement en 1 fois : "Acompte forcé" ≈ 1€ côté Notion → pas de ligne acompte à 1€).
+    // Pour une mission one-shot, seule la ligne Solde apparaît avec le montant total.
     function buildInvoiceLines(missions) {
       const lines = [];
+      const MIN_MONTANT = 5; // seuil cohérent avec la logique TRE (oneShot)
       for (const m of missions) {
         const nf = normFact(m.facturation);
 
-        // Acompte line
-        let acompteStatus = null;
-        if (nf.includes('acompte a envoyer')) acompteStatus = 'A envoyer';
-        else if (nf.includes('acompte envoye')) acompteStatus = 'Envoye';
-        else acompteStatus = 'Paye';
+        // Acompte line — skip si montant négligeable (one-shot payment)
+        if ((m.montantAcompte || 0) >= MIN_MONTANT) {
+          let acompteStatus = null;
+          if (nf.includes('acompte a envoyer')) acompteStatus = 'A envoyer';
+          else if (nf.includes('acompte envoye')) acompteStatus = 'Envoye';
+          else acompteStatus = 'Paye';
 
-        // Check for override
-        const acompteOv = factOverrides[m.nom + '||Acompte'];
-        lines.push({
-          mission: m.nom,
-          client: m.client,
-          type: 'Acompte',
-          montant: m.montantAcompte,
-          date: m.dateFactureAcompte,
-          status: (acompteOv && acompteOv.status) || acompteStatus,
-          originalStatus: acompteStatus,
-          overridden: !!acompteOv,
-          comment: (acompteOv && acompteOv.comment) || '',
-          retard: m.jrsAcompteRetard,
-        });
+          const acompteOv = factOverrides[m.nom + '||Acompte'];
+          lines.push({
+            mission: m.nom,
+            client: m.client,
+            type: 'Acompte',
+            montant: m.montantAcompte,
+            date: m.dateFactureAcompte,
+            status: (acompteOv && acompteOv.status) || acompteStatus,
+            originalStatus: acompteStatus,
+            overridden: !!acompteOv,
+            comment: (acompteOv && acompteOv.comment) || '',
+            retard: m.jrsAcompteRetard,
+          });
+        }
 
-        // Solde line - always shown
-        let soldeStatus = null;
-        if (nf.includes('acompte a envoyer') || nf.includes('acompte envoye')) soldeStatus = 'En attente';
-        else if (nf.includes('acompte paye') || nf.includes('solde a envoyer')) soldeStatus = 'A envoyer';
-        else if (nf.includes('solde envoye')) soldeStatus = 'Envoye';
-        else soldeStatus = 'Paye';
+        // Solde line — skip si montant négligeable (CA ≈ 0 ou mission annulée)
+        if ((m.montantFinal || 0) >= MIN_MONTANT) {
+          let soldeStatus = null;
+          if (nf.includes('acompte a envoyer') || nf.includes('acompte envoye')) soldeStatus = 'En attente';
+          else if (nf.includes('acompte paye') || nf.includes('solde a envoyer')) soldeStatus = 'A envoyer';
+          else if (nf.includes('solde envoye')) soldeStatus = 'Envoye';
+          else soldeStatus = 'Paye';
 
-        const soldeOv = factOverrides[m.nom + '||Solde'];
-        lines.push({
-          mission: m.nom,
-          client: m.client,
-          type: 'Solde',
-          montant: m.montantFinal,
-          date: m.dateFactureFinale,
-          status: (soldeOv && soldeOv.status) || soldeStatus,
-          originalStatus: soldeStatus,
-          overridden: !!soldeOv,
-          comment: (soldeOv && soldeOv.comment) || '',
-          retard: m.jrsSoldeRetard,
-        });
+          const soldeOv = factOverrides[m.nom + '||Solde'];
+          lines.push({
+            mission: m.nom,
+            client: m.client,
+            type: 'Solde',
+            montant: m.montantFinal,
+            date: m.dateFactureFinale,
+            status: (soldeOv && soldeOv.status) || soldeStatus,
+            originalStatus: soldeStatus,
+            overridden: !!soldeOv,
+            comment: (soldeOv && soldeOv.comment) || '',
+            retard: m.jrsSoldeRetard,
+          });
+        }
       }
       return lines;
     }
@@ -8069,7 +8179,7 @@
       const total = lines.reduce((s, l) => s + l.montant, 0);
 
       let html = '<table class="recon-table"><thead><tr>';
-      html += '<th>Mission</th><th>Client</th><th>Type</th><th>Montant</th><th>Date</th><th>Statut</th><th>Commentaire</th>';
+      html += '<th>Mission</th><th>Client</th><th>Type</th><th>Montant</th><th>Date</th><th>Statut</th><th>Penny</th><th>Commentaire</th>';
       html += '</tr></thead><tbody>';
 
       for (const l of lines) {
@@ -8103,6 +8213,28 @@
         });
         selectHtml += '</select>';
         html += '<td>' + selectHtml + '</td>';
+
+        // Colonne Penny (Patch 2) : cellule cliquable qui ouvre la popup de matching.
+        // Une facture non émise (statut "A envoyer" / "En attente") ne peut pas avoir de contrepartie
+        // Pennylane → on supprime les propositions auto (faux positifs systématiques) et on affiche ⏳.
+        // La cellule reste cliquable (edge case où user veut forcer un lien manuel).
+        const matchingEntry = factMatchingSummary[l.mission];
+        const typeKey = l.type === 'Acompte' ? 'acompte' : 'solde';
+        const linkedRaw = matchingEntry ? (typeKey === 'acompte' ? matchingEntry.acompteLinked : matchingEntry.soldeLinked) : '';
+        const suggest = matchingEntry ? (typeKey === 'acompte' ? matchingEntry.acompteSuggest : matchingEntry.soldeSuggest) : null;
+        const isNotYetIssued = l.status === 'A envoyer' || l.status === 'En attente';
+        let pennyCell;
+        if (linkedRaw) {
+          pennyCell = '<span class="fact-penny fact-penny-linked" title="Lié à ' + linkedRaw.replace(/"/g, '&quot;') + ' — cliquer pour modifier">✅ ' + linkedRaw + '</span>';
+        } else if (isNotYetIssued) {
+          pennyCell = '<span class="fact-penny fact-penny-waiting" title="Facture non émise — aucun match Pennylane attendu. Cliquer si besoin de lier manuellement.">⏳ —</span>';
+        } else if (suggest && suggest.score >= 50) {
+          pennyCell = '<span class="fact-penny fact-penny-suggest" title="Proposition à valider (score ' + suggest.score + '/100) : ' + (suggest.reasons || '').replace(/"/g, '&quot;') + '">⚠ ' + suggest.invoice + ' (' + suggest.score + '%)</span>';
+        } else {
+          pennyCell = '<span class="fact-penny fact-penny-none" title="Aucune proposition ≥ 50% — cliquer pour choisir manuellement">❌ —</span>';
+        }
+        html += '<td><a href="#" class="fact-penny-link" data-mission="' + l.mission.replace(/"/g, '&quot;') + '" data-type="' + typeKey + '" style="text-decoration:none;font-size:0.72rem">' + pennyCell + '</a></td>';
+
         html += '<td><input type="text" class="fact-comment-input" data-mission="' + l.mission.replace(/"/g, '&quot;') + '" data-type="' + l.type + '" value="' + (l.comment || '').replace(/"/g, '&quot;') + '" placeholder="..." style="width:100%;min-width:80px;padding:0.2rem 0.4rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.72rem;background:var(--bg);color:var(--text)"></td>';
         html += '</tr>';
       }
@@ -8114,7 +8246,7 @@
           html += '<tr style="background:var(--bg-secondary);font-size:0.78rem">';
           html += '<td colspan="3" style="color:var(--text-secondary)">Sous-total ' + y + ' (' + byYear[y].count + ' factures)</td>';
           html += '<td style="font-weight:600">' + formatEuro(byYear[y].total) + '</td>';
-          html += '<td colspan="3"></td>';
+          html += '<td colspan="4"></td>';
           html += '</tr>';
         }
       }
@@ -8123,7 +8255,7 @@
       html += '<tr style="background:var(--bg-secondary);font-weight:700">';
       html += '<td colspan="3">Total (' + lines.length + ' factures)</td>';
       html += '<td>' + formatEuro(total) + '</td>';
-      html += '<td colspan="3"></td>';
+      html += '<td colspan="4"></td>';
       html += '</tr>';
 
       html += '</tbody></table>';
@@ -8149,7 +8281,155 @@
           if (e.key === 'Enter') this.blur();
         });
       });
+
+      // Bind clicks Penny → popup matching (Patch 2)
+      document.querySelectorAll('.fact-penny-link').forEach(a => {
+        a.addEventListener('click', function(e) {
+          e.preventDefault();
+          openFactMatchingModal(this.getAttribute('data-mission'), this.getAttribute('data-type'));
+        });
+      });
     }
+
+    // --- Popup matching Notion ↔ Pennylane (Patch 2) ---
+    let factMatchingModalState = { missionNom: null, type: null, expectedCurrent: '' };
+    async function openFactMatchingModal(missionNom, type) {
+      const overlay = document.getElementById('factMatchingModalOverlay');
+      const body = document.getElementById('factMatchingModalBody');
+      const title = document.getElementById('factMatchingModalTitle');
+      title.textContent = 'Matching Pennylane — ' + missionNom + ' / ' + (type === 'acompte' ? 'Acompte' : 'Solde');
+      body.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem">Chargement des propositions...</p>';
+      overlay.classList.add('active');
+      try {
+        const res = await fetch('/api/facturation-matching/suggest?mission=' + encodeURIComponent(missionNom) + '&type=' + encodeURIComponent(type));
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        factMatchingModalState = { missionNom, type, expectedCurrent: data.currentlyLinked || '' };
+        body.innerHTML = renderFactMatchingModalContent(data);
+        // Bind boutons
+        document.querySelectorAll('.fact-matching-pick').forEach(btn => {
+          btn.addEventListener('click', function() {
+            confirmFactMatching(this.getAttribute('data-invoice'));
+          });
+        });
+        const unlinkBtn = document.getElementById('factMatchingUnlink');
+        if (unlinkBtn) unlinkBtn.addEventListener('click', () => confirmFactMatching(''));
+        const manualForm = document.getElementById('factMatchingManualForm');
+        if (manualForm) manualForm.addEventListener('submit', (e) => {
+          e.preventDefault();
+          const val = document.getElementById('factMatchingManualInput').value.trim();
+          if (val) confirmFactMatching(val);
+        });
+      } catch (err) {
+        body.innerHTML = '<p style="color:var(--danger);font-size:0.85rem">Erreur chargement : ' + err.message + '</p>';
+      }
+    }
+
+    function renderFactMatchingModalContent(data) {
+      const m = data.mission || {};
+      const sug = data.suggestions || [];
+      const current = data.currentlyLinked || '';
+      const montantTarget = data.type === 'acompte'
+        ? (m.ca ? 'Attendu acompte (Notion HT) : ~ ' + formatEuro(m.ca * 0.5) + ' (50/50 par défaut)' : '')
+        : 'Attendu solde (Notion HT) : variable selon acompte forcé';
+
+      let html = '<div style="margin-bottom:0.8rem;padding:0.6rem;background:var(--bg-secondary);border-radius:6px;font-size:0.8rem">';
+      html += '<div><b>Mission :</b> ' + (m.nom || '-') + '</div>';
+      html += '<div><b>Client Notion :</b> ' + (m.client || '-') + '</div>';
+      html += '<div><b>CA HT :</b> ' + formatEuro(m.ca || 0) + ' — ' + montantTarget + '</div>';
+      if (current) {
+        html += '<div style="margin-top:0.3rem;color:var(--success);font-weight:600">✅ Actuellement lié à : ' + current + '</div>';
+      } else {
+        html += '<div style="margin-top:0.3rem;color:var(--text-secondary)">Aucun lien Notion actuel.</div>';
+      }
+      html += '</div>';
+
+      if (sug.length === 0) {
+        html += '<p style="font-size:0.85rem;color:var(--text-secondary)">Aucune proposition automatique (aucun candidat scoré > 0). Utilise le formulaire manuel ci-dessous.</p>';
+      } else {
+        html += '<div style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);margin-bottom:0.4rem">Propositions</div>';
+        html += '<table style="width:100%;font-size:0.78rem;border-collapse:collapse">';
+        html += '<thead><tr style="border-bottom:1px solid var(--border)"><th style="text-align:left;padding:0.3rem">N° facture</th><th style="text-align:left;padding:0.3rem">Client Penny</th><th style="text-align:right;padding:0.3rem">Montant</th><th style="text-align:left;padding:0.3rem">Date</th><th style="text-align:left;padding:0.3rem">Statut</th><th style="text-align:center;padding:0.3rem">Score</th><th></th></tr></thead><tbody>';
+        for (const c of sug) {
+          const confidenceColor = c.score >= 70 ? 'var(--success)' : c.score >= 50 ? 'var(--warning)' : 'var(--danger)';
+          const isCurrent = c.invoiceNumber === current;
+          html += '<tr style="border-bottom:1px solid var(--border)' + (isCurrent ? ';background:rgba(15,123,108,0.08)' : '') + '">';
+          html += '<td style="padding:0.3rem;font-family:monospace">' + (c.invoiceNumber || '-') + (isCurrent ? ' ✅' : '') + '</td>';
+          html += '<td style="padding:0.3rem;color:var(--text-secondary)">' + (c.customerName || '-') + '</td>';
+          html += '<td style="padding:0.3rem;text-align:right">' + formatEuro(c.amount || 0) + '</td>';
+          html += '<td style="padding:0.3rem;font-size:0.72rem;color:var(--text-secondary)">' + (c.date || '-') + '</td>';
+          html += '<td style="padding:0.3rem;font-size:0.72rem">' + (c.status || '-') + (c.paid ? ' (paid)' : '') + '</td>';
+          html += '<td style="padding:0.3rem;text-align:center;color:' + confidenceColor + ';font-weight:600">' + c.score + '%</td>';
+          html += '<td style="padding:0.3rem"><button class="btn fact-matching-pick" data-invoice="' + (c.invoiceNumber || '').replace(/"/g, '&quot;') + '" style="font-size:0.72rem;padding:0.2rem 0.5rem" ' + (isCurrent ? 'disabled' : '') + '>' + (isCurrent ? 'Lié' : 'Choisir') + '</button></td>';
+          html += '</tr>';
+          if (c.reasons) {
+            html += '<tr><td colspan="7" style="padding:0 0.3rem 0.4rem;font-size:0.7rem;color:var(--text-secondary);font-style:italic">Raisons : ' + c.reasons + '</td></tr>';
+          }
+        }
+        html += '</tbody></table>';
+      }
+
+      // Saisie manuelle + unlink
+      html += '<div style="margin-top:1rem;padding-top:0.8rem;border-top:1px solid var(--border)">';
+      html += '<form id="factMatchingManualForm" style="display:flex;gap:0.4rem;align-items:center;margin-bottom:0.5rem">';
+      html += '<label style="font-size:0.8rem;font-weight:600">Saisie manuelle :</label>';
+      html += '<input type="text" id="factMatchingManualInput" placeholder="F-2025-XXX" style="flex:1;padding:0.3rem 0.5rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text);font-family:monospace">';
+      html += '<button type="submit" class="btn" style="font-size:0.75rem;padding:0.3rem 0.6rem">Enregistrer</button>';
+      html += '</form>';
+      if (current) {
+        html += '<button id="factMatchingUnlink" class="btn" style="font-size:0.75rem;padding:0.3rem 0.6rem;color:var(--danger);font-weight:600">✗ Retirer le lien</button>';
+      }
+      html += '</div>';
+      return html;
+    }
+
+    async function confirmFactMatching(invoiceNumber) {
+      const { missionNom, type, expectedCurrent } = factMatchingModalState;
+      if (!missionNom || !type) return;
+      const body = document.getElementById('factMatchingModalBody');
+      const prev = body.innerHTML;
+      body.innerHTML = '<p style="font-size:0.85rem;color:var(--text-secondary)">⏳ Écriture Notion en cours...</p>';
+      try {
+        const res = await fetch('/api/facturation-matching/link', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ missionNom, type, invoiceNumber, expectedCurrent }),
+        });
+        const json = await res.json();
+        if (!res.ok) {
+          if (json.code === 'NOTION_DRIFT') {
+            alert('⚠️ Notion a été modifié depuis le chargement. Valeur actuelle : "' + (json.currentValue || '(vide)') + '". Ferme la popup, la page va recharger.');
+          } else {
+            alert('Erreur : ' + (json.error || 'inconnue'));
+          }
+          body.innerHTML = prev;
+          return;
+        }
+        // Succès : optimistic update LOCAL + backup localStorage (survit hard refresh + eventual consistency)
+        const normalizedInvoice = (invoiceNumber || '').trim();
+        if (factMatchingSummary[missionNom]) {
+          const field = type === 'acompte' ? 'acompteLinked' : 'soldeLinked';
+          factMatchingSummary[missionNom][field] = normalizedInvoice;
+        }
+        setMatchingLocalOverride(missionNom, type, normalizedInvoice);
+        closeFactMatchingModal();
+        // Re-fetch en tâche de fond (le serveur peut renvoyer stale à cause de l'eventual consistency ;
+        // dans ce cas l'overlay localStorage rétablit la valeur dans loadFactMatchingSummary).
+        await refreshFactData();
+      } catch (err) {
+        alert('Erreur réseau : ' + err.message);
+        body.innerHTML = prev;
+      }
+    }
+
+    function closeFactMatchingModal() {
+      document.getElementById('factMatchingModalOverlay').classList.remove('active');
+      factMatchingModalState = { missionNom: null, type: null, expectedCurrent: '' };
+    }
+
+    document.getElementById('factMatchingModalOverlay').addEventListener('click', function(e) {
+      if (e.target === this) closeFactMatchingModal();
+    });
 
     async function loadFactOverrides() {
       try {
@@ -8162,31 +8442,373 @@
       } catch (e) { console.warn('Overrides non chargés:', e); }
     }
 
-    async function setFactOverride(mission, type, status, comment) {
-      const key = mission + '||' + type;
-      const existing = factOverrides[key] || {};
-      const newStatus = status !== undefined ? status : (existing.status || '');
-      const newComment = comment !== undefined ? comment : (existing.comment || '');
+    // Dump brut Pennylane : toutes les entités accessibles (customer_invoices, supplier_invoices,
+    // customers, suppliers, products, transactions, plan_items, journal_entries, credit_notes).
+    // Flatten récursif des objets imbriqués ; arrays JSON-stringifiées tronquées à 2000 chars.
+    function flattenObj(obj, prefix, out) {
+      if (obj == null) { if (prefix) out[prefix] = ''; return out; }
+      if (typeof obj !== 'object') { out[prefix || 'value'] = obj; return out; }
+      if (Array.isArray(obj)) {
+        out[prefix] = obj.length === 0 ? '' : JSON.stringify(obj).slice(0, 2000);
+        return out;
+      }
+      for (const k of Object.keys(obj)) {
+        const v = obj[k];
+        const key = prefix ? prefix + '.' + k : k;
+        if (v && typeof v === 'object' && !Array.isArray(v)) flattenObj(v, key, out);
+        else if (Array.isArray(v)) out[key] = v.length === 0 ? '' : JSON.stringify(v).slice(0, 2000);
+        else out[key] = v == null ? '' : v;
+      }
+      return out;
+    }
+    async function downloadPennylaneDump() {
+      const btn = document.getElementById('btnPennylaneDump');
+      const original = btn ? btn.innerHTML : '';
+      if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Fetch Pennylane...'; }
       try {
-        await fetch('/api/facture-overrides', {
+        const res = await fetch('/api/debug/pennylane-raw');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const { data, entities, fetchedAt } = await res.json();
+        const sep = ';';
+        const esc = (v) => {
+          if (v === null || v === undefined) return '';
+          let s = String(v).replace(/"/g, '""');
+          if (s.includes(sep) || s.includes('"') || s.includes('\n') || s.includes('\r')) s = '"' + s + '"';
+          return s;
+        };
+        let csv = [
+          `# Dump brut Pennylane — ${fetchedAt}`,
+          `# Entités testées : ${entities.join(', ')}`,
+          `# Chaque section liste tous les champs bruts disponibles. Les objets imbriqués sont aplatis avec "." (ex: customer.name). Les arrays sont JSON-stringifiées.`,
+          ``,
+        ].join('\n');
+        for (const key of entities) {
+          const entry = data[key] || {};
+          csv += `\n=== ${key.toUpperCase()} (count=${entry.count || 0}${entry.error ? ' ERROR: ' + entry.error : ''}) ===\n`;
+          const records = entry.records || [];
+          if (records.length === 0) { csv += '(aucune donnée)\n'; continue; }
+          // Flatten chaque record, union des clés
+          const flattened = records.map(r => flattenObj(r, '', {}));
+          const allKeys = new Set();
+          for (const f of flattened) for (const k of Object.keys(f)) allKeys.add(k);
+          const cols = [...allKeys].sort();
+          csv += cols.join(sep) + '\n';
+          for (const f of flattened) csv += cols.map(c => esc(f[c])).join(sep) + '\n';
+        }
+        const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `pennylane-dump-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        alert('Échec dump Pennylane : ' + err.message);
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = original; }
+      }
+    }
+
+    // PoC : export CSV du matching Notion↔Pennylane↔Qonto (12 mois). À annoter à la main pour mesurer le taux d'erreur.
+    async function downloadMatchingCSV() {
+      const btn = document.getElementById('btnMatchingCsv');
+      const original = btn ? btn.innerHTML : '';
+      if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Calcul...'; }
+      try {
+        const res = await fetch('/api/debug/facturation-matching');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        const rows = data.missions || [];
+        if (rows.length === 0) { alert('Aucune mission Notion trouvée.'); return; }
+        const cols = Object.keys(rows[0]);
+        const esc = (v) => {
+          if (v === null || v === undefined) return '';
+          let s = String(v).replace(/"/g, '""');
+          if (s.includes(',') || s.includes(';') || s.includes('"') || s.includes('\n')) s = '"' + s + '"';
+          return s;
+        };
+        const sep = ';'; // Excel FR friendly
+        let csv = cols.join(sep) + '\n';
+        for (const r of rows) csv += cols.map(c => esc(r[c])).join(sep) + '\n';
+        // Orphelins Pennylane en annexe (factures sans match confiant)
+        if (data.orphansPennylane && data.orphansPennylane.length > 0) {
+          csv += '\n'; csv += ['--- ORPHELINS PENNYLANE (aucun match Notion ≥ ' + data.scoreThreshold + ') ---'].join(sep) + '\n';
+          const oCols = Object.keys(data.orphansPennylane[0]);
+          csv += oCols.join(sep) + '\n';
+          for (const o of data.orphansPennylane) csv += oCols.map(c => esc(o[c])).join(sep) + '\n';
+        }
+        // Stats en header
+        const stats = data.stats || {};
+        const header = [
+          `# Audit matching Notion↔Pennylane↔Qonto — ${new Date().toISOString().slice(0, 10)}`,
+          `# Missions Notion: ${stats.missions || 0} | Factures Pennylane: ${stats.invoicesPennylane || 0} | Qonto credits 12mo: ${stats.qontoCredits12mo || 0} | Orphelins Pennylane: ${stats.orphansPennylane || 0}`,
+          `# Seuil match auto: ${data.scoreThreshold}/100. Annote la colonne "correction" (OK / NOK + raison) pour chaque ligne incorrecte.`,
+          '',
+        ].join('\n');
+        csv = header + csv;
+        // BOM UTF-8 pour Excel FR
+        const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `matching-audit-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        alert('Échec export matching : ' + err.message);
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = original; }
+      }
+    }
+
+    // Patch 3 : write-back statut Facturation → Notion.
+    // Ordre officiel des 6 statuts Notion "Facturation" (cf. screenshot G1 user).
+    const NOTION_FACTURATION_ORDER_FRONT = [
+      'Acompte à envoyer',
+      'Acompte envoyé',
+      'Acompte payé',
+      'Solde à envoyer',
+      'Solde envoyé',
+      'Solde payé',
+    ];
+    // Calcule le statut Notion cible depuis l'intention user. Miroir du mapping backend.
+    function computeTargetNotionStatus(rowType, newStatus, oneShot) {
+      if (oneShot) {
+        if (newStatus === 'A envoyer') return 'Solde à envoyer';
+        if (newStatus === 'Envoye')    return 'Solde envoyé';
+        if (newStatus === 'Paye')      return 'Solde payé';
+        return null;
+      }
+      if (rowType === 'acompte') {
+        if (newStatus === 'A envoyer') return 'Acompte à envoyer';
+        if (newStatus === 'Envoye')    return 'Acompte envoyé';
+        if (newStatus === 'Paye')      return 'Acompte payé';
+      }
+      if (rowType === 'solde') {
+        if (newStatus === 'A envoyer') return 'Solde à envoyer';
+        if (newStatus === 'Envoye')    return 'Solde envoyé';
+        if (newStatus === 'Paye')      return 'Solde payé';
+      }
+      return null;
+    }
+    // Décide si une confirmation est requise : transition arrière OU saut > 1 étape.
+    function shouldConfirmTransition(current, target) {
+      if (!current || !target || current === target) return false;
+      const curIdx = NOTION_FACTURATION_ORDER_FRONT.indexOf(current);
+      const tgtIdx = NOTION_FACTURATION_ORDER_FRONT.indexOf(target);
+      if (curIdx < 0 || tgtIdx < 0) return true; // statut inconnu → safe
+      if (tgtIdx < curIdx) return true;          // recul
+      if (tgtIdx - curIdx > 1) return true;      // saut > 1 étape
+      return false;
+    }
+    // Calcule le Pilot dropdown value à partir d'un statut Notion + type (pour revert).
+    function computePilotDropdownFromNotion(notionStatus, typeKey) {
+      const nf = (notionStatus || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+      if (typeKey === 'Acompte') {
+        if (nf.includes('acompte a envoyer')) return 'A envoyer';
+        if (nf.includes('acompte envoye'))    return 'Envoye';
+        return 'Paye'; // Acompte payé + tous statuts Solde*
+      }
+      if (nf.includes('acompte a envoyer') || nf.includes('acompte envoye')) return 'En attente';
+      if (nf.includes('acompte paye') || nf.includes('solde a envoyer'))     return 'A envoyer';
+      if (nf.includes('solde envoye'))                                        return 'Envoye';
+      return 'Paye';
+    }
+    function revertFactDropdown(missionNom, typeKey) {
+      const mission = (factData && factData.missions || []).find(m => m.nom === missionNom);
+      if (!mission) return;
+      const originalStatus = computePilotDropdownFromNotion(mission.facturation || '', typeKey);
+      const selects = document.querySelectorAll('.fact-status-select[data-mission="' + (window.CSS && CSS.escape ? CSS.escape(missionNom) : missionNom.replace(/"/g, '\\"')) + '"][data-type="' + typeKey + '"]');
+      selects.forEach(s => { s.value = originalStatus; });
+    }
+    // Toast non-bloquant (success/error/info) en haut à droite, auto-dismiss 4s.
+    function showToast(type, message, duration) {
+      duration = duration || 4000;
+      let container = document.getElementById('toastContainer');
+      if (!container) {
+        container = document.createElement('div');
+        container.id = 'toastContainer';
+        container.style.cssText = 'position:fixed;top:1rem;right:1rem;z-index:99999;display:flex;flex-direction:column;gap:0.5rem;pointer-events:none';
+        document.body.appendChild(container);
+      }
+      const toast = document.createElement('div');
+      const color = type === 'error' ? 'var(--danger, #e03e3e)' : type === 'success' ? 'var(--success, #0f7b6c)' : 'var(--warning, #d9730d)';
+      const icon = type === 'error' ? '❌' : type === 'success' ? '✅' : 'ℹ️';
+      toast.style.cssText = 'background:var(--bg, #fff);border-left:4px solid ' + color + ';box-shadow:0 4px 12px rgba(0,0,0,0.15);padding:0.7rem 1rem;border-radius:4px;max-width:420px;font-size:0.85rem;color:var(--text);pointer-events:auto;transition:opacity 0.3s;line-height:1.4';
+      toast.innerHTML = '<span style="margin-right:0.4rem">' + icon + '</span>' + message;
+      container.appendChild(toast);
+      setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, duration);
+    }
+
+    // Push statut Pilot → Notion. Si refus backend / drift → toast + revert dropdown.
+    async function pushFactStatusToNotion(missionNom, typeKey, newStatus) {
+      const rowType = typeKey === 'Acompte' ? 'acompte' : 'solde';
+      const mission = (factData && factData.missions || []).find(m => m.nom === missionNom);
+      if (!mission) { showToast('error', 'Mission introuvable dans la base locale.'); revertFactDropdown(missionNom, typeKey); return; }
+      const oneShot = (mission.montantAcompte || 0) < 5;
+      const currentNotionStatus = mission.facturation || '';
+      const target = computeTargetNotionStatus(rowType, newStatus, oneShot);
+      if (!target) {
+        // Cas "En attente" ou statut invalide → revert + message
+        showToast('error', 'Transition invalide : "' + newStatus + '" non applicable à ' + typeKey + (oneShot ? ' (paiement 1 fois)' : '') + '.');
+        revertFactDropdown(missionNom, typeKey);
+        return;
+      }
+      if (target === currentNotionStatus) return; // no-op
+      if (shouldConfirmTransition(currentNotionStatus, target)) {
+        const ok = confirm('Le statut Notion passera de "' + (currentNotionStatus || '(vide)') + '" à "' + target + '".\n\nConfirmer ?');
+        if (!ok) { revertFactDropdown(missionNom, typeKey); return; }
+      }
+      try {
+        const res = await fetch('/api/facturation-matching/set-status', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mission, type, status: newStatus, comment: newComment }),
+          body: JSON.stringify({ missionNom, rowType, newStatus, oneShot, expectedCurrent: currentNotionStatus }),
         });
-        factOverrides[key] = { status: newStatus, comment: newComment };
-        renderFactKpis();
-        renderFactTable();
-      } catch (e) { console.error('Erreur override:', e); }
+        const json = await res.json();
+        if (!res.ok) {
+          if (json.code === 'INVALID_TRANSITION') {
+            showToast('error', json.error || 'Transition refusée par Notion.');
+          } else if (json.code === 'NOTION_DRIFT') {
+            showToast('error', 'Notion a été modifié depuis le dernier chargement (valeur actuelle : "' + (json.currentValue || '(vide)') + '"). La page va recharger.');
+            await refreshFactData();
+            return;
+          } else {
+            showToast('error', json.error || 'Échec mise à jour Notion.');
+          }
+          revertFactDropdown(missionNom, typeKey);
+          return;
+        }
+        showToast('success', 'Statut Notion mis à jour : "' + target + '".');
+        // Refetch Notion pour synchroniser l'état Pilot
+        await refreshFactData();
+      } catch (err) {
+        showToast('error', 'Erreur réseau : ' + err.message);
+        revertFactDropdown(missionNom, typeKey);
+      }
+    }
+
+    async function setFactOverride(mission, type, status, comment) {
+      // Patch 3 : status → Notion (write-back), comment → Supabase (inchangé)
+      if (status !== undefined) {
+        // type ici est 'Acompte' ou 'Solde' (depuis data-type des dropdowns)
+        await pushFactStatusToNotion(mission, type, status);
+        return;
+      }
+      if (comment !== undefined) {
+        // Comment-only update → Supabase
+        const key = mission + '||' + type;
+        const existing = factOverrides[key] || {};
+        try {
+          await fetch('/api/facture-overrides', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mission, type, comment }),
+          });
+          factOverrides[key] = { status: existing.status || '', comment };
+          // Pas besoin de rerender la table pour un comment (visible immédiatement dans l'input)
+        } catch (e) { console.error('Erreur override:', e); showToast('error', 'Échec sauvegarde commentaire.'); }
+      }
+    }
+
+    // Patch 2 : cache du matching summary pour éviter de fetch à chaque re-render table.
+    // Clé : missionNom → { pageId, acompteLinked, soldeLinked, acompteSuggest, soldeSuggest }.
+    let factMatchingSummary = {};
+
+    // Patch 2+ : safety net localStorage pour les liens Notion écrits via Pilot.
+    // Objectif : pallier l'eventual consistency Notion (GET /databases/query peut retourner une valeur
+    // stale pendant quelques secondes à minutes après un PATCH). Si le serveur retourne vide pour un
+    // lien qu'on vient juste d'écrire, on restore la valeur depuis localStorage.
+    // TTL 7 jours ; une entrée est auto-purgée dès que le serveur confirme la même valeur (sync OK).
+    const NOTION_LINK_BACKUP_KEY = 'pilot_notion_link_backup_v1';
+    const NOTION_LINK_BACKUP_TTL_MS = 7 * 24 * 3600 * 1000;
+    function getMatchingLocalBackup() {
+      try {
+        const raw = localStorage.getItem(NOTION_LINK_BACKUP_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw) || {};
+        const cutoff = Date.now() - NOTION_LINK_BACKUP_TTL_MS;
+        const fresh = {};
+        for (const [k, v] of Object.entries(parsed)) {
+          if (v && v.timestamp && v.timestamp > cutoff) fresh[k] = v;
+        }
+        return fresh;
+      } catch (_) { return {}; }
+    }
+    function saveMatchingLocalBackup(overrides) {
+      try { localStorage.setItem(NOTION_LINK_BACKUP_KEY, JSON.stringify(overrides)); } catch (_) {}
+    }
+    function setMatchingLocalOverride(missionNom, type, invoiceNumber) {
+      const overrides = getMatchingLocalBackup();
+      const key = missionNom + '||' + type;
+      if (invoiceNumber) {
+        overrides[key] = { invoiceNumber, timestamp: Date.now() };
+      } else {
+        delete overrides[key];
+      }
+      saveMatchingLocalBackup(overrides);
+    }
+
+    async function loadFactMatchingSummary() {
+      try {
+        // Cache-bust pour éviter toute mise en cache navigateur du résultat
+        const res = await fetch('/api/facturation-matching/suggest?t=' + Date.now());
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        const serverSummary = {};
+        for (const s of (data.summary || [])) {
+          serverSummary[s.missionNom] = s;
+        }
+        // Overlay localStorage : si le serveur retourne vide pour un lien qu'on a écrit récemment,
+        // restaurer la valeur locale (mitigation eventual consistency Notion).
+        // Si le serveur a une valeur ≠ de la locale → trust server (ex. édition directe Notion).
+        // Si le serveur a la même valeur que locale → purger l'entrée locale (sync confirmé).
+        const localOverrides = getMatchingLocalBackup();
+        const prunedOverrides = { ...localOverrides };
+        for (const [key, val] of Object.entries(localOverrides)) {
+          const sep = key.indexOf('||');
+          const missionNom = key.substring(0, sep);
+          const type = key.substring(sep + 2);
+          if (!serverSummary[missionNom]) continue;
+          const field = type === 'acompte' ? 'acompteLinked' : 'soldeLinked';
+          const serverValue = serverSummary[missionNom][field];
+          if (!serverValue && val.invoiceNumber) {
+            // Serveur vide + local non-vide → overlay local (Notion eventual consistency)
+            serverSummary[missionNom][field] = val.invoiceNumber;
+            serverSummary[missionNom][field + 'FromLocal'] = true; // flag pour UI
+          } else if (serverValue === val.invoiceNumber) {
+            // Sync confirmé → purger local
+            delete prunedOverrides[key];
+          } else if (serverValue && serverValue !== val.invoiceNumber) {
+            // Serveur a une autre valeur → trust server, purger local
+            delete prunedOverrides[key];
+          }
+        }
+        saveMatchingLocalBackup(prunedOverrides);
+        factMatchingSummary = serverSummary;
+      } catch (err) {
+        // Ne PAS wiper factMatchingSummary en cas d'erreur réseau — on garde la dernière version valide
+        console.warn('Matching summary non chargé (garde l\'ancien):', err.message);
+      }
     }
 
     async function refreshFactData() {
       try {
+        // Patch 2 : invalide le cache Notion + Pennylane côté serveur pour que le bouton Sync
+        // force un re-fetch immédiat (sinon le user doit attendre jusqu'à 5/10 min le TTL).
+        // Best-effort : si l'invalidation échoue (réseau, endpoint manquant), on continue quand même.
+        try {
+          await fetch('/api/notion-missions/invalidate-cache', { method: 'POST' });
+        } catch (_) { /* ignore */ }
+        // Cache-bust ?t= pour éviter toute mise en cache navigateur/proxy
         const [res, _] = await Promise.all([
-          fetch('/api/facturation'),
+          fetch('/api/facturation?t=' + Date.now()),
           loadFactOverrides(),
         ]);
         if (!res.ok) throw new Error('Erreur chargement facturation');
         factData = await res.json();
+        // Recharger le matching summary en tâche de fond (ne bloque pas l'affichage)
+        loadFactMatchingSummary().then(() => renderFactTable());
         renderFactAlerts();
         renderFactKpis();
         renderFactTable();
@@ -8493,10 +9115,27 @@
       const encEnvoye = mois.encaissementsEnvoye || 0;
       const encPrev = mois.encaissementsPrev || 0;
       const encRetard = mois.encaissementsRetard || 0;
-      const encQonto = mois.encaissements || 0;
+      // Redesign Patch 1 : encaissementsTRE source = 'notion' (Pennylane + Notion HT×1.2) pour mois non-clos,
+      // 'qonto' pour mois clos, 'ca-estimatif' pour scénario override. Le total encaissementsTRE inclut déjà
+      // encEnvoye + encPrev + encRetard (non additionné séparément, sinon double-compte).
+      const encTRE = mois.encaissementsTRE || 0;
+      const encTRESource = mois.encaissementsTRESource || 'notion';
+      const encTRELabel = encTRESource === 'qonto' ? 'Encaissements Qonto'
+                        : encTRESource === 'ca-estimatif' ? 'CA estimatif (scénario)'
+                        : 'CA prévisionnel (Notion+Pennylane TTC)';
+      const subvPlanTreVal       = mois.subvPlanTre       || 0;
+      const aidePlanTreVal       = mois.aidePlanTre       || 0;
+      const pretPlanTreVal       = mois.pretPlanTre       || 0;
+      const avancePlanTreVal     = mois.avancePlanTre     || 0;
+      const rembOpcoPlanTreVal   = mois.rembOpcoPlanTre   || 0;
+      const rembAvancePlanTreVal = mois.rembAvancePlanTre || 0;
       const pipelineEnc = mois.pipelinePondereEncaissements || 0;
-      const charges = mois.decaissements || 0;
-      const totalEnc = encQonto + encEnvoye + encPrev + encRetard + pipelineEnc;
+      // Charges TTC Plan_TRE_Prév (mois non-clos) ou Qonto réel TTC (mois clos). decaissements = HT CR_Prev, à éviter pour le solde.
+      // Note : decaissementsTRE inclut déjà tvaReversementM1 + chargesFixesExtra (overrides). On ajoute ici rembAvance
+      // (remboursement avance remb. BPI) qui est un cash-out Plan_TRE_Prév séparé, aligné sur decForSolde.
+      const chargesTTC = (mois.decaissementsTRE || mois.decaissements || 0) + rembAvancePlanTreVal;
+      const decaissementsTRESource = mois.decaissementsTRESource || 'plan-tre';
+      const totalEnc = encTRE + subvPlanTreVal + aidePlanTreVal + pretPlanTreVal + avancePlanTreVal + rembOpcoPlanTreVal + pipelineEnc;
 
       // --- Soldes ---
       let html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.8rem;margin-bottom:1.2rem">';
@@ -8563,23 +9202,42 @@
       }
 
       // --- ENCAISSEMENTS ---
+      // Redesign Patch 1 :
+      // - Clos : une seule ligne "Encaissements Qonto" (source réelle) + detail transactions
+      // - Non-clos : décomposition CA par statut (envoyées Pennylane / prévi Notion / retard) qui somment à encTRE
+      //              + financements Plan_TRE_Prév ventilés en 5 lignes (subv, aide, remb_opco, pret, avance)
+      //              + pipeline pondéré (scénarios uniquement)
       html += '<div style="font-weight:700;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-secondary);margin-bottom:0.4rem">Encaissements</div>';
 
-      if (encQonto > 0) {
-        html += accordion('Encaissements Qonto', encQonto, 'rgba(15,123,108,0.7)', '&#9679;', txTable(creditsDetail));
+      if (encTRESource === 'qonto') {
+        // Clos : encTRE = cash-in Qonto réel. Détail = transactions créditrices du mois.
+        if (encTRE > 0) html += accordion(encTRELabel, encTRE, 'rgba(15,123,108,0.7)', '&#9679;', txTable(creditsDetail));
+      } else if (encTRESource === 'ca-estimatif') {
+        // Scénario CA estimatif : montant saisi par l'user, pas de détail
+        if (encTRE > 0) html += accordion(encTRELabel, encTRE, 'rgba(15,123,108,0.7)', '&#9679;', '');
+      } else {
+        // Non-clos : décomposition du CA prévisionnel par statut (Notion+Pennylane TTC)
+        if (encEnvoye > 0) {
+          html += accordion('Factures envoyées (Pennylane TTC)', encEnvoye, 'rgba(15,123,108,0.4)', '&#9675;', factureTable(facturesEnvoyees));
+        }
+        if (encPrev > 0) {
+          html += accordion('Factures prévisionnelles (Notion TTC, HT×1.2)', encPrev, 'rgba(105,64,165,0.6)', '&#9675;', factureTable(facturesPrev));
+        }
+        if (encRetard > 0) {
+          html += accordion('En retard', encRetard, 'rgba(224,62,62,0.7)', '&#9679;', factureTable(facturesRetard));
+        }
       }
-      if (encEnvoye > 0) {
-        html += accordion('Factures envoyees', encEnvoye, 'rgba(15,123,108,0.4)', '&#9675;', factureTable(facturesEnvoyees));
-      }
-      if (encPrev > 0) {
-        html += accordion('Factures previsionnelles', encPrev, 'rgba(105,64,165,0.6)', '&#9675;', factureTable(facturesPrev));
-      }
-      if (encRetard > 0) {
-        html += accordion('En retard', encRetard, 'rgba(224,62,62,0.7)', '&#9679;', factureTable(facturesRetard));
-      }
+
+      // Financements Plan_TRE_Prév — uniquement pour mois non-clos (pour clos, déjà dans Qonto cash-in)
+      if (subvPlanTreVal > 0)       html += accordion('Subvention d\'exploitation (Plan TRE)', subvPlanTreVal, 'rgba(15,123,108,0.55)', '&#9679;', '');
+      if (aidePlanTreVal > 0)       html += accordion('Aide d\'exploitation (Plan TRE)', aidePlanTreVal, 'rgba(15,123,108,0.55)', '&#9679;', '');
+      if (rembOpcoPlanTreVal > 0)   html += accordion('Remb. OPCO (produit d\'exploitation)', rembOpcoPlanTreVal, 'rgba(15,123,108,0.55)', '&#9679;', '');
+      if (pretPlanTreVal > 0)       html += accordion('Prêt bancaire (hors EBE)', pretPlanTreVal, 'rgba(80,80,140,0.45)', '&#9679;', '');
+      if (avancePlanTreVal > 0)     html += accordion('Avance remboursable BPI (hors EBE)', avancePlanTreVal, 'rgba(80,80,140,0.45)', '&#9679;', '');
+
       if (pipelineEnc > 0) {
         // Détail par deal du pipeline non accessible par mois côté modale ; on affiche le total uniquement.
-        html += accordion('Pipeline pondere', pipelineEnc, 'rgba(105,64,165,0.45)', '&#9650;', '');
+        html += accordion('Pipeline pondéré', pipelineEnc, 'rgba(105,64,165,0.45)', '&#9650;', '');
       }
 
       // --- REVENUS EXCEPTIONNELS ---
@@ -8605,9 +9263,10 @@
       html += '<span style="color:var(--success, #0f7b6c)">' + formatEuro(totalEncAvecRev) + '</span></div>';
 
       // --- CHARGES ---
-      // Mois clos : transactions Qonto réelles groupées par catégorie bancaire.
-      // Mois en cours + futurs : catégories CR_Prev (budget prévisionnel), sans détail transactionnel.
-      const chargesLabel = isClos ? 'Charges (Qonto réel)' : 'Charges prévisionnelles (CR_Prev)';
+      // Mois clos : transactions Qonto réelles groupées par catégorie bancaire (TTC, somme = chargesTTC).
+      // Mois en cours + futurs : total TTC = Plan_TRE_Prév (decaissementsTRE). Détail CR_Prev affiché à titre
+      // indicatif (HT, somme ≠ TTC) — on ajoute une note pour clarifier l'écart.
+      const chargesLabel = isClos ? 'Charges (Qonto réel)' : 'Charges prévisionnelles (Plan TRE TTC)';
       html += '<div style="font-weight:700;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-secondary);margin-bottom:0.4rem">' + chargesLabel + '</div>';
 
       if (isClos) {
@@ -8623,26 +9282,32 @@
             html += accordion(cat, catTotal, 'rgba(217,115,13,0.7)', '&#9679;', txTable(txs));
           }
         } else {
-          html += accordion('Charges Qonto', charges, 'rgba(217,115,13,0.7)', '&#9679;', '');
+          html += accordion('Charges Qonto', chargesTTC, 'rgba(217,115,13,0.7)', '&#9679;', '');
         }
       } else {
+        // Non-clos : Plan TRE TTC opérationnel + Remb. Avance (hors EBE) si présent
+        const chargesOps = (mois.decaissementsTRE || 0);
+        html += accordion('Charges opérationnelles (Plan TRE TTC)', chargesOps, 'rgba(217,115,13,0.7)', '&#9679;', '');
+        if (rembAvancePlanTreVal > 0) {
+          html += accordion('Remb. Avance remboursable BPI (hors EBE)', rembAvancePlanTreVal, 'rgba(80,80,140,0.45)', '&#9679;', '');
+        }
+        // Détail CR_Prev (HT) — informatif uniquement, somme ≠ TTC
         const gsheetCats = Object.keys(chargesGSheetDetail).sort((a, b) => chargesGSheetDetail[b] - chargesGSheetDetail[a]);
         if (gsheetCats.length > 0) {
+          html += '<div style="font-size:0.7rem;color:var(--text-secondary);margin:0.6rem 0 0.3rem;font-style:italic">Détail CR_Prev (HT, à titre indicatif)</div>';
           for (const cat of gsheetCats) {
-            html += accordion(cat, chargesGSheetDetail[cat], 'rgba(217,115,13,0.7)', '&#9679;', '');
+            html += accordion(cat, chargesGSheetDetail[cat], 'rgba(217,115,13,0.45)', '&#9675;', '');
           }
-        } else {
-          html += accordion('Charges prévisionnelles', charges, 'rgba(217,115,13,0.7)', '&#9679;', '');
         }
       }
 
-      // Total charges
+      // Total charges (TTC)
       html += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0.8rem;font-weight:700;font-size:0.85rem;margin-bottom:1rem">';
       html += '<span>Total charges</span>';
-      html += '<span style="color:var(--warning, #d9730d)">-' + formatEuro(charges) + '</span></div>';
+      html += '<span style="color:var(--warning, #d9730d)">-' + formatEuro(chargesTTC) + '</span></div>';
 
       // --- VARIATION ---
-      const variation = totalEncAvecRev - charges;
+      const variation = totalEncAvecRev - chargesTTC;
       const varColor = variation >= 0 ? 'var(--success, #0f7b6c)' : 'var(--danger, #e03e3e)';
       html += '<div style="display:flex;justify-content:space-between;padding:0.6rem 0.8rem;font-weight:700;font-size:0.95rem;border-top:2px solid var(--text);margin-top:0.5rem">';
       html += '<span>Variation du mois</span>';
@@ -8856,6 +9521,7 @@
     let currentScenarioOverrides = []; // overrides en mémoire pour la modale en cours
     let scenarioHorizon = 'fin-annee';
     let scenarioToggles = { gsheet: true, pipeline: true };
+    let scenarioPastMode = 'previ'; // 'previ' (default = tout budget) ou 'real' (charges passées Qonto réel)
     let scenarioActiveTab = 'treso';
 
     const SCENARIO_COLORS = [
@@ -8884,6 +9550,14 @@
       renderScenariosComparison();
     }
 
+    function setScenarioPastMode(m) {
+      if (scenarioPastMode === m) return;
+      scenarioPastMode = m;
+      document.querySelectorAll('input[name="scenarioPastMode"]').forEach(r => { r.checked = r.value === m; });
+      saveScenariosUiState();
+      renderScenariosComparison();
+    }
+
     function setScenarioTab(tab) {
       if (scenarioActiveTab === tab) return;
       scenarioActiveTab = tab;
@@ -8900,6 +9574,7 @@
 
     function buildScenarioQueryString() {
       return '?horizon=' + scenarioHorizon
+        + '&pastMode=' + scenarioPastMode
         + '&includeGSheet=' + (scenarioToggles.gsheet ? 'true' : 'false')
         + '&includePipeline=' + (scenarioToggles.pipeline ? 'true' : 'false');
     }
@@ -8913,6 +9588,7 @@
         const state = {
           horizon: scenarioHorizon,
           toggles: scenarioToggles,
+          pastMode: scenarioPastMode,
           activeTab: scenarioActiveTab,
           selectedIds: Array.from(selectedScenarios),
         };
@@ -8938,6 +9614,10 @@
             scenarioToggles.pipeline = state.toggles.pipeline;
             const el = document.getElementById('scenarioTogglePipeline'); if (el) el.checked = state.toggles.pipeline;
           }
+        }
+        if (state.pastMode && ['previ', 'real'].includes(state.pastMode)) {
+          scenarioPastMode = state.pastMode;
+          document.querySelectorAll('input[name="scenarioPastMode"]').forEach(r => { r.checked = r.value === scenarioPastMode; });
         }
         if (state.activeTab && ['treso', 'pnl', 'ebe'].includes(state.activeTab)) {
           scenarioActiveTab = state.activeTab;
@@ -9061,6 +9741,7 @@
       });
       const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
       const baselineColor = isDark ? 'rgba(180,180,180,1)' : 'rgba(120,120,120,1)';
+      const baseInclude = baseline.include || {};
 
       const datasets = [{
         label: 'Baseline',
@@ -9080,6 +9761,53 @@
         });
       });
 
+      // External tooltip : div HTML stylé, cohérent avec les kpi-tooltip du reste de la webapp
+      const getOrCreateTipEl = () => {
+        let el = document.getElementById('scenariosChartTooltip');
+        if (!el) {
+          el = document.createElement('div');
+          el.id = 'scenariosChartTooltip';
+          el.style.cssText = 'position:absolute;display:none;min-width:300px;max-width:420px;padding:0.8rem 1rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);box-shadow:0 6px 20px rgba(0,0,0,0.14);font-size:0.82rem;line-height:1.5;color:var(--text);z-index:1000;pointer-events:none';
+          document.body.appendChild(el);
+        }
+        return el;
+      };
+      const externalTooltip = (context) => {
+        const { chart, tooltip } = context;
+        const el = getOrCreateTipEl();
+        if (!tooltip || tooltip.opacity === 0) { el.style.display = 'none'; return; }
+        const idx = tooltip.dataPoints && tooltip.dataPoints[0] ? tooltip.dataPoints[0].dataIndex : -1;
+        if (idx < 0) { el.style.display = 'none'; return; }
+
+        const monthLabel = tooltip.title && tooltip.title[0] ? tooltip.title[0] : labels[idx];
+        let html = '<div style="font-weight:600;font-size:0.9rem;margin-bottom:0.3rem">' + monthLabel + '</div>';
+        tooltip.dataPoints.forEach(dp => {
+          const dsLabel = dp.dataset.label;
+          let m, inclPipeline = true, dotColor = dp.dataset.borderColor || 'var(--text)';
+          if (dsLabel === 'Baseline') {
+            m = baseline.previsionnel[idx];
+            inclPipeline = baseInclude.pipeline !== false;
+          } else {
+            const sc = scenarios.find(s => s.nom === dsLabel);
+            if (sc) { m = sc.previsionnel[idx]; inclPipeline = (sc.include || {}).pipeline !== false; }
+          }
+          if (!m) return;
+          html += '<div style="border-top:1px solid var(--border);margin-top:0.45rem;padding-top:0.4rem">';
+          html += '<div style="display:flex;align-items:center;gap:0.35rem;font-weight:600;margin-bottom:0.25rem"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + dotColor + '"></span>' + dsLabel + '</div>';
+          html += buildMonthTooltipHTML(m, inclPipeline);
+          html += '</div>';
+        });
+        el.innerHTML = html;
+        const rect = chart.canvas.getBoundingClientRect();
+        const leftOffset = tooltip.caretX + 16;
+        const right = rect.left + window.scrollX + leftOffset + 420;
+        const overflowRight = right - (window.innerWidth + window.scrollX);
+        const left = rect.left + window.scrollX + leftOffset - Math.max(0, overflowRight);
+        el.style.display = 'block';
+        el.style.left = left + 'px';
+        el.style.top  = (rect.top + window.scrollY + tooltip.caretY - 20) + 'px';
+      };
+
       if (scenariosChart) scenariosChart.destroy();
       scenariosChart = new Chart(document.getElementById('scenariosChart'), {
         type: 'line',
@@ -9090,15 +9818,7 @@
           interaction: { mode: 'index', intersect: false },
           plugins: {
             legend: { position: 'top', labels: { color: isDark ? '#ccc' : '#555', font: { size: 12 } } },
-            tooltip: {
-              backgroundColor: isDark ? '#333' : '#fff', titleColor: isDark ? '#eee' : '#37352f',
-              bodyColor: isDark ? '#ccc' : '#555', borderColor: isDark ? '#555' : '#e9e9e7',
-              borderWidth: 1, cornerRadius: 8, padding: 10,
-              callbacks: {
-                title: (items) => items[0]?.label + ' — Solde fin de mois',
-                label: (ctx) => ctx.dataset.label + ' : ' + formatEuro(ctx.raw),
-              },
-            },
+            tooltip: { enabled: false, external: externalTooltip },
           },
           scales: {
             x: { grid: { color: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' }, ticks: { color: isDark ? '#aaa' : '#888', font: { size: 11 } } },
@@ -9107,30 +9827,9 @@
         },
       });
 
-      // Helper : compose le tooltip détaillé d'un mois (Solde début + breakdown encaissements/décaissements)
-      const monthTip = (m) => {
-        const enc = (m.encaissements || 0) + (m.encaissementsFactures || 0) + (m.revenusExceptionnels || 0) + (m.fictionalEncaissements || 0) + (m.revenusRecurrents || 0) + (m.subventionsAnnoncees || 0) + (m.pipelinePondereEncaissements || 0);
-        const lines = ['Solde début : ' + formatEuro(m.soldeDebut || 0)];
-        lines.push('+ Encaissements : ' + formatEuro(enc));
-        if (m.encaissementsFactures)         lines.push('   • Factures Notion : ' + formatEuro(m.encaissementsFactures));
-        if (m.pipelinePondereEncaissements)  lines.push('   • Pipeline pondéré : ' + formatEuro(m.pipelinePondereEncaissements));
-        if (m.encaissements)                 lines.push('   • Qonto / CA estimatif : ' + formatEuro(m.encaissements));
-        if (m.revenusRecurrents)             lines.push('   • Revenus récurrents (scénario) : ' + formatEuro(m.revenusRecurrents));
-        if (m.revenusExceptionnels)          lines.push('   • Revenus exceptionnels : ' + formatEuro(m.revenusExceptionnels));
-        if (m.subventionsAnnoncees)          lines.push('   • Subventions annoncées : ' + formatEuro(m.subventionsAnnoncees));
-        if (m.fictionalEncaissements)        lines.push('   • Deals fictifs (scénario) : ' + formatEuro(m.fictionalEncaissements));
-        lines.push('− Décaissements : ' + formatEuro(m.decaissements || 0));
-        if (m.masseSalariale)   lines.push('   • dont masse salariale : ' + formatEuro(m.masseSalariale));
-        if (m.chargesFixesExtra) lines.push('   • dont charges fixes scénario : ' + formatEuro(m.chargesFixesExtra));
-        lines.push('────────────');
-        lines.push('= Solde fin : ' + formatEuro(m.soldeFin || 0));
-        return lines.join('\n');
-      };
-      const escAttr = (s) => String(s).replace(/"/g, '&quot;');
-
-      // Detail mensuel (Tréso seulement)
+      // Détail mensuel sous le chart : table avec tooltips stylés (kpi-tooltip-wrapper) par cellule
       let html = '<p style="font-size:0.75rem;color:var(--text-secondary);margin:0 0 0.5rem">Survole une cellule pour voir la décomposition du mois.</p>';
-      html += '<table style="width:100%;border-collapse:collapse;font-size:0.82rem">';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:0.82rem;overflow:visible">';
       html += '<thead><tr style="border-bottom:2px solid var(--border)">';
       html += '<th style="text-align:left;padding:0.5rem 0.8rem;color:var(--text-secondary)">Mois</th>';
       html += '<th style="text-align:right;padding:0.5rem 0.8rem;color:var(--text-secondary)">Baseline (Solde)</th>';
@@ -9139,18 +9838,22 @@
       for (let i = 0; i < baseline.previsionnel.length; i++) {
         const bm = baseline.previsionnel[i];
         const bVal = bm.soldeFin || 0;
-        const bTip = escAttr(monthTip(bm));
+        const bTipHtml = buildMonthTooltipHTML(bm, baseInclude.pipeline !== false);
         html += '<tr style="border-bottom:1px solid var(--border)">';
         html += '<td style="padding:0.4rem 0.8rem;font-weight:500">' + labels[i] + '</td>';
-        html += '<td style="text-align:right;padding:0.4rem 0.8rem;cursor:help" title="' + bTip + '">' + formatEuro(bVal) + '</td>';
+        html += '<td class="kpi-tooltip-wrapper" style="text-align:right;padding:0.4rem 0.8rem">' + formatEuro(bVal)
+             + '<div class="kpi-tooltip-content" style="right:0;left:auto;text-align:left">' + bTipHtml + '</div></td>';
         scenarios.forEach((sc) => {
           const sm = sc.previsionnel[i];
           const sVal = sm ? (sm.soldeFin || 0) : 0;
           const delta = sVal - bVal;
           const color = delta > 0 ? 'var(--success, #0f7b6c)' : delta < 0 ? 'var(--danger)' : '';
           const deltaStr = delta !== 0 ? ' <span style="font-size:0.75rem;color:' + color + '">(' + (delta > 0 ? '+' : '') + formatEuro(delta) + ')</span>' : '';
-          const sTip = sm ? escAttr(monthTip(sm)) : '';
-          html += '<td style="text-align:right;padding:0.4rem 0.8rem;cursor:help" title="' + sTip + '">' + formatEuro(sVal) + deltaStr + '</td>';
+          const sTipHtml = sm ? buildMonthTooltipHTML(sm, (sc.include || {}).pipeline !== false) : '';
+          html += '<td class="kpi-tooltip-wrapper" style="text-align:right;padding:0.4rem 0.8rem">' + formatEuro(sVal) + deltaStr
+               + '<div class="kpi-tooltip-content" style="right:0;left:auto;text-align:left">' + sTipHtml;
+          if (sm) { html += ttSeparator(); html += ttRow('Delta vs Baseline', delta, { bold: true, showZero: true, color: delta >= 0 ? 'var(--success)' : 'var(--danger)', sign: delta >= 0 ? '+' : '' }); }
+          html += '</div></td>';
         });
         html += '</tr>';
       }
@@ -9166,6 +9869,233 @@
     function lastValue(projection, field) {
       if (!projection || projection.length === 0) return 0;
       return projection[projection.length - 1][field] || 0;
+    }
+
+    // ==== Breakdown helpers (tooltips Scenarios) ====
+    // Décompose les indicateurs cumulés pour afficher leur origine dans les tooltips.
+    function caBreakdown(projection) {
+      // Sépare la baseline par source (ca-estimatif / qonto / crprev) pour un label explicite.
+      const b = { baselineQonto: 0, baselineCrPrev: 0, baselineCaEstimatif: 0, factures: 0, pipeline: 0, fictional: 0, revRecurrents: 0, revExc: 0 };
+      for (const m of projection) {
+        const v = m.encaissements || 0;
+        if      (m.encaissementsSource === 'ca-estimatif') b.baselineCaEstimatif += v;
+        else if (m.encaissementsSource === 'qonto')        b.baselineQonto       += v;
+        else                                                b.baselineCrPrev      += v;
+        b.factures      += m.encaissementsFactures        || 0;
+        b.pipeline      += m.pipelinePondereEncaissements || 0;
+        b.fictional     += m.fictionalEncaissements       || 0;
+        b.revRecurrents += m.revenusRecurrents            || 0;
+        b.revExc        += m.revenusExceptionnels         || 0;
+      }
+      b.baseline = b.baselineQonto + b.baselineCrPrev + b.baselineCaEstimatif;
+      b.total = b.baseline + b.factures + b.pipeline + b.fictional + b.revRecurrents + b.revExc;
+      return b;
+    }
+    function chargesBreakdown(projection) {
+      const b = { qontoClos: 0, crPrev: 0, chargesFixes: 0, masseDelta: 0 };
+      for (const m of projection) {
+        const fixes = m.chargesFixesExtra       || 0;
+        const delta = m.masseSalarialeDelta     || 0;
+        const total = m.decaissements           || 0;
+        const base  = total - fixes - delta;
+        // Source de la base charges : backend expose decaissementsBaseSource (fallback sur isClos pour rétrocompat)
+        const src = m.decaissementsBaseSource || (m.isClos ? 'qonto' : 'crprev');
+        if (src === 'qonto')      b.qontoClos    += base;
+        else if (src === 'crprev') b.crPrev      += base;
+        b.chargesFixes += fixes;
+        b.masseDelta   += delta;
+      }
+      b.total = b.qontoClos + b.crPrev + b.chargesFixes + b.masseDelta;
+      return b;
+    }
+    function subvBreakdown(projection) {
+      const b = { gsheet: 0, annoncees: 0 };
+      for (const m of projection) {
+        b.gsheet    += m.subvGSheet     || 0;
+        b.annoncees += m.subvAnnoncees  || 0;
+      }
+      b.total = b.gsheet + b.annoncees;
+      return b;
+    }
+
+    // Construit le HTML d'un tooltip CA/Charges/Subv/Marge/EBE.
+    // Reutilise les classes .tt-row / .tt-section du webapp pour rester cohérent avec Analytics.
+    function ttRow(label, montant, opts = {}) {
+      if (!montant && !opts.showZero) return '';
+      const color = opts.color ? 'color:' + opts.color + ';' : '';
+      const weight = opts.bold ? 'font-weight:700;' : '';
+      const sign = opts.sign || '';
+      return '<div class="tt-row" style="' + color + weight + '"><span>' + label + '</span><span>' + sign + formatEuro(montant) + '</span></div>';
+    }
+    function ttSeparator() {
+      return '<div style="border-top:1px solid var(--border);margin:0.4rem 0 0.3rem"></div>';
+    }
+    function ttSection(title) {
+      return '<div class="tt-section">' + title + '</div>';
+    }
+
+    function buildCATooltipHTML(projection, includePipeline) {
+      const b = caBreakdown(projection);
+      let html = ttSection('CA cumulé — par source');
+      html += ttRow('Qonto cash-in (mois clos)',              b.baselineQonto);
+      html += ttRow('CR_Prev Enc. Acompte + Enc. Solde',      b.baselineCrPrev);
+      html += ttRow('CA estimatif (scénario, HT)',            b.baselineCaEstimatif);
+      html += ttRow('Factures Pennylane + prévisionnelles Notion', b.factures);
+      if (includePipeline !== false) html += ttRow('Pipeline pondéré HubSpot', b.pipeline);
+      html += ttRow('Deals fictifs (scénario)',              b.fictional);
+      html += ttRow('Revenus récurrents (scénario)',         b.revRecurrents);
+      html += ttRow('Revenus exceptionnels (scénario)',      b.revExc);
+      html += ttSeparator();
+      html += ttRow('Total CA cumulé',                       b.total, { bold: true, showZero: true });
+      return html;
+    }
+    function buildChargesTooltipHTML(projection) {
+      const b = chargesBreakdown(projection);
+      let html = ttSection('Charges cumulées — par source');
+      html += ttRow('Qonto réel (mois clos, TTC)',           b.qontoClos);
+      html += ttRow('CR_Prev catégories mères (HT, mois non-clos)', b.crPrev);
+      html += ttRow('Charges fixes / remb. prêt (scénario)', b.chargesFixes);
+      html += ttRow('Delta masse salariale (override)',      b.masseDelta);
+      html += ttSeparator();
+      html += ttRow('Total charges',                         b.total, { bold: true, showZero: true });
+      return html;
+    }
+    function buildSubvTooltipHTML(projection) {
+      const b = subvBreakdown(projection);
+      let html = ttSection('Subventions — par source');
+      html += ttRow('Plan_TRE_Prév (lignes "Subvention*")',  b.gsheet);
+      html += ttRow('Subventions annoncées (scénario)',      b.annoncees);
+      html += ttSeparator();
+      html += ttRow('Total subventions',                     b.total, { bold: true, showZero: true });
+      return html;
+    }
+    function buildAidesTooltipHTML(projection) {
+      let total = 0;
+      for (const m of projection) total += m.aides || 0;
+      let html = ttSection('Aides — par source');
+      html += ttRow('Plan_TRE_Prév (lignes "Aide *")',       total, { showZero: true });
+      return html;
+    }
+    function buildMargeTooltipHTML(projection) {
+      const ca = caBreakdown(projection);
+      const ch = chargesBreakdown(projection);
+      let html = ttSection('Marge brute = CA − Charges');
+      html += ttRow('CA cumulé',                              ca.total);
+      html += ttRow('Charges cumulées',                       ch.total, { sign: '−' });
+      html += ttSeparator();
+      html += ttRow('Marge brute',                            ca.total - ch.total, { bold: true, showZero: true });
+      return html;
+    }
+    // Tooltip TRE mois par mois : détail du solde fin de mois en TTC (redesign Patch 1).
+    // Source CA : Notion+Pennylane TTC (HT×1.2) pour mois non-clos, Qonto réel pour mois clos.
+    // Financements Plan_TRE_Prév ventilés : subv/aide/remb_opco (EBE +), pret/avance/remb_avance (hors EBE).
+    function buildMonthTooltipHTML(m, includePipeline) {
+      if (!m) return '';
+      const encTRE = m.encaissementsTRE || 0;
+      // Attention : pour non-clos, encaissementsTRE EST encaissementsFactures (même valeur) → on n'additionne pas séparément.
+      const encTotalTTC = encTRE
+                        + (m.subvPlanTre || 0) + (m.aidePlanTre || 0)
+                        + (m.pretPlanTre || 0) + (m.avancePlanTre || 0) + (m.rembOpcoPlanTre || 0)
+                        + (m.revenusExceptionnels || 0)
+                        + (m.fictionalEncaissements || 0) + (m.revenusRecurrents || 0)
+                        + (m.subventionsAnnoncees || 0) + (m.pipelinePondereEncaissements || 0);
+      const fixes = m.chargesFixesExtra || 0;
+      const delta = m.masseSalarialeDelta || 0;
+      const decTREBase = m.decaissementsTREBase || 0;
+      const decTotal = (m.decaissementsTRE || 0) + (m.rembAvancePlanTre || 0);
+      let html = '';
+      html += ttSection('Solde début');
+      html += ttRow('Solde début de mois',              m.soldeDebut || 0, { showZero: true });
+      html += ttSection('Encaissements TTC (+)');
+      if (encTRE) {
+        const srcLabel = m.encaissementsTRESource === 'ca-estimatif' ? 'CA estimatif (scénario)'
+                       : m.encaissementsTRESource === 'qonto'         ? 'Qonto cash-in réel (TTC)'
+                       : 'CA Notion+Pennylane (HT×1.2 TTC)';
+        html += ttRow(srcLabel,                            encTRE, { sign: '+' });
+      }
+      if (includePipeline !== false && m.pipelinePondereEncaissements)
+                                           html += ttRow('Pipeline pondéré',                    m.pipelinePondereEncaissements, { sign: '+' });
+      if (m.fictionalEncaissements)        html += ttRow('Deals fictifs (scénario)',             m.fictionalEncaissements, { sign: '+' });
+      if (m.revenusRecurrents)             html += ttRow('Revenus récurrents (scénario)',        m.revenusRecurrents, { sign: '+' });
+      if (m.revenusExceptionnels)          html += ttRow('Revenus exceptionnels (scénario)',     m.revenusExceptionnels, { sign: '+' });
+      if (m.subventionsAnnoncees)          html += ttRow('Subventions annoncées (scénario)',     m.subventionsAnnoncees, { sign: '+' });
+      if (m.subvPlanTre)                   html += ttRow('Subvention d\'exploitation (Plan TRE)', m.subvPlanTre, { sign: '+' });
+      if (m.aidePlanTre)                   html += ttRow('Aide d\'exploitation (Plan TRE)',      m.aidePlanTre, { sign: '+' });
+      if (m.rembOpcoPlanTre)               html += ttRow('Remb. OPCO (produit d\'expl., Plan TRE)', m.rembOpcoPlanTre, { sign: '+' });
+      if (m.pretPlanTre)                   html += ttRow('Prêt bancaire (hors EBE, Plan TRE)',   m.pretPlanTre, { sign: '+' });
+      if (m.avancePlanTre)                 html += ttRow('Avance remboursable BPI (hors EBE)',   m.avancePlanTre, { sign: '+' });
+      html += ttRow('Sous-total encaissements',            encTotalTTC, { bold: true, showZero: true, sign: '+' });
+      html += ttSection('Décaissements TTC (−)');
+      if (decTREBase) {
+        const decLabel = m.decaissementsTRESource === 'qonto' ? 'Qonto réel (TTC, mois clos)'
+                                                               : 'Plan_TRE_Prév Total décaissements (TTC)';
+        html += ttRow(decLabel,                             decTREBase, { sign: '−' });
+      }
+      if (fixes)                  html += ttRow('Charges fixes / prêt (scénario, TTC)', fixes, { sign: '−' });
+      if (delta)                  html += ttRow('Delta masse salariale (override)',     delta, { sign: '−' });
+      if (m.tvaReversementM1)     html += ttRow('Reversement TVA M+1 (overrides)',      m.tvaReversementM1, { sign: '−', color: 'var(--warning, #d9730d)' });
+      if (m.rembAvancePlanTre)    html += ttRow('Remb. Avance remboursable BPI (hors EBE)', m.rembAvancePlanTre, { sign: '−' });
+      html += ttRow('Sous-total décaissements',            decTotal, { bold: true, showZero: true, sign: '−' });
+
+      // Section TVA overrides (debug) : visible si flux TVA du mois > 0
+      if ((m.tvaCollectee || 0) > 0 || (m.tvaDeductible || 0) > 0) {
+        html += ttSection('TVA overrides ce mois');
+        if (m.tvaCollectee)  html += ttRow('TVA collectée (CA overrides)',       m.tvaCollectee, { sign: '+' });
+        if (m.tvaDeductible) html += ttRow('TVA déductible (charges overrides)', m.tvaDeductible, { sign: '−' });
+        const netTva = (m.tvaCollectee || 0) - (m.tvaDeductible || 0);
+        html += ttRow('Solde TVA (reversé M+1 si +)',                             netTva, { showZero: true, color: netTva > 0 ? 'var(--warning)' : netTva < 0 ? 'var(--success)' : undefined });
+      }
+
+      html += ttSeparator();
+      const soldeFin = m.soldeFin || 0;
+      html += ttRow('Solde fin de mois (TTC)',             soldeFin, { bold: true, showZero: true, color: soldeFin >= 0 ? 'var(--success)' : 'var(--danger)' });
+      return html;
+    }
+
+    function buildEbeTooltipHTML(projection, includePipeline) {
+      const ca = caBreakdown(projection);
+      const ch = chargesBreakdown(projection);
+      const sv = subvBreakdown(projection);
+      let aides = 0; let produitsExpl = 0;
+      for (const m of projection) {
+        aides        += m.aides        || 0;
+        produitsExpl += m.produitsExpl || 0;
+      }
+      const marge = ca.total - ch.total;
+      const ebe = marge + sv.total + aides + produitsExpl;
+      let html = '';
+      // Section CA
+      html += ttSection('CA cumulé');
+      html += ttRow('Qonto cash-in (mois clos)',             ca.baselineQonto);
+      html += ttRow('CR_Prev Enc. Acompte + Solde',          ca.baselineCrPrev);
+      html += ttRow('CA estimatif (scénario, HT)',           ca.baselineCaEstimatif);
+      html += ttRow('Factures Pennylane + prév. Notion',     ca.factures);
+      if (includePipeline !== false) html += ttRow('Pipeline pondéré HubSpot', ca.pipeline);
+      html += ttRow('Deals fictifs',                         ca.fictional);
+      html += ttRow('Revenus récurrents',                    ca.revRecurrents);
+      html += ttRow('Revenus exceptionnels',                 ca.revExc);
+      html += ttRow('Sous-total CA',                         ca.total, { bold: true, showZero: true });
+      // Section Charges
+      html += ttSection('Charges cumulées');
+      html += ttRow('Qonto réel (mois clos)',                ch.qontoClos, { sign: '−' });
+      html += ttRow('CR_Prev (mois non-clos)',               ch.crPrev, { sign: '−' });
+      html += ttRow('Charges fixes / prêt (scénario)',       ch.chargesFixes, { sign: '−' });
+      html += ttRow('Delta masse salariale (override)',      ch.masseDelta, { sign: '−' });
+      html += ttRow('Sous-total charges',                    ch.total, { bold: true, sign: '−', showZero: true });
+      // Marge
+      html += ttSeparator();
+      html += ttRow('Marge brute', marge, { bold: true, showZero: true, color: marge >= 0 ? 'var(--success)' : 'var(--danger)' });
+      // Section Subv + Aides + Produits d'exploitation (Remb. OPCO)
+      if (sv.total > 0 || aides > 0 || produitsExpl > 0) {
+        html += ttSection('Subventions + produits d\'exploitation');
+        if (sv.gsheet)    html += ttRow('Subv Plan_TRE_Prév',        sv.gsheet,    { sign: '+' });
+        if (sv.annoncees) html += ttRow('Subv annoncées (scénario)', sv.annoncees, { sign: '+' });
+        if (aides)        html += ttRow('Aide d\'exploitation (Plan TRE)', aides,        { sign: '+' });
+        if (produitsExpl) html += ttRow('Remb. OPCO (Plan TRE)',     produitsExpl, { sign: '+' });
+      }
+      html += ttSeparator();
+      html += ttRow('EBE projeté', ebe, { bold: true, showZero: true, color: ebe >= 0 ? 'var(--success)' : 'var(--danger)' });
+      return html;
     }
 
     // ==== Vue P&L : tableau comparatif des indicateurs cumulés à fin d'horizon ====
@@ -9186,43 +10116,56 @@
       });
 
       const baseAgg = aggregate(baseline.previsionnel);
-      const scAggs  = scenarios.map(sc => ({ nom: sc.nom, agg: aggregate(sc.previsionnel) }));
+      const scAggs  = scenarios.map(sc => ({ nom: sc.nom, agg: aggregate(sc.previsionnel), proj: sc.previsionnel, include: sc.include || {} }));
+      const baseInclude = baseline.include || {};
 
-      // Tooltips synthétiques par indicateur (source + formule)
-      const ROW_TOOLTIPS = {
-        ca:      'Somme mensuelle de pnl_ca = encaissements totaux (factures Notion + pipeline pondéré HubSpot + revenus exceptionnels + revenus récurrents + deals fictifs) − subventions annoncées (qui ne sont pas du CA P&L)',
-        charges: 'Somme mensuelle de pnl_charges = décaissements (Qonto pour mois passés + GSheet CR_Prév HT pour mois futurs + masse salariale + charges fixes scénario)',
-        marge:   'Marge brute = CA cumulé − Charges cumulées',
-        subv:    'Somme des subventions GSheet Plan_TRE_Prév (lignes commençant par "Subvention") + subventions annoncées du scénario',
-        aides:   'Somme des aides GSheet Plan_TRE_Prév (lignes commençant par "Aide ")',
-        ebe:     'EBE projeté à fin d\'horizon = Marge brute + Subventions + Aides. Lecture directe de ebe_cumule sur le dernier mois.',
+      // Générateur de contenu de tooltip par ligne, pour une projection donnée (baseline ou scénario).
+      const buildTipForRow = (key, proj, include) => {
+        const inclPipeline = include.pipeline !== false;
+        switch (key) {
+          case 'ca':      return buildCATooltipHTML(proj, inclPipeline);
+          case 'charges': return buildChargesTooltipHTML(proj);
+          case 'marge':   return buildMargeTooltipHTML(proj);
+          case 'subv':    return buildSubvTooltipHTML(proj);
+          case 'aides':   return buildAidesTooltipHTML(proj);
+          case 'ebe':     return buildEbeTooltipHTML(proj, inclPipeline);
+          default:        return '';
+        }
       };
 
-      let html = '<p style="font-size:0.75rem;color:var(--text-secondary);margin:0 0 0.5rem">Cumul sur la projection — fin d\'horizon : <strong>' + horizonLabel + '</strong>. Survole une ligne ou un chiffre pour voir la source.</p>';
-      html += '<table style="width:100%;border-collapse:collapse;font-size:0.85rem">';
+      let html = '<p style="font-size:0.75rem;color:var(--text-secondary);margin:0 0 0.5rem">Cumul sur la projection — fin d\'horizon : <strong>' + horizonLabel + '</strong>. Survole une cellule pour voir la décomposition par source.</p>';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;overflow:visible">';
       html += '<thead><tr style="border-bottom:2px solid var(--border)">';
       html += '<th style="text-align:left;padding:0.55rem 0.9rem;color:var(--text-secondary)">Indicateur</th>';
       html += '<th style="text-align:right;padding:0.55rem 0.9rem;color:var(--text-secondary)">Baseline</th>';
       scAggs.forEach(sc => { html += '<th style="text-align:right;padding:0.55rem 0.9rem;color:var(--text-secondary)">' + sc.nom + '</th>'; });
       html += '</tr></thead><tbody>';
 
-      const escAttr = (s) => String(s).replace(/"/g, '&quot;');
-
       const renderRow = (label, key, opts = {}) => {
         const bVal = baseAgg[key];
         const isBold = opts.bold;
         const sign = opts.sign || '';
-        const tip  = escAttr(ROW_TOOLTIPS[key] || '');
+        const baseTipHtml = buildTipForRow(key, baseline.previsionnel, baseInclude);
         html += '<tr style="border-bottom:1px solid var(--border)' + (isBold ? ';font-weight:700;background:var(--hover)' : '') + '">';
-        html += '<td style="padding:0.5rem 0.9rem;cursor:help" title="' + tip + '">' + sign + label + '</td>';
-        html += '<td style="text-align:right;padding:0.5rem 0.9rem;cursor:help" title="' + tip + '">' + formatEuro(bVal) + '</td>';
+        // Colonne label + Baseline cell (tooltip = baseline breakdown)
+        html += '<td style="padding:0.5rem 0.9rem">' + sign + label + '</td>';
+        html += '<td class="kpi-tooltip-wrapper" style="text-align:right;padding:0.5rem 0.9rem">';
+        html += formatEuro(bVal);
+        html += '<div class="kpi-tooltip-content" style="right:0;left:auto;text-align:left">' + baseTipHtml + '</div>';
+        html += '</td>';
         scAggs.forEach(sc => {
           const sVal = sc.agg[key];
           const delta = sVal - bVal;
           const color = delta > 0 ? 'var(--success, #0f7b6c)' : delta < 0 ? 'var(--danger)' : '';
           const deltaStr = delta !== 0 ? ' <span style="font-size:0.72rem;color:' + color + ';font-weight:500">(' + (delta > 0 ? '+' : '') + formatEuro(delta) + ')</span>' : '';
-          const cellTip = escAttr(tip + '\n\nDelta vs Baseline : ' + (delta >= 0 ? '+' : '') + formatEuro(delta));
-          html += '<td style="text-align:right;padding:0.5rem 0.9rem;cursor:help" title="' + cellTip + '">' + formatEuro(sVal) + deltaStr + '</td>';
+          const scTipHtml = buildTipForRow(key, sc.proj, sc.include);
+          html += '<td class="kpi-tooltip-wrapper" style="text-align:right;padding:0.5rem 0.9rem">';
+          html += formatEuro(sVal) + deltaStr;
+          html += '<div class="kpi-tooltip-content" style="right:0;left:auto;text-align:left">' + scTipHtml;
+          html += ttSeparator();
+          html += ttRow('Delta vs Baseline', delta, { bold: true, showZero: true, color: delta >= 0 ? 'var(--success)' : 'var(--danger)', sign: delta >= 0 ? '+' : '' });
+          html += '</div>';
+          html += '</td>';
         });
         html += '</tr>';
       };
@@ -9238,7 +10181,7 @@
       container.innerHTML = html;
     }
 
-    // ==== Vue EBE : cards comparatives ====
+    // ==== Vue EBE : cards comparatives avec tooltips stylisés (breakdown par source) ====
     function renderEbeView(baseline, scenarios) {
       const container = document.getElementById('scenariosEbeCards');
       const baselineEbe = lastValue(baseline.previsionnel, 'ebe_cumule');
@@ -9247,33 +10190,16 @@
         : '';
       const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
       const baselineBg = isDark ? 'rgba(120,120,120,0.10)' : 'rgba(120,120,120,0.06)';
-
-      // Décompose l'EBE en ses composants pour le tooltip
-      const composeTip = (proj, totalEbe) => {
-        const ca       = sumField(proj, 'pnl_ca');
-        const charges  = sumField(proj, 'pnl_charges');
-        const marge    = sumField(proj, 'pnl_marge');
-        const subv     = sumField(proj, 'subventions');
-        const aides    = sumField(proj, 'aides');
-        return [
-          'CA cumulé : ' + formatEuro(ca),
-          'Charges cumulées : −' + formatEuro(charges),
-          'Marge brute : ' + formatEuro(marge),
-          'Subventions : +' + formatEuro(subv),
-          'Aides : +' + formatEuro(aides),
-          '────────────',
-          'EBE projeté : ' + formatEuro(totalEbe),
-        ].join('\n');
-      };
-      const escAttr = (s) => String(s).replace(/"/g, '&quot;');
+      const baseInclude = baseline.include || {};
 
       let html = '';
-      // Card Baseline
-      const baseTip = escAttr(composeTip(baseline.previsionnel, baselineEbe));
-      html += '<div class="kpi-block" style="background:' + baselineBg + ';border:1px solid var(--border);cursor:help" title="' + baseTip + '">';
+      // Card Baseline : tooltip = breakdown détaillé
+      const baseTipHtml = buildEbeTooltipHTML(baseline.previsionnel, baseInclude.pipeline !== false);
+      html += '<div class="kpi-block kpi-tooltip-wrapper" style="background:' + baselineBg + ';border:1px solid var(--border)">';
       html += '<div class="kpi-label">Baseline · ' + horizonLabel + '</div>';
       html += '<div class="kpi-value" style="color:var(--text)">' + formatEuro(baselineEbe) + '</div>';
       html += '<div class="kpi-sub">EBE projeté à horizon (survol pour détail)</div>';
+      html += '<div class="kpi-tooltip-content">' + baseTipHtml + '</div>';
       html += '</div>';
 
       scenarios.forEach((sc, i) => {
@@ -9284,11 +10210,15 @@
         const accentBg = col.replace('1)', '0.08)');
         const deltaColor = delta > 0 ? 'var(--success, #0f7b6c)' : delta < 0 ? 'var(--danger)' : 'var(--text-secondary)';
         const sign = delta > 0 ? '+' : '';
-        const tip = escAttr(composeTip(sc.previsionnel, ebe) + '\n\nDelta vs Baseline : ' + (delta >= 0 ? '+' : '') + formatEuro(delta) + ' (' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)');
-        html += '<div class="kpi-block" style="background:' + accentBg + ';border:1px solid ' + col.replace('1)', '0.5)') + ';cursor:help" title="' + tip + '">';
+        const scInclude = sc.include || {};
+        let scTipHtml = buildEbeTooltipHTML(sc.previsionnel, scInclude.pipeline !== false);
+        scTipHtml += ttSeparator();
+        scTipHtml += ttRow('Delta vs Baseline', delta, { bold: true, showZero: true, color: delta >= 0 ? 'var(--success)' : 'var(--danger)', sign: delta >= 0 ? '+' : '' });
+        html += '<div class="kpi-block kpi-tooltip-wrapper" style="background:' + accentBg + ';border:1px solid ' + col.replace('1)', '0.5)') + '">';
         html += '<div class="kpi-label" style="display:flex;align-items:center;gap:0.4rem"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + col + '"></span>' + sc.nom + '</div>';
         html += '<div class="kpi-value" style="color:var(--text)">' + formatEuro(ebe) + '</div>';
         html += '<div class="kpi-sub" style="color:' + deltaColor + ';font-weight:600">' + sign + formatEuro(delta) + ' vs Baseline (' + sign + pct.toFixed(1) + '%)</div>';
+        html += '<div class="kpi-tooltip-content">' + scTipHtml + '</div>';
         html += '</div>';
       });
 
@@ -9335,6 +10265,7 @@
         fetchAndRenderBaselineSalaries();
         populateSalAugTargets();
         populateGSheetCategories();
+        loadCategoriesTvaDropdown();
         document.getElementById('scenarioModalOverlay').classList.add('active');
       } catch {
         alert('Erreur chargement scenario');
@@ -9487,6 +10418,28 @@
       el.style.display = 'block';
     }
 
+    // Garde-fou : le CA estimatif remplace tout le CA baseline côté backend (factures + pipeline mis à 0).
+    // On désactive visuellement les toggles conflictuels + on force leur valeur à false pour rester cohérent en DB.
+    function updateCaEstimatifGuardRail() {
+      const hasCaEstimatif = currentScenarioOverrides.some(o => o.type === 'ca_estimatif');
+      const pipelineCb = document.getElementById('scenarioIncludePipeline');
+      const caNotionCb = document.getElementById('scenarioIncludeCaNotion');
+      const pipelineLabel = document.getElementById('scenarioIncludePipelineLabel');
+      const caNotionLabel = document.getElementById('scenarioIncludeCaNotionLabel');
+      const warnEl = document.getElementById('caEstimatifGuardWarning');
+      if (pipelineCb) {
+        pipelineCb.disabled = hasCaEstimatif;
+        if (pipelineLabel) { pipelineLabel.style.opacity = hasCaEstimatif ? '0.5' : '1'; pipelineLabel.style.cursor = hasCaEstimatif ? 'not-allowed' : 'pointer'; }
+        if (hasCaEstimatif && pipelineCb.checked) { pipelineCb.checked = false; saveScenarioInclude('include_pipeline', false); }
+      }
+      if (caNotionCb) {
+        caNotionCb.disabled = hasCaEstimatif;
+        if (caNotionLabel) { caNotionLabel.style.opacity = hasCaEstimatif ? '0.5' : '1'; caNotionLabel.style.cursor = hasCaEstimatif ? 'not-allowed' : 'pointer'; }
+        if (hasCaEstimatif && caNotionCb.checked) { caNotionCb.checked = false; saveScenarioInclude('include_ca_notion', false); }
+      }
+      if (warnEl) warnEl.style.display = hasCaEstimatif ? 'block' : 'none';
+    }
+
     function renderAllOverrideLists() {
       const salaires         = currentScenarioOverrides.filter(o => o.type === 'salaire');
       const charges          = currentScenarioOverrides.filter(o => o.type === 'charges_fixes');
@@ -9575,6 +10528,8 @@
       }
       // Signale les overrides dont la plage déborde l'horizon
       checkOverridesHorizon();
+      // Désactive pipeline + CA Notion toggles si CA estimatif présent
+      updateCaEstimatifGuardRail();
     }
 
     function renderOverrideList(containerId, overrides, formatter) {
@@ -9665,6 +10620,11 @@
     }
 
     function addOverrideCharge() {
+      // TVA bloc commun : catégorie (optionnelle, prend le pas sur le taux), taux (%), mode HT/TTC
+      const categorie_tva = document.getElementById('ovChargeCategorieTva').value || null;
+      const tva_pct = parseFloat(document.getElementById('ovChargeTvaTaux').value);
+      const tva_taux = (isNaN(tva_pct) || tva_pct < 0) ? 0.20 : (tva_pct / 100);
+      const montant_mode = document.getElementById('ovChargeMontantMode').value === 'TTC' ? 'TTC' : 'HT';
       const mode = document.querySelector('input[name="chargeMode"]:checked').value;
       if (mode === 'oneshot') {
         const libelle = document.getElementById('ovChargeLibOneshot').value.trim();
@@ -9673,7 +10633,7 @@
         if (!libelle) return alert('Libelle requis');
         if (!montant || montant <= 0) return alert('Montant invalide');
         if (!mois) return alert('Mois requis');
-        addOverrideToServer('charges_fixes', { mode: 'oneshot', libelle, montant, mois });
+        addOverrideToServer('charges_fixes', { mode: 'oneshot', libelle, montant, mois, tva_taux, montant_mode, categorie_tva });
         document.getElementById('ovChargeLibOneshot').value = '';
         document.getElementById('ovChargeMontantOneshot').value = '';
         document.getElementById('ovChargeMoisOneshot').value = '';
@@ -9685,7 +10645,7 @@
         if (!libelle) return alert('Libelle requis');
         if (!montant_mensuel || montant_mensuel <= 0) return alert('Montant invalide');
         if (!mois_debut || !mois_fin) return alert('Mois debut et fin requis');
-        addOverrideToServer('charges_fixes', { libelle, montant_mensuel, mois_debut, mois_fin });
+        addOverrideToServer('charges_fixes', { libelle, montant_mensuel, mois_debut, mois_fin, tva_taux, montant_mode, categorie_tva });
         document.getElementById('ovChargeLib').value = '';
         document.getElementById('ovChargeMontant').value = '';
         document.getElementById('ovChargeDebut').value = '';
@@ -9716,12 +10676,62 @@
       const montant_annuel = parseFloat(document.getElementById('ovCaMontant').value);
       const nb_mois = parseInt(document.getElementById('ovCaNbMois').value) || 12;
       if (!montant_annuel || montant_annuel <= 0) return alert('Montant annuel requis');
+      // TVA Phase E
+      const tva_pct = parseFloat(document.getElementById('ovCaTvaTaux').value);
+      const tva_taux = (isNaN(tva_pct) || tva_pct < 0) ? 0.20 : (tva_pct / 100);
+      const montant_mode = document.getElementById('ovCaMontantMode').value === 'TTC' ? 'TTC' : 'HT';
       // Remove existing CA estimatif overrides first (one CA per scenario)
       const existing = currentScenarioOverrides.filter(o => o.type === 'ca_estimatif');
       for (const o of existing) {
         await deleteOverride(o.id);
       }
-      addOverrideToServer('ca_estimatif', { montant_annuel, nb_mois });
+      addOverrideToServer('ca_estimatif', { montant_annuel, nb_mois, tva_taux, montant_mode });
+    }
+
+    // Callback catégorie TVA (charges_fixes) : auto-remplit le taux TVA depuis le GSheet Catégories
+    let categoriesTvaCache = null;
+    async function loadCategoriesTvaDropdown() {
+      if (categoriesTvaCache) return categoriesTvaCache;
+      try {
+        const res = await fetch('/api/categories-tva');
+        const data = await res.json();
+        categoriesTvaCache = data.categories || [];
+      } catch (err) {
+        console.warn('Chargement catégories TVA échoué:', err);
+        categoriesTvaCache = [];
+      }
+      const optionsHtml = categoriesTvaCache.map(c => `<option value="${c.nom.replace(/"/g, '&quot;')}" data-taux="${c.taux}">${c.nom} (${c.tauxLabel})</option>`).join('');
+      const selCharge = document.getElementById('ovChargeCategorieTva');
+      if (selCharge) {
+        const current = selCharge.value;
+        selCharge.innerHTML = '<option value="">— Aucune (défaut 20%)</option>' + optionsHtml;
+        if (current) selCharge.value = current;
+      }
+      const selRev = document.getElementById('ovRevCategorieTva');
+      if (selRev) {
+        const current = selRev.value;
+        selRev.innerHTML = '<option value="">— Aucune (défaut 0% hors TVA)</option>' + optionsHtml;
+        if (current) selRev.value = current;
+      }
+      return categoriesTvaCache;
+    }
+
+    function onChargeCategorieChange() {
+      const sel = document.getElementById('ovChargeCategorieTva');
+      const opt = sel.options[sel.selectedIndex];
+      const taux = opt && opt.dataset.taux ? parseFloat(opt.dataset.taux) : null;
+      if (taux != null && !isNaN(taux)) {
+        document.getElementById('ovChargeTvaTaux').value = (taux * 100).toFixed(taux % 0.01 ? 1 : 0);
+      }
+    }
+
+    function onRevCategorieChange() {
+      const sel = document.getElementById('ovRevCategorieTva');
+      const opt = sel.options[sel.selectedIndex];
+      const taux = opt && opt.dataset.taux ? parseFloat(opt.dataset.taux) : null;
+      if (taux != null && !isNaN(taux)) {
+        document.getElementById('ovRevTvaTaux').value = (taux * 100).toFixed(taux % 0.01 ? 1 : 0);
+      }
     }
 
     // --- Baseline salaries recap ---
@@ -9759,10 +10769,17 @@
       if (!libelle) return alert('Libelle requis');
       if (!montant || montant <= 0) return alert('Montant invalide');
       if (!mois) return alert('Mois requis');
-      addOverrideToServer('revenu_exceptionnel', { libelle, montant, mois });
+      const categorie_tva = document.getElementById('ovRevCategorieTva').value || null;
+      const tva_pct = parseFloat(document.getElementById('ovRevTvaTaux').value);
+      const tva_taux = (isNaN(tva_pct) || tva_pct < 0) ? 0 : (tva_pct / 100);
+      const montant_mode = document.getElementById('ovRevMontantMode').value === 'TTC' ? 'TTC' : 'HT';
+      addOverrideToServer('revenu_exceptionnel', { libelle, montant, mois, tva_taux, montant_mode, categorie_tva });
       document.getElementById('ovRevLib').value = '';
       document.getElementById('ovRevMontant').value = '';
       document.getElementById('ovRevMois').value = '';
+      document.getElementById('ovRevTvaTaux').value = '0';
+      document.getElementById('ovRevCategorieTva').value = '';
+      document.getElementById('ovRevMontantMode').value = 'HT';
     }
 
     // --- Pipeline (factor OU deal) ---

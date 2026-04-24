@@ -762,15 +762,34 @@ async function fetchAndParseCRPrev() {
   ];
   const shouldSkip = (name) => SKIP_PATTERNS.some(p => p.test(name));
 
-  // categories    : { "Frais de personnel": { "2025-01": 15000, ... } }  — totaux par catégorie mère
+  // categories    : { "Frais de personnel": { "2025-01": 15000, ... } }  — totaux par catégorie mère (charges)
   // subCategories : { "Frais de personnel": { "Salaires nets": { "2025-01": 4810 } } }
+  // encaissementsCA : { "2025-01": 63132, ... } — HT, Enc. Acompte + Enc. Solde (éclatement du CA budgété via Notion signé)
+  // encaissementsCADetail : { "2025-01": { "Enc. Acompte": 34552, "Enc. Solde": 28580 } }
   const categories    = {};
   const subCategories = {};
+  const encaissementsCA = {};
+  const encaissementsCADetail = {};
   let currentParent   = null;
 
   for (let r = monthRowIdx + 2; r < rows.length; r++) {
     const row = rows[r];
     const rawName = (row[2] || row[0] || '').trim();
+
+    // Capture les lignes "Enc. *" (CA encaissé budgété) AVANT le skip filter
+    if (/^enc\./i.test(rawName)) {
+      for (const { index, key } of budgetCols) {
+        const raw = (row[index] || '').trim().replace(/[€\s ]/g, '').replace(',', '.');
+        const val = parseFloat(raw) || 0;
+        if (val !== 0) {
+          encaissementsCA[key] = (encaissementsCA[key] || 0) + val;
+          if (!encaissementsCADetail[key]) encaissementsCADetail[key] = {};
+          encaissementsCADetail[key][rawName] = (encaissementsCADetail[key][rawName] || 0) + val;
+        }
+      }
+      continue; // ne pas descendre dans la logique charges
+    }
+
     if (shouldSkip(rawName)) continue;
 
     if (rawName.toLowerCase().startsWith('cm.')) {
@@ -800,14 +819,17 @@ async function fetchAndParseCRPrev() {
     }
   }
 
-  crPrevCache = { budgetCols, categories, subCategories };
+  crPrevCache = { budgetCols, categories, subCategories, encaissementsCA, encaissementsCADetail };
   crPrevCacheTime = Date.now();
   return crPrevCache;
 }
 
 let notionMissionsCache = null;
 let notionMissionsCacheTime = 0;
-const NOTION_MISSIONS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+// TTL réduit à 60s (Patch 2+ safety) : évite que le cache capture une valeur stale Notion juste après
+// un PATCH (eventual consistency Notion → GET /databases/query peut renvoyer l'ancienne valeur). Le
+// cache sert toujours à éviter un rafale de requêtes mais se rafraîchit vite.
+const NOTION_MISSIONS_CACHE_TTL = 60 * 1000; // 60 secondes
 
 async function fetchAllNotionMissions() {
   if (notionMissionsCache && (Date.now() - notionMissionsCacheTime) < NOTION_MISSIONS_CACHE_TTL) {
@@ -876,6 +898,17 @@ async function fetchAllNotionMissions() {
         ? props['Contact'].rich_text.map(t => t.plain_text).join('') : '',
       secteur: props["Secteur d'activité"] && props["Secteur d'activité"].multi_select
         ? props["Secteur d'activité"].multi_select.map(s => s.name) : [],
+      // Acompte forcé : Number saisi par user pour override du split 50/50 par défaut.
+      // - null/0 → pas d'override, montantAcompte = CA/2 via la formule Notion
+      // - valeur < 5€ → signale "paiement en 1 fois" (pas d'acompte réel, solde = ~CA)
+      // - valeur > 0 et < CA → split custom (ex: 40/60)
+      acompteForce: props['Acompte forcé'] && props['Acompte forcé'].number != null
+        ? props['Acompte forcé'].number : null,
+      // Liens Pennylane (Patch 2 : matching) — lecture Text. Écriture via PATCH Notion plus tard.
+      factAcptPenny: props['Fact acpt Penny'] && props['Fact acpt Penny'].rich_text
+        ? props['Fact acpt Penny'].rich_text.map(t => t.plain_text).join('') : '',
+      factSoldePenny: props['Fact solde Penny'] && props['Fact solde Penny'].rich_text
+        ? props['Fact solde Penny'].rich_text.map(t => t.plain_text).join('') : '',
     };
   });
 
@@ -883,6 +916,208 @@ async function fetchAllNotionMissions() {
   notionMissionsCacheTime = Date.now();
   return notionMissionsCache;
 }
+
+// --- Write-back Notion (Patch 2) : helper pour PATCH une propriété d'une page Notion ---
+// Implémentation avec refetch-before-write (détection de drift) + read-after-write (confirmation PATCH pris).
+// Mitigations identifiées dans l'audit Q1 :
+// - #1 Concurrence Notion UI ↔ Pilot : refetch avant write, compare current value à expectedCurrent.
+//      Si divergent, renvoie 409 "drift" avec la valeur actuelle pour que l'UI recharge.
+// - #2 Échec PATCH silencieux : read-after-write, compare la valeur retournée à celle demandée.
+// - #5 Audit trail : on stocke aussi en Supabase facture_overrides comme journal (reuse table existante).
+
+// Récupère une page Notion par son id (sans passer par fetchAllNotionMissions qui fait tout charger).
+async function fetchNotionMissionById(pageId) {
+  return notionRequest(`/v1/pages/${pageId}`, 'GET');
+}
+
+// Lit la valeur texte actuelle d'une propriété rich_text d'une page.
+function extractRichTextValue(page, propName) {
+  const prop = page.properties && page.properties[propName];
+  if (!prop || !prop.rich_text) return '';
+  return prop.rich_text.map(t => t.plain_text).join('');
+}
+
+// Écrit une valeur texte dans une propriété rich_text d'une page Notion.
+// - pageId : id de la page (UUID)
+// - propName : nom exact de la propriété (sensible à la casse et aux accents)
+// - newValue : nouvelle valeur texte (string, peut être vide pour effacer)
+// - expectedCurrent : valeur attendue avant write (optional, pour détecter drift). Si fournie et divergente → throw.
+// Renvoie { updated: boolean, previousValue, newValue, pageId } ou throw Error.
+async function updateNotionMissionRichTextProperty(pageId, propName, newValue, expectedCurrent) {
+  // Refetch-before-write : compare valeur actuelle à expectedCurrent pour détecter drift
+  const currentPage = await fetchNotionMissionById(pageId);
+  const currentValue = extractRichTextValue(currentPage, propName);
+  if (expectedCurrent !== undefined && currentValue !== expectedCurrent) {
+    const err = new Error(`Notion drift: la valeur actuelle "${currentValue}" diffère de la valeur attendue "${expectedCurrent}". Recharge la page pour voir la dernière version.`);
+    err.code = 'NOTION_DRIFT';
+    err.currentValue = currentValue;
+    throw err;
+  }
+  if (currentValue === newValue) {
+    // No-op : la valeur est déjà celle demandée, pas besoin de PATCH
+    return { updated: false, previousValue: currentValue, newValue, pageId, reason: 'no_change' };
+  }
+  // PATCH
+  const body = {
+    properties: {
+      [propName]: {
+        rich_text: newValue ? [{ text: { content: newValue } }] : [],
+      },
+    },
+  };
+  const patched = await notionRequest(`/v1/pages/${pageId}`, 'PATCH', body);
+  // Read-after-write : vérifie que la valeur retournée correspond bien
+  const writtenValue = extractRichTextValue(patched, propName);
+  if (writtenValue !== newValue) {
+    throw new Error(`Notion PATCH a échoué silencieusement : valeur écrite "${writtenValue}" ≠ "${newValue}". Vérifier le schéma de la propriété "${propName}".`);
+  }
+  // Invalider le cache missions (la prochaine lecture re-fetch)
+  notionMissionsCache = null; notionMissionsCacheTime = 0;
+  console.log(`[Notion PATCH OK] page=${pageId} prop="${propName}" "${currentValue}" → "${newValue}"`);
+  return { updated: true, previousValue: currentValue, newValue, pageId };
+}
+
+// Write Notion STATUS property (Patch 3, write-back Facturation).
+// Différent du rich_text : le payload API Notion utilise { status: { name: '...' } }.
+// L'option "name" doit exister EXACTEMENT dans le schéma de la propriété, sinon Notion renvoie 400.
+async function updateNotionMissionStatusProperty(pageId, propName, statusName, expectedCurrent) {
+  const currentPage = await fetchNotionMissionById(pageId);
+  const prop = currentPage.properties && currentPage.properties[propName];
+  const currentValue = (prop && prop.status && prop.status.name) || '';
+  if (expectedCurrent !== undefined && currentValue !== expectedCurrent) {
+    const err = new Error(`Notion drift: la valeur actuelle "${currentValue}" diffère de la valeur attendue "${expectedCurrent}". Recharge la page.`);
+    err.code = 'NOTION_DRIFT';
+    err.currentValue = currentValue;
+    throw err;
+  }
+  if (currentValue === statusName) {
+    return { updated: false, previousValue: currentValue, newValue: statusName, pageId, reason: 'no_change' };
+  }
+  const body = { properties: { [propName]: { status: { name: statusName } } } };
+  const patched = await notionRequest(`/v1/pages/${pageId}`, 'PATCH', body);
+  const writtenProp = patched.properties && patched.properties[propName];
+  const writtenValue = (writtenProp && writtenProp.status && writtenProp.status.name) || '';
+  if (writtenValue !== statusName) {
+    throw new Error(`Notion PATCH a échoué silencieusement : valeur écrite "${writtenValue}" ≠ "${statusName}". Vérifier que l'option existe dans le schéma "${propName}".`);
+  }
+  notionMissionsCache = null; notionMissionsCacheTime = 0;
+  return { updated: true, previousValue: currentValue, newValue: statusName, pageId };
+}
+
+// Progression officielle des statuts Notion "Facturation" (6 options, cf screenshot user G1).
+// L'ordre est utilisé pour détecter : reculs (curIdx > tgtIdx) et sauts (|tgtIdx - curIdx| > 1).
+const NOTION_FACTURATION_ORDER = [
+  'Acompte à envoyer',
+  'Acompte envoyé',
+  'Acompte payé',
+  'Solde à envoyer',
+  'Solde envoyé',
+  'Solde payé',
+];
+
+// Mapping Pilot → Notion selon (rowType, newStatus, oneShot, currentNotionStatus).
+// Retourne { target } si valide, { error } si transition refusée.
+// Règles (cf. matrices audit G) :
+// - Acompte : "En attente" invalide
+// - Solde : "En attente" invalide (modifier Acompte plutôt)
+// - Solde → Envoyé/Payé : l'acompte doit être payé dans Notion (pas de saut avant "Acompte payé")
+// - One-shot : seule la ligne Solde modifiable, mapping direct Solde→Solde
+function mapPilotToNotionStatus(rowType, newStatus, oneShot, currentNotionStatus) {
+  if (oneShot) {
+    if (rowType !== 'solde') {
+      return { error: 'Mission en paiement 1 fois : seule la ligne Solde est modifiable.' };
+    }
+    switch (newStatus) {
+      case 'A envoyer': return { target: 'Solde à envoyer' };
+      case 'Envoye':    return { target: 'Solde envoyé' };
+      case 'Paye':      return { target: 'Solde payé' };
+      case 'En attente': return { error: '"En attente" non applicable pour une mission en paiement 1 fois.' };
+      default: return { error: 'Statut inconnu : ' + newStatus };
+    }
+  }
+  if (rowType === 'acompte') {
+    switch (newStatus) {
+      case 'A envoyer': return { target: 'Acompte à envoyer' };
+      case 'Envoye':    return { target: 'Acompte envoyé' };
+      case 'Paye':      return { target: 'Acompte payé' };
+      case 'En attente': return { error: '"En attente" non applicable à l\'acompte.' };
+      default: return { error: 'Statut inconnu : ' + newStatus };
+    }
+  }
+  if (rowType === 'solde') {
+    switch (newStatus) {
+      case 'A envoyer': return { target: 'Solde à envoyer' };
+      case 'Envoye': {
+        const curIdx = NOTION_FACTURATION_ORDER.indexOf(currentNotionStatus);
+        const paidIdx = NOTION_FACTURATION_ORDER.indexOf('Acompte payé');
+        if (curIdx >= 0 && curIdx < paidIdx) {
+          return { error: 'Le solde ne peut pas être envoyé tant que l\'acompte n\'est pas payé. Statut actuel : "' + currentNotionStatus + '".' };
+        }
+        return { target: 'Solde envoyé' };
+      }
+      case 'Paye': {
+        const curIdx = NOTION_FACTURATION_ORDER.indexOf(currentNotionStatus);
+        const paidIdx = NOTION_FACTURATION_ORDER.indexOf('Acompte payé');
+        if (curIdx >= 0 && curIdx < paidIdx) {
+          return { error: 'Le solde ne peut pas être payé tant que l\'acompte n\'est pas payé. Statut actuel : "' + currentNotionStatus + '".' };
+        }
+        return { target: 'Solde payé' };
+      }
+      case 'En attente':
+        return { error: 'Pour remettre en attente, modifier plutôt le statut de la ligne Acompte.' };
+      default: return { error: 'Statut inconnu : ' + newStatus };
+    }
+  }
+  return { error: 'rowType inconnu : ' + rowType };
+}
+
+// POST /api/facturation-matching/set-status
+// Body : { missionNom, rowType: 'acompte'|'solde', newStatus, oneShot, expectedCurrent }
+// Applique le mapping + PATCH Notion avec refetch-before-write. Retourne erreurs structurées.
+app.post('/api/facturation-matching/set-status', async (req, res) => {
+  try {
+    const { missionNom, rowType, newStatus, oneShot, expectedCurrent } = req.body || {};
+    if (!missionNom || !rowType || !newStatus) {
+      return res.status(400).json({ error: 'missionNom, rowType, newStatus requis' });
+    }
+    if (rowType !== 'acompte' && rowType !== 'solde') {
+      return res.status(400).json({ error: 'rowType doit être "acompte" ou "solde"' });
+    }
+    const missions = await fetchAllNotionMissions();
+    const mission = missions.find(m => m.nom === missionNom);
+    if (!mission) return res.status(404).json({ error: 'Mission introuvable' });
+
+    const currentNotionStatus = mission.facturation || '';
+    const mapping = mapPilotToNotionStatus(rowType, newStatus, !!oneShot, currentNotionStatus);
+    if (mapping.error) {
+      return res.status(400).json({ error: mapping.error, code: 'INVALID_TRANSITION', currentNotionStatus });
+    }
+
+    try {
+      const result = await updateNotionMissionStatusProperty(mission.id, 'Facturation', mapping.target, expectedCurrent);
+      res.json({ ok: true, ...result, missionNom, rowType, newStatus, targetNotionStatus: mapping.target, currentNotionStatus });
+    } catch (err) {
+      if (err.code === 'NOTION_DRIFT') {
+        return res.status(409).json({ error: err.message, code: 'NOTION_DRIFT', currentValue: err.currentValue });
+      }
+      throw err;
+    }
+  } catch (err) {
+    console.error('Erreur set-status:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Invalidation cache Notion + Pennylane (Patch 2) : déclenché par le bouton "Sync" de Pilot
+// pour forcer un re-fetch immédiat quand un user a modifié Notion ou Pennylane directement.
+// Sans ça, le cache de 5 min (Notion) / 10 min (Pennylane) retarde la propagation côté Pilot.
+app.post('/api/notion-missions/invalidate-cache', (req, res) => {
+  notionMissionsCache = null;
+  notionMissionsCacheTime = 0;
+  customerInvoicesCache = null;
+  customerInvoicesCacheTime = 0;
+  res.json({ ok: true, invalidated: ['notionMissions', 'customerInvoices'] });
+});
 
 // --- Repeat clients (grouping of finished Notion missions by client) ---
 app.get('/api/repeat-clients', async (req, res) => {
@@ -1226,6 +1461,7 @@ app.get('/api/facturation', async (req, res) => {
       }
 
       return {
+      id: m.id, // nécessaire pour PATCH Notion (Patch 2 matching)
       nom: m.nom,
       client: m.client,
       ca: m.ca,
@@ -1239,6 +1475,9 @@ app.get('/api/facturation', async (req, res) => {
       anneeFinal: m.anneeFinal,
       jrsAcompteRetard: m.jrsAcompteRetard,
       jrsSoldeRetard: m.jrsSoldeRetard,
+      acompteForce: m.acompteForce,
+      factAcptPenny: m.factAcptPenny,
+      factSoldePenny: m.factSoldePenny,
     };
     });
 
@@ -1251,6 +1490,452 @@ app.get('/api/facturation', async (req, res) => {
     console.error('Erreur facturation:', err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// --- Debug matching : audit PoC Notion ↔ Pennylane ↔ Qonto ---
+// Outil de PoC pour évaluer la qualité d'un matching auto avant de l'intégrer au TRE.
+// Hypothèses : montants Notion HT, conversion TTC = ×1.2.
+// Usage : GET /api/debug/facturation-matching → JSON. Frontend expose un bouton "Télécharger CSV".
+function normalizeCompanyName(s) {
+  if (!s) return '';
+  return String(s).toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/\b(sasu|sarl|sas|eurl|sci|sa|snc)\b\.?/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+function similarityScore(a, b) {
+  const na = normalizeCompanyName(a);
+  const nb = normalizeCompanyName(b);
+  if (!na || !nb) return 0;
+  if (na === nb) return 1;
+  if (na.length >= 3 && (nb.includes(na))) return 0.88;
+  if (nb.length >= 3 && (na.includes(nb))) return 0.88;
+  // Jaccard trigrammes
+  const tri = (s) => { const set = new Set(); for (let i = 0; i <= s.length - 3; i++) set.add(s.substring(i, i + 3)); return set; };
+  const ta = tri(na), tb = tri(nb);
+  if (ta.size === 0 || tb.size === 0) return 0;
+  let inter = 0; for (const t of ta) if (tb.has(t)) inter++;
+  return inter / (ta.size + tb.size - inter);
+}
+function daysBetween(d1, d2) {
+  if (!d1 || !d2) return Infinity;
+  const dt = Math.abs(new Date(d1).getTime() - new Date(d2).getTime());
+  if (isNaN(dt)) return Infinity;
+  return Math.round(dt / (24 * 3600 * 1000));
+}
+// Score 0-100 d'une transaction Qonto pour une facture Pennylane
+function scoreQontoVsPennylane(tx, inv) {
+  const reasons = [];
+  let score = 0;
+  if (inv.amount > 0) {
+    const diff = Math.abs(tx.amount - inv.amount);
+    if (diff < 1)                       { score += 50; reasons.push('montant='); }
+    else if (diff <= inv.amount * 0.01) { score += 35; reasons.push('montant±1%'); }
+    else if (diff <= inv.amount * 0.05) { score += 15; reasons.push('montant±5%'); }
+  }
+  // Sans paid_at côté Pennylane dans notre mapping, on proxy sur inv.date+45j (delai client moyen)
+  const expectedPaidDate = inv.date ? new Date(new Date(inv.date).getTime() + 45 * 24 * 3600 * 1000).toISOString().slice(0, 10) : null;
+  const dd = daysBetween(tx.date, expectedPaidDate);
+  if (dd <= 10)      { score += 30; reasons.push('date≤10j'); }
+  else if (dd <= 30) { score += 20; reasons.push('date≤30j'); }
+  else if (dd <= 60) { score += 10; reasons.push('date≤60j'); }
+  if (inv.invoiceNumber && tx.label && tx.label.toUpperCase().includes(inv.invoiceNumber.toUpperCase())) {
+    score += 20; reasons.push('invoice#∈label');
+  }
+  return { score, reasons: reasons.join(' | ') };
+}
+
+app.get('/api/debug/facturation-matching', async (req, res) => {
+  try {
+    // Fetch 3 sources en parallèle. Qonto sur 12 mois (override défaut 6).
+    const [missions, invoices, qontoOrg] = await Promise.all([
+      fetchAllNotionMissions(),
+      fetchCustomerInvoices(),
+      qontoRequest('/v2/organization').catch(() => null),
+    ]);
+
+    let qontoCredits = [];
+    if (qontoOrg && qontoOrg.organization && qontoOrg.organization.bank_accounts) {
+      const main = qontoOrg.organization.bank_accounts.reduce((a, b) => (b.balance_cents > a.balance_cents ? b : a));
+      const txs = await fetchQontoTransactions(main.iban, 12);
+      qontoCredits = txs
+        .filter(t => t.side === 'credit' && t.settled_at)
+        .map(t => ({
+          label: t.label || '',
+          reference: t.reference || '',
+          amount: t.amount,
+          date: String(t.settled_at).slice(0, 10),
+        }));
+    }
+
+    const SCORE_MATCH = 70; // seuil au-dessus duquel on considère un match confirmé
+
+    const results = missions.map(m => {
+      const expectSolde = (m.ca || 0) - (m.montantAcompte || 0) > 0;
+      // Acompte : chercher la meilleure Pennylane invoice (nouveau scoring Patch 2+ : type match pdf_*)
+      let bestAcompte = null;
+      if ((m.montantAcompte || 0) > 0) {
+        for (const inv of invoices) {
+          const s = scoreInvoiceForMission(inv, m, 'acompte');
+          if (!bestAcompte || s.score > bestAcompte.score) bestAcompte = { inv, ...s };
+        }
+      }
+      // Solde
+      let bestSolde = null;
+      if (expectSolde) {
+        for (const inv of invoices) {
+          const s = scoreInvoiceForMission(inv, m, 'solde');
+          if (!bestSolde || s.score > bestSolde.score) bestSolde = { inv, ...s };
+        }
+      }
+      // Pour chaque best Pennylane match qui est paid, chercher Qonto
+      const pickQonto = (pennyMatch) => {
+        if (!pennyMatch || pennyMatch.score < SCORE_MATCH || !pennyMatch.inv || !pennyMatch.inv.paid) return null;
+        let best = null;
+        for (const tx of qontoCredits) {
+          const s = scoreQontoVsPennylane(tx, pennyMatch.inv);
+          if (!best || s.score > best.score) best = { tx, ...s };
+        }
+        return best;
+      };
+      const qontoAcompte = pickQonto(bestAcompte);
+      const qontoSolde = pickQonto(bestSolde);
+
+      const verdictPart = (best, type) => {
+        const targetHT = type === 'acompte' ? (m.montantAcompte || 0) : ((m.ca || 0) - (m.montantAcompte || 0));
+        if (targetHT <= 0) return 'N/A';
+        if (!best) return 'NO_MATCH';
+        if (best.score >= SCORE_MATCH) return 'HIGH';
+        if (best.score >= 40) return 'MEDIUM';
+        return 'LOW';
+      };
+      const verdict = `A:${verdictPart(bestAcompte, 'acompte')} S:${verdictPart(bestSolde, 'solde')}`;
+
+      return {
+        mission_notion: m.nom,
+        client_notion: m.client,
+        ca: m.ca,
+        montantAcompte: m.montantAcompte,
+        montantSolde: (m.ca || 0) - (m.montantAcompte || 0),
+        status_notion: m.facturation,
+        date_acompte_notion: m.dateFactureAcompte,
+        date_solde_notion: m.dateFactureFinale,
+        penny_acompte: bestAcompte && bestAcompte.inv ? bestAcompte.inv.invoiceNumber : '',
+        penny_acompte_customer: bestAcompte && bestAcompte.inv ? bestAcompte.inv.customerName : '',
+        penny_acompte_amount: bestAcompte && bestAcompte.inv ? bestAcompte.inv.amount : '',
+        penny_acompte_date: bestAcompte && bestAcompte.inv ? bestAcompte.inv.date : '',
+        penny_acompte_status: bestAcompte && bestAcompte.inv ? bestAcompte.inv.status : '',
+        penny_acompte_paid: bestAcompte && bestAcompte.inv ? !!bestAcompte.inv.paid : '',
+        score_acompte: bestAcompte ? bestAcompte.score : '',
+        reasons_acompte: bestAcompte ? bestAcompte.reasons : '',
+        penny_solde: bestSolde && bestSolde.inv ? bestSolde.inv.invoiceNumber : '',
+        penny_solde_customer: bestSolde && bestSolde.inv ? bestSolde.inv.customerName : '',
+        penny_solde_amount: bestSolde && bestSolde.inv ? bestSolde.inv.amount : '',
+        penny_solde_date: bestSolde && bestSolde.inv ? bestSolde.inv.date : '',
+        penny_solde_status: bestSolde && bestSolde.inv ? bestSolde.inv.status : '',
+        penny_solde_paid: bestSolde && bestSolde.inv ? !!bestSolde.inv.paid : '',
+        score_solde: bestSolde ? bestSolde.score : '',
+        reasons_solde: bestSolde ? bestSolde.reasons : '',
+        qonto_acompte_label: qontoAcompte ? qontoAcompte.tx.label : '',
+        qonto_acompte_amount: qontoAcompte ? qontoAcompte.tx.amount : '',
+        qonto_acompte_date: qontoAcompte ? qontoAcompte.tx.date : '',
+        score_qonto_acompte: qontoAcompte ? qontoAcompte.score : '',
+        qonto_solde_label: qontoSolde ? qontoSolde.tx.label : '',
+        qonto_solde_amount: qontoSolde ? qontoSolde.tx.amount : '',
+        qonto_solde_date: qontoSolde ? qontoSolde.tx.date : '',
+        score_qonto_solde: qontoSolde ? qontoSolde.score : '',
+        verdict_auto: verdict,
+        correction: '',
+      };
+    });
+
+    // Orphelins Pennylane (factures sans mission Notion qui les match ≥ SCORE_MATCH)
+    const usedInvoiceIds = new Set();
+    for (const r of results) {
+      if (r.score_acompte >= SCORE_MATCH && r.penny_acompte) usedInvoiceIds.add(r.penny_acompte);
+      if (r.score_solde >= SCORE_MATCH && r.penny_solde) usedInvoiceIds.add(r.penny_solde);
+    }
+    const orphansPenny = invoices
+      .filter(inv => inv.invoiceNumber && !usedInvoiceIds.has(inv.invoiceNumber))
+      .map(inv => ({
+        invoiceNumber: inv.invoiceNumber,
+        customerName: inv.customerName,
+        amount: inv.amount,
+        date: inv.date,
+        status: inv.status,
+        paid: inv.paid,
+      }));
+
+    res.json({
+      scoreThreshold: SCORE_MATCH,
+      stats: {
+        missions: results.length,
+        invoicesPennylane: invoices.length,
+        qontoCredits12mo: qontoCredits.length,
+        orphansPennylane: orphansPenny.length,
+      },
+      missions: results,
+      orphansPennylane: orphansPenny,
+      fetchedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('Erreur debug matching:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Debug Pennylane raw : dump de tous les endpoints Pennylane accessibles ---
+// Objectif : explorer quelles données sont exposées pour déterminer une stratégie de matching
+// plus robuste (ex. présence d'un numéro de commande, référence externe, lineitems, etc.).
+// Mise en forme : chaque entité rendue séparément, champs bruts (flatten à 1 niveau).
+function flattenRow(obj, prefix = '', out = {}) {
+  if (obj == null) return out;
+  if (typeof obj !== 'object') { out[prefix || 'value'] = obj; return out; }
+  if (Array.isArray(obj)) {
+    if (obj.length === 0) { out[prefix] = ''; return out; }
+    // Arrays d'objets : on JSON.stringify (trop imbriqués pour aplatir proprement en CSV)
+    out[prefix] = JSON.stringify(obj).slice(0, 2000);
+    return out;
+  }
+  for (const [k, v] of Object.entries(obj)) {
+    const key = prefix ? `${prefix}.${k}` : k;
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      flattenRow(v, key, out);
+    } else if (Array.isArray(v)) {
+      out[key] = v.length === 0 ? '' : JSON.stringify(v).slice(0, 2000);
+    } else {
+      out[key] = v == null ? '' : v;
+    }
+  }
+  return out;
+}
+
+// --- Matching Pennylane ↔ Notion (Patch 2) : suggestions + linking ---
+// Leçons du PoC : le scoring doit exclure strictement les factures cancelled/archived/negative
+// et supporter le cas "split acompte/solde différent" (total mission TTC matché même si individuels divergent).
+
+// Helper : check si un texte Pennylane contient un mot-clé type, avec normalisation accents/casse.
+// Retourne 'acompte' | 'solde' | null selon ce qui apparaît dans le texte.
+function detectInvoiceTypeInText(text) {
+  if (!text) return null;
+  const norm = String(text).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  // "acompte" d'abord car il peut coexister avec "solde" (ex: "acompte pour solde à venir" rare)
+  const hasAcompte = /\bacompte\b/.test(norm);
+  const hasSolde = /\bsolde\b/.test(norm);
+  if (hasAcompte && !hasSolde) return 'acompte';
+  if (hasSolde && !hasAcompte) return 'solde';
+  if (hasAcompte && hasSolde) return 'ambiguous';
+  return null;
+}
+
+// Score 0-100 + raisons pour un candidat Pennylane donné vs une mission Notion + un type (acompte|solde).
+// Refonte matching (leçons PoC + signaux pdf_* issus de Pennylane API) :
+// - Exclusion stricte : cancelled / archived / amount <= 0
+// - Nouveau signal fort : type acompte/solde détecté dans pdf_invoice_subject + pdf_description
+// - Nouveau signal : client match étendu à filename + label + customerName (best-of-3)
+// - Nouveau signal : nom mission trouvé dans subject/description
+// - Pénalité forte si type détecté ≠ type recherché (évite cross-matching acompte↔solde)
+function scoreInvoiceForMission(inv, mission, type) {
+  if (!inv || inv.amount == null || inv.amount <= 0) return { score: 0, reasons: 'montant invalide' };
+  if (inv.status === 'cancelled' || inv.status === 'archived') return { score: 0, reasons: 'facture ' + inv.status };
+
+  const reasons = [];
+  let score = 0;
+  const targetHT = type === 'acompte' ? (mission.montantAcompte || 0)
+                                       : ((mission.ca || 0) - (mission.montantAcompte || 0));
+  const targetTTC = targetHT * 1.2;
+  const targetDate = type === 'acompte' ? mission.dateFactureAcompte : mission.dateFactureFinale;
+
+  // --- Signal type (acompte/solde) détecté dans pdf_invoice_subject + pdf_description ---
+  // Signal le plus fort : Pennylane met souvent "Acompte" ou "Solde" explicitement dans le sujet.
+  // Match positif : +25. Mismatch (ex: subject="acompte" mais target=solde) : -30 (pénalité forte pour
+  // couper les faux positifs où le montant matche par hasard mais la facture est de l'autre type).
+  const subjectType = detectInvoiceTypeInText(inv.pdfInvoiceSubject);
+  const descType    = detectInvoiceTypeInText(inv.pdfDescription);
+  const resolvedType = subjectType === 'ambiguous' ? null : (subjectType || (descType === 'ambiguous' ? null : descType));
+  if (resolvedType === type) {
+    score += 25;
+    reasons.push(`type=${type} (subject/desc)`);
+  } else if (resolvedType && resolvedType !== 'ambiguous' && resolvedType !== type) {
+    score -= 30;
+    reasons.push(`⚠ type mismatch (${resolvedType}≠${type})`);
+  }
+
+  // --- Client similarité (best-of-3 parmi customerName, label, filename) ---
+  const simCustomer = similarityScore(inv.customerName, mission.client);
+  const simLabel    = similarityScore(inv.label,        mission.client);
+  const simFilename = similarityScore(inv.filename,     mission.client);
+  const simBest = Math.max(simCustomer, simLabel, simFilename);
+  if (simBest >= 0.9)      { score += 30; reasons.push(`client≈${Math.round(simBest * 100)}%`); }
+  else if (simBest >= 0.6) { score += 18; reasons.push(`client~${Math.round(simBest * 100)}%`); }
+  else if (simBest > 0)    { score += 4;  reasons.push(`client low ${Math.round(simBest * 100)}%`); }
+
+  // --- Nom mission trouvé dans subject ou description ---
+  if (mission.nom && mission.nom.length >= 3) {
+    const nomNorm = String(mission.nom).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const subjNorm = String(inv.pdfInvoiceSubject || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const descNorm = String(inv.pdfDescription     || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    if (subjNorm.includes(nomNorm) || descNorm.includes(nomNorm)) {
+      score += 15;
+      reasons.push('mission∈sujet/desc');
+    }
+  }
+
+  // --- Montant TTC ---
+  if (targetTTC > 0) {
+    const diff = Math.abs(inv.amount - targetTTC);
+    if (diff < 1)                      { score += 20; reasons.push('montant=TTC'); }
+    else if (diff <= targetTTC * 0.01) { score += 14; reasons.push('montant±1%'); }
+    else if (diff <= targetTTC * 0.05) { score += 6;  reasons.push('montant±5%'); }
+  }
+
+  // --- Date émission ---
+  const dd = daysBetween(targetDate, inv.date);
+  if (dd <= 5)       { score += 10; reasons.push('date≤5j'); }
+  else if (dd <= 30) { score += 5;  reasons.push('date≤30j'); }
+  else if (dd <= 90) { score += 2;  reasons.push('date≤90j'); }
+
+  // Plancher 0 (pas de score négatif affiché — le mismatch type peut faire passer en <0)
+  if (score < 0) score = 0;
+  return { score, reasons: reasons.join(' | ') };
+}
+
+// Retourne top N candidats Pennylane scorés pour une mission/type donné (seuil score > 0).
+function suggestPennylaneMatches(mission, type, customerInvoices, topN = 5) {
+  const candidates = [];
+  for (const inv of customerInvoices) {
+    const s = scoreInvoiceForMission(inv, mission, type);
+    if (s.score > 0) candidates.push({ inv, ...s });
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates.slice(0, topN);
+}
+
+// GET /api/facturation-matching/suggest?mission=<nom>&type=<acompte|solde>
+// Retourne les top 5 candidats Pennylane pour une mission/type donnés.
+// Si mission non fournie : retourne un résumé pour toutes les missions (top 1 par mission/type).
+app.get('/api/facturation-matching/suggest', async (req, res) => {
+  try {
+    const { mission: missionNom, type } = req.query;
+    const [missions, invoices] = await Promise.all([
+      fetchAllNotionMissions(),
+      fetchCustomerInvoices(),
+    ]);
+    if (missionNom && type) {
+      // Cas ciblé : top 5 pour une mission/type
+      const mission = missions.find(m => m.nom === missionNom);
+      if (!mission) return res.status(404).json({ error: 'Mission introuvable' });
+      if (type !== 'acompte' && type !== 'solde') return res.status(400).json({ error: 'type doit être acompte ou solde' });
+      const suggestions = suggestPennylaneMatches(mission, type, invoices, 5);
+      return res.json({
+        mission: { nom: mission.nom, client: mission.client, ca: mission.ca, pageId: mission.id },
+        type,
+        currentlyLinked: type === 'acompte' ? mission.factAcptPenny : mission.factSoldePenny,
+        suggestions: suggestions.map(c => ({
+          invoiceNumber: c.inv.invoiceNumber,
+          customerName: c.inv.customerName,
+          amount: c.inv.amount,
+          date: c.inv.date,
+          status: c.inv.status,
+          paid: c.inv.paid,
+          score: c.score,
+          reasons: c.reasons,
+        })),
+      });
+    }
+    // Cas par défaut : résumé par mission (top 1 par type, pour la colonne "Penny" du tableau Facturation)
+    const summary = missions.map(m => {
+      const acompteSuggest = (m.montantAcompte || 0) >= 5 ? suggestPennylaneMatches(m, 'acompte', invoices, 1)[0] : null;
+      const soldeSuggest   = (m.montantFinal   || 0) >= 5 ? suggestPennylaneMatches(m, 'solde',   invoices, 1)[0] : null;
+      return {
+        missionNom: m.nom,
+        pageId: m.id,
+        client: m.client,
+        acompteLinked: m.factAcptPenny || '',
+        soldeLinked:   m.factSoldePenny || '',
+        acompteSuggest: acompteSuggest ? { invoice: acompteSuggest.inv.invoiceNumber, amount: acompteSuggest.inv.amount, score: acompteSuggest.score, reasons: acompteSuggest.reasons } : null,
+        soldeSuggest:   soldeSuggest   ? { invoice: soldeSuggest.inv.invoiceNumber,   amount: soldeSuggest.inv.amount,   score: soldeSuggest.score,   reasons: soldeSuggest.reasons   } : null,
+      };
+    });
+    res.json({ summary, invoicesCount: invoices.length, missionsCount: missions.length });
+  } catch (err) {
+    console.error('Erreur matching suggest:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/facturation-matching/link
+// Body : { missionNom: string, type: 'acompte'|'solde', invoiceNumber: string|'' (string vide = unlink), expectedCurrent?: string }
+// Écrit le n° facture dans la propriété Notion correspondante (Fact acpt Penny / Fact solde Penny).
+app.post('/api/facturation-matching/link', async (req, res) => {
+  try {
+    const { missionNom, type, invoiceNumber, expectedCurrent } = req.body || {};
+    if (!missionNom || !type) return res.status(400).json({ error: 'missionNom et type requis' });
+    if (type !== 'acompte' && type !== 'solde') return res.status(400).json({ error: 'type doit être acompte ou solde' });
+    const newValue = (invoiceNumber || '').trim();
+
+    const missions = await fetchAllNotionMissions();
+    const mission = missions.find(m => m.nom === missionNom);
+    if (!mission) return res.status(404).json({ error: 'Mission introuvable' });
+
+    const propName = type === 'acompte' ? 'Fact acpt Penny' : 'Fact solde Penny';
+    try {
+      const result = await updateNotionMissionRichTextProperty(mission.id, propName, newValue, expectedCurrent);
+      res.json({ ok: true, ...result, missionNom, type, propName });
+    } catch (err) {
+      if (err.code === 'NOTION_DRIFT') {
+        return res.status(409).json({ error: err.message, code: 'NOTION_DRIFT', currentValue: err.currentValue });
+      }
+      throw err;
+    }
+  } catch (err) {
+    console.error('Erreur matching link:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/debug/pennylane-raw', async (req, res) => {
+  // Rate-limit safeguard côté serveur : on cap chaque entité à ~1000 pages max pour éviter les timeouts.
+  // Pennylane pagine 20/pages + delay 400ms → ~500 items/entity en <1min.
+  const results = {};
+
+  // Liste des endpoints candidats à tenter. Certains peuvent 404 selon le plan / permissions Pennylane.
+  const endpoints = [
+    { key: 'customer_invoices',    path: '/customer_invoices',   params: {} },
+    { key: 'supplier_invoices',    path: '/supplier_invoices',   params: {} },
+    { key: 'customers',            path: '/customers',           params: {} },
+    { key: 'suppliers',            path: '/suppliers',           params: {} },
+    { key: 'products',             path: '/products',            params: {} },
+    { key: 'transactions_90d',     path: '/transactions',        params: (() => {
+        const d = new Date(); d.setDate(d.getDate() - 90);
+        return { filter: JSON.stringify([{ field: 'date', operator: 'gteq', value: d.toISOString().split('T')[0] }]) };
+    })() },
+    { key: 'plan_items',           path: '/plan_items',          params: {} },
+    { key: 'journal_entries_90d',  path: '/journal_entries',     params: (() => {
+        const d = new Date(); d.setDate(d.getDate() - 90);
+        return { filter: JSON.stringify([{ field: 'date', operator: 'gteq', value: d.toISOString().split('T')[0] }]) };
+    })() },
+    { key: 'credit_notes',         path: '/credit_notes',        params: {} },
+  ];
+
+  for (const ep of endpoints) {
+    try {
+      const items = await pennylaneFetchAll(ep.path, ep.params, 50);
+      results[ep.key] = {
+        count: items.length,
+        sample: items.slice(0, 3),        // échantillon JSON pour debug
+        records: items,                    // tous les records pour export CSV
+      };
+    } catch (err) {
+      results[ep.key] = { error: err.message, count: 0, sample: [], records: [] };
+    }
+  }
+
+  res.json({
+    entities: Object.keys(results),
+    data: results,
+    fetchedAt: new Date().toISOString(),
+  });
 });
 
 // --- Pennylane API ---
@@ -1802,6 +2487,10 @@ async function fetchCustomerInvoices() {
     status: inv.status || 'unknown', // paid, upcoming, late, incomplete, cancelled
     paid: inv.paid || false,
     invoiceNumber: inv.invoice_number || '',
+    // Patch 2+ : signaux supplémentaires pour améliorer le matching (type acompte/solde + nom client plus propre)
+    filename: inv.filename || '',
+    pdfDescription: inv.pdf_description || '',
+    pdfInvoiceSubject: inv.pdf_invoice_subject || '',
   }));
   customerInvoicesCache = mapped;
   customerInvoicesCacheTime = Date.now();
@@ -1872,12 +2561,14 @@ async function fetchQontoTransactions(iban, monthsBack = 6) {
 // Build treasury data from Qonto
 // horizonMonths : nombre de mois projetés dans `previsionnel` (défaut 12, utilisé par /api/tresorerie).
 // includePreviousMonth : si true, ajoute aussi M-1 au début de previsionnel (utilisé par /api/tresorerie
-//   pour afficher le dernier mois clos à côté du mois en cours). Les endpoints scénarios utilisent false
-//   car l'horizon ne concerne que le présent et le futur.
-// Le cache ne s'applique qu'au horizon par défaut sans M-1, pour éviter les résultats tronqués.
-async function buildTresorerieFromQonto(horizonMonths = 12, { includePreviousMonth = false } = {}) {
-  // Return cache if fresh (deux slots distincts selon includePreviousMonth)
-  if (horizonMonths === 12) {
+//   pour afficher le dernier mois clos à côté du mois en cours).
+// startYear/startMonth : si fournis, override le point de départ (par défaut = mois courant).
+//   Les endpoints scénarios utilisent startMonth=1 pour couvrir toute l'année civile.
+// Le cache ne s'applique qu'au horizon par défaut sans override de start, pour éviter les résultats tronqués.
+async function buildTresorerieFromQonto(horizonMonths = 12, { includePreviousMonth = false, startYear, startMonth } = {}) {
+  const hasStartOverride = (startYear != null && startMonth != null);
+  // Return cache if fresh (deux slots distincts selon includePreviousMonth, pas de cache si start override)
+  if (horizonMonths === 12 && !hasStartOverride) {
     if (!includePreviousMonth && tresorerieCache && (Date.now() - tresorerieCacheTime) < TRESORERIE_CACHE_TTL) {
       return tresorerieCache;
     }
@@ -1958,10 +2649,14 @@ async function buildTresorerieFromQonto(horizonMonths = 12, { includePreviousMon
   // soldeDebutFirstMonth = soldeDebut du premier mois de la projection (M-1), dérivé à rebours
   // depuis le solde Qonto actuel en décumulant les transactions réelles. Le cumul des soldes
   // mois par mois sera refait dans buildPrevisionnel à partir de ce point de départ.
+  // Point de départ du loop : startYear/startMonth si fournis, sinon mois courant (+ éventuel -1 si includePreviousMonth)
+  const loopStartYear = hasStartOverride ? startYear : currentYear;
+  const loopStartMonth = hasStartOverride ? startMonth : currentMonth;
+  const startOffset = (hasStartOverride || !includePreviousMonth) ? 0 : -1;
+
   const previsionnel = [];
-  const startOffset = includePreviousMonth ? -1 : 0;
   for (let i = startOffset; i < horizonMonths; i++) {
-    const mDate = new Date(currentYear, currentMonth - 1 + i, 1);
+    const mDate = new Date(loopStartYear, loopStartMonth - 1 + i, 1);
     const mois = mDate.getMonth() + 1;
     const annee = mDate.getFullYear();
     const mKey = `${annee}-${String(mois).padStart(2, '0')}`;
@@ -1985,17 +2680,25 @@ async function buildTresorerieFromQonto(horizonMonths = 12, { includePreviousMon
     });
   }
 
-  // Calcul du soldeDebut du premier mois (M-1) à rebours depuis le solde Qonto actuel :
-  //   soldeDebut(M)   = soldeActuel - Σ(transactions signées dans M)
-  //   soldeDebut(M-1) = soldeDebut(M) - (enc réel M-1 - dec réel M-1)
-  let soldeDebutMoisCourant = (solde || 0)
-    - (encaissementsParMois[moisCourantKey] || 0)
-    + (chargesParMois[moisCourantKey] || 0);
+  // Calcul du soldeDebut du premier mois du previsionnel, à rebours depuis le solde Qonto actuel :
+  // solde(M) = soldeActuel - partial_M  (retire les movements du mois en cours)
+  // puis on décumule chaque mois complet de (currentMonth - 1) jusqu'à firstMonth (inclus).
+  let soldeDebutFirstMonth = solde || 0;
+  soldeDebutFirstMonth -= (encaissementsParMois[moisCourantKey] || 0);
+  soldeDebutFirstMonth += (chargesParMois[moisCourantKey] || 0);
   const firstMois = previsionnel[0];
-  const firstMKey = `${firstMois.annee}-${String(firstMois.mois).padStart(2, '0')}`;
-  const soldeDebutFirstMonth = firstMKey < moisCourantKey
-    ? soldeDebutMoisCourant - ((encaissementsParMois[firstMKey] || 0) - (chargesParMois[firstMKey] || 0))
-    : soldeDebutMoisCourant;
+  if (firstMois) {
+    const firstDate = new Date(firstMois.annee, firstMois.mois - 1, 1);
+    const currentDate = new Date(currentYear, currentMonth - 1, 1);
+    let cursor = new Date(currentDate);
+    cursor.setMonth(cursor.getMonth() - 1);
+    while (cursor >= firstDate) {
+      const cKey = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
+      soldeDebutFirstMonth -= (encaissementsParMois[cKey] || 0);
+      soldeDebutFirstMonth += (chargesParMois[cKey] || 0);
+      cursor.setMonth(cursor.getMonth() - 1);
+    }
+  }
 
   // --- Ventilation des charges par catégorie ---
   const ventilationCharges = Object.entries(chargesParCategorie)
@@ -2016,8 +2719,8 @@ async function buildTresorerieFromQonto(horizonMonths = 12, { includePreviousMon
     creditsDetailParMois,
   };
 
-  // Update cache (slot dédié selon includePreviousMonth)
-  if (horizonMonths === 12) {
+  // Update cache (slot dédié selon includePreviousMonth, pas de cache si start override)
+  if (horizonMonths === 12 && !hasStartOverride) {
     if (includePreviousMonth) {
       tresorerieCacheWithPrev = result;
       tresorerieCacheWithPrevTime = Date.now();
@@ -2036,6 +2739,7 @@ const GID_MASSE_SALARIALE = 798407110;
 const GID_SALARIES_META = 1450270387;
 const GID_PLAN_TRESORERIE = 2116491556;
 const GID_PROJETS = 0;
+const GID_CATEGORIES_TVA = 771195553;
 
 function fetchGoogleSheetCSV(gid) {
   return new Promise((resolve, reject) => {
@@ -2248,6 +2952,54 @@ async function fetchAndParseMasseSalarialeDetailed() {
 // Lit l'onglet GSheet Salaires (metadata employés) : nom, type de contrat, date début/fin.
 // Retourne [{ nom, type, date_debut, date_fin, isDirigeant }]. Utile pour la multi-select
 // "Salariés concernés" de l'override salaire_augmentation.
+// --- Catégories TVA (Phase E complète) ---
+// Onglet "Catégories" (GID 771195553). Format attendu : colonne nom + colonne taux TVA.
+// Parser défensif : scan toutes les colonnes pour trouver un taux TVA par ligne.
+// Taux reconnu : "20", "20%", "0.20", "20,00%", etc. — normalisé en décimale (0.20 pour 20%).
+let categoriesTvaCache = null;
+let categoriesTvaCacheTime = 0;
+const CATEGORIES_TVA_CACHE_TTL = 30 * 60 * 1000;
+
+async function fetchAndParseCategoriesTVA() {
+  if (categoriesTvaCache && (Date.now() - categoriesTvaCacheTime) < CATEGORIES_TVA_CACHE_TTL) {
+    return categoriesTvaCache;
+  }
+  const csv = await fetchGoogleSheetCSV(GID_CATEGORIES_TVA);
+  const rows = parseCSV(csv);
+  const byCategorie = {};
+  // Ignore les 2 premières lignes si header probable ("Catégorie" / "Nom" / "Catégories" en col A, etc.)
+  let startRow = 0;
+  for (let r = 0; r < Math.min(3, rows.length); r++) {
+    const first = (rows[r][0] || '').trim().toLowerCase();
+    if (first === 'catégorie' || first === 'categorie' || first === 'catégories' || first === 'nom' || first === 'libellé' || first === '') {
+      startRow = r + 1;
+    }
+  }
+  for (let r = startRow; r < rows.length; r++) {
+    const row = rows[r];
+    const nom = (row[0] || '').trim();
+    if (!nom) continue;
+    // Cherche un taux TVA dans les colonnes suivantes (première valeur numérique plausible en pct ou décimal)
+    let taux = null;
+    for (let c = 1; c < row.length; c++) {
+      const raw = (row[c] || '').trim();
+      if (!raw) continue;
+      const cleaned = raw.replace(/[%\s ]/g, '').replace(',', '.');
+      const n = parseFloat(cleaned);
+      if (isNaN(n)) continue;
+      if (n > 0.99 && n <= 30)  { taux = n / 100; break; } // "20", "20%", "5.5"
+      else if (n >= 0 && n <= 0.30) { taux = n; break; }   // "0.20", "0.055"
+      else if (n === 0) { taux = 0; break; }
+    }
+    if (taux !== null) byCategorie[nom] = taux;
+  }
+  const result = { byCategorie, nbDetected: Object.keys(byCategorie).length };
+  console.log('[CategoriesTVA] parsed', result.nbDetected, 'catégories :', Object.keys(byCategorie).slice(0, 10).join(', '), result.nbDetected > 10 ? '...' : '');
+  categoriesTvaCache = result;
+  categoriesTvaCacheTime = Date.now();
+  return result;
+}
+
 async function fetchAndParseSalariesMeta() {
   if (salariesMetaCache && (Date.now() - salariesMetaCacheTime) < MASSE_SALARIALE_CACHE_TTL) {
     return salariesMetaCache;
@@ -2328,14 +3080,20 @@ function parsePlanTresorerie(csvText) {
     'Fournitures', 'Honoraires divers',
   ];
 
-  // Financements : pattern-based detection, chaque pattern attribue une catégorie à la ligne
-  // Permet de capturer dynamiquement toute nouvelle ligne correspondante (ex. "Subvention XYZ") sans toucher au code
+  // Financements / remboursements : pattern-based detection par catégorie.
+  // Direction 'in' = encaissement (cash-in TTC), 'out' = décaissement (cash-out TTC).
+  // inEBE = true → la ligne impacte l'EBE (produit/subvention d'exploitation).
+  //         false → pur flux financier hors EBE (prêt, avance remboursable, remb. de dette).
+  // ORDRE IMPORTANT : patterns plus spécifiques (Remb. Avance, Remb. OPCO) en premier pour
+  // ne pas être capturés par les patterns génériques (Avance) qui suivent.
+  // "Autres" n'a pas de pattern → ignoré silencieusement (cf. Q7 user).
   const financementPatterns = [
-    { pattern: /^Subvention\b/i,       category: 'subvention' },
-    { pattern: /^Aide\s/i,             category: 'aide' },
-    { pattern: /^Prêt\b/i,             category: 'pret' },
-    { pattern: /^Remb\./i,             category: 'remb' },
-    { pattern: /^Avance\b/i,           category: 'avance' },
+    { pattern: /^Remb\.?\s*OPCO/i,     category: 'remb_opco',    direction: 'in',  inEBE: true  }, // produit d'exploitation
+    { pattern: /^Remb\.?\s*Avance/i,   category: 'remb_avance',  direction: 'out', inEBE: false }, // remboursement dette
+    { pattern: /^Subvention\b/i,       category: 'subvention',   direction: 'in',  inEBE: true  }, // subvention d'exploitation
+    { pattern: /^Aide\s/i,             category: 'aide',         direction: 'in',  inEBE: true  }, // subvention d'exploitation
+    { pattern: /^Prêt\b/i,             category: 'pret',         direction: 'in',  inEBE: false }, // encaissement financier
+    { pattern: /^Avance\b/i,           category: 'avance',       direction: 'in',  inEBE: false }, // encaissement financier
   ];
 
   const lines = {};
@@ -2364,7 +3122,13 @@ function parsePlanTresorerie(csvText) {
     }
     const matchedFin = financementPatterns.find(p => p.pattern.test(label));
     if (matchedFin) {
-      financementsData.push({ name: label, category: matchedFin.category, values });
+      financementsData.push({
+        name: label,
+        category: matchedFin.category,
+        direction: matchedFin.direction,
+        inEBE: matchedFin.inEBE,
+        values,
+      });
     }
   }
 
@@ -2417,6 +3181,53 @@ function getBaselineMasseSlot(masseSalarialeData, mKey) {
   const lastKey = months[months.length - 1];
   if (mKey > lastKey) return masseSalarialeData.byMonth[lastKey];
   return { total: 0, detail: [] };
+}
+
+// --- TVA helpers (Phase E complète) ---
+// Defaults par type d'override. Peut être surchargé par data.tva_taux côté frontend.
+// direction: 'encaissement' (TVA collectée) | 'decaissement' (TVA déductible) | 'none' (hors TVA).
+const OVERRIDE_TVA_DEFAULTS = {
+  charges_fixes:         { taux: 0.20, direction: 'decaissement' },
+  ca_estimatif:          { taux: 0.20, direction: 'encaissement' },
+  revenu_recurrent:      { taux: 0.20, direction: 'encaissement' },
+  revenu_exceptionnel:   { taux: 0,    direction: 'encaissement' }, // par défaut taux=0 (indemnités/dommages hors TVA). Si l'user saisit un taux > 0, la TVA collectée est trackée.
+  pret:                  { taux: 0,    direction: 'none' }, // ni l'entrée ni les remb. ne portent TVA
+  salaire:               { taux: 0,    direction: 'none' },
+  salaire_augmentation:  { taux: 0,    direction: 'none' },
+  subvention_annoncee:   { taux: 0,    direction: 'none' },
+  pipeline:              { taux: 0.20, direction: 'encaissement' }, // deals fictifs = CA
+  ligne_gsheet_override: { taux: 0.20, direction: 'decaissement' }, // heuristique : défaut charges
+};
+
+// Résout { taux, direction, ht, ttc, tva } pour un override donné.
+// - data.tva_taux (décimal, ex. 0.20) override le défaut si fourni
+// - data.montant_mode ('HT' | 'TTC', défaut 'HT') indique l'unité de saisie du montant
+// - montant : champ selon le type (montant / montant_mensuel / montant_annuel)
+// - categoriesTva : { nom: taux } depuis fetchAndParseCategoriesTVA(). Si data.categorie_tva est fournie,
+//                   le taux de cette catégorie override le défaut.
+function getOverrideTvaInfo(type, data, montant, categoriesTva = {}) {
+  const defaults = OVERRIDE_TVA_DEFAULTS[type] || { taux: 0, direction: 'none' };
+  // Taux : priorité explicit data.tva_taux > taux catégorie > défaut type
+  let taux = defaults.taux;
+  if (data.categorie_tva && categoriesTva[data.categorie_tva] != null) {
+    taux = categoriesTva[data.categorie_tva];
+  }
+  if (typeof data.tva_taux === 'number' && data.tva_taux >= 0 && data.tva_taux < 1) {
+    taux = data.tva_taux;
+  }
+  const mode = data.montant_mode === 'TTC' ? 'TTC' : 'HT';
+  const m = Number(montant) || 0;
+  let ht, ttc;
+  if (mode === 'HT') { ht = m; ttc = m * (1 + taux); }
+  else               { ttc = m; ht = taux > 0 ? m / (1 + taux) : m; }
+  return {
+    taux,
+    direction: defaults.direction,
+    mode,
+    ht: Math.round(ht * 100) / 100,
+    ttc: Math.round(ttc * 100) / 100,
+    tva: Math.round((ttc - ht) * 100) / 100,
+  };
 }
 
 // Calcule la masse salariale d'un mois donné :
@@ -2523,7 +3334,15 @@ function masseSalarialeMois(annee, mois, masseSalarialeData, masseOverrides = {}
 // - revenusRecurrentsExtras : [{ libelle, montant_mensuel, mois_debut, mois_fin }]
 // - subventionsAnnoncees    : [{ libelle, montant, mois }] — catégorisées subv pour l'EBE, pas dans CA P&L
 // - gsheetOverrides         : [{ categorie, mois_debut, mois_fin, montant_mensuel }]
-async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, masseSalarialeData, masseOverrides = {}, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals, crPrevData, caEstimatif, customerInvoices = [], includeGSheet = true, includePipeline = true, includeCaNotion = true, includeSalariesBaseline = true, revenusRecurrentsExtras = [], subventionsAnnoncees = [], gsheetOverrides = [] }) {
+// caSource :
+//   'factures' (défaut, utilisé par /api/tresorerie) → CA = factures Pennylane émises + prévisionnelles Notion + pipeline
+//   'crprev'   (utilisé par /api/scenarios/*)       → CA = CR_Prev `Enc. Acompte` + `Enc. Solde` (HT, missions signées Notion) + pipeline si toggle
+// pastMode :
+//   'real'  (défaut) → mois clos : charges Qonto réel (TTC), pas de subv/aides Plan_TRE_Prév (déjà dans Qonto)
+//   'previ'          → mois clos : charges CR_Prev HT + subv/aides Plan_TRE_Prév (vue 100% budget annuel,
+//                      aligne avec les lignes cumulées de CR_Prev). Le soldeDebutFirstMonth reste ancré Qonto,
+//                      mais le cumul intermédiaire projette le budget au lieu de la réalité bancaire.
+async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, masseSalarialeData, masseOverrides = {}, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals, crPrevData, caEstimatif, customerInvoices = [], caSource = 'factures', pastMode = 'real', includeGSheet = true, includePipeline = true, includeCaNotion = true, includeSalariesBaseline = true, revenusRecurrentsExtras = [], subventionsAnnoncees = [], gsheetOverrides = [] }) {
   // --- A encaisser : deux sources ---
   // 1) Factures ÉMISES depuis Pennylane (source de vérité pour late/upcoming, avec deadline et remaining_amount réels)
   // 2) Factures PRÉVISIONNELLES depuis Notion (missions dont la facture n'est pas encore émise)
@@ -2574,8 +3393,13 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
       return d.toISOString().split('T')[0];
     }
 
-    // --- ACOMPTE : prévisionnel uniquement si pas encore émis ni payé ---
-    if (m.montantAcompte > 0
+    // Redesign Patch 1 : Notion HT → TTC (×1.2, TVA 20% hardcodée) pour alimenter le TRE TTC.
+    // Seuil acompte < 5€ (cf. Q4 user : "Acompte forcé" < 2€ simule paiement 1 fois, donc pas d'acompte attendu).
+    const oneShot = (m.montantAcompte || 0) < 5;
+
+    // --- ACOMPTE : prévisionnel uniquement si pas encore émis ni payé ET non one-shot ---
+    if (!oneShot
+        && m.montantAcompte > 0
         && !acompteEnvoye
         && !status.includes('acompte paye')
         && (status.includes('acompte a envoyer') || status === 'non defini' || status === '')) {
@@ -2583,7 +3407,9 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
       const dateEcheance = echeanceJ45(dateEmission);
       facturesAEncaisser.push({
         client: m.client || m.nom, mission: m.nom, type: 'Acompte',
-        montant: m.montantAcompte, dateEmission, dateEcheance,
+        montant: Math.round(m.montantAcompte * 1.2), // HT → TTC
+        montantHT: m.montantAcompte,
+        dateEmission, dateEcheance,
         status: 'previsionnel', previsionnel: true,
         source: 'notion',
       });
@@ -2599,7 +3425,9 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
         const dateEcheance = echeanceJ45(dateEmission);
         facturesAEncaisser.push({
           client: m.client || m.nom, mission: m.nom, type: 'Solde',
-          montant: montantSolde, dateEmission, dateEcheance,
+          montant: Math.round(montantSolde * 1.2), // HT → TTC
+          montantHT: montantSolde,
+          dateEmission, dateEcheance,
           status: 'previsionnel', previsionnel: true,
           source: 'notion',
         });
@@ -2673,12 +3501,24 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
   }
 
   // --- Revenus exceptionnels ---
+  // --- TVA tracking (Phase E complète) : overrides uniquement, ne double pas la TVA baseline
+  //     déjà dans "Décaissement de TVA" de Plan_TRE_Prév. Collectée = overrides CA, Déductible = overrides charges.
+  const tvaCollecteeByMonth = {};
+  const tvaDeductibleByMonth = {};
+  const trackTva = (mKey, tvaInfo) => {
+    if (!tvaInfo || !tvaInfo.tva) return;
+    const v = Math.abs(tvaInfo.tva);
+    if (tvaInfo.direction === 'encaissement') tvaCollecteeByMonth[mKey] = (tvaCollecteeByMonth[mKey] || 0) + v;
+    else if (tvaInfo.direction === 'decaissement') tvaDeductibleByMonth[mKey] = (tvaDeductibleByMonth[mKey] || 0) + v;
+  };
+
   const revenusParMois = {};
   const revenusDetailParMois = {};
   for (const r of revenus) {
     revenusParMois[r.mois] = (revenusParMois[r.mois] || 0) + r.montant;
     if (!revenusDetailParMois[r.mois]) revenusDetailParMois[r.mois] = [];
     revenusDetailParMois[r.mois].push(r);
+    trackTva(r.mois, r._tva);
   }
 
   // --- Charges fixes extras (scénarios) ---
@@ -2692,6 +3532,7 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
         const mKey = `${mois.annee}-${String(mois.mois).padStart(2, '0')}`;
         if (mKey >= debut && mKey <= fin) {
           chargesFixesParMois[mKey] = (chargesFixesParMois[mKey] || 0) + cf.montant_mensuel;
+          trackTva(mKey, cf._tva);
         }
       }
     }
@@ -2705,6 +3546,7 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
         const mKey = `${mois.annee}-${String(mois.mois).padStart(2, '0')}`;
         if (mKey >= rr.mois_debut && mKey <= rr.mois_fin) {
           revenusRecurrentsParMois[mKey] = (revenusRecurrentsParMois[mKey] || 0) + rr.montant_mensuel;
+          trackTva(mKey, rr._tva);
         }
       }
     }
@@ -2718,6 +3560,7 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
       subvAnnonceesParMois[s.mois] = (subvAnnonceesParMois[s.mois] || 0) + (s.montant || 0);
       if (!subvAnnonceesDetailParMois[s.mois]) subvAnnonceesDetailParMois[s.mois] = [];
       subvAnnonceesDetailParMois[s.mois].push(s);
+      trackTva(s.mois, s._tva);
     }
   }
 
@@ -2741,8 +3584,62 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
       }
       const montant = fd.montant * ((fd.probabilite || 100) / 100);
       fictionalEncaissements[mKey] = (fictionalEncaissements[mKey] || 0) + montant;
+      trackTva(mKey, fd._tva);
     }
   }
+
+  // --- Plan_TRE_Prév : source TTC pour charges et financements (redesign Patch 1) ---
+  // - Charges : ligne "Total décaissements (€TTC)" → decaissementsTRE
+  // - Financements 'in' (cash-in TTC) par catégorie :
+  //     subvention / aide        → intégrés dans l'EBE (subventions d'exploitation)
+  //     remb_opco                → produit d'exploitation (EBE +)
+  //     pret / avance            → encaissement financier hors EBE
+  // - Remboursements 'out' (cash-out TTC) par catégorie :
+  //     remb_avance              → remboursement dette hors EBE
+  // Les encaissements CA (Enc. Acompte + Enc. Solde de Plan_TRE_Prév) ne sont PLUS utilisés :
+  // le CA prévi TTC provient désormais de Notion (×1.2) via notionProjectionByMonth.
+  // CR_Prev reste la source HT pour la vue P&L / EBE (résultat d'exploitation HT traditionnel).
+  // Si includeGSheet=false, tous ces postes sont à 0.
+  const subvPlanTreByMonth = {};
+  const aidePlanTreByMonth = {};
+  const pretPlanTreByMonth = {};
+  const avancePlanTreByMonth = {};
+  const rembOpcoPlanTreByMonth = {};
+  const rembAvancePlanTreByMonth = {};
+  const planTreDecByMonth = {};
+  if (includeGSheet) {
+    try {
+      const planData = await fetchAndParsePlanTresorerie();
+      for (const fin of (planData.financements || [])) {
+        planData.months.forEach((m, i) => {
+          const key = `${m.year}-${String(m.month).padStart(2, '0')}`;
+          const val = fin.values[i] || 0;
+          if (val === 0) return;
+          switch (fin.category) {
+            case 'subvention':    subvPlanTreByMonth[key]       = (subvPlanTreByMonth[key]       || 0) + val; break;
+            case 'aide':          aidePlanTreByMonth[key]       = (aidePlanTreByMonth[key]       || 0) + val; break;
+            case 'pret':          pretPlanTreByMonth[key]       = (pretPlanTreByMonth[key]       || 0) + val; break;
+            case 'avance':        avancePlanTreByMonth[key]     = (avancePlanTreByMonth[key]     || 0) + val; break;
+            case 'remb_opco':     rembOpcoPlanTreByMonth[key]   = (rembOpcoPlanTreByMonth[key]   || 0) + val; break;
+            case 'remb_avance':   rembAvancePlanTreByMonth[key] = (rembAvancePlanTreByMonth[key] || 0) + val; break;
+          }
+        });
+      }
+      // Charges TTC par mois (ligne "Total décaissements (€TTC)")
+      if (planData.lines) {
+        planData.months.forEach((m, i) => {
+          const key = `${m.year}-${String(m.month).padStart(2, '0')}`;
+          const totalDec = (planData.lines.totalDecaissements || [])[i] || 0;
+          planTreDecByMonth[key] = Math.round(totalDec);
+        });
+      }
+    } catch (err) {
+      console.warn('Plan_TRE_Prév fetch échoué dans buildPrevisionnel:', err.message);
+    }
+  }
+
+  // Note redesign Patch 1 : le CA prévi TTC est alimenté par `facturesAEncaisser` enrichi TTC
+  // (Pennylane émises + Notion prévi converties HT×1.2). Voir `encaissementsFactures` plus bas.
 
   // --- Charges GSheet par mois (source principale pour mois en cours + futurs, désactivable via includeGSheet=false) ---
   // gsheetOverrides permet de remplacer la valeur d'une catégorie mère sur une plage de mois
@@ -2769,6 +3666,40 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
     ? Math.round((caEstimatif.montant_annuel || 0) / (caEstimatif.nb_mois || 12))
     : null;
 
+  // Track la TVA du CA estimatif : applique _tva.tva à chaque mois non-clos où caMensuelHT est utilisé
+  if (caEstimatif && caEstimatif._tva && caEstimatif._tva.tva) {
+    for (const mois of qontoData.previsionnel) {
+      const isClos = mois.isClos === true;
+      if (!isClos) {
+        const mKey = `${mois.annee}-${String(mois.mois).padStart(2, '0')}`;
+        trackTva(mKey, caEstimatif._tva);
+      }
+    }
+  }
+
+  // --- Reversement TVA M+1 (overrides uniquement, avec carry-forward du crédit TVA) ---
+  // La baseline Plan_TRE_Prév a déjà sa propre ligne "Décaissement de TVA" remplie manuellement.
+  // Ici on n'ajoute QUE le delta overrides : collectée(M) - déductible(M) à payer en M+1 si positif,
+  // sinon crédit reporté sur les mois suivants.
+  const reversementTvaByMonth = {};
+  let tvaCreditBalance = 0;
+  for (const mois of qontoData.previsionnel) {
+    const mKey = `${mois.annee}-${String(mois.mois).padStart(2, '0')}`;
+    const collectee = tvaCollecteeByMonth[mKey] || 0;
+    const deductible = tvaDeductibleByMonth[mKey] || 0;
+    const netSolde = collectee - deductible;
+    const netEffective = netSolde - tvaCreditBalance;
+    // M+1 key
+    const nextDate = new Date(mois.annee, mois.mois, 1); // mois.mois est 1-indexed → nextDate = M+1 (0-indexed)
+    const nextMKey = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
+    if (netEffective > 0) {
+      reversementTvaByMonth[nextMKey] = (reversementTvaByMonth[nextMKey] || 0) + Math.round(netEffective);
+      tvaCreditBalance = 0;
+    } else {
+      tvaCreditBalance = -netEffective; // accumule (netEffective est négatif → on stocke sa valeur positive)
+    }
+  }
+
   const previsionnelFinal = qontoData.previsionnel.map((mois) => {
     const mKey = `${mois.annee}-${String(mois.mois).padStart(2, '0')}`;
     // Régime : isClos (mois passé clos) → encaissements/charges = Qonto réel uniquement.
@@ -2776,8 +3707,11 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
     const isClos = mois.isClos === true;
 
     // --- Encaissements ---
-    // Pour un mois clos, on ne rajoute rien aux encaissements Qonto déjà agrégés (factures + pipeline sont
-    // déjà capturés en réel dans le cash-in Qonto du mois). On garde factures/pipeline à 0.
+    // caSource='crprev' (scenarios) : CA = CR_Prev Enc. Acompte + Enc. Solde (HT, missions signées Notion).
+    //                                 Pennylane et prévisionnelles Notion non utilisées ici (doublon avec CR_Prev dérivé Notion).
+    //                                 Pipeline pondéré conservé (ADD-ON, deals non signés → pas de doublon).
+    // caSource='factures' (/api/tresorerie) : logique actuelle factures Pennylane + Notion prévisionnelles + pipeline.
+    const isCaSourceCRPrev = caSource === 'crprev';
     let encaissementsFactures, factEnvoye, factPrev, factRetard, fictionalEnc, pipelineEnc;
     if (isClos) {
       factEnvoye = 0; factPrev = 0; factRetard = 0;
@@ -2785,11 +3719,17 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
       fictionalEnc = 0;
       pipelineEnc = 0;
     } else if (caMensuelHT !== null) {
-      // CA estimatif (scénario) : remplace TOUT le CA baseline (Notion + pipeline pondéré + deals fictifs)
+      // CA estimatif (scénario) : remplace TOUT le CA baseline
       factEnvoye = 0; factPrev = 0; factRetard = 0;
       encaissementsFactures = 0;
       fictionalEnc = 0;
       pipelineEnc = 0;
+    } else if (isCaSourceCRPrev) {
+      // Scenarios : pas de factures Pennylane/Notion (doublon CR_Prev). Pipeline conservé.
+      factEnvoye = 0; factPrev = 0; factRetard = 0;
+      encaissementsFactures = 0;
+      fictionalEnc = Math.round(fictionalEncaissements[mKey] || 0);
+      pipelineEnc = Math.round(pipelinePondereEncaissements[mKey] || 0);
     } else if (!includeCaNotion) {
       // Scénario "sans CA facturé Notion" : zéro les factures Notion, le pipeline et les deals fictifs restent
       factEnvoye = 0; factPrev = 0; factRetard = 0;
@@ -2819,23 +3759,92 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
       : masseSalarialeMois(mois.annee, mois.mois, masseSalarialeData, masseOverrides, includeSalariesBaseline);
     const chargesFixesExtra = isClos ? 0 : Math.round(chargesFixesParMois[mKey] || 0);
 
-    // --- Décaissements : Qonto réel pour mois clos, CR_Prev pour mois en cours + futurs ---
-    let decaissementsBase = mois.decaissements; // = Qonto réel pour isClos, 0 pour !isClos
+    // --- Décaissements ---
+    // pastMode='real' (défaut) : mois clos → Qonto réel, mois non-clos → CR_Prev HT
+    // pastMode='previ'          : tous les mois → CR_Prev HT (vue budget annuel)
+    // Fallback si includeGSheet=false ou pas de data CR_Prev pour ce mois : garde Qonto réel.
+    const useBudgetCharges = !isClos || pastMode === 'previ';
+    let decaissementsBase = mois.decaissements; // = Qonto réel pour isClos, 0 pour !isClos (avant override)
+    let decaissementsBaseSource = isClos ? 'qonto' : 'none'; // source de decaissementsBase (avant overrides)
     let chargesGSheetDetail = null;
-    if (!isClos && chargesGSheetParMois[mKey] != null) {
+    if (useBudgetCharges && chargesGSheetParMois[mKey] != null) {
       decaissementsBase = Math.round(chargesGSheetParMois[mKey]);
+      decaissementsBaseSource = 'crprev';
       chargesGSheetDetail = chargesGSheetDetailParMois[mKey] || {};
     }
 
     // --- Encaissements base ---
-    // Pour mois clos : Qonto réel (mois.encaissements = cash-in Qonto du mois).
-    // Pour !isClos : 0, sauf en scénario CA estimatif où on force caMensuelHT.
-    const encBase = (caMensuelHT !== null && !isClos) ? caMensuelHT : mois.encaissements;
+    // caSource='crprev' (scenarios) : CR_Prev Enc.* pour TOUS les mois (passés, courants, futurs).
+    //   Pour les mois passés, on préfère CR_Prev (dérivé Notion = source vérité CA) plutôt que Qonto
+    //   cash-in (qui peut être en retard d'un mois à cause des délais de paiement).
+    //   Les charges des mois passés restent en Qonto réel (cf. decaissementsBase plus haut).
+    // caSource='factures' (/api/tresorerie) : Qonto réel pour mois clos, factures+pipeline pour mois en cours/futurs.
+    let encBase;
+    let encBaseSource; // 'ca-estimatif' | 'crprev' | 'qonto' (mois clos) — sert au wording des tooltips
+    if (caMensuelHT !== null && !isClos) {
+      encBase = caMensuelHT;
+      encBaseSource = 'ca-estimatif';
+    } else if (isCaSourceCRPrev) {
+      encBase = Math.round((crPrevData && crPrevData.encaissementsCA && crPrevData.encaissementsCA[mKey]) || 0);
+      encBaseSource = 'crprev';
+    } else {
+      encBase = mois.encaissements;
+      encBaseSource = isClos ? 'qonto' : 'crprev';
+    }
 
     // Delta masse salariale à appliquer aux décaissements : uniquement pour mois non-clos,
     // car CR_Prev "Frais de personnel" contient déjà la baseline. Le delta reflète les overrides
     // scénario (add/modify/remove/augmentation) + le retrait de baseline si includeSalariesBaseline=false.
     const masseDelta = isClos ? 0 : (masse.delta || 0);
+
+    // Financements Plan_TRE_Prév : après redesign Patch 1, on bascule toujours Qonto pour les mois clos
+    // (CA et financements sont dans Qonto cash-in réel). On n'injecte Plan_TRE_Prév que pour les mois non-clos.
+    // Ça évite le double-compte et simplifie (pastMode n'a plus d'effet sur les mois clos).
+    const showPlanTreFinancements = !isClos;
+    const subvPlanTreMois       = showPlanTreFinancements ? Math.round(subvPlanTreByMonth[mKey]       || 0) : 0;
+    const aidePlanTreMois       = showPlanTreFinancements ? Math.round(aidePlanTreByMonth[mKey]       || 0) : 0;
+    const pretPlanTreMois       = showPlanTreFinancements ? Math.round(pretPlanTreByMonth[mKey]       || 0) : 0;
+    const avancePlanTreMois     = showPlanTreFinancements ? Math.round(avancePlanTreByMonth[mKey]     || 0) : 0;
+    const rembOpcoPlanTreMois   = showPlanTreFinancements ? Math.round(rembOpcoPlanTreByMonth[mKey]   || 0) : 0;
+    const rembAvancePlanTreMois = showPlanTreFinancements ? Math.round(rembAvancePlanTreByMonth[mKey] || 0) : 0;
+
+    // --- Champs TRE TTC (redesign Patch 1) : base Notion+Pennylane TTC (mois non-clos) ou Qonto réel (mois clos) ---
+    // Règle :
+    // - Mois clos : Qonto cash-in réel (source absolue pour le passé, ignore Notion pour éviter double-compte)
+    // - Mois non-clos : somme des factures attendues TTC = facturesAEncaisser (Pennylane non-payées + Notion prévi ×1.2)
+    //   → équivalent à (factEnvoye + factPrev + factRetard) du mois
+    // - Scénario avec CA estimatif : override complet (remplace Notion)
+    let encaissementsTRE, encaissementsTRESource;
+    if (isClos) {
+      // Mois clos : TOUJOURS Qonto (pastMode n'a plus d'effet sur les mois clos après redesign)
+      encaissementsTRE = Math.round(qontoData.encaissementsParMois ? (qontoData.encaissementsParMois[mKey] || 0) : 0);
+      encaissementsTRESource = 'qonto';
+    } else if (caMensuelHT !== null) {
+      // Scénario CA estimatif : remplace le baseline Notion (user-entered, opaque HT/TTC)
+      encaissementsTRE = caMensuelHT;
+      encaissementsTRESource = 'ca-estimatif';
+    } else {
+      // Somme des factures TTC attendues ce mois (Pennylane non-payées + Notion prévi HT×1.2)
+      encaissementsTRE = Math.round(encaissementsFactures || 0);
+      encaissementsTRESource = 'notion';
+    }
+
+    // Décaissements TRE TTC (redesign Patch 1) : Qonto pour mois clos, Plan_TRE_Prév pour mois non-clos.
+    // pastMode n'a plus d'effet sur les mois clos (Qonto fait foi pour le passé).
+    let decaissementsTREBase, decaissementsTRESource;
+    if (isClos) {
+      decaissementsTREBase = Math.round(mois.decaissements || 0); // Qonto réel TTC (set par buildTresorerieFromQonto)
+      decaissementsTRESource = 'qonto';
+    } else {
+      decaissementsTREBase = Math.round(planTreDecByMonth[mKey] || 0);
+      decaissementsTRESource = 'plan-tre';
+    }
+
+    // Reversement TVA M+1 (overrides uniquement). S'ajoute aux décaissements TTC de ce mois
+    // si overrides CA des mois précédents ont généré un solde TVA positif.
+    const tvaReversementM1 = Math.round(reversementTvaByMonth[mKey] || 0);
+    const tvaCollecteeMois = Math.round(tvaCollecteeByMonth[mKey] || 0);
+    const tvaDeductibleMois = Math.round(tvaDeductibleByMonth[mKey] || 0);
 
     return {
       ...mois,
@@ -2848,6 +3857,15 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
       revenusRecurrents,
       subventionsAnnoncees: subvAnnoncees,
       subventionsAnnonceesDetail: subvAnnonceesDetailParMois[mKey] || [],
+      subvPlanTre: subvPlanTreMois,
+      aidePlanTre: aidePlanTreMois,
+      // Nouveaux champs financements (redesign Patch 1) : Plan_TRE_Prév ventilé par catégorie.
+      // Integration EBE : subv + aide + remb_opco → subvention/produit d'exploitation (EBE +)
+      //                   pret + avance + remb_avance → flux financier hors EBE
+      pretPlanTre: pretPlanTreMois,
+      avancePlanTre: avancePlanTreMois,
+      rembOpcoPlanTre: rembOpcoPlanTreMois,
+      rembAvancePlanTre: rembAvancePlanTreMois,
       pipelinePondereEncaissements: pipelineEnc,
       masseSalariale: masse.total,
       masseSalarialeDetail: masse.detail,
@@ -2856,21 +3874,51 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
       chargesFixesExtra,
       fictionalEncaissements: fictionalEnc,
       decaissements: decaissementsBase + chargesFixesExtra + masseDelta,
-      chargesGSheetDetail, // null pour mois clos, { categorie: montant } sinon
+      decaissementsBaseSource, // 'qonto' | 'crprev' | 'none' — pour libellé tooltip P&L
+      chargesGSheetDetail, // null si decaissementsBaseSource !== 'crprev', { categorie: montant } sinon
+      // Champs TRE TTC (Phase E light) : utilisés pour le calcul du solde fin de mois et le tooltip TRE.
+      // encaissementsTRE : base TTC (Plan_TRE ou Qonto réel ou CA estimatif).
+      // decaissementsTRE : base TTC + chargesFixesExtra (overrides) + masseDelta (overrides, HT).
+      encaissementsTRE,
+      encaissementsTRESource, // 'plan-tre' | 'qonto' | 'ca-estimatif'
+      decaissementsTRE: decaissementsTREBase + chargesFixesExtra + masseDelta + tvaReversementM1,
+      decaissementsTREBase,
+      decaissementsTRESource, // 'plan-tre' | 'qonto'
+      // Phase E complète : info TVA overrides du mois + reversement M+1 (delta overrides, pas baseline)
+      tvaCollectee: tvaCollecteeMois,
+      tvaDeductible: tvaDeductibleMois,
+      tvaReversementM1, // payé dans CE mois pour solde des mois précédents
       encaissements: encBase,
+      encaissementsSource: encBaseSource,
       encaissementsTotal: encBase + encaissementsFactures + revExc + fictionalEnc + revenusRecurrents + subvAnnoncees + pipelineEnc,
     };
   });
 
-  // Recalculer les soldes en cumulant depuis soldeDebutFirstMonth (début du premier mois = M-1).
-  // Pour les mois clos, la variation cumulée reproduit l'évolution réelle Qonto et ramène le cumul
-  // au soldeActuel au 1er du mois en cours. Pour le mois courant et les futurs, on projette.
+  // Recalculer les soldes en cumulant depuis soldeDebutFirstMonth.
+  // Pour les mois CLOS : on utilise le cash-in Qonto réel du mois (indépendamment de caSource)
+  //   pour que soldeFin reproduise la réalité bancaire passée.
+  // Pour les mois non-clos : soldeFin = projection budget (CR_Prev ou factures selon caSource).
+  // decaissements : déjà en Qonto réel pour isClos, CR_Prev pour !isClos — on le réutilise tel quel.
+  // Cumul TTC : encaissementsTRE (Plan_TRE ou Qonto réel ou CA estimatif) + subv/aide Plan_TRE + cash-in additionnels
+  // (factures Notion/Pennylane en mode /api/tresorerie, pipeline, deals fictifs, revenus récurrents/exceptionnels,
+  // subventions annoncées scénario). decaissementsTRE inclut déjà les overrides charges_fixes + masseDelta.
+  // Les overrides restent HT par défaut — limite connue Phase E light, à traiter en Phase E complète.
   let soldeCumul = qontoData.soldeDebutFirstMonth != null
     ? qontoData.soldeDebutFirstMonth
     : (qontoData.soldeActuel || 0);
   for (const mois of previsionnelFinal) {
-    const encTotal = mois.encaissements + (mois.encaissementsFactures || 0) + (mois.revenusExceptionnels || 0) + (mois.fictionalEncaissements || 0) + (mois.revenusRecurrents || 0) + (mois.subventionsAnnoncees || 0) + (mois.pipelinePondereEncaissements || 0);
-    const variation = encTotal - mois.decaissements;
+    // Redesign Patch 1 : encaissementsFactures n'est PLUS additionné séparément (double-compte) —
+    // pour non-clos, encaissementsTRE = encaissementsFactures (mêmes valeurs TTC).
+    // Ajout des nouveaux financements Plan_TRE_Prév : pret + avance + remb_opco (cash-in non-clos),
+    // remb_avance (cash-out non-clos).
+    const encForSolde = (mois.encaissementsTRE || 0)
+                      + (mois.subvPlanTre || 0) + (mois.aidePlanTre || 0)
+                      + (mois.pretPlanTre || 0) + (mois.avancePlanTre || 0) + (mois.rembOpcoPlanTre || 0)
+                      + (mois.revenusExceptionnels || 0)
+                      + (mois.fictionalEncaissements || 0) + (mois.revenusRecurrents || 0)
+                      + (mois.subventionsAnnoncees || 0) + (mois.pipelinePondereEncaissements || 0);
+    const decForSolde = (mois.decaissementsTRE || 0) + (mois.rembAvancePlanTre || 0);
+    const variation = encForSolde - decForSolde;
     mois.soldeDebut = Math.round(soldeCumul);
     soldeCumul += variation;
     mois.soldeFin = Math.round(soldeCumul);
@@ -3034,6 +4082,7 @@ app.delete('/api/scenarios/:id/overrides/:oid', async (req, res) => {
 // --- Projections ---
 
 // Convertit un preset d'horizon en nombre de mois à projeter (à partir du mois en cours, inclus)
+// Utilisé par /api/tresorerie.
 function getHorizonMonths(preset) {
   const now = new Date();
   const currentYear = now.getFullYear();
@@ -3045,15 +4094,35 @@ function getHorizonMonths(preset) {
   return Math.max(1, (endYear - currentYear) * 12 + (endMonth - currentMonth) + 1);
 }
 
+// Pour les endpoints scénarios : horizon sur l'année civile complète (Jan → preset end).
+// Permet d'aligner "CA cumulé à fin déc 26" sur la ligne "CA cumulé (estimation)" de CR_Prev.
+// Retourne { startYear, startMonth (=1), horizonMonths } pour feed buildTresorerieFromQonto.
+function getScenarioHorizon(preset) {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const startYear = currentYear;
+  const startMonth = 1;
+  let endYear, endMonth;
+  if (preset === 's1-np1')       { endYear = currentYear + 1; endMonth = 6;  }
+  else if (preset === 'n-plus-1'){ endYear = currentYear + 1; endMonth = 12; }
+  else                           { endYear = currentYear;     endMonth = 12; } // fin-annee
+  const horizonMonths = Math.max(1, (endYear - startYear) * 12 + (endMonth - startMonth) + 1);
+  return { startYear, startMonth, endYear, endMonth, horizonMonths };
+}
+
 // Parse les query params communs aux endpoints de projection (horizon, toggles baseline)
 // Les 4 toggles (gsheet, pipeline, caNotion, salariesBaseline) ne servent que pour
 // /api/scenarios/baseline/projection. Pour /api/scenarios/:id/projection, les flags sont
 // lus directement depuis la ligne `scenarios` du scénario (include_gsheet, etc.).
 function parseProjectionQuery(req) {
   const preset = req.query.horizon || 'fin-annee';
+  // pastMode : 'previ' (défaut sur scenarios) aligne sur CR_Prev pour l'année entière ;
+  // 'real' garde Qonto réel pour les mois clos (charges TTC + pas de subv/aide Plan_TRE sur passé).
+  const pastMode = req.query.pastMode === 'real' ? 'real' : 'previ';
   return {
     preset,
     horizonMonths: getHorizonMonths(preset),
+    pastMode,
     includeGSheet:           req.query.includeGSheet           !== 'false',
     includePipeline:         req.query.includePipeline         !== 'false',
     includeCaNotion:         req.query.includeCaNotion         !== 'false',
@@ -3062,36 +4131,25 @@ function parseProjectionQuery(req) {
 }
 
 // Enrichit chaque mois de la projection avec les champs P&L et EBE cumulé pour les tabs de visualisation.
-// Les subventions/aides viennent de Plan_TRE_Prév (cached 10 min). Si includeGSheet=false, subv+aide=0.
+// Consomme directement les champs subvPlanTre / aidePlanTre déjà exposés par buildPrevisionnel
+// (cohérent avec leur usage dans le calcul du solde, pas de second fetch Plan_TRE_Prév).
 async function enrichWithPnlEbe(projection, { includeGSheet = true } = {}) {
-  const subvByMonth = {};
-  const aideByMonth = {};
-  if (includeGSheet) {
-    const planData = await fetchAndParsePlanTresorerie();
-    for (const fin of (planData.financements || [])) {
-      planData.months.forEach((m, i) => {
-        const key = `${m.year}-${String(m.month).padStart(2, '0')}`;
-        const val = fin.values[i] || 0;
-        if (val === 0) return;
-        if (fin.category === 'subvention') subvByMonth[key] = (subvByMonth[key] || 0) + val;
-        if (fin.category === 'aide')       aideByMonth[key] = (aideByMonth[key] || 0) + val;
-      });
-    }
-  }
   let ebeCumul = 0;
   return projection.map((mois) => {
-    const mKey = `${mois.annee}-${String(mois.mois).padStart(2, '0')}`;
     // Les subventions annoncées (scénario) sont cash-in pour la tréso mais NE sont PAS du CA P&L ;
     // on les retire du pnl_ca et on les ajoute aux subventions pour l'EBE.
     const subvAnnonceesMois = mois.subventionsAnnoncees || 0;
     const encTotal = mois.encaissementsTotal ?? ((mois.encaissements || 0) + (mois.encaissementsFactures || 0) + (mois.revenusExceptionnels || 0) + (mois.fictionalEncaissements || 0) + (mois.revenusRecurrents || 0) + subvAnnonceesMois + (mois.pipelinePondereEncaissements || 0));
     const ca = encTotal - subvAnnonceesMois;
     const charges = mois.decaissements || 0;
-    const subvGSheet = Math.round(subvByMonth[mKey] || 0);
-    const aide = Math.round(aideByMonth[mKey] || 0);
+    const subvGSheet = includeGSheet ? (mois.subvPlanTre || 0) : 0;
+    const aide       = includeGSheet ? (mois.aidePlanTre || 0) : 0;
+    // Redesign Patch 1 : Remb. OPCO = produit d'exploitation (EBE +), au même titre que les subventions.
+    // Prêt, Avance, Remb. Avance : hors EBE (flux financiers pur).
+    const rembOpco   = includeGSheet ? (mois.rembOpcoPlanTre || 0) : 0;
     const subv = subvGSheet + subvAnnonceesMois;
     const marge = ca - charges;
-    const ebeMensuel = marge + subv + aide;
+    const ebeMensuel = marge + subv + aide + rembOpco;
     ebeCumul += ebeMensuel;
     return {
       ...mois,
@@ -3099,26 +4157,32 @@ async function enrichWithPnlEbe(projection, { includeGSheet = true } = {}) {
       pnl_charges:  Math.round(charges),
       pnl_marge:    Math.round(marge),
       subventions:  Math.round(subv),
+      subvGSheet:   subvGSheet,
+      subvAnnoncees: Math.round(subvAnnonceesMois),
       aides:        aide,
+      produitsExpl: Math.round(rembOpco),
       ebe_mensuel:  Math.round(ebeMensuel),
       ebe_cumule:   Math.round(ebeCumul),
     };
   });
 }
 
-async function fetchBaseData(horizonMonths = 12) {
-  const [qontoData, pipelineDeals, notionMissions, crPrevData, customerInvoices, masseSalarialeData] = await Promise.all([
-    buildTresorerieFromQonto(horizonMonths),
+async function fetchBaseData(horizonMonths = 12, qontoOptions = {}) {
+  const [qontoData, pipelineDeals, notionMissions, crPrevData, customerInvoices, masseSalarialeData, categoriesTvaData] = await Promise.all([
+    buildTresorerieFromQonto(horizonMonths, qontoOptions),
     fetchOpenDeals(),
     fetchAllNotionMissions(),
     fetchAndParseCRPrev(),
     fetchCustomerInvoices().catch(err => { console.warn('Pennylane fetch échoué dans fetchBaseData:', err.message); return []; }),
     fetchAndParseMasseSalarialeDetailed().catch(err => { console.warn('Masse_salariale GSheet échoué dans fetchBaseData:', err.message); return null; }),
+    fetchAndParseCategoriesTVA().catch(err => { console.warn('Catégories TVA GSheet échoué:', err.message); return { byCategorie: {} }; }),
   ]);
   // Revenus exceptionnels Supabase droppée en migration 24 → source = overrides de scénario uniquement
   // Masse salariale : Phase F → GSheet Masse_salariale (table Supabase `salaries` dépréciée, migration 25)
+  // Catégories TVA : Phase E complète → taux TVA par catégorie pour enrichir les overrides
   return {
     qontoData, pipelineDeals, notionMissions, crPrevData, customerInvoices, masseSalarialeData,
+    categoriesTva: categoriesTvaData.byCategorie || {},
     revenus: [],
   };
 }
@@ -3127,6 +4191,9 @@ function applyOverrides(baseData, overrides) {
   // masseOverrides : structure consommée par masseSalarialeMois (identification par nom d'employé GSheet).
   // Rétrocompat : si un override utilise salarie_id (ancien uuid Supabase), on le traite comme nom
   //               (le frontend doit maintenant fournir le nom comme identifiant, cf. migration Phase F).
+  // Phase E complète : chaque élément distribué porte un champ `_tva` { taux, direction, mode, ht, ttc, tva }
+  // calculé pour l'unité du montant (mensuel ou one-shot selon le type).
+  const categoriesTva = baseData.categoriesTva || {};
   const masseOverrides = { additions: [], modifications: [], removedNames: [], augmentations: [] };
   let revenus = [...baseData.revenus];
   let chargesFixesExtras = [];
@@ -3167,33 +4234,48 @@ function applyOverrides(baseData, overrides) {
         if (d.mode === 'factor' && d.facteur != null) {
           pipelineFactor = d.facteur;
         } else if (d.mode === 'deal') {
+          const montant = d.montant || 0;
+          const proba = d.probabilite != null ? d.probabilite : 100;
+          const montantPondere = montant * (proba / 100);
           fictionalDeals.push({
             nom: d.nom || 'Deal fictif',
-            montant: d.montant || 0,
-            probabilite: d.probabilite != null ? d.probabilite : 100,
+            montant,
+            probabilite: proba,
             mois: d.mois,
             delai_encaissement_jours: d.delai_encaissement_jours,
+            _tva: getOverrideTvaInfo('pipeline', d, montantPondere, categoriesTva),
           });
         }
         break;
-      case 'ca_estimatif':
-        caEstimatif = { montant_annuel: d.montant_annuel || 0, nb_mois: d.nb_mois || 12 };
+      case 'ca_estimatif': {
+        const montant_annuel = d.montant_annuel || 0;
+        const nb_mois = d.nb_mois || 12;
+        const monthly = nb_mois > 0 ? montant_annuel / nb_mois : 0;
+        // _tva calculé sur le montant MENSUEL (base saisie : montant_annuel HT ou TTC selon data.montant_mode)
+        caEstimatif = { montant_annuel, nb_mois, _tva: getOverrideTvaInfo('ca_estimatif', d, monthly, categoriesTva) };
         break;
-      case 'charges_fixes':
+      }
+      case 'charges_fixes': {
+        const montant = d.mode === 'oneshot' ? (d.montant || 0) : (d.montant_mensuel || 0);
+        const tva = getOverrideTvaInfo('charges_fixes', d, montant, categoriesTva);
         if (d.mode === 'oneshot') {
-          chargesFixesExtras.push({ libelle: d.libelle, montant_mensuel: d.montant || 0, mois_debut: d.mois, mois_fin: d.mois });
+          chargesFixesExtras.push({ libelle: d.libelle, montant_mensuel: montant, mois_debut: d.mois, mois_fin: d.mois, _tva: tva });
         } else {
-          chargesFixesExtras.push({ libelle: d.libelle, montant_mensuel: d.montant_mensuel || 0, mois_debut: d.mois_debut, mois_fin: d.mois_fin });
+          chargesFixesExtras.push({ libelle: d.libelle, montant_mensuel: montant, mois_debut: d.mois_debut, mois_fin: d.mois_fin, _tva: tva });
         }
         break;
-      case 'revenu_exceptionnel':
+      }
+      case 'revenu_exceptionnel': {
+        const montant = d.montant || 0;
         revenus.push({
           id: 'fictional-' + ov.id,
           libelle: d.libelle,
-          montant: d.montant || 0,
+          montant,
           mois: d.mois,
+          _tva: getOverrideTvaInfo('revenu_exceptionnel', d, montant, categoriesTva),
         });
         break;
+      }
       case 'salaire_augmentation':
         // % d'augmentation cumulative à partir d'une date. targetNames vide/absent → applique à tous.
         // Rétrocompat : accepte salarie_noms (nouveau) ou salarie_ids (ancien = pré Phase F, interprété comme noms).
@@ -3203,27 +4285,32 @@ function applyOverrides(baseData, overrides) {
           targetNames: d.salarie_noms || d.salarie_ids || [],
         });
         break;
-      case 'revenu_recurrent':
+      case 'revenu_recurrent': {
+        const montant_mensuel = d.montant_mensuel || 0;
         revenusRecurrentsExtras.push({
           libelle: d.libelle || 'Revenu récurrent',
-          montant_mensuel: d.montant_mensuel || 0,
+          montant_mensuel,
           mois_debut: d.mois_debut,
           mois_fin: d.mois_fin,
+          _tva: getOverrideTvaInfo('revenu_recurrent', d, montant_mensuel, categoriesTva),
         });
         break;
+      }
       case 'pret': {
         // Décompose en : revenu one-shot (entrée) + charge récurrente (mensualité amortissable)
+        // TVA = 0 sur les deux (prêts hors TVA).
         const P = d.montant || 0;
         const tx = (d.taux_annuel || 0) / 100;
         const n = d.duree_mois || 12;
         const mensualite = tx > 0 ? P * (tx / 12) / (1 - Math.pow(1 + tx / 12, -n)) : P / n;
+        const tvaZero = getOverrideTvaInfo('pret', d, 0, categoriesTva); // forces taux=0 par défaut
         revenus.push({
           id: 'pret-entry-' + ov.id,
           libelle: (d.libelle || 'Prêt') + ' (entrée)',
           montant: P,
           mois: d.mois_entree,
+          _tva: tvaZero,
         });
-        // Remboursements : du mois suivant l'entrée, pendant duree_mois
         const [y, m] = (d.mois_entree || '').split('-').map(Number);
         if (y && m) {
           const startD = new Date(y, m - 1 + 1, 1);
@@ -3235,27 +4322,35 @@ function applyOverrides(baseData, overrides) {
             montant_mensuel: Math.round(mensualite),
             mois_debut: startKey,
             mois_fin: endKey,
+            _tva: tvaZero,
           });
         }
         break;
       }
-      case 'subvention_annoncee':
+      case 'subvention_annoncee': {
+        const montant = d.montant || 0;
         subventionsAnnoncees.push({
           id: 'fictional-' + ov.id,
           libelle: d.libelle || 'Subvention annoncée',
-          montant: d.montant || 0,
+          montant,
           mois: d.mois,
+          _tva: getOverrideTvaInfo('subvention_annoncee', d, montant, categoriesTva),
         });
         break;
-      case 'ligne_gsheet_override':
-        // Remplace le montant d'une catégorie mère du GSheet CR_Prev sur une plage de mois
+      }
+      case 'ligne_gsheet_override': {
+        const montant_mensuel = d.montant_mensuel || 0;
+        // Taux TVA déduit de la catégorie CR_Prev si elle matche une entrée Catégories TVA.
+        const enrichedData = { ...d, categorie_tva: d.categorie_tva || d.categorie };
         gsheetOverrides.push({
           categorie: d.categorie,
           mois_debut: d.mois_debut,
           mois_fin: d.mois_fin,
-          montant_mensuel: d.montant_mensuel || 0,
+          montant_mensuel,
+          _tva: getOverrideTvaInfo('ligne_gsheet_override', enrichedData, montant_mensuel, categoriesTva),
         });
         break;
+      }
     }
   }
 
@@ -3264,8 +4359,10 @@ function applyOverrides(baseData, overrides) {
 
 app.get('/api/scenarios/baseline/projection', async (req, res) => {
   try {
-    const { preset, horizonMonths, includeGSheet, includePipeline, includeCaNotion, includeSalariesBaseline } = parseProjectionQuery(req);
-    const base = await fetchBaseData(horizonMonths);
+    const { preset, pastMode, includeGSheet, includePipeline, includeCaNotion, includeSalariesBaseline } = parseProjectionQuery(req);
+    // Scenarios : horizon = année civile complète (Jan → preset end) pour coller aux totaux CR_Prev.
+    const { startYear, startMonth, horizonMonths } = getScenarioHorizon(preset);
+    const base = await fetchBaseData(horizonMonths, { startYear, startMonth });
     const result = await buildPrevisionnel({
       qontoData: base.qontoData, pipelineDeals: base.pipelineDeals,
       notionMissions: base.notionMissions,
@@ -3273,11 +4370,12 @@ app.get('/api/scenarios/baseline/projection', async (req, res) => {
       revenus: base.revenus, chargesFixesExtras: [], pipelineFactor: 1, fictionalDeals: [],
       crPrevData: base.crPrevData, caEstimatif: null,
       customerInvoices: base.customerInvoices,
+      caSource: 'crprev', pastMode,
       includeGSheet, includePipeline, includeCaNotion, includeSalariesBaseline,
     });
     const enriched = await enrichWithPnlEbe(result.previsionnel, { includeGSheet });
     res.json({
-      nom: 'Baseline', horizon: preset,
+      nom: 'Baseline', horizon: preset, pastMode,
       include: { gsheet: includeGSheet, pipeline: includePipeline, caNotion: includeCaNotion, salariesBaseline: includeSalariesBaseline },
       previsionnel: enriched,
     });
@@ -3298,6 +4396,21 @@ app.get('/api/cr-prev/categories', async (req, res) => {
       .sort((a, b) => a.name.localeCompare(b.name));
     res.json({ categories });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Catégories TVA depuis GSheet Catégories (GID 771195553).
+// Utilisé par les formulaires overrides pour dropdown "Catégorie" → taux TVA auto-sélectionné.
+app.get('/api/categories-tva', async (req, res) => {
+  try {
+    const data = await fetchAndParseCategoriesTVA();
+    const list = Object.entries(data.byCategorie || {})
+      .map(([nom, taux]) => ({ nom, taux, tauxLabel: (taux * 100).toFixed(taux % 0.01 ? 1 : 0) + '%' }))
+      .sort((a, b) => a.nom.localeCompare(b.nom));
+    res.json({ categories: list, nbDetected: data.nbDetected });
+  } catch (err) {
+    console.error('Erreur categories-tva:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -3364,14 +4477,15 @@ app.get('/api/scenarios/:id/projection', async (req, res) => {
 
     const { data: overrides } = await supabase.from('scenario_overrides').select('*').eq('scenario_id', req.params.id).order('created_at');
 
-    // Composition : chaque scénario porte ses 4 flags d'inclusion. Seul horizon vient du query string.
-    const { preset, horizonMonths } = parseProjectionQuery(req);
+    // Composition : chaque scénario porte ses 4 flags d'inclusion. Horizon + pastMode viennent du query string.
+    const { preset, pastMode } = parseProjectionQuery(req);
+    const { startYear, startMonth, horizonMonths } = getScenarioHorizon(preset);
     const includeGSheet           = scenario.include_gsheet !== false;
     const includePipeline         = scenario.include_pipeline !== false;
     const includeCaNotion         = scenario.include_ca_notion !== false;
     const includeSalariesBaseline = scenario.include_salaries_baseline !== false;
 
-    const base = await fetchBaseData(horizonMonths);
+    const base = await fetchBaseData(horizonMonths, { startYear, startMonth });
     const applied = applyOverrides(base, overrides || []);
 
     const result = await buildPrevisionnel({
@@ -3384,6 +4498,7 @@ app.get('/api/scenarios/:id/projection', async (req, res) => {
       fictionalDeals: applied.fictionalDeals,
       crPrevData: base.crPrevData, caEstimatif: applied.caEstimatif,
       customerInvoices: base.customerInvoices,
+      caSource: 'crprev', pastMode,
       includeGSheet, includePipeline, includeCaNotion, includeSalariesBaseline,
       revenusRecurrentsExtras: applied.revenusRecurrentsExtras,
       subventionsAnnoncees: applied.subventionsAnnoncees,
@@ -3391,7 +4506,7 @@ app.get('/api/scenarios/:id/projection', async (req, res) => {
     });
     const enriched = await enrichWithPnlEbe(result.previsionnel, { includeGSheet });
     res.json({
-      nom: scenario.nom, horizon: preset,
+      nom: scenario.nom, horizon: preset, pastMode,
       include: { gsheet: includeGSheet, pipeline: includePipeline, caNotion: includeCaNotion, salariesBaseline: includeSalariesBaseline },
       previsionnel: enriched,
     });
