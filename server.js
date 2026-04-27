@@ -914,6 +914,13 @@ async function fetchAllNotionMissions() {
 
   notionMissionsCache = result;
   notionMissionsCacheTime = Date.now();
+  // Patch 2++++ : invalide aussi le summary cache. Sans ça, le summary peut être stale par rapport
+  // aux missions fraîchement refetchées (ex: user édite Notion directement → missions se refresh
+  // au prochain TTL expiry mais summary garde l'ancienne valeur 60s de plus).
+  // Bénéfice : le summary est toujours dérivé de la dernière version des missions.
+  if (typeof invalidateFactMatchingSummaryCache === 'function') {
+    invalidateFactMatchingSummaryCache();
+  }
   return notionMissionsCache;
 }
 
@@ -971,8 +978,9 @@ async function updateNotionMissionRichTextProperty(pageId, propName, newValue, e
   if (writtenValue !== newValue) {
     throw new Error(`Notion PATCH a échoué silencieusement : valeur écrite "${writtenValue}" ≠ "${newValue}". Vérifier le schéma de la propriété "${propName}".`);
   }
-  // Invalider le cache missions (la prochaine lecture re-fetch)
+  // Invalider le cache missions (la prochaine lecture re-fetch) + cache summary
   notionMissionsCache = null; notionMissionsCacheTime = 0;
+  invalidateFactMatchingSummaryCache();
   console.log(`[Notion PATCH OK] page=${pageId} prop="${propName}" "${currentValue}" → "${newValue}"`);
   return { updated: true, previousValue: currentValue, newValue, pageId };
 }
@@ -1001,6 +1009,7 @@ async function updateNotionMissionStatusProperty(pageId, propName, statusName, e
     throw new Error(`Notion PATCH a échoué silencieusement : valeur écrite "${writtenValue}" ≠ "${statusName}". Vérifier que l'option existe dans le schéma "${propName}".`);
   }
   notionMissionsCache = null; notionMissionsCacheTime = 0;
+  invalidateFactMatchingSummaryCache();
   return { updated: true, previousValue: currentValue, newValue: statusName, pageId };
 }
 
@@ -1116,7 +1125,8 @@ app.post('/api/notion-missions/invalidate-cache', (req, res) => {
   notionMissionsCacheTime = 0;
   customerInvoicesCache = null;
   customerInvoicesCacheTime = 0;
-  res.json({ ok: true, invalidated: ['notionMissions', 'customerInvoices'] });
+  invalidateFactMatchingSummaryCache();
+  res.json({ ok: true, invalidated: ['notionMissions', 'customerInvoices', 'factMatchingSummary'] });
 });
 
 // --- Repeat clients (grouping of finished Notion missions by client) ---
@@ -1492,10 +1502,8 @@ app.get('/api/facturation', async (req, res) => {
   }
 });
 
-// --- Debug matching : audit PoC Notion ↔ Pennylane ↔ Qonto ---
-// Outil de PoC pour évaluer la qualité d'un matching auto avant de l'intégrer au TRE.
+// Helpers de matching réutilisables (utilisés par /api/facturation-matching/suggest et /link).
 // Hypothèses : montants Notion HT, conversion TTC = ×1.2.
-// Usage : GET /api/debug/facturation-matching → JSON. Frontend expose un bouton "Télécharger CSV".
 function normalizeCompanyName(s) {
   if (!s) return '';
   return String(s).toLowerCase()
@@ -1523,167 +1531,6 @@ function daysBetween(d1, d2) {
   if (isNaN(dt)) return Infinity;
   return Math.round(dt / (24 * 3600 * 1000));
 }
-// Score 0-100 d'une transaction Qonto pour une facture Pennylane
-function scoreQontoVsPennylane(tx, inv) {
-  const reasons = [];
-  let score = 0;
-  if (inv.amount > 0) {
-    const diff = Math.abs(tx.amount - inv.amount);
-    if (diff < 1)                       { score += 50; reasons.push('montant='); }
-    else if (diff <= inv.amount * 0.01) { score += 35; reasons.push('montant±1%'); }
-    else if (diff <= inv.amount * 0.05) { score += 15; reasons.push('montant±5%'); }
-  }
-  // Sans paid_at côté Pennylane dans notre mapping, on proxy sur inv.date+45j (delai client moyen)
-  const expectedPaidDate = inv.date ? new Date(new Date(inv.date).getTime() + 45 * 24 * 3600 * 1000).toISOString().slice(0, 10) : null;
-  const dd = daysBetween(tx.date, expectedPaidDate);
-  if (dd <= 10)      { score += 30; reasons.push('date≤10j'); }
-  else if (dd <= 30) { score += 20; reasons.push('date≤30j'); }
-  else if (dd <= 60) { score += 10; reasons.push('date≤60j'); }
-  if (inv.invoiceNumber && tx.label && tx.label.toUpperCase().includes(inv.invoiceNumber.toUpperCase())) {
-    score += 20; reasons.push('invoice#∈label');
-  }
-  return { score, reasons: reasons.join(' | ') };
-}
-
-app.get('/api/debug/facturation-matching', async (req, res) => {
-  try {
-    // Fetch 3 sources en parallèle. Qonto sur 12 mois (override défaut 6).
-    const [missions, invoices, qontoOrg] = await Promise.all([
-      fetchAllNotionMissions(),
-      fetchCustomerInvoices(),
-      qontoRequest('/v2/organization').catch(() => null),
-    ]);
-
-    let qontoCredits = [];
-    if (qontoOrg && qontoOrg.organization && qontoOrg.organization.bank_accounts) {
-      const main = qontoOrg.organization.bank_accounts.reduce((a, b) => (b.balance_cents > a.balance_cents ? b : a));
-      const txs = await fetchQontoTransactions(main.iban, 12);
-      qontoCredits = txs
-        .filter(t => t.side === 'credit' && t.settled_at)
-        .map(t => ({
-          label: t.label || '',
-          reference: t.reference || '',
-          amount: t.amount,
-          date: String(t.settled_at).slice(0, 10),
-        }));
-    }
-
-    const SCORE_MATCH = 70; // seuil au-dessus duquel on considère un match confirmé
-
-    const results = missions.map(m => {
-      const expectSolde = (m.ca || 0) - (m.montantAcompte || 0) > 0;
-      // Acompte : chercher la meilleure Pennylane invoice (nouveau scoring Patch 2+ : type match pdf_*)
-      let bestAcompte = null;
-      if ((m.montantAcompte || 0) > 0) {
-        for (const inv of invoices) {
-          const s = scoreInvoiceForMission(inv, m, 'acompte');
-          if (!bestAcompte || s.score > bestAcompte.score) bestAcompte = { inv, ...s };
-        }
-      }
-      // Solde
-      let bestSolde = null;
-      if (expectSolde) {
-        for (const inv of invoices) {
-          const s = scoreInvoiceForMission(inv, m, 'solde');
-          if (!bestSolde || s.score > bestSolde.score) bestSolde = { inv, ...s };
-        }
-      }
-      // Pour chaque best Pennylane match qui est paid, chercher Qonto
-      const pickQonto = (pennyMatch) => {
-        if (!pennyMatch || pennyMatch.score < SCORE_MATCH || !pennyMatch.inv || !pennyMatch.inv.paid) return null;
-        let best = null;
-        for (const tx of qontoCredits) {
-          const s = scoreQontoVsPennylane(tx, pennyMatch.inv);
-          if (!best || s.score > best.score) best = { tx, ...s };
-        }
-        return best;
-      };
-      const qontoAcompte = pickQonto(bestAcompte);
-      const qontoSolde = pickQonto(bestSolde);
-
-      const verdictPart = (best, type) => {
-        const targetHT = type === 'acompte' ? (m.montantAcompte || 0) : ((m.ca || 0) - (m.montantAcompte || 0));
-        if (targetHT <= 0) return 'N/A';
-        if (!best) return 'NO_MATCH';
-        if (best.score >= SCORE_MATCH) return 'HIGH';
-        if (best.score >= 40) return 'MEDIUM';
-        return 'LOW';
-      };
-      const verdict = `A:${verdictPart(bestAcompte, 'acompte')} S:${verdictPart(bestSolde, 'solde')}`;
-
-      return {
-        mission_notion: m.nom,
-        client_notion: m.client,
-        ca: m.ca,
-        montantAcompte: m.montantAcompte,
-        montantSolde: (m.ca || 0) - (m.montantAcompte || 0),
-        status_notion: m.facturation,
-        date_acompte_notion: m.dateFactureAcompte,
-        date_solde_notion: m.dateFactureFinale,
-        penny_acompte: bestAcompte && bestAcompte.inv ? bestAcompte.inv.invoiceNumber : '',
-        penny_acompte_customer: bestAcompte && bestAcompte.inv ? bestAcompte.inv.customerName : '',
-        penny_acompte_amount: bestAcompte && bestAcompte.inv ? bestAcompte.inv.amount : '',
-        penny_acompte_date: bestAcompte && bestAcompte.inv ? bestAcompte.inv.date : '',
-        penny_acompte_status: bestAcompte && bestAcompte.inv ? bestAcompte.inv.status : '',
-        penny_acompte_paid: bestAcompte && bestAcompte.inv ? !!bestAcompte.inv.paid : '',
-        score_acompte: bestAcompte ? bestAcompte.score : '',
-        reasons_acompte: bestAcompte ? bestAcompte.reasons : '',
-        penny_solde: bestSolde && bestSolde.inv ? bestSolde.inv.invoiceNumber : '',
-        penny_solde_customer: bestSolde && bestSolde.inv ? bestSolde.inv.customerName : '',
-        penny_solde_amount: bestSolde && bestSolde.inv ? bestSolde.inv.amount : '',
-        penny_solde_date: bestSolde && bestSolde.inv ? bestSolde.inv.date : '',
-        penny_solde_status: bestSolde && bestSolde.inv ? bestSolde.inv.status : '',
-        penny_solde_paid: bestSolde && bestSolde.inv ? !!bestSolde.inv.paid : '',
-        score_solde: bestSolde ? bestSolde.score : '',
-        reasons_solde: bestSolde ? bestSolde.reasons : '',
-        qonto_acompte_label: qontoAcompte ? qontoAcompte.tx.label : '',
-        qonto_acompte_amount: qontoAcompte ? qontoAcompte.tx.amount : '',
-        qonto_acompte_date: qontoAcompte ? qontoAcompte.tx.date : '',
-        score_qonto_acompte: qontoAcompte ? qontoAcompte.score : '',
-        qonto_solde_label: qontoSolde ? qontoSolde.tx.label : '',
-        qonto_solde_amount: qontoSolde ? qontoSolde.tx.amount : '',
-        qonto_solde_date: qontoSolde ? qontoSolde.tx.date : '',
-        score_qonto_solde: qontoSolde ? qontoSolde.score : '',
-        verdict_auto: verdict,
-        correction: '',
-      };
-    });
-
-    // Orphelins Pennylane (factures sans mission Notion qui les match ≥ SCORE_MATCH)
-    const usedInvoiceIds = new Set();
-    for (const r of results) {
-      if (r.score_acompte >= SCORE_MATCH && r.penny_acompte) usedInvoiceIds.add(r.penny_acompte);
-      if (r.score_solde >= SCORE_MATCH && r.penny_solde) usedInvoiceIds.add(r.penny_solde);
-    }
-    const orphansPenny = invoices
-      .filter(inv => inv.invoiceNumber && !usedInvoiceIds.has(inv.invoiceNumber))
-      .map(inv => ({
-        invoiceNumber: inv.invoiceNumber,
-        customerName: inv.customerName,
-        amount: inv.amount,
-        date: inv.date,
-        status: inv.status,
-        paid: inv.paid,
-      }));
-
-    res.json({
-      scoreThreshold: SCORE_MATCH,
-      stats: {
-        missions: results.length,
-        invoicesPennylane: invoices.length,
-        qontoCredits12mo: qontoCredits.length,
-        orphansPennylane: orphansPenny.length,
-      },
-      missions: results,
-      orphansPennylane: orphansPenny,
-      fetchedAt: new Date().toISOString(),
-    });
-  } catch (err) {
-    console.error('Erreur debug matching:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // --- Debug Pennylane raw : dump de tous les endpoints Pennylane accessibles ---
 // Objectif : explorer quelles données sont exposées pour déterminer une stratégie de matching
 // plus robuste (ex. présence d'un numéro de commande, référence externe, lineitems, etc.).
@@ -1714,6 +1561,51 @@ function flattenRow(obj, prefix = '', out = {}) {
 // Leçons du PoC : le scoring doit exclure strictement les factures cancelled/archived/negative
 // et supporter le cas "split acompte/solde différent" (total mission TTC matché même si individuels divergent).
 
+// --- Optimisations matching (Patch 2++) : pré-calcul des valeurs coûteuses ---
+// Le scoring naïf recompute pour chaque (mission, invoice) la normalisation NFD/regex et les trigrammes.
+// Avec 104 missions × 248 invoices × 2 types = 51k itérations × 6 normalisations = 300k+ opérations.
+// On cache les valeurs normalisées + trigrammes EN PLACE sur les objets via préfixe `_pre*`.
+function trigramsOf(s) {
+  const set = new Set();
+  if (!s) return set;
+  for (let i = 0; i <= s.length - 3; i++) set.add(s.substring(i, i + 3));
+  return set;
+}
+function normalizeTextFr(s) {
+  return s ? String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '') : '';
+}
+function ensureMissionPrecomputed(m) {
+  if (m._preClient !== undefined) return;
+  m._preClient = normalizeCompanyName(m.client);
+  m._trigClient = trigramsOf(m._preClient);
+  m._preNom = normalizeTextFr(m.nom);
+}
+function ensureInvoicePrecomputed(inv) {
+  if (inv._preCustomer !== undefined) return;
+  inv._preCustomer = normalizeCompanyName(inv.customerName);
+  inv._preLabel    = normalizeCompanyName(inv.label);
+  inv._preFilename = normalizeCompanyName(inv.filename);
+  inv._trigCustomer = trigramsOf(inv._preCustomer);
+  inv._trigLabel    = trigramsOf(inv._preLabel);
+  inv._trigFilename = trigramsOf(inv._preFilename);
+  // Type detection en avance pour éviter recompute regex
+  const subjectType = detectInvoiceTypeInText(inv.pdfInvoiceSubject);
+  const descType    = detectInvoiceTypeInText(inv.pdfDescription);
+  inv._resolvedType = subjectType === 'ambiguous' ? null : (subjectType || (descType === 'ambiguous' ? null : descType));
+  inv._subjectNorm = normalizeTextFr(inv.pdfInvoiceSubject);
+  inv._descNorm    = normalizeTextFr(inv.pdfDescription);
+}
+function similarityFromPrecomputed(naStr, naTrig, nbStr, nbTrig) {
+  if (!naStr || !nbStr) return 0;
+  if (naStr === nbStr) return 1;
+  if (naStr.length >= 3 && nbStr.includes(naStr)) return 0.88;
+  if (nbStr.length >= 3 && naStr.includes(nbStr)) return 0.88;
+  if (naTrig.size === 0 || nbTrig.size === 0) return 0;
+  let inter = 0;
+  for (const t of naTrig) if (nbTrig.has(t)) inter++;
+  return inter / (naTrig.size + nbTrig.size - inter);
+}
+
 // Helper : check si un texte Pennylane contient un mot-clé type, avec normalisation accents/casse.
 // Retourne 'acompte' | 'solde' | null selon ce qui apparaît dans le texte.
 function detectInvoiceTypeInText(text) {
@@ -1729,15 +1621,34 @@ function detectInvoiceTypeInText(text) {
 }
 
 // Score 0-100 + raisons pour un candidat Pennylane donné vs une mission Notion + un type (acompte|solde).
-// Refonte matching (leçons PoC + signaux pdf_* issus de Pennylane API) :
-// - Exclusion stricte : cancelled / archived / amount <= 0
-// - Nouveau signal fort : type acompte/solde détecté dans pdf_invoice_subject + pdf_description
-// - Nouveau signal : client match étendu à filename + label + customerName (best-of-3)
-// - Nouveau signal : nom mission trouvé dans subject/description
-// - Pénalité forte si type détecté ≠ type recherché (évite cross-matching acompte↔solde)
+// Refonte v3 (focus client) : le nom client est le SIGNAL PIVOT. Pas de proposition si client sim < 0.5.
+// Notion = HT, Pennylane.amount = TTC (vérifié par dump). Conversion HT × 1.2 = TTC.
+// Le montant individuel est un SIGNAL FAIBLE car le split Notion (50/50 par défaut si Acompte forcé non
+// rempli) diverge souvent de la réalité Pennylane (30/70, 40/60...). Tolérance élargie à ±25%, poids
+// réduit. La discrimination acompte/solde repose principalement sur pdf_invoice_subject/description.
+//
+// Pondération (sur ~110, capé 100) :
+//   Client best-of-3 (filename / customerName / label) : 0/10/25/45 selon similarité (HARD FILTER ≥ 0.5)
+//   Type acompte/solde dans subject : +30 match | -50 mismatch (signal fort)
+//   Nom mission dans subject/description : +15
+//   Montant TTC ±1% / ±5% / ±25% : 15/10/5
+//   Date émission ≤5j / ≤30j / ≤90j : 5/3/1
 function scoreInvoiceForMission(inv, mission, type) {
   if (!inv || inv.amount == null || inv.amount <= 0) return { score: 0, reasons: 'montant invalide' };
   if (inv.status === 'cancelled' || inv.status === 'archived') return { score: 0, reasons: 'facture ' + inv.status };
+
+  // Pré-calcul lazy (cache sur l'objet) — la 1ère fois c'est lent, les suivantes c'est instant
+  ensureMissionPrecomputed(mission);
+  ensureInvoicePrecomputed(inv);
+
+  // --- HARD FILTER client (évite faux positifs montant/date sans rapport client) ---
+  const simCustomer = similarityFromPrecomputed(inv._preCustomer, inv._trigCustomer, mission._preClient, mission._trigClient);
+  const simLabel    = similarityFromPrecomputed(inv._preLabel,    inv._trigLabel,    mission._preClient, mission._trigClient);
+  const simFilename = similarityFromPrecomputed(inv._preFilename, inv._trigFilename, mission._preClient, mission._trigClient);
+  const simBest = Math.max(simCustomer, simLabel, simFilename);
+  if (simBest < 0.5) {
+    return { score: 0, reasons: `client mismatch (best ${Math.round(simBest * 100)}%)` };
+  }
 
   const reasons = [];
   let score = 0;
@@ -1746,57 +1657,45 @@ function scoreInvoiceForMission(inv, mission, type) {
   const targetTTC = targetHT * 1.2;
   const targetDate = type === 'acompte' ? mission.dateFactureAcompte : mission.dateFactureFinale;
 
-  // --- Signal type (acompte/solde) détecté dans pdf_invoice_subject + pdf_description ---
-  // Signal le plus fort : Pennylane met souvent "Acompte" ou "Solde" explicitement dans le sujet.
-  // Match positif : +25. Mismatch (ex: subject="acompte" mais target=solde) : -30 (pénalité forte pour
-  // couper les faux positifs où le montant matche par hasard mais la facture est de l'autre type).
-  const subjectType = detectInvoiceTypeInText(inv.pdfInvoiceSubject);
-  const descType    = detectInvoiceTypeInText(inv.pdfDescription);
-  const resolvedType = subjectType === 'ambiguous' ? null : (subjectType || (descType === 'ambiguous' ? null : descType));
-  if (resolvedType === type) {
-    score += 25;
-    reasons.push(`type=${type} (subject/desc)`);
-  } else if (resolvedType && resolvedType !== 'ambiguous' && resolvedType !== type) {
-    score -= 30;
-    reasons.push(`⚠ type mismatch (${resolvedType}≠${type})`);
+  // 1) Client (signal pivot)
+  if (simBest >= 0.95)     { score += 45; reasons.push(`client=${Math.round(simBest * 100)}%`); }
+  else if (simBest >= 0.8) { score += 35; reasons.push(`client≈${Math.round(simBest * 100)}%`); }
+  else if (simBest >= 0.6) { score += 25; reasons.push(`client~${Math.round(simBest * 100)}%`); }
+  else                     { score += 10; reasons.push(`client min ${Math.round(simBest * 100)}%`); }
+
+  // 2) Type (acompte/solde) — utilise valeur pré-calculée
+  if (inv._resolvedType === type) {
+    score += 30;
+    reasons.push(`type=${type}`);
+  } else if (inv._resolvedType && inv._resolvedType !== type) {
+    score -= 50;
+    reasons.push(`⚠ type mismatch (${inv._resolvedType}≠${type})`);
   }
 
-  // --- Client similarité (best-of-3 parmi customerName, label, filename) ---
-  const simCustomer = similarityScore(inv.customerName, mission.client);
-  const simLabel    = similarityScore(inv.label,        mission.client);
-  const simFilename = similarityScore(inv.filename,     mission.client);
-  const simBest = Math.max(simCustomer, simLabel, simFilename);
-  if (simBest >= 0.9)      { score += 30; reasons.push(`client≈${Math.round(simBest * 100)}%`); }
-  else if (simBest >= 0.6) { score += 18; reasons.push(`client~${Math.round(simBest * 100)}%`); }
-  else if (simBest > 0)    { score += 4;  reasons.push(`client low ${Math.round(simBest * 100)}%`); }
-
-  // --- Nom mission trouvé dans subject ou description ---
-  if (mission.nom && mission.nom.length >= 3) {
-    const nomNorm = String(mission.nom).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-    const subjNorm = String(inv.pdfInvoiceSubject || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-    const descNorm = String(inv.pdfDescription     || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-    if (subjNorm.includes(nomNorm) || descNorm.includes(nomNorm)) {
+  // 3) Nom mission dans subject/description (utilise valeurs pré-normalisées)
+  if (mission._preNom && mission._preNom.length >= 3) {
+    if (inv._subjectNorm.includes(mission._preNom) || inv._descNorm.includes(mission._preNom)) {
       score += 15;
       reasons.push('mission∈sujet/desc');
     }
   }
 
-  // --- Montant TTC ---
+  // 4) Montant TTC — signal faible (split Notion souvent divergent), tolérance large ±25%
   if (targetTTC > 0) {
     const diff = Math.abs(inv.amount - targetTTC);
-    if (diff < 1)                      { score += 20; reasons.push('montant=TTC'); }
-    else if (diff <= targetTTC * 0.01) { score += 14; reasons.push('montant±1%'); }
-    else if (diff <= targetTTC * 0.05) { score += 6;  reasons.push('montant±5%'); }
+    if (diff < 1)                       { score += 15; reasons.push('montant=TTC'); }
+    else if (diff <= targetTTC * 0.05)  { score += 10; reasons.push('montant±5%'); }
+    else if (diff <= targetTTC * 0.25)  { score += 5;  reasons.push('montant±25%'); }
   }
 
-  // --- Date émission ---
+  // 5) Date émission
   const dd = daysBetween(targetDate, inv.date);
-  if (dd <= 5)       { score += 10; reasons.push('date≤5j'); }
-  else if (dd <= 30) { score += 5;  reasons.push('date≤30j'); }
-  else if (dd <= 90) { score += 2;  reasons.push('date≤90j'); }
+  if (dd <= 5)       { score += 5; reasons.push('date≤5j'); }
+  else if (dd <= 30) { score += 3; reasons.push('date≤30j'); }
+  else if (dd <= 90) { score += 1; reasons.push('date≤90j'); }
 
-  // Plancher 0 (pas de score négatif affiché — le mismatch type peut faire passer en <0)
   if (score < 0) score = 0;
+  if (score > 100) score = 100;
   return { score, reasons: reasons.join(' | ') };
 }
 
@@ -1811,12 +1710,246 @@ function suggestPennylaneMatches(mission, type, customerInvoices, topN = 5) {
   return candidates.slice(0, topN);
 }
 
+// Patch 2+++ : trigram inverted index sur les invoices pour speedup massif du bulk matching.
+// Au lieu d'itérer 248 invoices × 104 missions × 2 types = 51k iterations, on construit UNE FOIS un
+// index trigramme→Set<invoice>. Pour chaque mission, on lookup ses ~15 trigrammes pour récupérer
+// directement les ~30-50 invoices candidates partageant au moins un trigramme client → score uniquement
+// celles-là. Speedup empirique : ~10x sur le bulk.
+function buildInvoiceTrigramIndex(invoices) {
+  const idx = new Map(); // trigram → Set<invoice>
+  for (const inv of invoices) {
+    if (!inv || inv.amount == null || inv.amount <= 0) continue;
+    if (inv.status === 'cancelled' || inv.status === 'archived') continue;
+    ensureInvoicePrecomputed(inv);
+    // Union des trigrammes des 3 sources de nom client
+    const allTrigrams = new Set();
+    for (const t of inv._trigCustomer) allTrigrams.add(t);
+    for (const t of inv._trigLabel)    allTrigrams.add(t);
+    for (const t of inv._trigFilename) allTrigrams.add(t);
+    for (const t of allTrigrams) {
+      let bucket = idx.get(t);
+      if (!bucket) { bucket = new Set(); idx.set(t, bucket); }
+      bucket.add(inv);
+    }
+  }
+  return idx;
+}
+
+// Find candidate invoices via trigram index. Bien plus rapide que d'itérer toute la liste.
+// Retourne un Array (pas un Set) pour pouvoir itérer + sort ensuite.
+function findCandidateInvoices(mission, invoiceTrigramIndex) {
+  ensureMissionPrecomputed(mission);
+  const candidates = new Set();
+  for (const t of mission._trigClient) {
+    const bucket = invoiceTrigramIndex.get(t);
+    if (bucket) for (const inv of bucket) candidates.add(inv);
+  }
+  return [...candidates];
+}
+
+// Combined acompte+solde scoring : itère les invoices une seule fois pour produire les 2 tops.
+// Évite le double parcours et garantit les pré-calculs sont chauds dès la 1ère itération.
+function suggestPennylaneMatchesBoth(mission, customerInvoices, topN = 5, invoiceTrigramIndex = null) {
+  const candidatesAcompte = [];
+  const candidatesSolde = [];
+  // Si index fourni, ne score que les candidats qui ont au moins 1 trigramme commun (filtre client)
+  const pool = invoiceTrigramIndex ? findCandidateInvoices(mission, invoiceTrigramIndex) : customerInvoices;
+  for (const inv of pool) {
+    const sA = scoreInvoiceForMission(inv, mission, 'acompte');
+    if (sA.score > 0) candidatesAcompte.push({ inv, ...sA });
+    const sS = scoreInvoiceForMission(inv, mission, 'solde');
+    if (sS.score > 0) candidatesSolde.push({ inv, ...sS });
+  }
+  candidatesAcompte.sort((a, b) => b.score - a.score);
+  candidatesSolde.sort((a, b) => b.score - a.score);
+  return { acompte: candidatesAcompte.slice(0, topN), solde: candidatesSolde.slice(0, topN) };
+}
+
+// Phase 1 (Pilot↔Penny) : helper standalone pour calculer warnings cohérence + orphelins Pennylane.
+// Utilisé par /api/facturation-matching/suggest summary (frontend Facturation) — léger, sans TRE projection.
+// Doit rester aligné avec la logique inline dans buildPrevisionnel (source of truth pour le TRE).
+function computeMatchingCoherence(missions, customerInvoices) {
+  const linkedInvoiceNumbersLower = new Set();
+  const invoiceByNumberLower = new Map();
+  for (const inv of (customerInvoices || [])) {
+    if (inv.invoiceNumber) invoiceByNumberLower.set(inv.invoiceNumber.toLowerCase(), inv);
+  }
+  const notionWarnings = [];
+  const now = new Date();
+
+  function processSide(m, type, links, status) {
+    let allPaid = links.length > 0;
+    let allCancelledOrMissing = links.length > 0;
+    let pushedAny = false;
+    for (const num of links) {
+      linkedInvoiceNumbersLower.add(num.toLowerCase());
+      const inv = invoiceByNumberLower.get(num.toLowerCase());
+      if (!inv) {
+        notionWarnings.push({ missionNom: m.nom, type, code: 'linked-not-found',
+          message: 'Lien vers "' + num + '" mais introuvable dans Pennylane' });
+        allPaid = false;
+        continue;
+      }
+      if (inv.paid) { allCancelledOrMissing = false; continue; }
+      allPaid = false;
+      if (inv.status === 'cancelled' || inv.status === 'incomplete') continue;
+      allCancelledOrMissing = false;
+      if (inv.status !== 'upcoming' && inv.status !== 'late') continue;
+      if (!inv.remainingAmount || inv.remainingAmount <= 0) continue;
+      pushedAny = true;
+    }
+    return { allPaid, allCancelledOrMissing, pushedAny };
+  }
+
+  for (const m of (missions || [])) {
+    if (!m || (m.ca || 0) <= 0) continue;
+    const status = (m.facturation || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    if (status.includes('solde paye')) continue;
+    const oneShot = (m.montantAcompte || 0) < 5;
+
+    if (!oneShot && (m.montantAcompte || 0) >= 5) {
+      const acompteLinks = parseLinkedInvoiceList(m.factAcptPenny);
+      if (acompteLinks.length === 0) {
+        if (status.includes('acompte envoye')) {
+          notionWarnings.push({ missionNom: m.nom, type: 'acompte', code: 'unmatched-issued',
+            message: 'Notion "Acompte envoye" sans matching Pennylane' });
+        }
+      } else {
+        const st = processSide(m, 'acompte', acompteLinks, status);
+        if (st.allPaid && (status.includes('acompte a envoyer') || status === 'non defini' || status === '')) {
+          notionWarnings.push({ missionNom: m.nom, type: 'acompte', code: 'notion-late-update',
+            message: 'Notion "Acompte a envoyer" mais factures liees toutes payees' });
+        }
+        if (status.includes('acompte paye') && !st.allPaid) {
+          notionWarnings.push({ missionNom: m.nom, type: 'acompte', code: 'notion-overdue',
+            message: 'Notion "Acompte paye" mais facture liee non payee' });
+        }
+        if (st.allCancelledOrMissing && !st.allPaid) {
+          notionWarnings.push({ missionNom: m.nom, type: 'acompte', code: 'linked-cancelled',
+            message: 'Toutes les factures acompte liees sont annulees' });
+        }
+      }
+    }
+
+    const montantSoldeHT = (m.ca || 0) - (m.montantAcompte || 0);
+    if (montantSoldeHT > 5) {
+      const soldeLinks = parseLinkedInvoiceList(m.factSoldePenny);
+      if (soldeLinks.length === 0) {
+        if (status.includes('solde envoye')) {
+          notionWarnings.push({ missionNom: m.nom, type: 'solde', code: 'unmatched-issued',
+            message: 'Notion "Solde envoye" sans matching Pennylane' });
+        }
+      } else {
+        const st = processSide(m, 'solde', soldeLinks, status);
+        if (st.allPaid) {
+          notionWarnings.push({ missionNom: m.nom, type: 'solde', code: 'notion-late-update',
+            message: 'Factures solde liees toutes payees mais Notion non a jour' });
+        }
+        if (status.includes('solde a envoyer') && st.pushedAny) {
+          notionWarnings.push({ missionNom: m.nom, type: 'solde', code: 'notion-late-update',
+            message: 'Notion "Solde a envoyer" mais Pennylane factures emises' });
+        }
+        if (st.allCancelledOrMissing && !st.allPaid) {
+          notionWarnings.push({ missionNom: m.nom, type: 'solde', code: 'linked-cancelled',
+            message: 'Toutes les factures solde liees sont annulees' });
+        }
+      }
+    }
+  }
+
+  // Orphelins
+  const pennylaneOrphans = [];
+  for (const inv of (customerInvoices || [])) {
+    if (inv.paid) continue;
+    if (inv.status === 'cancelled' || inv.status === 'incomplete') continue;
+    if (!inv.remainingAmount || inv.remainingAmount <= 0) continue;
+    if (inv.status !== 'upcoming' && inv.status !== 'late') continue;
+    if (linkedInvoiceNumbersLower.has((inv.invoiceNumber || '').toLowerCase())) continue;
+    const isLate = inv.status === 'late' || (inv.dueDate && new Date(inv.dueDate) < now);
+    pennylaneOrphans.push({
+      invoiceNumber: inv.invoiceNumber || '',
+      customerName: inv.customerName || '',
+      label: inv.label || '',
+      amount: inv.remainingAmount,
+      date: inv.date,
+      dueDate: inv.dueDate,
+      status: inv.status,
+      isLate,
+    });
+  }
+  return { notionWarnings, pennylaneOrphans };
+}
+
+// Patch 2++++ : helper de détection de doublons. Pour une liste de n° factures à écrire dans
+// (excludeMissionNom, excludeType), cherche les autres (mission, type) qui contiennent déjà l'un
+// d'eux. Retourne la liste des conflits avec contexte complet pour pouvoir les retirer ensuite.
+function findDuplicateLinks(invoiceNumbers, missions, excludeMissionNom, excludeType) {
+  const lowerSet = new Set(invoiceNumbers.map(s => String(s).toLowerCase()));
+  const conflicts = [];
+  for (const m of missions) {
+    for (const fieldType of ['acompte', 'solde']) {
+      if (m.nom === excludeMissionNom && fieldType === excludeType) continue;
+      const raw = fieldType === 'acompte' ? m.factAcptPenny : m.factSoldePenny;
+      if (!raw) continue;
+      const list = parseLinkedInvoiceList(raw);
+      for (const inv of list) {
+        if (lowerSet.has(inv.toLowerCase())) {
+          conflicts.push({
+            invoice: inv,
+            otherMission: m.nom,
+            otherMissionId: m.id,
+            otherType: fieldType,
+            otherCurrentList: list,
+          });
+        }
+      }
+    }
+  }
+  return conflicts;
+}
+
+// Patch 2++ : helper pour parser une valeur de propriété Notion "Fact acpt/solde Penny" pouvant
+// contenir plusieurs n° de facture séparés par ',' / ';' / newline. Retourne un tableau dédupliqué
+// (insensible à la casse, conserve la première casse rencontrée).
+function parseLinkedInvoiceList(raw) {
+  if (!raw) return [];
+  const seen = new Set();
+  const result = [];
+  for (const part of String(raw).split(/[,;\n]/)) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(trimmed);
+  }
+  return result;
+}
+
+// Patch 2+++ : cache server-side du summary (mode "résumé pour toutes missions") pour servir
+// instantanément les re-fetch dans la fenêtre TTL. Invalidé proactivement à chaque PATCH Notion
+// (helpers updateNotionMissionRichTextProperty + updateNotionMissionStatusProperty) et au Sync.
+let factMatchingSummaryCache = null;
+let factMatchingSummaryCacheTime = 0;
+const FACT_MATCHING_SUMMARY_TTL = 30 * 1000; // 30s — assez court pour limiter la latence des éditions Notion directes
+function invalidateFactMatchingSummaryCache() {
+  factMatchingSummaryCache = null;
+  factMatchingSummaryCacheTime = 0;
+}
+
 // GET /api/facturation-matching/suggest?mission=<nom>&type=<acompte|solde>
 // Retourne les top 5 candidats Pennylane pour une mission/type donnés.
 // Si mission non fournie : retourne un résumé pour toutes les missions (top 1 par mission/type).
 app.get('/api/facturation-matching/suggest', async (req, res) => {
   try {
     const { mission: missionNom, type } = req.query;
+    // Cas par défaut : résumé global → check cache d'abord (instantané si TTL valide)
+    if (!missionNom && !type) {
+      if (factMatchingSummaryCache && (Date.now() - factMatchingSummaryCacheTime) < FACT_MATCHING_SUMMARY_TTL) {
+        return res.json(factMatchingSummaryCache);
+      }
+    }
+    const tStart = Date.now();
     const [missions, invoices] = await Promise.all([
       fetchAllNotionMissions(),
       fetchCustomerInvoices(),
@@ -1827,10 +1960,12 @@ app.get('/api/facturation-matching/suggest', async (req, res) => {
       if (!mission) return res.status(404).json({ error: 'Mission introuvable' });
       if (type !== 'acompte' && type !== 'solde') return res.status(400).json({ error: 'type doit être acompte ou solde' });
       const suggestions = suggestPennylaneMatches(mission, type, invoices, 5);
+      const currentRaw = type === 'acompte' ? mission.factAcptPenny : mission.factSoldePenny;
       return res.json({
         mission: { nom: mission.nom, client: mission.client, ca: mission.ca, pageId: mission.id },
         type,
-        currentlyLinked: type === 'acompte' ? mission.factAcptPenny : mission.factSoldePenny,
+        currentlyLinked: currentRaw,
+        currentlyLinkedList: parseLinkedInvoiceList(currentRaw),
         suggestions: suggestions.map(c => ({
           invoiceNumber: c.inv.invoiceNumber,
           customerName: c.inv.customerName,
@@ -1840,13 +1975,23 @@ app.get('/api/facturation-matching/suggest', async (req, res) => {
           paid: c.inv.paid,
           score: c.score,
           reasons: c.reasons,
+          pdfInvoiceSubject: c.inv.pdfInvoiceSubject || '',
+          pdfDescription: c.inv.pdfDescription || '',
         })),
       });
     }
-    // Cas par défaut : résumé par mission (top 1 par type, pour la colonne "Penny" du tableau Facturation)
+    // Cas par défaut : résumé par mission. Patch 2+++ : trigram index + scoring combiné.
+    const trigIdx = buildInvoiceTrigramIndex(invoices);
     const summary = missions.map(m => {
-      const acompteSuggest = (m.montantAcompte || 0) >= 5 ? suggestPennylaneMatches(m, 'acompte', invoices, 1)[0] : null;
-      const soldeSuggest   = (m.montantFinal   || 0) >= 5 ? suggestPennylaneMatches(m, 'solde',   invoices, 1)[0] : null;
+      // ensureMissionPrecomputed appelé dans suggestPennylaneMatchesBoth via scoreInvoiceForMission.
+      const wantAcompte = (m.montantAcompte || 0) >= 5;
+      const wantSolde   = (m.montantFinal   || 0) >= 5;
+      let acompteSuggest = null, soldeSuggest = null;
+      if (wantAcompte || wantSolde) {
+        const both = suggestPennylaneMatchesBoth(m, invoices, 1, trigIdx);
+        if (wantAcompte) acompteSuggest = both.acompte[0] || null;
+        if (wantSolde)   soldeSuggest   = both.solde[0]   || null;
+      }
       return {
         missionNom: m.nom,
         pageId: m.id,
@@ -1857,7 +2002,21 @@ app.get('/api/facturation-matching/suggest', async (req, res) => {
         soldeSuggest:   soldeSuggest   ? { invoice: soldeSuggest.inv.invoiceNumber,   amount: soldeSuggest.inv.amount,   score: soldeSuggest.score,   reasons: soldeSuggest.reasons   } : null,
       };
     });
-    res.json({ summary, invoicesCount: invoices.length, missionsCount: missions.length });
+    // Phase 1 : warnings cohérence + orphelins Pennylane (utilisés par bandeau + section Facturation)
+    const coherence = computeMatchingCoherence(missions, invoices);
+    const elapsed = Date.now() - tStart;
+    const responsePayload = {
+      summary,
+      invoicesCount: invoices.length,
+      missionsCount: missions.length,
+      notionWarnings: coherence.notionWarnings,
+      pennylaneOrphans: coherence.pennylaneOrphans,
+      computedInMs: elapsed,
+    };
+    factMatchingSummaryCache = responsePayload;
+    factMatchingSummaryCacheTime = Date.now();
+    console.log(`[matching summary] ${missions.length} missions × ${invoices.length} invoices computed in ${elapsed}ms (warnings=${coherence.notionWarnings.length}, orphans=${coherence.pennylaneOrphans.length})`);
+    res.json(responsePayload);
   } catch (err) {
     console.error('Erreur matching suggest:', err.message);
     res.status(500).json({ error: err.message });
@@ -1865,23 +2024,98 @@ app.get('/api/facturation-matching/suggest', async (req, res) => {
 });
 
 // POST /api/facturation-matching/link
-// Body : { missionNom: string, type: 'acompte'|'solde', invoiceNumber: string|'' (string vide = unlink), expectedCurrent?: string }
-// Écrit le n° facture dans la propriété Notion correspondante (Fact acpt Penny / Fact solde Penny).
+// Body : { missionNom, type, invoiceNumbers?: string[], invoiceNumber?: string, expectedCurrent?, confirmDuplicates? }
+// - invoiceNumbers : array de n° factures (Patch 2++). Joint par ", " avant PATCH Notion.
+// - invoiceNumber : single value (rétrocompat — équivaut à invoiceNumbers: [invoiceNumber]).
+// - tableau vide ou string vide = unlink (efface la valeur Notion).
+// - confirmDuplicates (Patch 2++++) : si true, accepte de retirer les factures déjà liées ailleurs.
+//   Sinon : refuse avec 409 INVALID_DUPLICATE en listant les conflits.
 app.post('/api/facturation-matching/link', async (req, res) => {
   try {
-    const { missionNom, type, invoiceNumber, expectedCurrent } = req.body || {};
+    const { missionNom, type, invoiceNumbers, invoiceNumber, expectedCurrent, confirmDuplicates } = req.body || {};
     if (!missionNom || !type) return res.status(400).json({ error: 'missionNom et type requis' });
     if (type !== 'acompte' && type !== 'solde') return res.status(400).json({ error: 'type doit être acompte ou solde' });
-    const newValue = (invoiceNumber || '').trim();
+
+    let listInput;
+    if (Array.isArray(invoiceNumbers)) {
+      listInput = invoiceNumbers;
+    } else if (typeof invoiceNumber === 'string') {
+      listInput = invoiceNumber ? [invoiceNumber] : [];
+    } else {
+      listInput = [];
+    }
+    const cleaned = parseLinkedInvoiceList(listInput.join(','));
+    const newValue = cleaned.join(', ');
 
     const missions = await fetchAllNotionMissions();
     const mission = missions.find(m => m.nom === missionNom);
     if (!mission) return res.status(404).json({ error: 'Mission introuvable' });
 
+    // Détection doublons : pour chaque invoice du nouveau lien, cherche dans les autres (mission, type).
+    // Skip si la liste cible est vide (unlink, jamais de conflit possible).
+    let conflicts = [];
+    if (cleaned.length > 0) {
+      conflicts = findDuplicateLinks(cleaned, missions, missionNom, type);
+      if (conflicts.length > 0 && !confirmDuplicates) {
+        return res.status(409).json({
+          error: 'Factures déjà liées ailleurs — confirmation requise pour les retirer.',
+          code: 'INVALID_DUPLICATE',
+          conflicts: conflicts.map(c => ({
+            invoice: c.invoice,
+            otherMission: c.otherMission,
+            otherType: c.otherType,
+            otherCurrentList: c.otherCurrentList,
+          })),
+        });
+      }
+    }
+
+    // Si conflits ET confirmé : retire d'abord les factures des anciens emplacements
+    // pour éviter le doublon. Group par (mission, type) pour 1 PATCH par emplacement.
+    if (conflicts.length > 0 && confirmDuplicates) {
+      const removalsByLoc = new Map();
+      for (const c of conflicts) {
+        const key = c.otherMissionId + '||' + c.otherType;
+        if (!removalsByLoc.has(key)) {
+          removalsByLoc.set(key, {
+            missionId: c.otherMissionId,
+            missionNom: c.otherMission,
+            type: c.otherType,
+            removed: new Set(),
+            currentList: c.otherCurrentList,
+          });
+        }
+        removalsByLoc.get(key).removed.add(c.invoice.toLowerCase());
+      }
+      for (const info of removalsByLoc.values()) {
+        const newList = info.currentList.filter(inv => !info.removed.has(inv.toLowerCase()));
+        const newValueOther = newList.join(', ');
+        const propNameOther = info.type === 'acompte' ? 'Fact acpt Penny' : 'Fact solde Penny';
+        try {
+          // Best effort : pas de expectedCurrent ici (on a refetché frais juste avant la détection).
+          await updateNotionMissionRichTextProperty(info.missionId, propNameOther, newValueOther);
+          console.log(`[duplicate cleanup] removed ${[...info.removed].join(', ')} from ${info.missionNom}/${info.type}`);
+        } catch (err) {
+          // Si le retrait échoue, on bloque le PATCH cible pour éviter un état incohérent
+          console.error(`[duplicate cleanup FAILED] mission=${info.missionNom} type=${info.type}: ${err.message}`);
+          return res.status(500).json({
+            error: `Échec retrait facture chez ${info.missionNom}/${info.type} : ${err.message}. PATCH cible annulé pour éviter doublon.`,
+            code: 'DUPLICATE_CLEANUP_FAILED',
+          });
+        }
+      }
+    }
+
+    // PATCH cible
     const propName = type === 'acompte' ? 'Fact acpt Penny' : 'Fact solde Penny';
     try {
       const result = await updateNotionMissionRichTextProperty(mission.id, propName, newValue, expectedCurrent);
-      res.json({ ok: true, ...result, missionNom, type, propName });
+      res.json({
+        ok: true,
+        ...result,
+        missionNom, type, propName, invoicesList: cleaned,
+        cleanedFromOthers: conflicts.length, // info utile côté UI
+      });
     } catch (err) {
       if (err.code === 'NOTION_DRIFT') {
         return res.status(409).json({ error: err.message, code: 'NOTION_DRIFT', currentValue: err.currentValue });
@@ -2015,8 +2249,8 @@ async function pennylaneFetchAll(endpoint, params = {}, maxPages = 200) {
       break;
     }
 
-    // Rate limit: 25 req/5s — delay 400ms between requests for safety
-    await new Promise(r => setTimeout(r, 400));
+    // Rate limit Pennylane : 25 req/5s = 200ms minimum. On respecte 250ms (10% marge) pour speedup vs 400ms.
+    await new Promise(r => setTimeout(r, 250));
   }
 
   return allItems;
@@ -3352,87 +3586,179 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
   // pas en double. Propriété volontaire : discipline Notion ↔ vérité Pennylane.
   const facturesAEncaisser = [];
   const now = new Date();
-
-  // --- 1) Pennylane : factures émises, non payées ---
+  // Phase 1 (Pilot ↔ Penny réconciliation) : matching link Notion = source of truth.
+  // Pour chaque (mission, acompte|solde) : si liens Pennylane existent → projeter chaque invoice liée
+  // (montant + due_date réels). Sinon → projection Notion HT × 1.2 (estimation, status-based historique).
+  // Pennylane unpaid orphans (non liés à aucune mission) → projetés en `pennylane-orphan` séparément.
+  const notionWarnings = [];
+  const pennylaneOrphans = [];
+  const linkedInvoiceNumbersLower = new Set();
+  const invoiceByNumberLower = new Map();
   for (const inv of (customerInvoices || [])) {
-    if (inv.paid) continue;
-    if (inv.status === 'cancelled' || inv.status === 'incomplete') continue;
-    if (!inv.remainingAmount || inv.remainingAmount <= 0) continue;
-    if (inv.status !== 'upcoming' && inv.status !== 'late') continue;
-    const isLate = inv.status === 'late' || (inv.dueDate && new Date(inv.dueDate) < now);
+    if (inv.invoiceNumber) invoiceByNumberLower.set(inv.invoiceNumber.toLowerCase(), inv);
+  }
+  function echeanceJ45outer(dateStr) {
+    if (!dateStr) return null;
+    const d = new Date(dateStr); d.setDate(d.getDate() + 45);
+    return d.toISOString().split('T')[0];
+  }
+  function projectLinkedInvoices(m, type, links) {
+    let pushedAny = false;
+    let allPaid = links.length > 0;
+    let allCancelledOrMissing = links.length > 0;
+    for (const num of links) {
+      linkedInvoiceNumbersLower.add(num.toLowerCase());
+      const inv = invoiceByNumberLower.get(num.toLowerCase());
+      if (!inv) {
+        notionWarnings.push({ missionNom: m.nom, type, code: 'linked-not-found',
+          message: 'Lien vers "' + num + '" mais introuvable dans Pennylane' });
+        allPaid = false;
+        continue;
+      }
+      if (inv.paid) { allCancelledOrMissing = false; continue; }
+      allPaid = false;
+      if (inv.status === 'cancelled' || inv.status === 'incomplete') continue;
+      allCancelledOrMissing = false;
+      if (inv.status !== 'upcoming' && inv.status !== 'late') continue;
+      if (!inv.remainingAmount || inv.remainingAmount <= 0) continue;
+      const isLate2 = inv.status === 'late' || (inv.dueDate && new Date(inv.dueDate) < now);
+      facturesAEncaisser.push({
+        client: m.client || m.nom,
+        mission: m.nom,
+        type: type === 'acompte' ? 'Acompte' : 'Solde',
+        montant: inv.remainingAmount,
+        dateEmission: inv.date,
+        dateEcheance: inv.dueDate,
+        status: isLate2 ? 'late' : 'upcoming',
+        previsionnel: false,
+        source: 'pennylane-linked',
+        invoiceNumber: inv.invoiceNumber,
+      });
+      pushedAny = true;
+    }
+    return { pushedAny, allPaid, allCancelledOrMissing };
+  }
+  function pushNotionForecast(m, type) {
+    const isAcompte = type === 'acompte';
+    const montantHT = isAcompte ? (m.montantAcompte || 0) : ((m.ca || 0) - (m.montantAcompte || 0));
+    if (montantHT < 5) return;
+    const dateEmission = isAcompte ? m.dateFactureAcompte : m.dateFactureFinale;
     facturesAEncaisser.push({
-      client: inv.customerName || inv.label || '-',
-      mission: inv.invoiceNumber || inv.label || '-',
-      type: 'Facture',
-      montant: inv.remainingAmount,
-      dateEmission: inv.date,
-      dateEcheance: inv.dueDate,
-      status: isLate ? 'late' : 'upcoming',
-      previsionnel: false,
-      source: 'pennylane',
+      client: m.client || m.nom,
+      mission: m.nom,
+      type: isAcompte ? 'Acompte' : 'Solde',
+      montant: Math.round(montantHT * 1.2),
+      montantHT,
+      dateEmission,
+      dateEcheance: echeanceJ45outer(dateEmission),
+      status: 'previsionnel',
+      previsionnel: true,
+      source: 'notion',
     });
   }
 
-  // --- 2) Notion : missions pas encore facturées (prévisionnelles uniquement) ---
+  // --- 2) Pour chaque mission Notion : projection acompte/solde via matching link OU Notion forecast ---
   for (const m of notionMissions) {
     if (m.ca <= 0) continue;
     const status = (m.facturation || '').toLowerCase()
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
-    // Statuts exclus ici : "solde paye" (terminée), "solde envoye" (facture émise → côté Pennylane),
-    // "acompte envoye" (facture acompte émise → côté Pennylane pour l'acompte, mais on garde la mission
-    // pour le solde tant qu'il n'est pas envoyé).
-    if (status.includes('solde paye')) continue;
-    const soldeEnvoye = status.includes('solde envoye');
-    const acompteEnvoye = status.includes('acompte envoye');
-
-    function echeanceJ45(dateStr) {
-      if (!dateStr) return null;
-      const d = new Date(dateStr);
-      d.setDate(d.getDate() + 45);
-      return d.toISOString().split('T')[0];
-    }
-
-    // Redesign Patch 1 : Notion HT → TTC (×1.2, TVA 20% hardcodée) pour alimenter le TRE TTC.
-    // Seuil acompte < 5€ (cf. Q4 user : "Acompte forcé" < 2€ simule paiement 1 fois, donc pas d'acompte attendu).
+    if (status.includes('solde paye')) continue; // mission close, Qonto a tout
     const oneShot = (m.montantAcompte || 0) < 5;
 
-    // --- ACOMPTE : prévisionnel uniquement si pas encore émis ni payé ET non one-shot ---
-    if (!oneShot
-        && m.montantAcompte > 0
-        && !acompteEnvoye
-        && !status.includes('acompte paye')
-        && (status.includes('acompte a envoyer') || status === 'non defini' || status === '')) {
-      const dateEmission = m.dateFactureAcompte;
-      const dateEcheance = echeanceJ45(dateEmission);
-      facturesAEncaisser.push({
-        client: m.client || m.nom, mission: m.nom, type: 'Acompte',
-        montant: Math.round(m.montantAcompte * 1.2), // HT → TTC
-        montantHT: m.montantAcompte,
-        dateEmission, dateEcheance,
-        status: 'previsionnel', previsionnel: true,
-        source: 'notion',
-      });
-    }
-
-    // --- SOLDE : prévisionnel uniquement si la facture solde n'est pas émise ---
-    if (soldeEnvoye) continue; // le solde est côté Pennylane
-    const montantSolde = m.ca - m.montantAcompte;
-    if (montantSolde > 0) {
-      if (status.includes('acompte paye') || status.includes('solde a envoyer')
-                 || acompteEnvoye || status.includes('acompte a envoyer') || status === 'non defini' || status === '') {
-        const dateEmission = m.dateFactureFinale;
-        const dateEcheance = echeanceJ45(dateEmission);
-        facturesAEncaisser.push({
-          client: m.client || m.nom, mission: m.nom, type: 'Solde',
-          montant: Math.round(montantSolde * 1.2), // HT → TTC
-          montantHT: montantSolde,
-          dateEmission, dateEcheance,
-          status: 'previsionnel', previsionnel: true,
-          source: 'notion',
-        });
+    // === ACOMPTE === : matching link prime sur status Notion
+    if (!oneShot && (m.montantAcompte || 0) >= 5) {
+      const acompteLinks = parseLinkedInvoiceList(m.factAcptPenny);
+      const acompteState = acompteLinks.length > 0 ? projectLinkedInvoices(m, 'acompte', acompteLinks) : null;
+      if (!acompteState) {
+        const acompteEnvoye = status.includes('acompte envoye');
+        const acomptePaye   = status.includes('acompte paye');
+        const acompteAEnvoyer = status.includes('acompte a envoyer') || status === 'non defini' || status === '';
+        if (!acompteEnvoye && !acomptePaye && acompteAEnvoyer) pushNotionForecast(m, 'acompte');
+        if (acompteEnvoye) {
+          notionWarnings.push({ missionNom: m.nom, type: 'acompte', code: 'unmatched-issued',
+            message: 'Notion "Acompte envoye" sans matching Pennylane — a matcher pour precision TRE' });
+        }
+      } else {
+        if (acompteState.allPaid && (status.includes('acompte a envoyer') || status === 'non defini' || status === '')) {
+          notionWarnings.push({ missionNom: m.nom, type: 'acompte', code: 'notion-late-update',
+            message: 'Notion "Acompte a envoyer" mais toutes les factures liees sont payees' });
+        }
+        if (status.includes('acompte paye') && !acompteState.allPaid) {
+          notionWarnings.push({ missionNom: m.nom, type: 'acompte', code: 'notion-overdue',
+            message: 'Notion "Acompte paye" mais une facture liee n est pas payee — Penny prime' });
+        }
+        if (acompteState.allCancelledOrMissing && !acompteState.allPaid) {
+          notionWarnings.push({ missionNom: m.nom, type: 'acompte', code: 'linked-cancelled',
+            message: 'Toutes les factures acompte liees sont annulees — re-projection Notion forecast' });
+          pushNotionForecast(m, 'acompte');
+        }
       }
     }
+
+    // === SOLDE === : matching link prime sur status Notion
+    const montantSoldeHT = (m.ca || 0) - (m.montantAcompte || 0);
+    if (montantSoldeHT > 5) {
+      const soldeLinks = parseLinkedInvoiceList(m.factSoldePenny);
+      const soldeState = soldeLinks.length > 0 ? projectLinkedInvoices(m, 'solde', soldeLinks) : null;
+      if (!soldeState) {
+        const soldeEnvoye2 = status.includes('solde envoye');
+        const acompteEnvoye2 = status.includes('acompte envoye');
+        const soldeProjetable = status.includes('acompte paye') || status.includes('solde a envoyer')
+                              || acompteEnvoye2 || status.includes('acompte a envoyer') || status === 'non defini' || status === '';
+        if (!soldeEnvoye2 && soldeProjetable) pushNotionForecast(m, 'solde');
+        if (soldeEnvoye2) {
+          notionWarnings.push({ missionNom: m.nom, type: 'solde', code: 'unmatched-issued',
+            message: 'Notion "Solde envoye" sans matching Pennylane — a matcher pour precision TRE' });
+        }
+      } else {
+        if (soldeState.allPaid) {
+          notionWarnings.push({ missionNom: m.nom, type: 'solde', code: 'notion-late-update',
+            message: 'Toutes les factures solde liees sont payees mais Notion non a jour' });
+        }
+        if (status.includes('solde a envoyer') && soldeState.pushedAny) {
+          notionWarnings.push({ missionNom: m.nom, type: 'solde', code: 'notion-late-update',
+            message: 'Notion "Solde a envoyer" mais factures Pennylane deja emises' });
+        }
+        if (soldeState.allCancelledOrMissing && !soldeState.allPaid) {
+          notionWarnings.push({ missionNom: m.nom, type: 'solde', code: 'linked-cancelled',
+            message: 'Toutes les factures solde liees sont annulees — re-projection Notion forecast' });
+          pushNotionForecast(m, 'solde');
+        }
+      }
+    }
+  }
+
+  // === ORPHANS Pennylane === : factures unpaid non liees a aucune mission Notion
+  for (const inv of (customerInvoices || [])) {
+    if (inv.paid) continue;
+    if (inv.status === 'cancelled' || inv.status === 'incomplete') continue;
+    if (!inv.remainingAmount || inv.remainingAmount <= 0) continue;
+    if (inv.status !== 'upcoming' && inv.status !== 'late') continue;
+    if (linkedInvoiceNumbersLower.has((inv.invoiceNumber || '').toLowerCase())) continue;
+    const isLateO = inv.status === 'late' || (inv.dueDate && new Date(inv.dueDate) < now);
+    facturesAEncaisser.push({
+      client: inv.customerName || inv.label || '-',
+      mission: inv.invoiceNumber || inv.label || 'Orphan',
+      type: 'Facture',
+      montant: inv.remainingAmount,
+      dateEmission: inv.date,
+      dateEcheance: inv.dueDate,
+      status: isLateO ? 'late' : 'upcoming',
+      previsionnel: false,
+      source: 'pennylane-orphan',
+      invoiceNumber: inv.invoiceNumber,
+    });
+    pennylaneOrphans.push({
+      invoiceNumber: inv.invoiceNumber || '',
+      customerName: inv.customerName || '',
+      label: inv.label || '',
+      amount: inv.remainingAmount,
+      date: inv.date,
+      dueDate: inv.dueDate,
+      status: inv.status,
+      isLate: isLateO,
+    });
   }
 
   facturesAEncaisser.sort((a, b) => {
@@ -3932,6 +4258,8 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
     totalAEncaisserNotion,
     pipelinePondere,
     pipelineDetail,
+    notionWarnings,        // [{ missionNom, type, code, message }]
+    pennylaneOrphans,      // [{ invoiceNumber, customerName, amount, date, dueDate, status, isLate }]
   };
 }
 
@@ -3983,6 +4311,8 @@ app.get('/api/tresorerie', async (req, res) => {
       previsionnel: result.previsionnel,
       pipelinePondere: Math.round(result.pipelinePondere),
       pipelineDetail: result.pipelineDetail,
+      notionWarnings: result.notionWarnings || [],
+      pennylaneOrphans: result.pennylaneOrphans || [],
       pennylaneError,
       masseSalarialeError,
       fetchedAt: new Date().toISOString(),

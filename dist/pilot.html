@@ -1426,8 +1426,14 @@
     .fact-penny-none    { background: rgba(224,62,62,0.08);   color: var(--danger, #e03e3e); }
     .fact-penny-waiting { background: rgba(128,128,128,0.10); color: var(--text-secondary, #787878); }
     .fact-penny:hover   { filter: brightness(0.92); }
+    .fact-penny-warn-icon {
+      display: inline-block;
+      color: var(--warning, #d9730d);
+      font-weight: 700;
+      cursor: help;
+      margin-right: 0.15rem;
+    }
 
-    tr.row-2025 { opacity: 0.7; }
 
     @media (max-width: 768px) {
       .sidebar { display: none; }
@@ -2684,7 +2690,6 @@
         </div>
         <div style="margin-left:auto;display:flex;gap:0.4rem">
           <button class="btn" id="btnPennylaneDump" onclick="downloadPennylaneDump()" style="font-size:0.75rem;padding:0.3rem 0.6rem;color:var(--primary);font-weight:600" title="Dump brut de toutes les entités Pennylane accessibles (factures clients/fournisseurs, transactions, clients, produits, etc.)">📥 Dump Pennylane</button>
-          <button class="btn" id="btnMatchingCsv" onclick="downloadMatchingCSV()" style="font-size:0.75rem;padding:0.3rem 0.6rem;color:var(--primary);font-weight:600" title="Exporte un CSV d'audit Notion↔Pennylane↔Qonto (12 mois) pour valider le matching auto">📊 CSV matching (PoC)</button>
         </div>
       </div>
       <div class="table-wrapper">
@@ -4418,7 +4423,18 @@
 
       if (page === 'cockpit') refreshCockpit();
       if (page === 'dashboard') { fetchDealMetadata().then(() => renderKanban()); if (dashboardData) render(); else { refreshData(); } refreshEmeliaCampaign(); if (!repeatClientsData) fetchRepeatClients(); }
-      if (page === 'facturation') { if (factData) { loadFactOverrides().then(() => { renderFactAlerts(); renderFactKpis(); renderFactTable(); }); } else refreshFactData(); }
+      if (page === 'facturation') {
+        if (factData) {
+          // Patch 2++++ : on rafraîchit AUSSI le matching summary (même si factData existe), sinon le
+          // cell display peut être stale par rapport à des éditions Notion faites depuis une autre page.
+          // Cheap : le backend a un cache 30s → ~50ms si chaud, ~500ms si froid.
+          Promise.all([loadFactOverrides(), loadFactMatchingSummary()]).then(() => {
+            renderFactAlerts(); renderFactKpis(); renderFactTable();
+          });
+        } else {
+          refreshFactData();
+        }
+      }
       if (page === 'tresorerie') { if (tresoData) { renderTresoKpis(); renderTresoChart(); renderChargesChart(); renderChargesDetail(); renderMasseSalariale(); } else refreshTresoData(); }
       if (page === 'masse-salariale') refreshMasseSalarialePage();
       if (page === 'scenarios') refreshScenariosPage();
@@ -4498,7 +4514,7 @@
     function refreshCurrentPage() {
       if (currentPage === 'cockpit') refreshCockpit();
       else if (currentPage === 'dashboard') refreshData();
-      else if (currentPage === 'facturation') refreshFactData();
+      else if (currentPage === 'facturation') forceSyncFactData(); // Sync button → invalide cache Notion + Pennylane puis re-fetch
       else if (currentPage === 'tresorerie') refreshTresoData();
       else if (currentPage === 'masse-salariale') refreshMasseSalarialePage();
       else if (currentPage === 'scenarios') refreshScenariosPage();
@@ -7882,7 +7898,8 @@
 
     function formatDateFR(dateStr) {
       if (!dateStr) return '--';
-      return new Date(dateStr).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+      // Année obligatoire pour éviter toute ambiguïté entre 2024/2025/2026 (factures pluri-années)
+      return new Date(dateStr).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
     }
 
     // Transform missions into invoice lines
@@ -8152,6 +8169,37 @@
         html += '</div>';
       }
 
+      // Phase 1 : bandeau warnings cohérence Notion ↔ Pennylane
+      // Group by code pour synthèse compact
+      if (factCoherenceWarnings && factCoherenceWarnings.length > 0) {
+        const byCode = {};
+        for (const w of factCoherenceWarnings) {
+          if (!byCode[w.code]) byCode[w.code] = [];
+          byCode[w.code].push(w);
+        }
+        const codeLabels = {
+          'unmatched-issued':   { icon: '⚠', label: 'Notion "Envoyé" sans matching Pennylane', color: 'warning' },
+          'notion-late-update': { icon: '🔄', label: 'Notion en retard sur Pennylane', color: 'warning' },
+          'notion-overdue':     { icon: '❗', label: 'Notion "Payé" mais Pennylane non payé', color: 'danger' },
+          'linked-cancelled':   { icon: '🚫', label: 'Factures liées annulées (re-facturation attendue)', color: 'warning' },
+          'linked-not-found':   { icon: '🔍', label: 'Factures liées introuvables dans Pennylane', color: 'danger' },
+        };
+        html += '<div class="fact-alert fact-alert-warn" style="display:flex;flex-direction:column;gap:0.4rem">';
+        html += '<div style="font-weight:700;display:flex;align-items:center;gap:0.4rem"><span>⚠️</span> Cohérence Notion ↔ Pennylane : ' + factCoherenceWarnings.length + ' alerte' + (factCoherenceWarnings.length > 1 ? 's' : '') + '</div>';
+        for (const code of Object.keys(byCode)) {
+          const meta = codeLabels[code] || { icon: '⚠', label: code, color: 'warning' };
+          const list = byCode[code];
+          const missions = [...new Set(list.map(w => w.missionNom + ' (' + w.type + ')'))];
+          html += '<div style="font-size:0.78rem;color:var(--text)">';
+          html += '<span style="margin-right:0.3rem">' + meta.icon + '</span>';
+          html += '<b>' + meta.label + '</b> (' + list.length + ') : ';
+          html += '<span style="color:var(--text-secondary)">' + missions.slice(0, 5).join(', ');
+          if (missions.length > 5) html += ' +' + (missions.length - 5);
+          html += '</span></div>';
+        }
+        html += '</div>';
+      }
+
       document.getElementById('factAlerts').innerHTML = html;
     }
 
@@ -8192,21 +8240,22 @@
           : '<span class="recon-source-tag tag-notion">' + l.type + '</span>';
         const statusLabel = l.status === 'Envoye' ? 'Envoy\u00e9' : l.status === 'Paye' ? 'Pay\u00e9' : l.status === 'En attente' ? 'En attente' : '\u00c0 envoyer';
 
-        const yearTag = is2025 ? ' <span class="fact-year-tag y2025">2025</span>' : '';
+        // Patch UX : pas de marquage spécial pour les factures 2025 — l'année est dans la date DD/MM/YYYY
         const dateCell = isSansDate
           ? '<span style="color:var(--danger);font-weight:600;font-size:0.7rem">Date manquante</span>'
-          : formatDateFR(l.date) + yearTag;
+          : formatDateFR(l.date);
 
-        html += '<tr' + (is2025 ? ' class="row-2025"' : '') + '>';
+        html += '<tr>';
         html += '<td>' + l.mission + '</td>';
         html += '<td style="color:var(--text-secondary)">' + l.client + '</td>';
         html += '<td>' + typeTag + '</td>';
         html += '<td style="font-weight:600">' + formatEuro(l.montant) + '</td>';
         html += '<td style="font-size:0.75rem">' + dateCell + '</td>';
         const statuses = ['A envoyer', 'En attente', 'Envoye', 'Paye'];
+        // Patch 3 : status overrides Supabase obsolètes (statut → Notion direct). On retire la bordure orange.
         let selectHtml = '<select class="notion-select fact-status-select ' + invoiceStatusClass(l.status) + '"';
         selectHtml += ' data-mission="' + l.mission.replace(/"/g, '&quot;') + '" data-type="' + l.type + '"';
-        selectHtml += ' style="font-size:0.72rem;padding:0.15rem 0.3rem;' + (l.overridden ? 'border:2px solid var(--warning);' : '') + '">';
+        selectHtml += ' style="font-size:0.72rem;padding:0.15rem 0.3rem">';
         statuses.forEach(s => {
           const label = s === 'Envoye' ? 'Envoy\u00e9' : s === 'Paye' ? 'Pay\u00e9' : s === 'En attente' ? 'En attente' : '\u00c0 envoyer';
           selectHtml += '<option value="' + s + '"' + (l.status === s ? ' selected' : '') + '>' + label + '</option>';
@@ -8214,18 +8263,29 @@
         selectHtml += '</select>';
         html += '<td>' + selectHtml + '</td>';
 
-        // Colonne Penny (Patch 2) : cellule cliquable qui ouvre la popup de matching.
-        // Une facture non émise (statut "A envoyer" / "En attente") ne peut pas avoir de contrepartie
-        // Pennylane → on supprime les propositions auto (faux positifs systématiques) et on affiche ⏳.
-        // La cellule reste cliquable (edge case où user veut forcer un lien manuel).
+        // Colonne Penny (Patch 2++) : multi-invoice. La valeur Notion peut être un n° simple ou
+        // plusieurs séparés par ", " (split en M+1 paiements partiels par exemple). Affichage condensé
+        // pour ne pas exploser la largeur quand 2+ factures sont liées. Phase 1 : ⚠ si warning cohérence.
         const matchingEntry = factMatchingSummary[l.mission];
         const typeKey = l.type === 'Acompte' ? 'acompte' : 'solde';
+        const lineWarnings = (factCoherenceWarnings || []).filter(w => w.missionNom === l.mission && w.type === typeKey);
+        const warningPrefix = lineWarnings.length > 0
+          ? '<span class="fact-penny-warn-icon" title="' + lineWarnings.map(w => w.message).join(' / ').replace(/"/g, '&quot;') + '">⚠</span> '
+          : '';
         const linkedRaw = matchingEntry ? (typeKey === 'acompte' ? matchingEntry.acompteLinked : matchingEntry.soldeLinked) : '';
+        const linkedList = parseLinkedInvoicesFront(linkedRaw);
         const suggest = matchingEntry ? (typeKey === 'acompte' ? matchingEntry.acompteSuggest : matchingEntry.soldeSuggest) : null;
         const isNotYetIssued = l.status === 'A envoyer' || l.status === 'En attente';
         let pennyCell;
-        if (linkedRaw) {
-          pennyCell = '<span class="fact-penny fact-penny-linked" title="Lié à ' + linkedRaw.replace(/"/g, '&quot;') + ' — cliquer pour modifier">✅ ' + linkedRaw + '</span>';
+        if (linkedList.length > 0) {
+          const fullTitle = linkedList.length === 1
+            ? 'Lié à ' + linkedList[0] + ' — cliquer pour modifier'
+            : linkedList.length + ' factures liées : ' + linkedList.join(', ') + ' — cliquer pour modifier';
+          let label;
+          if (linkedList.length === 1)      label = '✅ ' + linkedList[0];
+          else if (linkedList.length <= 2)  label = '✅ ' + linkedList.join(', ');
+          else                              label = '✅ ' + linkedList[0] + ' +' + (linkedList.length - 1);
+          pennyCell = '<span class="fact-penny fact-penny-linked" title="' + fullTitle.replace(/"/g, '&quot;') + '">' + label + '</span>';
         } else if (isNotYetIssued) {
           pennyCell = '<span class="fact-penny fact-penny-waiting" title="Facture non émise — aucun match Pennylane attendu. Cliquer si besoin de lier manuellement.">⏳ —</span>';
         } else if (suggest && suggest.score >= 50) {
@@ -8233,7 +8293,7 @@
         } else {
           pennyCell = '<span class="fact-penny fact-penny-none" title="Aucune proposition ≥ 50% — cliquer pour choisir manuellement">❌ —</span>';
         }
-        html += '<td><a href="#" class="fact-penny-link" data-mission="' + l.mission.replace(/"/g, '&quot;') + '" data-type="' + typeKey + '" style="text-decoration:none;font-size:0.72rem">' + pennyCell + '</a></td>';
+        html += '<td><a href="#" class="fact-penny-link" data-mission="' + l.mission.replace(/"/g, '&quot;') + '" data-type="' + typeKey + '" style="text-decoration:none;font-size:0.72rem">' + warningPrefix + pennyCell + '</a></td>';
 
         html += '<td><input type="text" class="fact-comment-input" data-mission="' + l.mission.replace(/"/g, '&quot;') + '" data-type="' + l.type + '" value="' + (l.comment || '').replace(/"/g, '&quot;') + '" placeholder="..." style="width:100%;min-width:80px;padding:0.2rem 0.4rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.72rem;background:var(--bg);color:var(--text)"></td>';
         html += '</tr>';
@@ -8259,6 +8319,34 @@
       html += '</tr>';
 
       html += '</tbody></table>';
+
+      // Phase 1 : section "Pennylane orphans" — factures non liées à aucune mission Notion
+      if (factPennylaneOrphans && factPennylaneOrphans.length > 0) {
+        const totalOrphans = factPennylaneOrphans.reduce((s, o) => s + (o.amount || 0), 0);
+        html += '<div style="margin-top:1.5rem;border:1px solid var(--warning, #d9730d);border-radius:6px;overflow:hidden">';
+        html += '<div style="background:rgba(217,115,13,0.08);padding:0.6rem 0.8rem;display:flex;align-items:center;gap:0.5rem">';
+        html += '<span style="font-size:1.1rem">🔍</span>';
+        html += '<b style="color:var(--warning, #d9730d)">Factures Pennylane orphelines (' + factPennylaneOrphans.length + ')</b>';
+        html += '<span style="font-size:0.78rem;color:var(--text-secondary)">— ' + formatEuro(totalOrphans) + ' TTC à encaisser, non liées à une mission Notion</span>';
+        html += '</div>';
+        html += '<table class="recon-table" style="margin-top:0">';
+        html += '<thead><tr><th>N° facture</th><th>Client Penny</th><th>Montant TTC</th><th>Date émission</th><th>Échéance</th><th>Statut</th><th>Action</th></tr></thead><tbody>';
+        for (const o of factPennylaneOrphans) {
+          const lateBadge = o.isLate ? ' <span style="color:var(--danger);font-weight:600;font-size:0.7rem">RETARD</span>' : '';
+          html += '<tr>';
+          html += '<td style="font-family:monospace">' + (o.invoiceNumber || '-') + '</td>';
+          html += '<td style="color:var(--text-secondary)">' + (o.customerName || '-') + '</td>';
+          html += '<td style="font-weight:600">' + formatEuro(o.amount || 0) + '</td>';
+          html += '<td style="font-size:0.75rem">' + (o.date ? formatDateFR(o.date) : '-') + '</td>';
+          html += '<td style="font-size:0.75rem">' + (o.dueDate ? formatDateFR(o.dueDate) : '-') + lateBadge + '</td>';
+          html += '<td style="font-size:0.72rem">' + (o.status || '-') + '</td>';
+          html += '<td><button class="btn fact-orphan-link" data-invoice="' + (o.invoiceNumber || '').replace(/"/g, '&quot;') + '" style="font-size:0.72rem;padding:0.2rem 0.5rem">+ Lier à mission</button></td>';
+          html += '</tr>';
+        }
+        html += '</tbody></table>';
+        html += '</div>';
+      }
+
       document.getElementById('factContent').innerHTML = html;
 
       // Bind change events on status selects
@@ -8289,10 +8377,48 @@
           openFactMatchingModal(this.getAttribute('data-mission'), this.getAttribute('data-type'));
         });
       });
+
+      // Bind clicks "+ Lier à mission" sur les Pennylane orphans → copie le n° dans le clipboard
+      // pour que l'user le colle dans la popup matching d'une mission ci-dessus.
+      document.querySelectorAll('.fact-orphan-link').forEach(btn => {
+        btn.addEventListener('click', function() {
+          const invNum = this.getAttribute('data-invoice');
+          if (!invNum) return;
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(invNum).then(() => {
+              if (typeof showToast === 'function') {
+                showToast('info', 'N° "' + invNum + '" copié dans le presse-papier — colle-le dans la popup Pennylane d\'une mission ci-dessus.', 6000);
+              }
+            }).catch(() => {
+              if (typeof showToast === 'function') showToast('error', 'Impossible de copier — copie manuellement : ' + invNum);
+            });
+          } else {
+            if (typeof showToast === 'function') showToast('info', 'N° à copier manuellement : ' + invNum);
+          }
+        });
+      });
     }
 
-    // --- Popup matching Notion ↔ Pennylane (Patch 2) ---
-    let factMatchingModalState = { missionNom: null, type: null, expectedCurrent: '' };
+    // Patch 2++ : parser une string Notion contenant 1+ n° factures séparés par ',', ';' ou newline.
+    // Dédoublonne (case-insensitive). Miroir client de parseLinkedInvoiceList côté backend.
+    function parseLinkedInvoicesFront(raw) {
+      if (!raw) return [];
+      const seen = new Set();
+      const result = [];
+      for (const part of String(raw).split(/[,;\n]/)) {
+        const trimmed = part.trim();
+        if (!trimmed) continue;
+        const key = trimmed.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        result.push(trimmed);
+      }
+      return result;
+    }
+
+    // --- Popup matching Notion ↔ Pennylane (Patch 2++ : multi-invoice) ---
+    // factMatchingModalState.currentList = liste actuelle (modifiable via checkboxes)
+    let factMatchingModalState = { missionNom: null, type: null, expectedCurrent: '', currentList: [] };
     async function openFactMatchingModal(missionNom, type) {
       const overlay = document.getElementById('factMatchingModalOverlay');
       const body = document.getElementById('factMatchingModalBody');
@@ -8304,87 +8430,152 @@
         const res = await fetch('/api/facturation-matching/suggest?mission=' + encodeURIComponent(missionNom) + '&type=' + encodeURIComponent(type));
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
-        factMatchingModalState = { missionNom, type, expectedCurrent: data.currentlyLinked || '' };
-        body.innerHTML = renderFactMatchingModalContent(data);
-        // Bind boutons
-        document.querySelectorAll('.fact-matching-pick').forEach(btn => {
-          btn.addEventListener('click', function() {
-            confirmFactMatching(this.getAttribute('data-invoice'));
-          });
-        });
-        const unlinkBtn = document.getElementById('factMatchingUnlink');
-        if (unlinkBtn) unlinkBtn.addEventListener('click', () => confirmFactMatching(''));
-        const manualForm = document.getElementById('factMatchingManualForm');
-        if (manualForm) manualForm.addEventListener('submit', (e) => {
-          e.preventDefault();
-          const val = document.getElementById('factMatchingManualInput').value.trim();
-          if (val) confirmFactMatching(val);
-        });
+        const currentList = (data.currentlyLinkedList && data.currentlyLinkedList.length)
+          ? data.currentlyLinkedList
+          : parseLinkedInvoicesFront(data.currentlyLinked);
+        factMatchingModalState = {
+          missionNom, type,
+          expectedCurrent: data.currentlyLinked || '',
+          currentList: currentList.slice(),
+          suggestions: data.suggestions || [],
+          mission: data.mission || {},
+        };
+        renderFactMatchingModalBody();
       } catch (err) {
         body.innerHTML = '<p style="color:var(--danger);font-size:0.85rem">Erreur chargement : ' + err.message + '</p>';
       }
     }
 
-    function renderFactMatchingModalContent(data) {
-      const m = data.mission || {};
-      const sug = data.suggestions || [];
-      const current = data.currentlyLinked || '';
-      const montantTarget = data.type === 'acompte'
-        ? (m.ca ? 'Attendu acompte (Notion HT) : ~ ' + formatEuro(m.ca * 0.5) + ' (50/50 par défaut)' : '')
-        : 'Attendu solde (Notion HT) : variable selon acompte forcé';
+    // Re-render le body de la popup à partir de factMatchingModalState (utile pour MAJ instant après check/uncheck/manuel)
+    function renderFactMatchingModalBody() {
+      const body = document.getElementById('factMatchingModalBody');
+      const { mission: m, suggestions: sug, currentList, type } = factMatchingModalState;
+      const montantTarget = type === 'acompte'
+        ? (m.ca ? 'Attendu acompte (Notion HT) : ~ ' + formatEuro(m.ca * 0.5) + ' (50/50 par défaut, peut différer si Acompte forcé)' : '')
+        : 'Attendu solde (Notion HT) : variable selon Acompte forcé';
 
+      // Header
       let html = '<div style="margin-bottom:0.8rem;padding:0.6rem;background:var(--bg-secondary);border-radius:6px;font-size:0.8rem">';
       html += '<div><b>Mission :</b> ' + (m.nom || '-') + '</div>';
       html += '<div><b>Client Notion :</b> ' + (m.client || '-') + '</div>';
       html += '<div><b>CA HT :</b> ' + formatEuro(m.ca || 0) + ' — ' + montantTarget + '</div>';
-      if (current) {
-        html += '<div style="margin-top:0.3rem;color:var(--success);font-weight:600">✅ Actuellement lié à : ' + current + '</div>';
+      if (currentList.length > 0) {
+        html += '<div style="margin-top:0.3rem;color:var(--success);font-weight:600">✅ ' + currentList.length + ' facture' + (currentList.length > 1 ? 's' : '') + ' liée' + (currentList.length > 1 ? 's' : '') + ' : ' + currentList.join(', ') + '</div>';
       } else {
-        html += '<div style="margin-top:0.3rem;color:var(--text-secondary)">Aucun lien Notion actuel.</div>';
+        html += '<div style="margin-top:0.3rem;color:var(--text-secondary)">Aucun lien Notion actuel. Coche les factures à lier ci-dessous.</div>';
       }
+      html += '<p style="margin-top:0.4rem;font-size:0.72rem;color:var(--text-secondary);font-style:italic">Plusieurs factures possibles (ex: solde payé en 2 virements). Coche celles qui composent ce ' + (type === 'acompte' ? 'acompte' : 'solde') + '.</p>';
       html += '</div>';
 
-      if (sug.length === 0) {
-        html += '<p style="font-size:0.85rem;color:var(--text-secondary)">Aucune proposition automatique (aucun candidat scoré > 0). Utilise le formulaire manuel ci-dessous.</p>';
-      } else {
+      // Liens actuels (toujours en haut, pré-cochés)
+      if (currentList.length > 0) {
+        html += '<div style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);margin-bottom:0.4rem">Liens actuels</div>';
+        html += '<div style="margin-bottom:0.8rem">';
+        for (const inv of currentList) {
+          html += '<label style="display:flex;align-items:center;gap:0.5rem;padding:0.3rem 0.5rem;border:1px solid var(--border);border-radius:4px;margin-bottom:0.3rem;cursor:pointer;font-size:0.8rem">';
+          html += '<input type="checkbox" class="fact-matching-checkbox" data-invoice="' + inv.replace(/"/g, '&quot;') + '" checked style="margin:0">';
+          html += '<span style="font-family:monospace">' + inv + '</span>';
+          html += '<span style="margin-left:auto;font-size:0.7rem;color:var(--text-secondary)">décocher pour retirer</span>';
+          html += '</label>';
+        }
+        html += '</div>';
+      }
+
+      // Propositions (top 5) — exclut celles déjà dans currentList
+      const sugFiltered = sug.filter(c => !currentList.some(cl => cl.toLowerCase() === (c.invoiceNumber || '').toLowerCase()));
+      if (sugFiltered.length === 0 && currentList.length === 0) {
+        html += '<p style="font-size:0.85rem;color:var(--text-secondary)">Aucune proposition automatique. Utilise la saisie manuelle ci-dessous.</p>';
+      } else if (sugFiltered.length > 0) {
         html += '<div style="font-size:0.75rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);margin-bottom:0.4rem">Propositions</div>';
-        html += '<table style="width:100%;font-size:0.78rem;border-collapse:collapse">';
-        html += '<thead><tr style="border-bottom:1px solid var(--border)"><th style="text-align:left;padding:0.3rem">N° facture</th><th style="text-align:left;padding:0.3rem">Client Penny</th><th style="text-align:right;padding:0.3rem">Montant</th><th style="text-align:left;padding:0.3rem">Date</th><th style="text-align:left;padding:0.3rem">Statut</th><th style="text-align:center;padding:0.3rem">Score</th><th></th></tr></thead><tbody>';
-        for (const c of sug) {
+        html += '<table style="width:100%;font-size:0.78rem;border-collapse:collapse;margin-bottom:0.8rem">';
+        html += '<thead><tr style="border-bottom:1px solid var(--border)"><th style="width:1%;padding:0.3rem"></th><th style="text-align:left;padding:0.3rem">N° facture</th><th style="text-align:left;padding:0.3rem">Client Penny</th><th style="text-align:right;padding:0.3rem">Montant</th><th style="text-align:left;padding:0.3rem">Date</th><th style="text-align:center;padding:0.3rem">Score</th></tr></thead><tbody>';
+        // Helper de troncature pour ne pas exploser la largeur (max 100 chars affichés, full text en tooltip)
+        const truncate = (s, n) => { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
+        const escAttr = (s) => String(s || '').replace(/"/g, '&quot;');
+        for (const c of sugFiltered) {
           const confidenceColor = c.score >= 70 ? 'var(--success)' : c.score >= 50 ? 'var(--warning)' : 'var(--danger)';
-          const isCurrent = c.invoiceNumber === current;
-          html += '<tr style="border-bottom:1px solid var(--border)' + (isCurrent ? ';background:rgba(15,123,108,0.08)' : '') + '">';
-          html += '<td style="padding:0.3rem;font-family:monospace">' + (c.invoiceNumber || '-') + (isCurrent ? ' ✅' : '') + '</td>';
+          html += '<tr style="border-bottom:1px solid var(--border)">';
+          html += '<td style="padding:0.3rem;text-align:center"><input type="checkbox" class="fact-matching-checkbox" data-invoice="' + (c.invoiceNumber || '').replace(/"/g, '&quot;') + '"></td>';
+          html += '<td style="padding:0.3rem;font-family:monospace">' + (c.invoiceNumber || '-') + '</td>';
           html += '<td style="padding:0.3rem;color:var(--text-secondary)">' + (c.customerName || '-') + '</td>';
           html += '<td style="padding:0.3rem;text-align:right">' + formatEuro(c.amount || 0) + '</td>';
           html += '<td style="padding:0.3rem;font-size:0.72rem;color:var(--text-secondary)">' + (c.date || '-') + '</td>';
-          html += '<td style="padding:0.3rem;font-size:0.72rem">' + (c.status || '-') + (c.paid ? ' (paid)' : '') + '</td>';
           html += '<td style="padding:0.3rem;text-align:center;color:' + confidenceColor + ';font-weight:600">' + c.score + '%</td>';
-          html += '<td style="padding:0.3rem"><button class="btn fact-matching-pick" data-invoice="' + (c.invoiceNumber || '').replace(/"/g, '&quot;') + '" style="font-size:0.72rem;padding:0.2rem 0.5rem" ' + (isCurrent ? 'disabled' : '') + '>' + (isCurrent ? 'Lié' : 'Choisir') + '</button></td>';
           html += '</tr>';
+          // Lignes sub-info (sujet PDF + description PDF) — affichées seulement si non vides, tronquées avec tooltip full
+          if (c.pdfInvoiceSubject) {
+            html += '<tr><td></td><td colspan="5" style="padding:0 0.3rem;font-size:0.72rem;color:var(--text)" title="' + escAttr(c.pdfInvoiceSubject) + '"><b style="color:var(--text-secondary);font-weight:600">Sujet :</b> ' + truncate(c.pdfInvoiceSubject, 100) + '</td></tr>';
+          }
+          if (c.pdfDescription) {
+            html += '<tr><td></td><td colspan="5" style="padding:0 0.3rem;font-size:0.72rem;color:var(--text-secondary)" title="' + escAttr(c.pdfDescription) + '"><b style="font-weight:600">Desc :</b> ' + truncate(c.pdfDescription, 100) + '</td></tr>';
+          }
           if (c.reasons) {
-            html += '<tr><td colspan="7" style="padding:0 0.3rem 0.4rem;font-size:0.7rem;color:var(--text-secondary);font-style:italic">Raisons : ' + c.reasons + '</td></tr>';
+            html += '<tr><td></td><td colspan="5" style="padding:0 0.3rem 0.4rem;font-size:0.7rem;color:var(--text-secondary);font-style:italic">Raisons : ' + c.reasons + '</td></tr>';
           }
         }
         html += '</tbody></table>';
       }
 
-      // Saisie manuelle + unlink
-      html += '<div style="margin-top:1rem;padding-top:0.8rem;border-top:1px solid var(--border)">';
-      html += '<form id="factMatchingManualForm" style="display:flex;gap:0.4rem;align-items:center;margin-bottom:0.5rem">';
-      html += '<label style="font-size:0.8rem;font-weight:600">Saisie manuelle :</label>';
+      // Saisie manuelle (ajout d'un n° hors propositions)
+      html += '<div style="padding:0.6rem;background:var(--bg-secondary);border-radius:6px;margin-bottom:0.8rem">';
+      html += '<form id="factMatchingManualForm" style="display:flex;gap:0.4rem;align-items:center">';
+      html += '<label style="font-size:0.78rem;font-weight:600">+ Ajouter manuellement :</label>';
       html += '<input type="text" id="factMatchingManualInput" placeholder="F-2025-XXX" style="flex:1;padding:0.3rem 0.5rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.8rem;background:var(--bg);color:var(--text);font-family:monospace">';
-      html += '<button type="submit" class="btn" style="font-size:0.75rem;padding:0.3rem 0.6rem">Enregistrer</button>';
+      html += '<button type="submit" class="btn" style="font-size:0.75rem;padding:0.3rem 0.6rem">+ Ajouter</button>';
       html += '</form>';
-      if (current) {
-        html += '<button id="factMatchingUnlink" class="btn" style="font-size:0.75rem;padding:0.3rem 0.6rem;color:var(--danger);font-weight:600">✗ Retirer le lien</button>';
-      }
       html += '</div>';
-      return html;
+
+      // Footer : actions
+      html += '<div style="display:flex;gap:0.5rem;justify-content:flex-end;padding-top:0.6rem;border-top:1px solid var(--border)">';
+      if (currentList.length > 0) {
+        html += '<button id="factMatchingUnlinkAll" class="btn" style="font-size:0.78rem;padding:0.4rem 0.8rem;color:var(--danger);font-weight:600">✗ Tout retirer</button>';
+      }
+      html += '<button id="factMatchingSave" class="btn" style="font-size:0.8rem;padding:0.4rem 1rem;background:var(--primary);color:white;font-weight:700;border:none">Enregistrer la sélection</button>';
+      html += '</div>';
+
+      body.innerHTML = html;
+
+      // Bind checkbox toggle (in-memory, pas d'écriture Notion avant Enregistrer)
+      body.querySelectorAll('.fact-matching-checkbox').forEach(cb => {
+        cb.addEventListener('change', function() {
+          const inv = this.getAttribute('data-invoice');
+          if (this.checked) {
+            if (!factMatchingModalState.currentList.some(c => c.toLowerCase() === inv.toLowerCase())) {
+              factMatchingModalState.currentList.push(inv);
+            }
+          } else {
+            factMatchingModalState.currentList = factMatchingModalState.currentList.filter(c => c.toLowerCase() !== inv.toLowerCase());
+          }
+          // Pas de re-render complet pour éviter de perdre le focus ; on laisse les checkboxes tels quels.
+        });
+      });
+
+      // Bind saisie manuelle (ajoute à la liste in-memory + re-render pour faire apparaître la ligne dans "Liens actuels")
+      const manualForm = body.querySelector('#factMatchingManualForm');
+      if (manualForm) manualForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const input = body.querySelector('#factMatchingManualInput');
+        const val = (input.value || '').trim();
+        if (!val) return;
+        if (!factMatchingModalState.currentList.some(c => c.toLowerCase() === val.toLowerCase())) {
+          factMatchingModalState.currentList.push(val);
+        }
+        input.value = '';
+        renderFactMatchingModalBody(); // re-render pour montrer le nouvel élément en "Liens actuels"
+      });
+
+      const unlinkAllBtn = body.querySelector('#factMatchingUnlinkAll');
+      if (unlinkAllBtn) unlinkAllBtn.addEventListener('click', function() {
+        factMatchingModalState.currentList = [];
+        renderFactMatchingModalBody();
+      });
+
+      const saveBtn = body.querySelector('#factMatchingSave');
+      if (saveBtn) saveBtn.addEventListener('click', () => confirmFactMatchingMulti());
     }
 
-    async function confirmFactMatching(invoiceNumber) {
-      const { missionNom, type, expectedCurrent } = factMatchingModalState;
+    async function confirmFactMatchingMulti(confirmDuplicates) {
+      const { missionNom, type, expectedCurrent, currentList } = factMatchingModalState;
       if (!missionNom || !type) return;
       const body = document.getElementById('factMatchingModalBody');
       const prev = body.innerHTML;
@@ -8393,28 +8584,56 @@
         const res = await fetch('/api/facturation-matching/link', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ missionNom, type, invoiceNumber, expectedCurrent }),
+          body: JSON.stringify({ missionNom, type, invoiceNumbers: currentList, expectedCurrent, confirmDuplicates: !!confirmDuplicates }),
         });
         const json = await res.json();
         if (!res.ok) {
+          if (json.code === 'INVALID_DUPLICATE') {
+            // Patch 2++++ : conflits détectés. Construire un message explicite et demander confirmation.
+            const conflictsList = (json.conflicts || []).map(c =>
+              '• ' + c.invoice + ' → déjà lié à "' + c.otherMission + '" / ' + c.otherType
+            ).join('\n');
+            const msg = 'Conflit(s) de matching détecté(s) :\n\n' + conflictsList +
+              '\n\nConfirmer remplacera ces liens — les factures seront RETIRÉES des autres emplacements avant d\'être liées ici.\n\nContinuer ?';
+            if (confirm(msg)) {
+              return confirmFactMatchingMulti(true); // re-call avec confirmDuplicates: true
+            } else {
+              body.innerHTML = prev;
+              return;
+            }
+          }
           if (json.code === 'NOTION_DRIFT') {
             alert('⚠️ Notion a été modifié depuis le chargement. Valeur actuelle : "' + (json.currentValue || '(vide)') + '". Ferme la popup, la page va recharger.');
+          } else if (json.code === 'DUPLICATE_CLEANUP_FAILED') {
+            alert('⚠️ Échec du retrait automatique : ' + (json.error || 'inconnue') + '\n\nLe lien cible n\'a pas été appliqué pour éviter un doublon. Vérifie l\'autre mission manuellement et réessaie.');
           } else {
             alert('Erreur : ' + (json.error || 'inconnue'));
           }
           body.innerHTML = prev;
           return;
         }
-        // Succès : optimistic update LOCAL + backup localStorage (survit hard refresh + eventual consistency)
-        const normalizedInvoice = (invoiceNumber || '').trim();
+        // Succès : optimistic update + localStorage (joined string)
+        const joined = currentList.join(', ');
+        const field = type === 'acompte' ? 'acompteLinked' : 'soldeLinked';
         if (factMatchingSummary[missionNom]) {
-          const field = type === 'acompte' ? 'acompteLinked' : 'soldeLinked';
-          factMatchingSummary[missionNom][field] = normalizedInvoice;
+          factMatchingSummary[missionNom][field] = joined;
+        } else {
+          // Crée l'entrée si manquante (cas rare : popup ouvert avant chargement summary)
+          factMatchingSummary[missionNom] = {
+            missionNom,
+            acompteLinked: type === 'acompte' ? joined : '',
+            soldeLinked:   type === 'solde'   ? joined : '',
+            acompteSuggest: null,
+            soldeSuggest: null,
+          };
         }
-        setMatchingLocalOverride(missionNom, type, normalizedInvoice);
+        setMatchingLocalOverride(missionNom, type, joined);
+        // Si auto-correction : showToast pour informer
+        if (json.cleanedFromOthers > 0) {
+          if (typeof showToast === 'function') showToast('info', json.cleanedFromOthers + ' lien(s) retiré(s) d\'autres missions pour éviter le doublon.');
+        }
         closeFactMatchingModal();
-        // Re-fetch en tâche de fond (le serveur peut renvoyer stale à cause de l'eventual consistency ;
-        // dans ce cas l'overlay localStorage rétablit la valeur dans loadFactMatchingSummary).
+        renderFactTable(); // feedback visuel immédiat (avant que refreshFactData ne complète)
         await refreshFactData();
       } catch (err) {
         alert('Erreur réseau : ' + err.message);
@@ -8424,7 +8643,7 @@
 
     function closeFactMatchingModal() {
       document.getElementById('factMatchingModalOverlay').classList.remove('active');
-      factMatchingModalState = { missionNom: null, type: null, expectedCurrent: '' };
+      factMatchingModalState = { missionNom: null, type: null, expectedCurrent: '', currentList: [] };
     }
 
     document.getElementById('factMatchingModalOverlay').addEventListener('click', function(e) {
@@ -8509,57 +8728,6 @@
       }
     }
 
-    // PoC : export CSV du matching Notion↔Pennylane↔Qonto (12 mois). À annoter à la main pour mesurer le taux d'erreur.
-    async function downloadMatchingCSV() {
-      const btn = document.getElementById('btnMatchingCsv');
-      const original = btn ? btn.innerHTML : '';
-      if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Calcul...'; }
-      try {
-        const res = await fetch('/api/debug/facturation-matching');
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const data = await res.json();
-        const rows = data.missions || [];
-        if (rows.length === 0) { alert('Aucune mission Notion trouvée.'); return; }
-        const cols = Object.keys(rows[0]);
-        const esc = (v) => {
-          if (v === null || v === undefined) return '';
-          let s = String(v).replace(/"/g, '""');
-          if (s.includes(',') || s.includes(';') || s.includes('"') || s.includes('\n')) s = '"' + s + '"';
-          return s;
-        };
-        const sep = ';'; // Excel FR friendly
-        let csv = cols.join(sep) + '\n';
-        for (const r of rows) csv += cols.map(c => esc(r[c])).join(sep) + '\n';
-        // Orphelins Pennylane en annexe (factures sans match confiant)
-        if (data.orphansPennylane && data.orphansPennylane.length > 0) {
-          csv += '\n'; csv += ['--- ORPHELINS PENNYLANE (aucun match Notion ≥ ' + data.scoreThreshold + ') ---'].join(sep) + '\n';
-          const oCols = Object.keys(data.orphansPennylane[0]);
-          csv += oCols.join(sep) + '\n';
-          for (const o of data.orphansPennylane) csv += oCols.map(c => esc(o[c])).join(sep) + '\n';
-        }
-        // Stats en header
-        const stats = data.stats || {};
-        const header = [
-          `# Audit matching Notion↔Pennylane↔Qonto — ${new Date().toISOString().slice(0, 10)}`,
-          `# Missions Notion: ${stats.missions || 0} | Factures Pennylane: ${stats.invoicesPennylane || 0} | Qonto credits 12mo: ${stats.qontoCredits12mo || 0} | Orphelins Pennylane: ${stats.orphansPennylane || 0}`,
-          `# Seuil match auto: ${data.scoreThreshold}/100. Annote la colonne "correction" (OK / NOK + raison) pour chaque ligne incorrecte.`,
-          '',
-        ].join('\n');
-        csv = header + csv;
-        // BOM UTF-8 pour Excel FR
-        const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `matching-audit-${new Date().toISOString().slice(0, 10)}.csv`;
-        document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      } catch (err) {
-        alert('Échec export matching : ' + err.message);
-      } finally {
-        if (btn) { btn.disabled = false; btn.innerHTML = original; }
-      }
-    }
 
     // Patch 3 : write-back statut Facturation → Notion.
     // Ordre officiel des 6 statuts Notion "Facturation" (cf. screenshot G1 user).
@@ -8749,12 +8917,20 @@
       saveMatchingLocalBackup(overrides);
     }
 
+    // Phase 1 : warnings cohérence + orphelins Pennylane (alimentés par /api/facturation-matching/suggest)
+    let factCoherenceWarnings = []; // [{ missionNom, type, code, message }]
+    let factPennylaneOrphans = [];  // [{ invoiceNumber, customerName, amount, date, dueDate, status, isLate }]
+    function getMissionWarnings(missionNom) {
+      return factCoherenceWarnings.filter(w => w.missionNom === missionNom);
+    }
     async function loadFactMatchingSummary() {
       try {
         // Cache-bust pour éviter toute mise en cache navigateur du résultat
         const res = await fetch('/api/facturation-matching/suggest?t=' + Date.now());
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
+        factCoherenceWarnings = data.notionWarnings || [];
+        factPennylaneOrphans = data.pennylaneOrphans || [];
         const serverSummary = {};
         for (const s of (data.summary || [])) {
           serverSummary[s.missionNom] = s;
@@ -8792,15 +8968,15 @@
       }
     }
 
+    // Patch 2++ : Sync button = forceSyncFactData (invalide cache + refresh).
+    // Auto-load (navigation / post-write) = refreshFactData (cache backend, bcp plus rapide).
+    async function forceSyncFactData() {
+      try { await fetch('/api/notion-missions/invalidate-cache', { method: 'POST' }); } catch (_) {}
+      await refreshFactData();
+    }
     async function refreshFactData() {
       try {
-        // Patch 2 : invalide le cache Notion + Pennylane côté serveur pour que le bouton Sync
-        // force un re-fetch immédiat (sinon le user doit attendre jusqu'à 5/10 min le TTL).
-        // Best-effort : si l'invalidation échoue (réseau, endpoint manquant), on continue quand même.
-        try {
-          await fetch('/api/notion-missions/invalidate-cache', { method: 'POST' });
-        } catch (_) { /* ignore */ }
-        // Cache-bust ?t= pour éviter toute mise en cache navigateur/proxy
+        // Cache-bust ?t= pour éviter toute mise en cache navigateur/proxy (le serveur sert depuis son cache mémoire)
         const [res, _] = await Promise.all([
           fetch('/api/facturation?t=' + Date.now()),
           loadFactOverrides(),
