@@ -9249,7 +9249,23 @@
       });
     }
 
-    function openTresoMoisDetailModal(monthIndex) {
+    // Cache des validations Plan TRE par mois (key: monthKey → { lineLabel: { paid, validated_at } })
+    let tresoValidationsCache = {};
+    async function loadTresoValidationsForMonth(mKey) {
+      try {
+        const res = await fetch('/api/plan-tre-validations?month=' + encodeURIComponent(mKey));
+        if (!res.ok) return {};
+        const arr = await res.json();
+        const map = {};
+        for (const v of arr) map[v.line_label] = v;
+        tresoValidationsCache[mKey] = map;
+        return map;
+      } catch (_) {
+        return tresoValidationsCache[mKey] || {};
+      }
+    }
+
+    async function openTresoMoisDetailModal(monthIndex) {
       if (!tresoData || !tresoData.previsionnel) return;
       const mois = tresoData.previsionnel[monthIndex];
       if (!mois) return;
@@ -9258,19 +9274,24 @@
       document.getElementById('tresoMoisDetailTitle').textContent = dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1);
 
       const mKey = mois.annee + '-' + String(mois.mois).padStart(2, '0');
-      // Mois courant = mois auquel les factures "late" des mois passés sont forcées par le backend.
-      // Calculé côté client à partir de la date du jour (doit matcher moisCourantKey du backend).
       const today = new Date();
       const moisCourantKey = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0');
       const isMoisCourant = mKey === moisCourantKey;
+      const isClos = mois.isClos === true;
 
-      // Factures du mois : dueDate dans le mois affiché, OU facture late forcée sur le mois courant.
+      // Show modal with loading first
+      document.getElementById('tresoMoisDetailBody').innerHTML = '<p style="padding:1rem;color:var(--text-secondary)">Chargement…</p>';
+      document.getElementById('tresoMoisDetailModalOverlay').classList.add('active');
+
+      // Charge validations Plan TRE en parallèle
+      const validations = await loadTresoValidationsForMonth(mKey);
+
+      // Factures du mois
       const factures = (tresoData.facturesImpayees || []).filter(f => {
         if (!f.dateEcheance) return false;
         const d = new Date(f.dateEcheance);
         const fMKey = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
         if (fMKey === mKey) return true;
-        // Retard forcé : facture late dont la dueDate est antérieure au mois courant → affichée dans la modale du mois courant
         if (isMoisCourant && f.status === 'late' && fMKey < moisCourantKey) return true;
         return false;
       });
@@ -9278,40 +9299,41 @@
       const facturesPrev = factures.filter(f => f.status === 'previsionnel');
       const facturesRetard = factures.filter(f => f.status === 'late');
 
-      // Régime d'affichage : mois clos = données Qonto réelles, mois en cours + futur = prévisionnel (CR_Prev + factures + pipeline)
-      const isClos = mois.isClos === true;
-
-      // Transactions Qonto du mois (utilisées uniquement pour les mois clos)
       const chargesDetail = (tresoData.chargesDetailParMois || {})[mKey] || {};
       const creditsDetail = (tresoData.creditsDetailParMois || {})[mKey] || [];
-
-      // Breakdown CR_Prev par catégorie (utilisé uniquement pour mois en cours + futurs)
-      const chargesGSheetDetail = mois.chargesGSheetDetail || {};
 
       const encEnvoye = mois.encaissementsEnvoye || 0;
       const encPrev = mois.encaissementsPrev || 0;
       const encRetard = mois.encaissementsRetard || 0;
-      // Redesign Patch 1 : encaissementsTRE source = 'notion' (Pennylane + Notion HT×1.2) pour mois non-clos,
-      // 'qonto' pour mois clos, 'ca-estimatif' pour scénario override. Le total encaissementsTRE inclut déjà
-      // encEnvoye + encPrev + encRetard (non additionné séparément, sinon double-compte).
       const encTRE = mois.encaissementsTRE || 0;
       const encTRESource = mois.encaissementsTRESource || 'notion';
-      const encTRELabel = encTRESource === 'qonto' ? 'Encaissements Qonto'
-                        : encTRESource === 'ca-estimatif' ? 'CA estimatif (scénario)'
-                        : 'CA prévisionnel (Notion+Pennylane TTC)';
-      const subvPlanTreVal       = mois.subvPlanTre       || 0;
-      const aidePlanTreVal       = mois.aidePlanTre       || 0;
-      const pretPlanTreVal       = mois.pretPlanTre       || 0;
-      const avancePlanTreVal     = mois.avancePlanTre     || 0;
-      const rembOpcoPlanTreVal   = mois.rembOpcoPlanTre   || 0;
-      const rembAvancePlanTreVal = mois.rembAvancePlanTre || 0;
+      const pennyPaidTotal = mois.pennylanePaidThisMonth || 0;
+      const pennyPaidDetail = mois.pennylanePaidDetailThisMonth || [];
+      const financementsDetail = mois.financementsDetail || [];
       const pipelineEnc = mois.pipelinePondereEncaissements || 0;
-      // Charges TTC Plan_TRE_Prév (mois non-clos) ou Qonto réel TTC (mois clos). decaissements = HT CR_Prev, à éviter pour le solde.
-      // Note : decaissementsTRE inclut déjà tvaReversementM1 + chargesFixesExtra (overrides). On ajoute ici rembAvance
-      // (remboursement avance remb. BPI) qui est un cash-out Plan_TRE_Prév séparé, aligné sur decForSolde.
+      const rembAvancePlanTreVal = mois.rembAvancePlanTre || 0;
+      const creditTvaVal = mois.creditTvaPlanTre || 0;
+      // Charges TTC Plan TRE Prév (mois non-clos) ou Qonto réel TTC (mois clos)
       const chargesTTC = (mois.decaissementsTRE || mois.decaissements || 0) + rembAvancePlanTreVal;
-      const decaissementsTRESource = mois.decaissementsTRESource || 'plan-tre';
-      const totalEnc = encTRE + subvPlanTreVal + aidePlanTreVal + pretPlanTreVal + avancePlanTreVal + rembOpcoPlanTreVal + pipelineEnc;
+      const chargesPlanTreDetail = mois.chargesPlanTreDetail || {};
+      const chargesPlanTreLines  = mois.chargesPlanTreLines  || {};
+
+      // Split financements en validés (déjà reçus, marqués par user) vs non-validés (prévi)
+      const finValides = [];
+      const finPrevi = [];
+      for (const f of financementsDetail) {
+        if (f.direction !== 'in') continue; // skip remb_avance qui est sortant
+        const v = validations[f.name];
+        if (v && v.paid) finValides.push(f);
+        else finPrevi.push(f);
+      }
+      const finValidesTotal = finValides.reduce((s, f) => s + f.amount, 0);
+      const finPreviTotal   = finPrevi.reduce((s, f) => s + f.amount, 0);
+
+      // Calcul du total encaissements (= encForSolde miroir backend)
+      // Pour clos : encTRE = Qonto réel (inclut tout). pennyPaid = 0 (déjà dans encTRE).
+      // Pour non-clos : encTRE = factures forecast. + pennyPaid + financements (validés et non) + creditTva + pipeline
+      const totalEnc = encTRE + pennyPaidTotal + finValidesTotal + finPreviTotal + creditTvaVal + pipelineEnc;
 
       // --- Soldes ---
       let html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.8rem;margin-bottom:1.2rem">';
@@ -9377,72 +9399,104 @@
         return t;
       }
 
-      // --- ENCAISSEMENTS ---
-      // Redesign Patch 1 :
-      // - Clos : une seule ligne "Encaissements Qonto" (source réelle) + detail transactions
-      // - Non-clos : décomposition CA par statut (envoyées Pennylane / prévi Notion / retard) qui somment à encTRE
-      //              + financements Plan_TRE_Prév ventilés en 5 lignes (subv, aide, remb_opco, pret, avance)
-      //              + pipeline pondéré (scénarios uniquement)
-      html += '<div style="font-weight:700;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-secondary);margin-bottom:0.4rem">Encaissements</div>';
+      // Helpers de rendu pour la nouvelle structure
+      function financementsTable(items, withDropdown) {
+        if (!items || items.length === 0) return '';
+        let t = '<table style="width:100%;border-collapse:collapse;font-size:0.78rem">';
+        for (const f of items) {
+          const catLabel = f.category === 'subvention' ? 'Subvention' : f.category === 'aide' ? 'Aide' : f.category === 'remb_opco' ? 'Remb. OPCO' : f.category === 'pret' ? 'Prêt' : f.category === 'avance' ? 'Avance' : f.category;
+          const ebeBadge = f.inEBE ? '<span style="font-size:0.65rem;color:var(--success);font-weight:600;margin-left:0.3rem">[EBE+]</span>' : '<span style="font-size:0.65rem;color:var(--text-secondary);font-weight:600;margin-left:0.3rem">[hors EBE]</span>';
+          t += '<tr style="border-bottom:1px solid var(--border)">';
+          t += '<td style="padding:0.35rem 0.6rem">' + (f.name || '-') + ebeBadge + '</td>';
+          t += '<td style="padding:0.35rem 0.5rem;color:var(--text-secondary);font-size:0.7rem">' + catLabel + '</td>';
+          t += '<td style="padding:0.35rem 0.6rem;text-align:right;font-weight:600">' + formatEuro(f.amount) + '</td>';
+          if (withDropdown) {
+            const validations = tresoValidationsCache[mKey] || {};
+            const isValid = !!(validations[f.name] && validations[f.name].paid);
+            t += '<td style="padding:0.35rem 0.6rem">';
+            t += '<select class="treso-fin-validation" data-line-label="' + (f.name || '').replace(/"/g, '&quot;') + '" data-category="' + f.category + '" data-month="' + mKey + '" style="font-size:0.7rem;padding:0.15rem 0.3rem;border:1px solid var(--border);border-radius:4px">';
+            t += '<option value="previ"' + (!isValid ? ' selected' : '') + '>Prévi</option>';
+            t += '<option value="paid"' + (isValid ? ' selected' : '') + '>Reçu ✓</option>';
+            t += '</select>';
+            t += '</td>';
+          }
+          t += '</tr>';
+        }
+        t += '</table>';
+        return t;
+      }
 
-      if (encTRESource === 'qonto') {
-        // Clos : encTRE = cash-in Qonto réel. Détail = transactions créditrices du mois.
-        if (encTRE > 0) html += accordion(encTRELabel, encTRE, 'rgba(15,123,108,0.7)', '&#9679;', txTable(creditsDetail));
+      // ========== ENCAISSEMENTS ==========
+      // Pour CLOS : seulement Qonto réel (encTRE = Qonto cash-in)
+      // Pour NON-CLOS : Réels validés (Pennylane paid + finValides) + Prévisionnels (factures + finPrevi + pipeline)
+
+      if (isClos) {
+        // Mois clos : tout est réel via Qonto
+        html += '<div style="font-weight:700;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-secondary);margin-bottom:0.4rem">Encaissements (Qonto réel)</div>';
+        if (encTRE > 0) html += accordion('Encaissements Qonto', encTRE, 'rgba(15,123,108,0.7)', '&#9679;', txTable(creditsDetail));
+        if (rembAvancePlanTreVal === 0 && finValides.length > 0) {
+          // unlikely for clos but handle
+          html += accordion('Financements validés (Plan TRE)', finValidesTotal, 'rgba(15,123,108,0.55)', '&#9679;', financementsTable(finValides, false));
+        }
       } else if (encTRESource === 'ca-estimatif') {
-        // Scénario CA estimatif : montant saisi par l'user, pas de détail
-        if (encTRE > 0) html += accordion(encTRELabel, encTRE, 'rgba(15,123,108,0.7)', '&#9679;', '');
+        html += '<div style="font-weight:700;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-secondary);margin-bottom:0.4rem">Encaissements</div>';
+        html += accordion('CA estimatif (scénario)', encTRE, 'rgba(15,123,108,0.7)', '&#9679;', '');
+        if (finValidesTotal > 0) html += accordion('Financements Reçus (validés)', finValidesTotal, 'rgba(15,123,108,0.55)', '&#9679;', financementsTable(finValides, true));
+        if (finPreviTotal > 0)   html += accordion('Financements prévisionnels', finPreviTotal, 'rgba(80,80,140,0.45)', '&#9679;', financementsTable(finPrevi, true));
       } else {
-        // Non-clos : décomposition du CA prévisionnel par statut (Notion+Pennylane TTC)
+        // === NON-CLOS : Réels validés + Prévisionnels ===
+        const hasReels = pennyPaidTotal > 0 || finValidesTotal > 0;
+        if (hasReels) {
+          html += '<div style="font-weight:700;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--success);margin-bottom:0.4rem">✓ Encaissements réels validés ce mois</div>';
+          if (pennyPaidTotal > 0) {
+            const pennyTable = pennyPaidDetail.map(p => '<tr style="border-bottom:1px solid var(--border)"><td style="padding:0.3rem 0.6rem;font-family:monospace">' + (p.invoiceNumber || '-') + '</td><td style="padding:0.3rem 0.5rem;color:var(--text-secondary)">' + (p.customerName || '-') + '</td><td style="padding:0.3rem 0.5rem;font-size:0.7rem">' + (p.paidAt ? new Date(p.paidAt).toLocaleDateString('fr-FR') : '-') + '</td><td style="padding:0.3rem 0.6rem;text-align:right;font-weight:600">' + formatEuro(p.amount) + '</td></tr>').join('');
+            html += accordion('Factures Pennylane payées (auto)', pennyPaidTotal, 'rgba(15,123,108,0.7)', '&#9679;', '<table style="width:100%;border-collapse:collapse;font-size:0.78rem"><thead><tr style="border-bottom:1px solid var(--border)"><th style="text-align:left;padding:0.3rem">N°</th><th style="text-align:left;padding:0.3rem">Client</th><th style="text-align:left;padding:0.3rem">Payé le</th><th style="text-align:right;padding:0.3rem">Montant</th></tr></thead><tbody>' + pennyTable + '</tbody></table>');
+          }
+          if (finValidesTotal > 0) {
+            html += accordion('Subv / Aides / Financements Reçus', finValidesTotal, 'rgba(15,123,108,0.6)', '&#9679;', financementsTable(finValides, true));
+          }
+        }
+
+        html += '<div style="font-weight:700;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-secondary);margin:0.8rem 0 0.4rem">Encaissements prévisionnels</div>';
         if (encEnvoye > 0) {
           html += accordion('Factures envoyées (Pennylane TTC)', encEnvoye, 'rgba(15,123,108,0.4)', '&#9675;', factureTable(facturesEnvoyees));
         }
         if (encPrev > 0) {
-          html += accordion('Factures prévisionnelles (Notion TTC, HT×1.2)', encPrev, 'rgba(105,64,165,0.6)', '&#9675;', factureTable(facturesPrev));
+          html += accordion('Factures prévi à émettre (Notion HT×1.2)', encPrev, 'rgba(105,64,165,0.6)', '&#9675;', factureTable(facturesPrev));
         }
         if (encRetard > 0) {
-          html += accordion('En retard', encRetard, 'rgba(224,62,62,0.7)', '&#9679;', factureTable(facturesRetard));
+          html += accordion('Factures en retard', encRetard, 'rgba(224,62,62,0.7)', '&#9679;', factureTable(facturesRetard));
+        }
+        if (finPreviTotal > 0) {
+          html += accordion('Subv / Aides / Financements prévisionnels', finPreviTotal, 'rgba(80,80,140,0.45)', '&#9679;', financementsTable(finPrevi, true));
+        }
+        if (creditTvaVal > 0) {
+          html += accordion('Crédit de TVA (remboursement TVA)', creditTvaVal, 'rgba(15,123,108,0.45)', '&#9679;', '');
+        }
+        if (pipelineEnc > 0) {
+          html += accordion('Pipeline pondéré (scénario)', pipelineEnc, 'rgba(105,64,165,0.45)', '&#9650;', '');
         }
       }
 
-      // Financements Plan_TRE_Prév — uniquement pour mois non-clos (pour clos, déjà dans Qonto cash-in)
-      if (subvPlanTreVal > 0)       html += accordion('Subvention d\'exploitation (Plan TRE)', subvPlanTreVal, 'rgba(15,123,108,0.55)', '&#9679;', '');
-      if (aidePlanTreVal > 0)       html += accordion('Aide d\'exploitation (Plan TRE)', aidePlanTreVal, 'rgba(15,123,108,0.55)', '&#9679;', '');
-      if (rembOpcoPlanTreVal > 0)   html += accordion('Remb. OPCO (produit d\'exploitation)', rembOpcoPlanTreVal, 'rgba(15,123,108,0.55)', '&#9679;', '');
-      if (pretPlanTreVal > 0)       html += accordion('Prêt bancaire (hors EBE)', pretPlanTreVal, 'rgba(80,80,140,0.45)', '&#9679;', '');
-      if (avancePlanTreVal > 0)     html += accordion('Avance remboursable BPI (hors EBE)', avancePlanTreVal, 'rgba(80,80,140,0.45)', '&#9679;', '');
-
-      if (pipelineEnc > 0) {
-        // Détail par deal du pipeline non accessible par mois côté modale ; on affiche le total uniquement.
-        html += accordion('Pipeline pondéré', pipelineEnc, 'rgba(105,64,165,0.45)', '&#9650;', '');
-      }
-
-      // --- REVENUS EXCEPTIONNELS ---
+      // Revenus exceptionnels (scénarios)
       const revExc = mois.revenusExceptionnels || 0;
       const revDetail = mois.revenusExceptionnelsDetail || [];
       if (revExc > 0) {
-        let revHtml = '<table style="width:100%;border-collapse:collapse;font-size:0.8rem">';
-        for (const r of revDetail) {
-          revHtml += '<tr style="border-bottom:1px solid var(--border)">';
-          revHtml += '<td style="padding:0.3rem 0.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px">' + r.libelle + '</td>';
-          revHtml += '<td style="padding:0.3rem 0.8rem;text-align:right;font-weight:600;white-space:nowrap">' + formatEuro(r.montant) + '</td>';
-          revHtml += '</tr>';
-        }
-        revHtml += '</table>';
-        html += accordion('Revenus exceptionnels', revExc, 'rgba(105,64,165,0.7)', '&#9733;', revHtml);
+        const revHtml = '<table style="width:100%;border-collapse:collapse;font-size:0.78rem">' + revDetail.map(r =>
+          '<tr style="border-bottom:1px solid var(--border)"><td style="padding:0.3rem 0.8rem">' + r.libelle + '</td><td style="padding:0.3rem 0.8rem;text-align:right;font-weight:600">' + formatEuro(r.montant) + '</td></tr>'
+        ).join('') + '</table>';
+        html += accordion('Revenus exceptionnels (scénario)', revExc, 'rgba(105,64,165,0.7)', '&#9733;', revHtml);
       }
 
       const totalEncAvecRev = totalEnc + revExc;
 
-      // Total encaissements
       html += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0.8rem;font-weight:700;font-size:0.85rem;margin-bottom:1rem">';
       html += '<span>Total encaissements</span>';
       html += '<span style="color:var(--success, #0f7b6c)">' + formatEuro(totalEncAvecRev) + '</span></div>';
 
-      // --- CHARGES ---
-      // Mois clos : transactions Qonto réelles groupées par catégorie bancaire (TTC, somme = chargesTTC).
-      // Mois en cours + futurs : total TTC = Plan_TRE_Prév (decaissementsTRE). Détail CR_Prev affiché à titre
-      // indicatif (HT, somme ≠ TTC) — on ajoute une note pour clarifier l'écart.
-      const chargesLabel = isClos ? 'Charges (Qonto réel)' : 'Charges prévisionnelles (Plan TRE TTC)';
+      // ========== DÉCAISSEMENTS ==========
+      // Clos : Qonto réel par catégorie. Non-clos : Plan TRE Prév TTC avec breakdown TTC.
+      const chargesLabel = isClos ? 'Charges (Qonto réel)' : 'Charges prévisionnelles (Plan TRE Prév TTC)';
       html += '<div style="font-weight:700;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-secondary);margin-bottom:0.4rem">' + chargesLabel + '</div>';
 
       if (isClos) {
@@ -9461,28 +9515,46 @@
           html += accordion('Charges Qonto', chargesTTC, 'rgba(217,115,13,0.7)', '&#9679;', '');
         }
       } else {
-        // Non-clos : Plan TRE TTC opérationnel + Remb. Avance (hors EBE) si présent
-        const chargesOps = (mois.decaissementsTRE || 0);
-        html += accordion('Charges opérationnelles (Plan TRE TTC)', chargesOps, 'rgba(217,115,13,0.7)', '&#9679;', '');
+        // Non-clos : breakdown TTC par grands postes (Plan TRE Prév) — détail ligne par ligne en accordéon
+        const planCats = Object.keys(chargesPlanTreDetail).sort((a, b) => chargesPlanTreDetail[b] - chargesPlanTreDetail[a]);
+        if (planCats.length > 0) {
+          for (const cat of planCats) {
+            const linesObj = chargesPlanTreLines[cat] || {};
+            let lineTable = '';
+            const lineEntries = Object.entries(linesObj).filter(([, v]) => Math.abs(v) > 0.01).sort((a, b) => b[1] - a[1]);
+            if (lineEntries.length > 0) {
+              lineTable = '<table style="width:100%;font-size:0.78rem;border-collapse:collapse">';
+              for (const [lineName, val] of lineEntries) {
+                lineTable += '<tr style="border-bottom:1px solid var(--border)">';
+                lineTable += '<td style="padding:0.3rem 0.6rem">' + lineName + '</td>';
+                lineTable += '<td style="padding:0.3rem 0.6rem;text-align:right;font-weight:600;white-space:nowrap">' + formatEuro(val) + '</td>';
+                lineTable += '</tr>';
+              }
+              lineTable += '</table>';
+            }
+            html += accordion(cat, chargesPlanTreDetail[cat], 'rgba(217,115,13,0.7)', '&#9679;', lineTable);
+          }
+          // Sanity check : afficher écart si breakdown ne matche pas le total
+          const breakdownSum = planCats.reduce((s, c) => s + chargesPlanTreDetail[c], 0);
+          const decaissementsTreOnly = (mois.decaissementsTRE || 0);
+          const ecart = decaissementsTreOnly - breakdownSum;
+          if (Math.abs(ecart) > 1) {
+            html += '<div style="font-size:0.7rem;color:var(--text-secondary);font-style:italic;margin:0.3rem 0.4rem">Note : écart de ' + formatEuro(ecart) + ' entre total Plan TRE TTC et somme du détail (lignes non catégorisées dans le sheet).</div>';
+          }
+        } else {
+          const chargesOps = (mois.decaissementsTRE || 0);
+          html += accordion('Charges opérationnelles (Plan TRE TTC)', chargesOps, 'rgba(217,115,13,0.7)', '&#9679;', '');
+        }
         if (rembAvancePlanTreVal > 0) {
           html += accordion('Remb. Avance remboursable BPI (hors EBE)', rembAvancePlanTreVal, 'rgba(80,80,140,0.45)', '&#9679;', '');
         }
-        // Détail CR_Prev (HT) — informatif uniquement, somme ≠ TTC
-        const gsheetCats = Object.keys(chargesGSheetDetail).sort((a, b) => chargesGSheetDetail[b] - chargesGSheetDetail[a]);
-        if (gsheetCats.length > 0) {
-          html += '<div style="font-size:0.7rem;color:var(--text-secondary);margin:0.6rem 0 0.3rem;font-style:italic">Détail CR_Prev (HT, à titre indicatif)</div>';
-          for (const cat of gsheetCats) {
-            html += accordion(cat, chargesGSheetDetail[cat], 'rgba(217,115,13,0.45)', '&#9675;', '');
-          }
-        }
       }
 
-      // Total charges (TTC)
       html += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0.8rem;font-weight:700;font-size:0.85rem;margin-bottom:1rem">';
-      html += '<span>Total charges</span>';
+      html += '<span>Total décaissements</span>';
       html += '<span style="color:var(--warning, #d9730d)">-' + formatEuro(chargesTTC) + '</span></div>';
 
-      // --- VARIATION ---
+      // ========== VARIATION ==========
       const variation = totalEncAvecRev - chargesTTC;
       const varColor = variation >= 0 ? 'var(--success, #0f7b6c)' : 'var(--danger, #e03e3e)';
       html += '<div style="display:flex;justify-content:space-between;padding:0.6rem 0.8rem;font-weight:700;font-size:0.95rem;border-top:2px solid var(--text);margin-top:0.5rem">';
@@ -9490,7 +9562,34 @@
       html += '<span style="color:' + varColor + '">' + (variation >= 0 ? '+' : '') + formatEuro(variation) + '</span></div>';
 
       document.getElementById('tresoMoisDetailBody').innerHTML = html;
-      document.getElementById('tresoMoisDetailModalOverlay').classList.add('active');
+
+      // Bind les dropdowns de validation Plan TRE
+      document.querySelectorAll('.treso-fin-validation').forEach(sel => {
+        sel.addEventListener('change', async function() {
+          const lineLabel = this.getAttribute('data-line-label');
+          const lineCategory = this.getAttribute('data-category');
+          const monthKey = this.getAttribute('data-month');
+          const newPaid = this.value === 'paid';
+          this.disabled = true;
+          try {
+            const res = await fetch('/api/plan-tre-validations', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ lineLabel, lineCategory, monthKey, paid: newPaid }),
+            });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            // Update cache + re-render
+            if (!tresoValidationsCache[monthKey]) tresoValidationsCache[monthKey] = {};
+            if (newPaid) tresoValidationsCache[monthKey][lineLabel] = { line_label: lineLabel, paid: true };
+            else delete tresoValidationsCache[monthKey][lineLabel];
+            // Re-open modal to refresh display
+            openTresoMoisDetailModal(monthIndex);
+          } catch (err) {
+            alert('Erreur sauvegarde validation : ' + err.message);
+            this.disabled = false;
+          }
+        });
+      });
     }
 
     function toggleTresoAccordion(id, headerEl) {

@@ -2678,6 +2678,50 @@ app.delete('/api/facture-overrides', async (req, res) => {
   }
 });
 
+// --- Plan TRE Prév : validations manuelles (subv/aide/prêt/avance/remb_opco/remb_avance reçus) ---
+// Stockage Supabase (pas de matching auto Qonto pour ces flux). Bascule visuelle prévi → réel validé.
+app.get('/api/plan-tre-validations', async (req, res) => {
+  try {
+    const { month } = req.query;
+    let query = supabase.from('plan_tre_validations').select('*');
+    if (month) query = query.eq('month_key', month);
+    const { data, error } = await query;
+    if (error) throw new Error(error.message);
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/plan-tre-validations', async (req, res) => {
+  try {
+    const { lineLabel, lineCategory, monthKey, paid } = req.body || {};
+    if (!lineLabel || !lineCategory || !monthKey) return res.status(400).json({ error: 'lineLabel, lineCategory, monthKey requis' });
+    const validCategories = ['subvention', 'aide', 'pret', 'avance', 'remb_opco', 'remb_avance'];
+    if (!validCategories.includes(lineCategory)) return res.status(400).json({ error: 'lineCategory invalide' });
+    if (paid === false) {
+      // Unmark : delete row
+      const { error } = await supabase.from('plan_tre_validations').delete()
+        .eq('line_label', lineLabel).eq('month_key', monthKey);
+      if (error) throw new Error(error.message);
+      return res.json({ ok: true, deleted: true });
+    }
+    const row = {
+      line_label: lineLabel,
+      line_category: lineCategory,
+      month_key: monthKey,
+      paid: true,
+      validated_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const { error } = await supabase.from('plan_tre_validations').upsert(row, { onConflict: 'line_label,month_key' });
+    if (error) throw new Error(error.message);
+    res.json({ ok: true, validated: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Extract customer name from invoice label (format: "Facture CLIENT_NAME - INVOICE_NUMBER (label généré)")
 function extractCustomerFromLabel(label) {
   if (!label) return '';
@@ -2720,6 +2764,7 @@ async function fetchCustomerInvoices() {
     dueDate: inv.deadline || null,
     status: inv.status || 'unknown', // paid, upcoming, late, incomplete, cancelled
     paid: inv.paid || false,
+    paidAt: inv.paid_at || null, // date de paiement réel (Pennylane)
     invoiceNumber: inv.invoice_number || '',
     // Patch 2+ : signaux supplémentaires pour améliorer le matching (type acompte/solde + nom client plus propre)
     filename: inv.filename || '',
@@ -3335,9 +3380,32 @@ function parsePlanTresorerie(csvText) {
   const chargesVariablesData = [];
   const financementsData = [];
 
+  // Phase 2 UX : breakdown auto par catégorie cm.X (Option 2 user)
+  // Structure : chargesParCategorieByMonth[mKey] = { 'Frais de personnel': { total: X, lines: [{ name, value }] }, ... }
+  const chargesParCategorieByMonth = {};
+  // Crédit de TVA = encaissement (cash-in) → exposé séparément
+  const creditTvaByMonth = {};
+
+  // Top-level section headers à ignorer / qui resettent le contexte cm.
+  // - Lignes contenant "(ne rien écrire" : "Chiffre d'affaires (...)", "Charges Fixes (...)", "Charges Variables (...)"
+  // - "Budget de TVA" : début section tracking TVA (TVA collectée/déductible/Solde) — tout ce qui suit jusqu'à
+  //   prochain cm.X est à skipper côté charges (juste du tracking, pas du cash)
+  const SKIP_AFTER_LABELS = new Set(['Budget de TVA']);
+  let currentSection = null;
+  let skipMode = false;
+
+  function pushChargeLine(monthIdx, mKey, sectionName, lineName, value) {
+    if (!chargesParCategorieByMonth[mKey]) chargesParCategorieByMonth[mKey] = {};
+    if (!chargesParCategorieByMonth[mKey][sectionName]) {
+      chargesParCategorieByMonth[mKey][sectionName] = { total: 0, lines: {} };
+    }
+    chargesParCategorieByMonth[mKey][sectionName].total += value;
+    const existing = chargesParCategorieByMonth[mKey][sectionName].lines[lineName] || 0;
+    chargesParCategorieByMonth[mKey][sectionName].lines[lineName] = existing + value;
+  }
+
   for (let r = headerRow + 1; r < rows.length; r++) {
     const row = rows[r];
-    // Try col 2, then col 3 for the label
     let label = (row[2] || '').trim();
     if (!label) label = (row[3] || '').trim();
     if (!label && row[1]) label = (row[1] || '').trim();
@@ -3345,15 +3413,10 @@ function parsePlanTresorerie(csvText) {
 
     const values = months.map(m => parseFrenchNumber(row[m.col] || ''));
 
-    if (keyLines[label]) {
-      lines[keyLines[label]] = values;
-    }
-    if (logiciels.includes(label)) {
-      logicielsData.push({ name: label, values });
-    }
-    if (chargesVariablesItems.includes(label)) {
-      chargesVariablesData.push({ name: label, values });
-    }
+    // === Logique existante (rétrocompat) ===
+    if (keyLines[label]) lines[keyLines[label]] = values;
+    if (logiciels.includes(label)) logicielsData.push({ name: label, values });
+    if (chargesVariablesItems.includes(label)) chargesVariablesData.push({ name: label, values });
     const matchedFin = financementPatterns.find(p => p.pattern.test(label));
     if (matchedFin) {
       financementsData.push({
@@ -3364,9 +3427,67 @@ function parsePlanTresorerie(csvText) {
         values,
       });
     }
+
+    // === Phase 2 UX : détection automatique sections cm.X ===
+    // Détection en-tête section "cm.X" → switch contexte courant
+    if (label.startsWith('cm.')) {
+      currentSection = label.replace(/^cm\./, '').trim();
+      skipMode = false;
+      continue;
+    }
+    // Top-level header ("Charges Fixes (ne rien écrire...)", "Budget de TVA", etc.) → reset / skip
+    if (/\(ne rien écrire/i.test(label)) {
+      currentSection = null;
+      skipMode = false;
+      continue;
+    }
+    if (SKIP_AFTER_LABELS.has(label)) {
+      currentSection = null;
+      skipMode = true; // skip TVA collectée, TVA déductible, Solde de TVA qui suivent
+      continue;
+    }
+    if (skipMode) continue;
+
+    // Cas spéciaux TVA
+    if (label === 'Crédit de TVA') {
+      // ENCAISSEMENT TVA (remboursement) — exposé séparément
+      months.forEach((m, i) => {
+        const key = `${m.year}-${String(m.month).padStart(2, '0')}`;
+        creditTvaByMonth[key] = (creditTvaByMonth[key] || 0) + (values[i] || 0);
+      });
+      continue;
+    }
+    if (label === 'Décaissement de TVA') {
+      // Catégorie dédiée "TVA" dans les charges
+      months.forEach((m, i) => {
+        const v = values[i] || 0;
+        if (v === 0) return;
+        const key = `${m.year}-${String(m.month).padStart(2, '0')}`;
+        pushChargeLine(i, key, 'TVA', label, v);
+      });
+      continue;
+    }
+
+    // Skip les lignes financements (subv/aide/prêt/avance/remb_opco/remb_avance) — déjà capturées plus haut, hors charges
+    if (matchedFin) continue;
+
+    // Skip les lignes encaissement CA (Enc. Acompte / Enc. Solde)
+    if (/^Enc\./i.test(label)) continue;
+
+    // Skip totaux / soldes / variations
+    if (/^Total\b/i.test(label) || /^Trésorerie\b/i.test(label) || /^Variation\b/i.test(label)) continue;
+
+    // Sub-catégorie d'une section cm.X courante → ajout au breakdown
+    if (currentSection) {
+      months.forEach((m, i) => {
+        const v = values[i] || 0;
+        if (v === 0) return;
+        const key = `${m.year}-${String(m.month).padStart(2, '0')}`;
+        pushChargeLine(i, key, currentSection, label, v);
+      });
+    }
   }
 
-  // Compute totals for logiciels
   const logicielsTotal = months.map((_, i) =>
     logicielsData.reduce((sum, item) => sum + item.values[i], 0)
   );
@@ -3378,6 +3499,9 @@ function parsePlanTresorerie(csvText) {
     logicielsTotal,
     chargesVariables: chargesVariablesData,
     financements: financementsData,
+    // Phase 2 UX : breakdown auto par catégorie cm.X + cas spéciaux TVA
+    chargesParCategorieByMonth,
+    creditTvaByMonth,
   };
 }
 
@@ -3761,6 +3885,28 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
     });
   }
 
+  // Phase 2 UX : Pennylane factures DÉJÀ PAYÉES par mois (paid_at). Permet d'afficher dans modale
+  // Tréso un section "Réels validés" + d'inclure dans encForSolde du mois courant pour solde précis.
+  const pennylanePaidByMonth = {};
+  const pennylanePaidDetailByMonth = {};
+  for (const inv of (customerInvoices || [])) {
+    if (!inv.paid) continue;
+    const paidDateStr = inv.paidAt || inv.dueDate || inv.date;
+    if (!paidDateStr) continue;
+    const dPaid = new Date(paidDateStr);
+    if (isNaN(dPaid.getTime())) continue;
+    const mKeyPaid = `${dPaid.getFullYear()}-${String(dPaid.getMonth() + 1).padStart(2, '0')}`;
+    pennylanePaidByMonth[mKeyPaid] = (pennylanePaidByMonth[mKeyPaid] || 0) + (inv.amount || 0);
+    if (!pennylanePaidDetailByMonth[mKeyPaid]) pennylanePaidDetailByMonth[mKeyPaid] = [];
+    pennylanePaidDetailByMonth[mKeyPaid].push({
+      invoiceNumber: inv.invoiceNumber,
+      customerName: inv.customerName,
+      amount: inv.amount,
+      paidAt: inv.paidAt,
+      date: inv.date,
+    });
+  }
+
   facturesAEncaisser.sort((a, b) => {
     if (a.previsionnel !== b.previsionnel) return a.previsionnel ? 1 : -1;
     return new Date(a.dateEcheance || '2099-12-31') - new Date(b.dateEcheance || '2099-12-31');
@@ -3933,6 +4079,10 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
   const rembOpcoPlanTreByMonth = {};
   const rembAvancePlanTreByMonth = {};
   const planTreDecByMonth = {};
+  const planTreDecDetailByMonth = {}; // { mKey: { 'Frais de personnel': X, 'Logiciels': Y, ... } } — totaux par catégorie
+  const planTreDecLinesByMonth = {};  // { mKey: { 'Frais de personnel': { 'Salaires nets': X, 'Primes': Y } } } — lignes individuelles par catégorie
+  const financementsDetailByMonth = {}; // { mKey: [{ name, category, direction, inEBE, amount }] } — pour modale validation
+  const creditTvaByMonth_local = {};   // { mKey: amount } — Crédit de TVA = encaissement TVA
   if (includeGSheet) {
     try {
       const planData = await fetchAndParsePlanTresorerie();
@@ -3949,6 +4099,15 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
             case 'remb_opco':     rembOpcoPlanTreByMonth[key]   = (rembOpcoPlanTreByMonth[key]   || 0) + val; break;
             case 'remb_avance':   rembAvancePlanTreByMonth[key] = (rembAvancePlanTreByMonth[key] || 0) + val; break;
           }
+          // Détail ligne par ligne pour modale validation
+          if (!financementsDetailByMonth[key]) financementsDetailByMonth[key] = [];
+          financementsDetailByMonth[key].push({
+            name: fin.name,
+            category: fin.category,
+            direction: fin.direction,
+            inEBE: fin.inEBE,
+            amount: Math.round(val),
+          });
         });
       }
       // Charges TTC par mois (ligne "Total décaissements (€TTC)")
@@ -3958,6 +4117,33 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
           const totalDec = (planData.lines.totalDecaissements || [])[i] || 0;
           planTreDecByMonth[key] = Math.round(totalDec);
         });
+      }
+      // Phase 2 UX : breakdown charges TTC AUTO (Option 2 user) depuis parser parsePlanTresorerie.
+      // Source : planData.chargesParCategorieByMonth (auto-détection cm.X dans le sheet).
+      // Avantage : nouvelles lignes ajoutées dans le sheet apparaissent sans changement de code.
+      if (planData.chargesParCategorieByMonth) {
+        for (const [mKey, sections] of Object.entries(planData.chargesParCategorieByMonth)) {
+          const totals = {};
+          const lineDetails = {};
+          for (const [secName, secData] of Object.entries(sections)) {
+            if (Math.abs(secData.total) > 0.01) {
+              totals[secName] = Math.round(secData.total);
+              // Garde aussi le détail ligne par ligne (pour expansion accordéon)
+              lineDetails[secName] = {};
+              for (const [lineName, lineVal] of Object.entries(secData.lines)) {
+                if (Math.abs(lineVal) > 0.01) lineDetails[secName][lineName] = Math.round(lineVal);
+              }
+            }
+          }
+          planTreDecDetailByMonth[mKey] = totals;
+          planTreDecLinesByMonth[mKey] = lineDetails;
+        }
+      }
+      // Crédit de TVA (encaissement TVA) — exposé séparément côté encaissements
+      if (planData.creditTvaByMonth) {
+        for (const [mKey, val] of Object.entries(planData.creditTvaByMonth)) {
+          creditTvaByMonth_local[mKey] = Math.round(val);
+        }
       }
     } catch (err) {
       console.warn('Plan_TRE_Prév fetch échoué dans buildPrevisionnel:', err.message);
@@ -4210,6 +4396,18 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
       decaissementsTRE: decaissementsTREBase + chargesFixesExtra + masseDelta + tvaReversementM1,
       decaissementsTREBase,
       decaissementsTRESource, // 'plan-tre' | 'qonto'
+      // Phase 2 UX : breakdown TTC par grands postes Plan TRE Prév (utilisé par modale Tréso au lieu du HT CR_Prév)
+      chargesPlanTreDetail: planTreDecDetailByMonth[mKey] || {},
+      // Phase 2 UX : Pennylane factures payées dans ce mois (paid_at). Pour clos = 0 (Qonto réel les inclut déjà
+      // via encaissementsTRE). Pour non-clos (current month) = montant à ajouter à encForSolde pour solde précis.
+      pennylanePaidThisMonth: isClos ? 0 : Math.round(pennylanePaidByMonth[mKey] || 0),
+      pennylanePaidDetailThisMonth: isClos ? [] : (pennylanePaidDetailByMonth[mKey] || []),
+      // Détail individuel des lignes Plan TRE Prév (pour dropdown validation dans modale Tréso)
+      financementsDetail: financementsDetailByMonth[mKey] || [],
+      // Phase 2 UX : Crédit de TVA = encaissement (remboursement TVA), exposé séparément
+      creditTvaPlanTre: showPlanTreFinancements ? Math.round(creditTvaByMonth_local[mKey] || 0) : 0,
+      // Détail lignes par catégorie (pour expansion accordéon dans modale)
+      chargesPlanTreLines: planTreDecLinesByMonth[mKey] || {},
       // Phase E complète : info TVA overrides du mois + reversement M+1 (delta overrides, pas baseline)
       tvaCollectee: tvaCollecteeMois,
       tvaDeductible: tvaDeductibleMois,
@@ -4237,9 +4435,13 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
     // pour non-clos, encaissementsTRE = encaissementsFactures (mêmes valeurs TTC).
     // Ajout des nouveaux financements Plan_TRE_Prév : pret + avance + remb_opco (cash-in non-clos),
     // remb_avance (cash-out non-clos).
+    // Phase 2 UX : Pennylane paid this month = factures Pennylane déjà payées en réel ce mois.
+    // Pour clos = 0 (déjà inclus dans encaissementsTRE Qonto). Pour non-clos = à ajouter pour solde précis.
     const encForSolde = (mois.encaissementsTRE || 0)
+                      + (mois.pennylanePaidThisMonth || 0)
                       + (mois.subvPlanTre || 0) + (mois.aidePlanTre || 0)
                       + (mois.pretPlanTre || 0) + (mois.avancePlanTre || 0) + (mois.rembOpcoPlanTre || 0)
+                      + (mois.creditTvaPlanTre || 0)
                       + (mois.revenusExceptionnels || 0)
                       + (mois.fictionalEncaissements || 0) + (mois.revenusRecurrents || 0)
                       + (mois.subventionsAnnoncees || 0) + (mois.pipelinePondereEncaissements || 0);
