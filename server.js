@@ -2748,29 +2748,100 @@ let customerInvoicesCache = null;
 let customerInvoicesCacheTime = 0;
 const CUSTOMER_INVOICES_CACHE_TTL = 10 * 60 * 1000;
 
+// Concurrency-limited map (Pennylane = 25 req/5s, on reste a 3 paralleles pour marge).
+async function pLimitMap(items, limit, fn) {
+  const results = new Array(items.length);
+  let i = 0;
+  async function worker() {
+    while (i < items.length) {
+      const idx = i++;
+      try { results[idx] = await fn(items[idx], idx); }
+      catch (err) { results[idx] = { __error: err.message }; }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+// Source de verite paid_at : Pennylane v2 ne fournit ni paid_at sur la facture, ni /payments
+// (toujours vide). Mais le sous-endpoint /matched_transactions retourne la transaction Qonto
+// matchee, avec sa vraie date. C'est la date du virement reel.
+// Retry avec backoff exponentiel sur erreurs (rate limit Pennylane = 25 req/5s).
+async function fetchInvoicePaidAtFromMatchedTx(invoiceId, attempt = 0) {
+  const MAX_ATTEMPTS = 4;
+  try {
+    const result = await pennylaneRequest(`/api/external/v2/customer_invoices/${invoiceId}/matched_transactions`);
+    const items = Array.isArray(result) ? result : (result.items || []);
+    if (!items.length) return null;
+    let latest = null;
+    for (const tx of items) {
+      const dateStr = tx.date;
+      if (!dateStr) continue;
+      if (!latest || new Date(dateStr) > new Date(latest)) latest = dateStr;
+    }
+    return latest;
+  } catch (err) {
+    // Retry sur rate limit ou erreur reseau, jusqu'a 4 tentatives (1s, 2s, 4s)
+    if (attempt < MAX_ATTEMPTS - 1) {
+      const delayMs = 1000 * Math.pow(2, attempt);
+      await new Promise(r => setTimeout(r, delayMs));
+      return fetchInvoicePaidAtFromMatchedTx(invoiceId, attempt + 1);
+    }
+    console.warn(`[fetchInvoicePaidAtFromMatchedTx] ${invoiceId} apres ${MAX_ATTEMPTS} tentatives: ${err.message}`);
+    return null;
+  }
+}
+
 async function fetchCustomerInvoices() {
   if (customerInvoicesCache && (Date.now() - customerInvoicesCacheTime) < CUSTOMER_INVOICES_CACHE_TTL) {
     return customerInvoicesCache;
   }
   const invoices = await pennylaneFetchAll('/customer_invoices', {});
-  const mapped = invoices.map(inv => ({
-    id: inv.id,
-    label: inv.label || '',
-    customerName: extractCustomerFromLabel(inv.label),
-    amount: parseFloat(inv.amount) || 0,
-    remainingAmount: parseFloat(inv.remaining_amount_with_tax) || 0,
-    currency: inv.currency || 'EUR',
-    date: inv.date || null,
-    dueDate: inv.deadline || null,
-    status: inv.status || 'unknown', // paid, upcoming, late, incomplete, cancelled
-    paid: inv.paid || false,
-    paidAt: inv.paid_at || null, // date de paiement réel (Pennylane)
-    invoiceNumber: inv.invoice_number || '',
-    // Patch 2+ : signaux supplémentaires pour améliorer le matching (type acompte/solde + nom client plus propre)
-    filename: inv.filename || '',
-    pdfDescription: inv.pdf_description || '',
-    pdfInvoiceSubject: inv.pdf_invoice_subject || '',
-  }));
+  const mapped = invoices.map(inv => {
+    // paidAt initial : fallback sur updated_at pour les factures status=paid (proxy imparfait
+    // mais sans appel API). Sera override ci-dessous via matched_transactions (date reelle du virement).
+    const isRealPaid = inv.paid && inv.status === 'paid';
+    const paidAtFallback = isRealPaid && inv.updated_at ? inv.updated_at.split('T')[0] : null;
+    return {
+      id: inv.id,
+      label: inv.label || '',
+      customerName: extractCustomerFromLabel(inv.label),
+      amount: parseFloat(inv.amount) || 0,
+      remainingAmount: parseFloat(inv.remaining_amount_with_tax) || 0,
+      currency: inv.currency || 'EUR',
+      date: inv.date || null,
+      dueDate: inv.deadline || null,
+      status: inv.status || 'unknown', // paid, upcoming, late, incomplete, cancelled, archived
+      paid: inv.paid || false,
+      paidAt: paidAtFallback,
+      invoiceNumber: inv.invoice_number || '',
+      // Patch 2+ : signaux supplémentaires pour améliorer le matching (type acompte/solde + nom client plus propre)
+      filename: inv.filename || '',
+      pdfDescription: inv.pdf_description || '',
+      pdfInvoiceSubject: inv.pdf_invoice_subject || '',
+    };
+  });
+
+  // Enrichissement paidAt via matched_transactions (vraie date du virement Qonto).
+  // ~150 fetchs en parallele 3 par 3, ~10-15s sur cache miss, absorbed par cache 10min.
+  const toEnrich = mapped.filter(m => m.paid && m.status === 'paid');
+  if (toEnrich.length > 0) {
+    const t0 = Date.now();
+    const txDates = await pLimitMap(toEnrich, 3, m => fetchInvoicePaidAtFromMatchedTx(m.id));
+    let overridden = 0;
+    let kept = 0;
+    for (let i = 0; i < toEnrich.length; i++) {
+      const txDate = txDates[i];
+      if (txDate && typeof txDate === 'string' && !txDate.__error) {
+        toEnrich[i].paidAt = txDate; // override avec la date reelle
+        overridden++;
+      } else {
+        kept++; // garde le fallback updated_at
+      }
+    }
+    console.log(`[fetchCustomerInvoices] paidAt enrichi: ${overridden} via matched_tx, ${kept} fallback updated_at, en ${Date.now() - t0}ms`);
+  }
+
   customerInvoicesCache = mapped;
   customerInvoicesCacheTime = Date.now();
   return mapped;
@@ -3890,10 +3961,14 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
   const pennylanePaidByMonth = {};
   const pennylanePaidDetailByMonth = {};
   for (const inv of (customerInvoices || [])) {
+    // Filtre : booleen `inv.paid` Pennylane (source de verite "money in"), MAIS exclut explicitement
+    // les avoirs/annulees (status cancelled/incomplete) et exige un `paidAt` reel pour eviter de
+    // bucketer dans un mois futur via dueDate/date. Montant > 0 pour ecarter avoirs zero/negatifs.
     if (!inv.paid) continue;
-    const paidDateStr = inv.paidAt || inv.dueDate || inv.date;
-    if (!paidDateStr) continue;
-    const dPaid = new Date(paidDateStr);
+    if (inv.status === 'cancelled' || inv.status === 'incomplete') continue;
+    if (!inv.paidAt) continue;
+    if ((inv.amount || 0) <= 0) continue;
+    const dPaid = new Date(inv.paidAt);
     if (isNaN(dPaid.getTime())) continue;
     const mKeyPaid = `${dPaid.getFullYear()}-${String(dPaid.getMonth() + 1).padStart(2, '0')}`;
     pennylanePaidByMonth[mKeyPaid] = (pennylanePaidByMonth[mKeyPaid] || 0) + (inv.amount || 0);
