@@ -4410,6 +4410,17 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
       // Scénario CA estimatif : remplace le baseline Notion (user-entered, opaque HT/TTC)
       encaissementsTRE = caMensuelHT;
       encaissementsTRESource = 'ca-estimatif';
+    } else if (isCaSourceCRPrev) {
+      // Mode Scenarios : la vue P&L (encaissementsTotal) utilise CR_Prev via encBase, donc on a
+      // zero les factures Pennylane/Notion plus haut pour eviter le doublon en P&L. Mais pour la
+      // vue TRE (soldeFin du graphe), on a besoin de la vraie projection cash : memes factures
+      // TTC que la page Treso (Pennylane non-payees + Notion previ HT*1.2). On recalcule donc
+      // depuis les maps source qui ne sont jamais zero'd.
+      const factEnvoyeTRE  = Math.round(encaissementsEnvoye[mKey]  || 0);
+      const factPrevTRE    = Math.round(encaissementsPrev[mKey]    || 0);
+      const factRetardTRE  = Math.round(encaissementsRetard[mKey]  || 0);
+      encaissementsTRE = factEnvoyeTRE + factPrevTRE + factRetardTRE;
+      encaissementsTRESource = 'notion';
     } else {
       // Somme des factures TTC attendues ce mois (Pennylane non-payées + Notion prévi HT×1.2)
       encaissementsTRE = Math.round(encaissementsFactures || 0);
