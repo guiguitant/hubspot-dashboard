@@ -451,6 +451,20 @@
       margin-top: 0.2rem;
     }
 
+    /* Badge HT/TTC inline dans les labels KPI : sobre, en lettres capitales, fond gris légèrement teinté */
+    .kpi-unit {
+      display: inline-block;
+      margin-left: 0.35rem;
+      padding: 0.05rem 0.35rem;
+      font-size: 0.6rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      color: var(--text-secondary);
+      background: rgba(15,15,15,0.06);
+      border-radius: 3px;
+      vertical-align: middle;
+    }
+
     .kpi-clickable { cursor: pointer; position: relative; }
     .kpi-clickable:hover { opacity: 0.85; }
     .kpi-clickable.kpi-active {
@@ -2631,22 +2645,22 @@
 
     <div class="kpi-row" id="factKpis">
       <div class="kpi-block kpi-clickable" id="factKpiBlockCA" onclick="toggleKpiFilter('ca2026')">
-        <div class="kpi-label">CA 2026</div>
+        <div class="kpi-label">CA 2026 <span class="kpi-unit">HT</span></div>
         <div class="kpi-value" id="factKpiCA">--</div>
         <div class="kpi-sub" id="factKpiCASub"></div>
       </div>
       <div class="kpi-block kpi-clickable" id="factKpiBlockMontant" onclick="toggleKpiFilter('aFacturer')">
-        <div class="kpi-label">Montant a facturer</div>
+        <div class="kpi-label">Montant a facturer <span class="kpi-unit">HT</span></div>
         <div class="kpi-value" id="factKpiMontant">--</div>
         <div class="kpi-sub" id="factKpiMontantSub"></div>
       </div>
       <div class="kpi-block kpi-clickable" id="factKpiBlockEnvoye" onclick="toggleKpiFilter('envoye')">
-        <div class="kpi-label">En attente paiement</div>
+        <div class="kpi-label">En attente paiement <span class="kpi-unit">HT</span></div>
         <div class="kpi-value" id="factKpiEnvoye">--</div>
         <div class="kpi-sub" id="factKpiEnvoyeSub"></div>
       </div>
       <div class="kpi-block kpi-clickable" id="factKpiBlockImpaye" onclick="toggleKpiFilter('impaye2025')">
-        <div class="kpi-label">Impaye 2025</div>
+        <div class="kpi-label">Impaye 2025 <span class="kpi-unit">HT</span></div>
         <div class="kpi-value" id="factKpiImpaye2025">--</div>
         <div class="kpi-sub" id="factKpiImpaye2025Sub"></div>
       </div>
@@ -2780,22 +2794,22 @@
     <!-- KPIs -->
     <div class="kpi-row" id="tresoKpis">
       <div class="kpi-block">
-        <div class="kpi-label">Solde bancaire</div>
+        <div class="kpi-label">Solde bancaire <span class="kpi-unit">TTC</span></div>
         <div class="kpi-value" id="tresoKpiTreso">--</div>
         <div class="kpi-sub" id="tresoKpiTresoSub"></div>
       </div>
       <div class="kpi-block" onclick="openFacturesImpayeesModal()" style="cursor:pointer">
-        <div class="kpi-label">A encaisser</div>
+        <div class="kpi-label">A encaisser <span class="kpi-unit">TTC</span></div>
         <div class="kpi-value" id="tresoKpiAEncaisser">--</div>
         <div class="kpi-sub" id="tresoKpiAEncaisserSub"></div>
       </div>
       <div class="kpi-block">
-        <div class="kpi-label">Charges du mois</div>
+        <div class="kpi-label">Charges du mois <span class="kpi-unit">TTC</span></div>
         <div class="kpi-value" id="tresoKpiCharges">--</div>
         <div class="kpi-sub" id="tresoKpiChargesSub"></div>
       </div>
       <div class="kpi-block">
-        <div class="kpi-label">Pipeline pondere</div>
+        <div class="kpi-label">Pipeline pondere <span class="kpi-unit">HT</span></div>
         <div class="kpi-value" id="tresoKpiPipeline">--</div>
         <div class="kpi-sub" id="tresoKpiPipelineSub"></div>
       </div>
@@ -3794,27 +3808,19 @@
 
   <!-- Modal Factures Impayees -->
   <div class="modal-overlay" id="facturesImpayeesModalOverlay">
-    <div class="modal">
-      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
-        <h2>Factures a encaisser</h2>
-        <span id="facturesImpayeesModalTotal" style="font-size:0.85rem;font-weight:600;color:var(--primary)"></span>
+    <div class="modal" style="max-width:1100px;width:96%">
+      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;gap:1rem">
+        <div>
+          <h2 style="margin:0">Factures à encaisser</h2>
+          <div style="font-size:0.72rem;color:var(--text-secondary);margin-top:0.25rem;line-height:1.4">
+            Sources : <span style="color:var(--primary);font-weight:600">Pennylane</span> = facture émise (montant TTC réel) ·
+            <span style="color:#6940a5;font-weight:600">Notion</span> = mission non facturée (estimation HT × 1.2) ·
+            <span style="color:var(--warning, #d9730d);font-weight:600">Pennylane orphan</span> = facture sans mission Notion liée
+          </div>
+        </div>
+        <span id="facturesImpayeesModalTotal" style="font-size:0.95rem;font-weight:700;color:var(--primary);white-space:nowrap"></span>
       </div>
-      <div class="modal-body" style="padding:0">
-        <table style="width:100%;font-size:0.85rem">
-          <thead>
-            <tr>
-              <th style="text-align:left;padding:0.5rem 1rem">Client</th>
-              <th style="text-align:left;padding:0.5rem 1rem">Mission</th>
-              <th style="text-align:center;padding:0.5rem 1rem">Type</th>
-              <th style="text-align:right;padding:0.5rem 1rem">Montant</th>
-              <th style="text-align:right;padding:0.5rem 1rem">Emission</th>
-              <th style="text-align:right;padding:0.5rem 1rem">Echeance (J+45)</th>
-              <th style="text-align:center;padding:0.5rem 1rem">Statut</th>
-            </tr>
-          </thead>
-          <tbody id="facturesImpayeesModalBody"></tbody>
-        </table>
-      </div>
+      <div class="modal-body" id="facturesImpayeesModalBody" style="padding:0.5rem 1.25rem 1.25rem"></div>
       <div class="modal-footer">
         <button class="btn" onclick="closeFacturesImpayeesModal()">Fermer</button>
       </div>
@@ -8132,7 +8138,7 @@
 
       document.getElementById('factKpiCA').textContent = formatEuro(caTotal);
       document.getElementById('factKpiCASub').textContent = nbFactures + ' factures';
-      document.querySelector('#factKpiBlockCA .kpi-label').textContent = periodLabel;
+      document.querySelector('#factKpiBlockCA .kpi-label').innerHTML = periodLabel + ' <span class="kpi-unit">HT</span>';
       document.getElementById('factKpiMontant').textContent = formatEuro(montantAFacturer);
       document.getElementById('factKpiMontantSub').textContent = aEnvoyer.length + ' a envoyer, ' + enAttente.length + ' en attente';
       document.getElementById('factKpiEnvoye').textContent = formatEuro(montantEnvoye);
@@ -8147,7 +8153,7 @@
       const montantImpayesAnciens = impayesAnciens.reduce((s, l) => s + l.montant, 0);
       document.getElementById('factKpiImpaye2025').textContent = formatEuro(montantImpayesAnciens);
       document.getElementById('factKpiImpaye2025Sub').textContent = impayesAnciens.length + ' facture' + (impayesAnciens.length > 1 ? 's' : '');
-      document.querySelector('#factKpiBlockImpaye .kpi-label').textContent = 'Impayes < ' + currentYear;
+      document.querySelector('#factKpiBlockImpaye .kpi-label').innerHTML = 'Impayes < ' + currentYear + ' <span class="kpi-unit">HT</span>';
     }
 
     function getInvoiceYear(l) {
@@ -8634,6 +8640,44 @@
         }
         closeFactMatchingModal();
         renderFactTable(); // feedback visuel immédiat (avant que refreshFactData ne complète)
+
+        // Proposition de mise à jour du statut Notion si l'état Pennylane des factures liées
+        // ne correspond pas au statut actuel (ex: facture payée mais statut "Envoyé").
+        // Cas légitimes ignorés par le serveur : multi-facture partiel, statut déjà cohérent.
+        if (json.suggestedStatus) {
+          const ss = json.suggestedStatus;
+          const msg = '✅ Lien enregistré.\n\n' + ss.reason
+                    + '\n\nLe statut Notion actuel est "' + (ss.currentStatus || '(vide)') + '".'
+                    + '\n\nVeux-tu le mettre à jour vers "' + ss.expectedNotionStatus + '" ?';
+          if (confirm(msg)) {
+            try {
+              const r2 = await fetch('/api/facturation-matching/set-status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  missionNom,
+                  rowType: ss.rowType,
+                  newStatus: ss.newStatus,
+                  oneShot: !!ss.oneShot,
+                  expectedCurrent: ss.currentStatus,
+                }),
+              });
+              const j2 = await r2.json();
+              if (!r2.ok) {
+                if (j2.code === 'NOTION_DRIFT') {
+                  alert('⚠️ Notion a été modifié entre-temps. Statut actuel : "' + (j2.currentValue || '(vide)') + '". Recharge et réessaie.');
+                } else {
+                  alert('Erreur mise à jour statut : ' + (j2.error || 'inconnue'));
+                }
+              } else if (typeof showToast === 'function') {
+                showToast('success', 'Statut Notion mis à jour : ' + ss.expectedNotionStatus);
+              }
+            } catch (e) {
+              alert('Erreur réseau lors de la mise à jour du statut : ' + e.message);
+            }
+          }
+        }
+
         await refreshFactData();
       } catch (err) {
         alert('Erreur réseau : ' + err.message);
@@ -9066,48 +9110,118 @@
       document.getElementById('tresoKpiPipelineSub').textContent = nbDeals + ' deal' + (nbDeals > 1 ? 's' : '') + ' HubSpot';
     }
 
-    function openFacturesImpayeesModal() {
-      if (!tresoData || !tresoData.facturesImpayees) return;
-      const factures = tresoData.facturesImpayees;
-      const envoyees = factures.filter(f => !f.previsionnel);
-      const previsionnelles = factures.filter(f => f.previsionnel);
-      const totalEnv = envoyees.reduce((s, f) => s + (f.montant || 0), 0);
-      const totalPrev = previsionnelles.reduce((s, f) => s + (f.montant || 0), 0);
-      document.getElementById('facturesImpayeesModalTotal').textContent = 'Total : ' + formatEuro(totalEnv + totalPrev);
-      const tbody = document.getElementById('facturesImpayeesModalBody');
+    // Helpers partagés par les modales factures (à encaisser + en retard).
+    // Source backend (f.source) :
+    //   'pennylane-linked' = facture émise dans Pennylane et liée à mission Notion
+    //   'pennylane-orphan' = facture émise dans Pennylane sans mission Notion liée
+    //   'notion'           = mission Notion non encore facturée (estimation HT × 1.2)
+    function _sourceBadge(f) {
+      const src = f.source || (f.previsionnel ? 'notion' : 'pennylane-linked');
+      const conf = {
+        'pennylane-linked': { label: 'Pennylane',        color: 'var(--primary)' },
+        'pennylane-orphan': { label: 'Pennylane orphan', color: 'var(--warning, #d9730d)' },
+        'notion':           { label: 'Notion (prévi)',   color: '#6940a5' },
+      }[src] || { label: src, color: 'var(--text-secondary)' };
+      return '<span style="display:inline-block;padding:0.15rem 0.5rem;font-size:0.68rem;font-weight:600;border-radius:4px;background:' + conf.color + '20;color:' + conf.color + ';white-space:nowrap">' + conf.label + '</span>';
+    }
+    function _statusCell(status) {
+      const labels = { late: 'En retard', upcoming: 'À venir', previsionnel: 'Prévisionnel' };
+      const colors = { late: 'var(--danger)', upcoming: 'var(--warning, #f59e0b)', previsionnel: '#888' };
+      const lbl = labels[status] || status || '-';
+      const col = colors[status] || '';
+      return '<span style="color:' + col + ';font-weight:600">' + lbl + '</span>';
+    }
+    // Rebucket aligné serveur : late + previsionnel avec dueDate passée → mois courant.
+    function _factureMKey(f, moisCourantKey) {
+      if (!f.dateEcheance) return null;
+      const d = new Date(f.dateEcheance);
+      let mKey = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+      if (mKey < moisCourantKey && (f.status === 'late' || f.status === 'previsionnel' || f.previsionnel)) {
+        mKey = moisCourantKey;
+      }
+      return mKey;
+    }
+    function _formatMonthLabel(mKey) {
+      const [y, m] = mKey.split('-').map(Number);
+      const d = new Date(y, m - 1);
+      const lbl = d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+      return lbl.charAt(0).toUpperCase() + lbl.slice(1);
+    }
+    // Rendu d'une table de factures groupée par mois. `factures` : array de factures déjà filtrées.
+    function _renderFacturesGroupedByMonth(factures, emptyMessage) {
+      if (!factures || factures.length === 0) {
+        return '<p style="padding:2rem;text-align:center;color:var(--text-secondary)">' + (emptyMessage || 'Aucune facture') + '</p>';
+      }
+      const today = new Date();
+      const moisCourantKey = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0');
 
-      function renderRow(f) {
-        const emission = f.dateEmission ? new Date(f.dateEmission).toLocaleDateString('fr-FR') : '-';
-        const echeance = f.dateEcheance ? new Date(f.dateEcheance).toLocaleDateString('fr-FR') : '-';
-        const statusLabels = { late: 'En retard', upcoming: 'A venir', previsionnel: 'Previsionnel' };
-        const statusColors = { late: 'var(--danger)', upcoming: 'var(--warning, #f59e0b)', previsionnel: '#888' };
-        const statusLabel = statusLabels[f.status] || f.status || '-';
-        const statusColor = statusColors[f.status] || '';
-        const rowOpacity = f.previsionnel ? 'opacity:0.65;' : '';
-        return '<tr style="' + rowOpacity + '">' +
-          '<td style="padding:0.5rem 1rem">' + (f.client || '-') + '</td>' +
-          '<td style="padding:0.5rem 1rem">' + (f.mission || '-') + '</td>' +
-          '<td style="text-align:center;padding:0.5rem 1rem">' + (f.type || '-') + '</td>' +
-          '<td style="text-align:right;padding:0.5rem 1rem;font-weight:600">' + formatEuro(f.montant || 0) + '</td>' +
-          '<td style="text-align:right;padding:0.5rem 1rem">' + emission + (f.previsionnel ? ' (est.)' : '') + '</td>' +
-          '<td style="text-align:right;padding:0.5rem 1rem">' + echeance + '</td>' +
-          '<td style="text-align:center;padding:0.5rem 1rem;color:' + statusColor + ';font-weight:600">' + statusLabel + '</td>' +
-          '</tr>';
+      // Group par mKey rebucketé
+      const groups = {};
+      for (const f of factures) {
+        const mKey = _factureMKey(f, moisCourantKey);
+        if (!mKey) continue;
+        if (!groups[mKey]) groups[mKey] = [];
+        groups[mKey].push(f);
+      }
+      const sortedKeys = Object.keys(groups).sort();
+      // Tri intra-mois : late d'abord, puis upcoming, puis previsionnel ; secondaire = échéance ASC
+      const statusOrder = { late: 0, upcoming: 1, previsionnel: 2 };
+      for (const k of sortedKeys) {
+        groups[k].sort((a, b) => {
+          const sa = statusOrder[a.status] ?? 9;
+          const sb = statusOrder[b.status] ?? 9;
+          if (sa !== sb) return sa - sb;
+          return new Date(a.dateEcheance || '2099-12-31') - new Date(b.dateEcheance || '2099-12-31');
+        });
       }
 
       let html = '';
-      if (envoyees.length > 0) {
-        html += '<tr><td colspan="7" style="padding:0.6rem 1rem;font-weight:700;background:var(--bg-secondary, #f5f5f5);border-bottom:2px solid var(--primary)">Factures envoyees — ' + formatEuro(totalEnv) + '</td></tr>';
-        html += envoyees.map(renderRow).join('');
+      for (const mKey of sortedKeys) {
+        const items = groups[mKey];
+        const subtotal = items.reduce((s, f) => s + (f.montant || 0), 0);
+        const isCurrent = mKey === moisCourantKey;
+        const monthLabel = _formatMonthLabel(mKey) + (isCurrent ? ' (mois courant)' : '');
+        html += '<div style="margin-top:1.25rem;margin-bottom:0.5rem;display:flex;justify-content:space-between;align-items:baseline;border-bottom:2px solid var(--primary);padding-bottom:0.4rem">';
+        html +=   '<span style="font-weight:700;font-size:0.9rem;text-transform:uppercase;letter-spacing:0.04em">' + monthLabel + '</span>';
+        html +=   '<span style="font-weight:700;font-size:0.9rem;color:var(--primary)">' + items.length + ' facture' + (items.length > 1 ? 's' : '') + ' · ' + formatEuro(subtotal) + '</span>';
+        html += '</div>';
+        html += '<table style="width:100%;border-collapse:collapse;font-size:0.85rem">';
+        html += '<thead><tr style="border-bottom:1px solid var(--border);color:var(--text-secondary);font-size:0.72rem;text-transform:uppercase;letter-spacing:0.05em">';
+        html +=   '<th style="text-align:left;padding:0.5rem 0.75rem;font-weight:600">Client</th>';
+        html +=   '<th style="text-align:left;padding:0.5rem 0.75rem;font-weight:600">Mission</th>';
+        html +=   '<th style="text-align:center;padding:0.5rem 0.75rem;font-weight:600">Type</th>';
+        html +=   '<th style="text-align:left;padding:0.5rem 0.75rem;font-weight:600">Source</th>';
+        html +=   '<th style="text-align:right;padding:0.5rem 0.75rem;font-weight:600">Montant</th>';
+        html +=   '<th style="text-align:right;padding:0.5rem 0.75rem;font-weight:600">Émission</th>';
+        html +=   '<th style="text-align:right;padding:0.5rem 0.75rem;font-weight:600">Échéance (J+45)</th>';
+        html +=   '<th style="text-align:center;padding:0.5rem 0.75rem;font-weight:600">Statut</th>';
+        html += '</tr></thead><tbody>';
+        for (const f of items) {
+          const emission = f.dateEmission ? new Date(f.dateEmission).toLocaleDateString('fr-FR') : '-';
+          const echeance = f.dateEcheance ? new Date(f.dateEcheance).toLocaleDateString('fr-FR') : '-';
+          const rowStyle = f.previsionnel ? 'opacity:0.7;' : '';
+          html += '<tr style="border-bottom:1px solid var(--border);' + rowStyle + '">';
+          html +=   '<td style="padding:0.6rem 0.75rem">' + (f.client || '-') + '</td>';
+          html +=   '<td style="padding:0.6rem 0.75rem;color:var(--text-secondary)">' + (f.mission || '-') + '</td>';
+          html +=   '<td style="text-align:center;padding:0.6rem 0.75rem">' + (f.type || '-') + '</td>';
+          html +=   '<td style="padding:0.6rem 0.75rem">' + _sourceBadge(f) + '</td>';
+          html +=   '<td style="text-align:right;padding:0.6rem 0.75rem;font-weight:700;white-space:nowrap">' + formatEuro(f.montant || 0) + '</td>';
+          html +=   '<td style="text-align:right;padding:0.6rem 0.75rem;color:var(--text-secondary);white-space:nowrap">' + emission + (f.previsionnel ? ' <span style="font-size:0.7rem">(est.)</span>' : '') + '</td>';
+          html +=   '<td style="text-align:right;padding:0.6rem 0.75rem;color:var(--text-secondary);white-space:nowrap">' + echeance + '</td>';
+          html +=   '<td style="text-align:center;padding:0.6rem 0.75rem">' + _statusCell(f.status) + '</td>';
+          html += '</tr>';
+        }
+        html += '</tbody></table>';
       }
-      if (previsionnelles.length > 0) {
-        html += '<tr><td colspan="7" style="padding:0.6rem 1rem;font-weight:700;background:var(--bg-secondary, #f5f5f5);border-bottom:2px solid #888">Factures previsionnelles — ' + formatEuro(totalPrev) + '</td></tr>';
-        html += previsionnelles.map(renderRow).join('');
-      }
-      if (factures.length === 0) {
-        html = '<tr><td colspan="7" style="padding:1rem;text-align:center;color:#888">Aucune facture en attente</td></tr>';
-      }
-      tbody.innerHTML = html;
+      return html;
+    }
+
+    function openFacturesImpayeesModal() {
+      if (!tresoData || !tresoData.facturesImpayees) return;
+      const factures = tresoData.facturesImpayees;
+      const total = factures.reduce((s, f) => s + (f.montant || 0), 0);
+      document.getElementById('facturesImpayeesModalTotal').textContent = factures.length + ' facture' + (factures.length > 1 ? 's' : '') + ' · ' + formatEuro(total);
+      document.getElementById('facturesImpayeesModalBody').innerHTML = _renderFacturesGroupedByMonth(factures, 'Aucune facture en attente');
       document.getElementById('facturesImpayeesModalOverlay').classList.add('active');
     }
 
@@ -9115,27 +9229,8 @@
       if (!tresoData || !tresoData.facturesImpayees) return;
       const late = tresoData.facturesImpayees.filter(f => f.status === 'late');
       const total = late.reduce((s, f) => s + (f.montant || 0), 0);
-      document.getElementById('facturesImpayeesModalTotal').textContent = late.length + ' facture' + (late.length > 1 ? 's' : '') + ' en retard — ' + formatEuro(total);
-      const tbody = document.getElementById('facturesImpayeesModalBody');
-
-      let html = '';
-      for (const f of late) {
-        const emission = f.dateEmission ? new Date(f.dateEmission).toLocaleDateString('fr-FR') : '-';
-        const echeance = f.dateEcheance ? new Date(f.dateEcheance).toLocaleDateString('fr-FR') : '-';
-        html += '<tr>' +
-          '<td style="padding:0.5rem 1rem">' + (f.client || '-') + '</td>' +
-          '<td style="padding:0.5rem 1rem">' + (f.mission || '-') + '</td>' +
-          '<td style="text-align:center;padding:0.5rem 1rem">' + (f.type || '-') + '</td>' +
-          '<td style="text-align:right;padding:0.5rem 1rem;font-weight:600">' + formatEuro(f.montant || 0) + '</td>' +
-          '<td style="text-align:right;padding:0.5rem 1rem">' + emission + '</td>' +
-          '<td style="text-align:right;padding:0.5rem 1rem">' + echeance + '</td>' +
-          '<td style="text-align:center;padding:0.5rem 1rem;color:var(--danger);font-weight:600">En retard</td>' +
-          '</tr>';
-      }
-      if (late.length === 0) {
-        html = '<tr><td colspan="7" style="padding:1rem;text-align:center;color:#888">Aucune facture en retard</td></tr>';
-      }
-      tbody.innerHTML = html;
+      document.getElementById('facturesImpayeesModalTotal').textContent = late.length + ' facture' + (late.length > 1 ? 's' : '') + ' en retard · ' + formatEuro(total);
+      document.getElementById('facturesImpayeesModalBody').innerHTML = _renderFacturesGroupedByMonth(late, 'Aucune facture en retard');
       document.getElementById('facturesImpayeesModalOverlay').classList.add('active');
     }
 
@@ -9327,6 +9422,11 @@
       const chargesTTC = (mois.decaissementsTRE || mois.decaissements || 0) + rembAvancePlanTreVal;
       const chargesPlanTreDetail = mois.chargesPlanTreDetail || {};
       const chargesPlanTreLines  = mois.chargesPlanTreLines  || {};
+      // Crédits Plan TRE (catégories cm.X à total négatif reclassées en encaissement, ex. crédit IS).
+      // Montants en valeur absolue côté backend.
+      const creditsPlanTreVal    = mois.creditsPlanTre || 0;
+      const creditsPlanTreDetail = mois.creditsPlanTreDetail || {};
+      const creditsPlanTreLines  = mois.creditsPlanTreLines  || {};
 
       // Split financements en validés (déjà reçus, marqués par user) vs non-validés (prévi)
       const finValides = [];
@@ -9343,7 +9443,7 @@
       // Calcul du total encaissements (= encForSolde miroir backend)
       // Pour clos : encTRE = Qonto réel (inclut tout). pennyPaid = 0 (déjà dans encTRE).
       // Pour non-clos : encTRE = factures forecast. + pennyPaid + financements (validés et non) + creditTva + pipeline
-      const totalEnc = encTRE + pennyPaidTotal + finValidesTotal + finPreviTotal + creditTvaVal + pipelineEnc;
+      const totalEnc = encTRE + pennyPaidTotal + finValidesTotal + finPreviTotal + creditTvaVal + creditsPlanTreVal + pipelineEnc;
 
       // --- Soldes ---
       let html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.8rem;margin-bottom:1.2rem">';
@@ -9482,6 +9582,25 @@
         }
         if (creditTvaVal > 0) {
           html += accordion('Crédit de TVA (remboursement TVA)', creditTvaVal, 'rgba(15,123,108,0.45)', '&#9679;', '');
+        }
+        // Crédits Plan TRE (catégories cm.X à total négatif → reclassées en encaissement).
+        // Un accordéon par catégorie créditée, avec détail ligne par ligne.
+        const creditCats = Object.keys(creditsPlanTreDetail).sort((a, b) => creditsPlanTreDetail[b] - creditsPlanTreDetail[a]);
+        for (const cat of creditCats) {
+          const linesObj = creditsPlanTreLines[cat] || {};
+          let lineTable = '';
+          const lineEntries = Object.entries(linesObj).filter(([, v]) => Math.abs(v) > 0.01).sort((a, b) => b[1] - a[1]);
+          if (lineEntries.length > 0) {
+            lineTable = '<table style="width:100%;font-size:0.78rem;border-collapse:collapse">';
+            for (const [lineName, val] of lineEntries) {
+              lineTable += '<tr style="border-bottom:1px solid var(--border)">';
+              lineTable += '<td style="padding:0.3rem 0.6rem">' + lineName + '</td>';
+              lineTable += '<td style="padding:0.3rem 0.6rem;text-align:right;font-weight:600;white-space:nowrap">' + formatEuro(val) + '</td>';
+              lineTable += '</tr>';
+            }
+            lineTable += '</table>';
+          }
+          html += accordion('Crédit ' + cat, creditsPlanTreDetail[cat], 'rgba(15,123,108,0.45)', '&#9679;', lineTable);
         }
         if (pipelineEnc > 0) {
           html += accordion('Pipeline pondéré (scénario)', pipelineEnc, 'rgba(105,64,165,0.45)', '&#9650;', '');
@@ -10309,13 +10428,16 @@
       const avancePlanTre  = m.avancePlanTre || 0;
       const rembOpco       = m.rembOpcoPlanTre || 0;
       const creditTva      = m.creditTvaPlanTre || 0;
+      // Crédits Plan TRE (catégories cm.X à total négatif reclassées en encaissement)
+      const creditsPlanTre        = m.creditsPlanTre || 0;
+      const creditsPlanTreDetail  = m.creditsPlanTreDetail || {};
       const pipelineEnc    = (includePipeline !== false) ? (m.pipelinePondereEncaissements || 0) : 0;
       const fictionalEnc   = m.fictionalEncaissements || 0;
       const revRecur       = m.revenusRecurrents || 0;
       const revExc         = m.revenusExceptionnels || 0;
       const subvAnnoncees  = m.subventionsAnnoncees || 0;
       const encTotalTTC = encTRE + pennyPaid
-                        + subvPlanTre + aidePlanTre + pretPlanTre + avancePlanTre + rembOpco + creditTva
+                        + subvPlanTre + aidePlanTre + pretPlanTre + avancePlanTre + rembOpco + creditTva + creditsPlanTre
                         + revExc + fictionalEnc + revRecur + subvAnnoncees + pipelineEnc;
 
       // Décaissements
@@ -10366,8 +10488,11 @@
         // Pour clos, les financements Plan_TRE sont mis a 0 cote backend (deja dans Qonto)
       } else if (isCaEstimatif) {
         html += sectionHeader('Encaissements (CA estimatif scénario)', 'var(--success)');
-        if (encTRE)         html += row('CA estimatif HT', encTRE, { sign: '+' });
+        if (encTRE)         html += row('CA estimatif TTC', encTRE, { sign: '+' });
         if (creditTva)      html += row('Crédit de TVA', creditTva, { sign: '+' });
+        for (const [cat, val] of Object.entries(creditsPlanTreDetail)) {
+          if (val > 0) html += row('Crédit ' + cat, val, { sign: '+' });
+        }
         if (subvPlanTre)    html += row('Subvention Plan TRE', subvPlanTre, { sign: '+' });
         if (aidePlanTre)    html += row('Aide Plan TRE', aidePlanTre, { sign: '+' });
         if (rembOpco)       html += row('Remb. OPCO (produit d\'expl.)', rembOpco, { sign: '+' });
@@ -10387,6 +10512,9 @@
         html += sectionHeader('Encaissements prévisionnels', 'var(--text-secondary)');
         if (encTRE)         html += row('Factures Notion+Pennylane (HT×1.2 TTC)', encTRE, { sign: '+' });
         if (creditTva)      html += row('Crédit de TVA (remb.)', creditTva, { sign: '+' });
+        for (const [cat, val] of Object.entries(creditsPlanTreDetail)) {
+          if (val > 0) html += row('Crédit ' + cat, val, { sign: '+' });
+        }
         if (subvPlanTre)    html += row('Subvention Plan TRE', subvPlanTre, { sign: '+' });
         if (aidePlanTre)    html += row('Aide Plan TRE', aidePlanTre, { sign: '+' });
         if (rembOpco)       html += row('Remb. OPCO (produit d\'expl.)', rembOpco, { sign: '+' });
@@ -11107,31 +11235,91 @@
     }
 
     // --- Baseline salaries recap ---
+    // Affiche la masse salariale du mois selectionne (depuis le GSheet Masse_salariale,
+    // pas une moyenne). Dropdown de mois pour naviguer dans l'historique et le budget.
+    let _masseSalarialeData = null; // cache local du fetch (months + byMonth + meta)
+
     async function fetchAndRenderBaselineSalaries() {
       const container = document.getElementById('baselineSalariesRecap');
       if (!container) return;
       try {
-        const res = await fetch('/api/scenarios/baseline/salaries');
-        const salaries = await res.json();
-        if (!salaries || salaries.length === 0) {
-          container.innerHTML = '<p style="font-size:0.75rem;color:var(--text-secondary)">Aucun salarie en base.</p>';
+        const res = await fetch('/api/scenarios/baseline/masse-salariale-monthly');
+        const data = await res.json();
+        _masseSalarialeData = data;
+        if (!data.months || data.months.length === 0) {
+          container.innerHTML = '<p style="font-size:0.75rem;color:var(--text-secondary)">Aucun mois de donnees dans le GSheet Masse_salariale.</p>';
           return;
         }
-        let totalBaseline = 0;
-        let html = '<p style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:0.3rem;font-weight:600">Baseline actuelle :</p>';
-        html += '<table style="width:100%;font-size:0.75rem;border-collapse:collapse">';
-        html += '<tr style="color:var(--text-secondary)"><th style="text-align:left;padding:0.2rem 0.4rem">Nom</th><th style="text-align:left;padding:0.2rem 0.4rem">Poste</th><th style="text-align:right;padding:0.2rem 0.4rem">Cout total</th></tr>';
-        for (const s of salaries) {
-          const cout = (s.net_mensuel || 0) + (s.charges_mensuelles || 0);
-          totalBaseline += cout;
-          html += '<tr style="border-top:1px solid var(--border)"><td style="padding:0.2rem 0.4rem">' + (s.nom || '-') + '</td><td style="padding:0.2rem 0.4rem">' + (s.poste || '-') + '</td><td style="text-align:right;padding:0.2rem 0.4rem">' + formatEuro(Math.round(cout)) + '</td></tr>';
-        }
-        html += '<tr style="border-top:2px solid var(--text);font-weight:600"><td colspan="2" style="padding:0.2rem 0.4rem">Total baseline</td><td style="text-align:right;padding:0.2rem 0.4rem">' + formatEuro(Math.round(totalBaseline)) + '/mois</td></tr>';
-        html += '</table>';
-        container.innerHTML = html;
+        // Mois par defaut : mois courant si dispo, sinon le mois le plus recent <= mois courant,
+        // sinon le 1er mois disponible.
+        const today = new Date();
+        const currentMKey = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0');
+        const sortedKeys = data.months.map(m => m.mKey).sort();
+        let defaultMKey = sortedKeys.find(k => k === currentMKey)
+                       || sortedKeys.slice().reverse().find(k => k <= currentMKey)
+                       || sortedKeys[sortedKeys.length - 1];
+        renderBaselineSalariesForMonth(defaultMKey);
       } catch {
-        container.innerHTML = '<p style="font-size:0.75rem;color:var(--danger)">Erreur chargement salaries</p>';
+        container.innerHTML = '<p style="font-size:0.75rem;color:var(--danger)">Erreur chargement masse salariale</p>';
       }
+    }
+
+    function renderBaselineSalariesForMonth(mKey) {
+      const container = document.getElementById('baselineSalariesRecap');
+      if (!container || !_masseSalarialeData) return;
+      const { months, byMonth } = _masseSalarialeData;
+      const slot = byMonth[mKey] || { total: 0, detail: [] };
+
+      // Dropdown des mois (recent en premier)
+      const sortedMonths = months.slice().sort((a, b) => b.mKey.localeCompare(a.mKey));
+      let html = '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem">';
+      html += '<label style="font-size:0.75rem;color:var(--text-secondary);font-weight:600">Mois :</label>';
+      html += '<select id="baselineSalariesMonthSelect" style="font-size:0.78rem;padding:0.25rem 0.5rem;border:1px solid var(--border);border-radius:4px;background:var(--bg)" onchange="renderBaselineSalariesForMonth(this.value)">';
+      for (const m of sortedMonths) {
+        const lbl = (new Date(m.year, m.month - 1)).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+        const lblCap = lbl.charAt(0).toUpperCase() + lbl.slice(1);
+        html += '<option value="' + m.mKey + '"' + (m.mKey === mKey ? ' selected' : '') + '>' + lblCap + '</option>';
+      }
+      html += '</select>';
+      html += '<span style="font-size:0.7rem;color:var(--text-secondary);margin-left:auto">Source : GSheet Masse_salariale</span>';
+      html += '</div>';
+
+      // Table : nom + type + net + charges + autres + cout total
+      const detail = slot.detail || [];
+      if (detail.length === 0) {
+        html += '<p style="font-size:0.75rem;color:var(--text-secondary);padding:0.5rem">Aucune donnée pour ce mois.</p>';
+        container.innerHTML = html;
+        return;
+      }
+
+      html += '<table style="width:100%;font-size:0.75rem;border-collapse:collapse">';
+      html += '<thead><tr style="color:var(--text-secondary);border-bottom:1px solid var(--border)">';
+      html +=   '<th style="text-align:left;padding:0.3rem 0.4rem">Nom</th>';
+      html +=   '<th style="text-align:center;padding:0.3rem 0.4rem">Type</th>';
+      html +=   '<th style="text-align:right;padding:0.3rem 0.4rem">Net</th>';
+      html +=   '<th style="text-align:right;padding:0.3rem 0.4rem">Charges</th>';
+      html +=   '<th style="text-align:right;padding:0.3rem 0.4rem">Autres</th>';
+      html +=   '<th style="text-align:right;padding:0.3rem 0.4rem;font-weight:700">Coût total</th>';
+      html += '</tr></thead><tbody>';
+      for (const emp of detail) {
+        const autres = (emp.prime || 0) + (emp.aide || 0) + (emp.remuneration || 0) + (emp.gratification || 0);
+        const typeBadge = emp.isDirigeant
+          ? '<span style="display:inline-block;padding:0.05rem 0.35rem;font-size:0.6rem;font-weight:600;letter-spacing:0.04em;border-radius:3px;background:rgba(105,64,165,0.12);color:#6940a5">DIRIGEANT</span>'
+          : '<span style="display:inline-block;padding:0.05rem 0.35rem;font-size:0.6rem;font-weight:600;letter-spacing:0.04em;border-radius:3px;background:rgba(15,123,108,0.1);color:var(--success)">SALARIÉ</span>';
+        html += '<tr style="border-bottom:1px solid var(--border)">';
+        html +=   '<td style="padding:0.3rem 0.4rem">' + (emp.nom || '-') + '</td>';
+        html +=   '<td style="text-align:center;padding:0.3rem 0.4rem">' + typeBadge + '</td>';
+        html +=   '<td style="text-align:right;padding:0.3rem 0.4rem;color:var(--text-secondary)">' + formatEuro(emp.net || 0) + '</td>';
+        html +=   '<td style="text-align:right;padding:0.3rem 0.4rem;color:var(--text-secondary)">' + formatEuro(emp.charges || 0) + '</td>';
+        html +=   '<td style="text-align:right;padding:0.3rem 0.4rem;color:var(--text-secondary)">' + (autres ? formatEuro(autres) : '-') + '</td>';
+        html +=   '<td style="text-align:right;padding:0.3rem 0.4rem;font-weight:700">' + formatEuro(emp.cout || 0) + '</td>';
+        html += '</tr>';
+      }
+      html += '<tr style="border-top:2px solid var(--text);font-weight:700"><td colspan="5" style="padding:0.3rem 0.4rem">Total masse salariale du mois</td><td style="text-align:right;padding:0.3rem 0.4rem">' + formatEuro(Math.round(slot.total || 0)) + '</td></tr>';
+      html += '</tbody></table>';
+      html += '<p style="font-size:0.7rem;color:var(--text-secondary);margin-top:0.5rem;font-style:italic">Détail des montants : voir directement le GSheet Masse_salariale (onglet bas).</p>';
+
+      container.innerHTML = html;
     }
 
     function addOverrideRevenu() {

@@ -2110,11 +2110,51 @@ app.post('/api/facturation-matching/link', async (req, res) => {
     const propName = type === 'acompte' ? 'Fact acpt Penny' : 'Fact solde Penny';
     try {
       const result = await updateNotionMissionRichTextProperty(mission.id, propName, newValue, expectedCurrent);
+
+      // Calcule une suggestion de mise a jour du statut Notion en fonction de l'etat Pennylane
+      // des factures liees. Si toutes payees → propose passage en "Acompte/Solde paye".
+      // Si partiellement payees (multi-facture) → null (cas legitime, pas de suggestion).
+      // Si Notion deja au bon statut → null (pas de suggestion inutile).
+      let suggestedStatus = null;
+      if (cleaned.length > 0) {
+        try {
+          const customerInvoices = await fetchCustomerInvoices();
+          const lowerLinked = cleaned.map(s => s.toLowerCase());
+          const linked = customerInvoices.filter(inv =>
+            inv.invoiceNumber && lowerLinked.includes(inv.invoiceNumber.toLowerCase())
+          );
+          const validLinked = linked.filter(i => i.status !== 'cancelled' && i.status !== 'incomplete');
+          const paidCount = validLinked.filter(i => i.paid && i.status === 'paid').length;
+          const allPaid = validLinked.length > 0 && paidCount === validLinked.length;
+          if (allPaid) {
+            const oneShot = (mission.montantAcompte || 0) < 5;
+            const expectedNotionStatus = (oneShot || type === 'solde') ? 'Solde payé' : 'Acompte payé';
+            const currentStatus = mission.facturation || '';
+            if (currentStatus !== expectedNotionStatus) {
+              suggestedStatus = {
+                rowType: type,
+                newStatus: 'Paye',
+                expectedNotionStatus,
+                currentStatus,
+                oneShot,
+                reason: linked.length === 1
+                  ? 'La facture liée est marquée payée dans Pennylane.'
+                  : 'Toutes les factures liées (' + linked.length + ') sont marquées payées dans Pennylane.',
+              };
+            }
+          }
+        } catch (err) {
+          // Best-effort : si le calcul echoue, on retourne juste sans suggestion (le PATCH a deja reussi)
+          console.warn('[matching link] suggestedStatus computation failed:', err.message);
+        }
+      }
+
       res.json({
         ok: true,
         ...result,
         missionNom, type, propName, invoicesList: cleaned,
         cleanedFromOthers: conflicts.length, // info utile côté UI
+        suggestedStatus, // null ou { rowType, newStatus, expectedNotionStatus, currentStatus, oneShot, reason }
       });
     } catch (err) {
       if (err.code === 'NOTION_DRIFT') {
@@ -2215,6 +2255,39 @@ function pennylaneRequest(endpoint, method = 'GET', body = null) {
 
 // Paginated fetch for Pennylane (cursor-based pagination, max 20 items/page)
 // maxPages limits total pages to avoid timeout on large datasets
+// Parse "retry in N seconds" depuis le message d'erreur Pennylane 429.
+// Pennylane indique souvent le delai dans le body : "Rate limit exceeded. Please retry in 3 seconds."
+// Defaut 2s si non parseable.
+function _parsePennylaneRetryDelay(errMsg) {
+  if (!errMsg) return 2000;
+  const m = String(errMsg).match(/retry in (\d+)\s*second/i);
+  if (m) return Math.max(1000, parseInt(m[1], 10) * 1000);
+  return 2000;
+}
+
+// Wrapper avec retry exponentiel sur 429. Jusqu'a 4 tentatives (delais 1s, 2s, 4s, 8s),
+// avec respect du delai suggere par Pennylane si plus long.
+async function _pennylaneRequestWithRetry(url) {
+  const MAX_ATTEMPTS = 4;
+  let lastErr;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    try {
+      return await pennylaneRequest(url);
+    } catch (err) {
+      lastErr = err;
+      const isRateLimit = /429|rate limit/i.test(err.message || '');
+      const isConnReset = /ECONNRESET|ETIMEDOUT|ECONNREFUSED|invalide/i.test(err.message || '');
+      if (!isRateLimit && !isConnReset) throw err; // erreur non-retriable
+      if (attempt === MAX_ATTEMPTS - 1) break; // derniere tentative epuisee
+      const baseDelay = isRateLimit ? _parsePennylaneRetryDelay(err.message) : 1000;
+      const delay = Math.max(baseDelay, 1000 * Math.pow(2, attempt));
+      console.warn(`Pennylane retry ${attempt + 1}/${MAX_ATTEMPTS} after ${delay}ms : ${err.message}`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  throw lastErr;
+}
+
 async function pennylaneFetchAll(endpoint, params = {}, maxPages = 200) {
   const allItems = [];
   let cursor = null;
@@ -2226,15 +2299,7 @@ async function pennylaneFetchAll(endpoint, params = {}, maxPages = 200) {
     const sep = endpoint.includes('?') ? '&' : '?';
     const url = `/api/external/v2${endpoint}${queryParams.toString() ? sep + queryParams.toString() : ''}`;
 
-    let result;
-    try {
-      result = await pennylaneRequest(url);
-    } catch (err) {
-      // Retry once on connection reset (rate limit)
-      console.warn(`Pennylane retry after error: ${err.message}`);
-      await new Promise(r => setTimeout(r, 1000));
-      result = await pennylaneRequest(url);
-    }
+    const result = await _pennylaneRequestWithRetry(url);
 
     const items = result.items || [];
     if (Array.isArray(items)) {
@@ -2767,10 +2832,9 @@ async function pLimitMap(items, limit, fn) {
 // (toujours vide). Mais le sous-endpoint /matched_transactions retourne la transaction Qonto
 // matchee, avec sa vraie date. C'est la date du virement reel.
 // Retry avec backoff exponentiel sur erreurs (rate limit Pennylane = 25 req/5s).
-async function fetchInvoicePaidAtFromMatchedTx(invoiceId, attempt = 0) {
-  const MAX_ATTEMPTS = 4;
+async function fetchInvoicePaidAtFromMatchedTx(invoiceId) {
   try {
-    const result = await pennylaneRequest(`/api/external/v2/customer_invoices/${invoiceId}/matched_transactions`);
+    const result = await _pennylaneRequestWithRetry(`/api/external/v2/customer_invoices/${invoiceId}/matched_transactions`);
     const items = Array.isArray(result) ? result : (result.items || []);
     if (!items.length) return null;
     let latest = null;
@@ -2781,70 +2845,81 @@ async function fetchInvoicePaidAtFromMatchedTx(invoiceId, attempt = 0) {
     }
     return latest;
   } catch (err) {
-    // Retry sur rate limit ou erreur reseau, jusqu'a 4 tentatives (1s, 2s, 4s)
-    if (attempt < MAX_ATTEMPTS - 1) {
-      const delayMs = 1000 * Math.pow(2, attempt);
-      await new Promise(r => setTimeout(r, delayMs));
-      return fetchInvoicePaidAtFromMatchedTx(invoiceId, attempt + 1);
-    }
-    console.warn(`[fetchInvoicePaidAtFromMatchedTx] ${invoiceId} apres ${MAX_ATTEMPTS} tentatives: ${err.message}`);
+    console.warn(`[fetchInvoicePaidAtFromMatchedTx] ${invoiceId} echec final: ${err.message}`);
     return null;
   }
 }
+
+// Promise singleton : si un fetch est deja en cours, les appels concurrents partagent
+// la meme promesse au lieu de lancer chacun leur propre fetch (qui declenchait 3x les
+// memes 152 appels matched_transactions et explosait le rate limit Pennylane).
+let _inFlightFetchCustomerInvoices = null;
 
 async function fetchCustomerInvoices() {
   if (customerInvoicesCache && (Date.now() - customerInvoicesCacheTime) < CUSTOMER_INVOICES_CACHE_TTL) {
     return customerInvoicesCache;
   }
-  const invoices = await pennylaneFetchAll('/customer_invoices', {});
-  const mapped = invoices.map(inv => {
-    // paidAt initial : fallback sur updated_at pour les factures status=paid (proxy imparfait
-    // mais sans appel API). Sera override ci-dessous via matched_transactions (date reelle du virement).
-    const isRealPaid = inv.paid && inv.status === 'paid';
-    const paidAtFallback = isRealPaid && inv.updated_at ? inv.updated_at.split('T')[0] : null;
-    return {
-      id: inv.id,
-      label: inv.label || '',
-      customerName: extractCustomerFromLabel(inv.label),
-      amount: parseFloat(inv.amount) || 0,
-      remainingAmount: parseFloat(inv.remaining_amount_with_tax) || 0,
-      currency: inv.currency || 'EUR',
-      date: inv.date || null,
-      dueDate: inv.deadline || null,
-      status: inv.status || 'unknown', // paid, upcoming, late, incomplete, cancelled, archived
-      paid: inv.paid || false,
-      paidAt: paidAtFallback,
-      invoiceNumber: inv.invoice_number || '',
-      // Patch 2+ : signaux supplémentaires pour améliorer le matching (type acompte/solde + nom client plus propre)
-      filename: inv.filename || '',
-      pdfDescription: inv.pdf_description || '',
-      pdfInvoiceSubject: inv.pdf_invoice_subject || '',
-    };
-  });
-
-  // Enrichissement paidAt via matched_transactions (vraie date du virement Qonto).
-  // ~150 fetchs en parallele 3 par 3, ~10-15s sur cache miss, absorbed par cache 10min.
-  const toEnrich = mapped.filter(m => m.paid && m.status === 'paid');
-  if (toEnrich.length > 0) {
-    const t0 = Date.now();
-    const txDates = await pLimitMap(toEnrich, 3, m => fetchInvoicePaidAtFromMatchedTx(m.id));
-    let overridden = 0;
-    let kept = 0;
-    for (let i = 0; i < toEnrich.length; i++) {
-      const txDate = txDates[i];
-      if (txDate && typeof txDate === 'string' && !txDate.__error) {
-        toEnrich[i].paidAt = txDate; // override avec la date reelle
-        overridden++;
-      } else {
-        kept++; // garde le fallback updated_at
-      }
-    }
-    console.log(`[fetchCustomerInvoices] paidAt enrichi: ${overridden} via matched_tx, ${kept} fallback updated_at, en ${Date.now() - t0}ms`);
+  // Deduplication : un fetch est deja en route → on attend celui-la
+  if (_inFlightFetchCustomerInvoices) {
+    return _inFlightFetchCustomerInvoices;
   }
+  _inFlightFetchCustomerInvoices = (async () => {
+    try {
+      const invoices = await pennylaneFetchAll('/customer_invoices', {});
+      const mapped = invoices.map(inv => {
+        // paidAt initial : fallback sur updated_at pour les factures status=paid (proxy imparfait
+        // mais sans appel API). Sera override ci-dessous via matched_transactions (date reelle du virement).
+        const isRealPaid = inv.paid && inv.status === 'paid';
+        const paidAtFallback = isRealPaid && inv.updated_at ? inv.updated_at.split('T')[0] : null;
+        return {
+          id: inv.id,
+          label: inv.label || '',
+          customerName: extractCustomerFromLabel(inv.label),
+          amount: parseFloat(inv.amount) || 0,
+          remainingAmount: parseFloat(inv.remaining_amount_with_tax) || 0,
+          currency: inv.currency || 'EUR',
+          date: inv.date || null,
+          dueDate: inv.deadline || null,
+          status: inv.status || 'unknown', // paid, upcoming, late, incomplete, cancelled, archived
+          paid: inv.paid || false,
+          paidAt: paidAtFallback,
+          invoiceNumber: inv.invoice_number || '',
+          // Patch 2+ : signaux supplémentaires pour améliorer le matching (type acompte/solde + nom client plus propre)
+          filename: inv.filename || '',
+          pdfDescription: inv.pdf_description || '',
+          pdfInvoiceSubject: inv.pdf_invoice_subject || '',
+        };
+      });
 
-  customerInvoicesCache = mapped;
-  customerInvoicesCacheTime = Date.now();
-  return mapped;
+      // Enrichissement paidAt via matched_transactions (vraie date du virement Qonto).
+      // Concurrence 2 (au lieu de 3) pour rester sous les 5 req/s soutenu de Pennylane.
+      const toEnrich = mapped.filter(m => m.paid && m.status === 'paid');
+      if (toEnrich.length > 0) {
+        const t0 = Date.now();
+        const txDates = await pLimitMap(toEnrich, 2, m => fetchInvoicePaidAtFromMatchedTx(m.id));
+        let overridden = 0;
+        let kept = 0;
+        for (let i = 0; i < toEnrich.length; i++) {
+          const txDate = txDates[i];
+          if (txDate && typeof txDate === 'string' && !txDate.__error) {
+            toEnrich[i].paidAt = txDate; // override avec la date reelle
+            overridden++;
+          } else {
+            kept++; // garde le fallback updated_at
+          }
+        }
+        console.log(`[fetchCustomerInvoices] paidAt enrichi: ${overridden} via matched_tx, ${kept} fallback updated_at, en ${Date.now() - t0}ms`);
+      }
+
+      customerInvoicesCache = mapped;
+      customerInvoicesCacheTime = Date.now();
+      return mapped;
+    } finally {
+      // Une fois termine (succes ou echec), on libere le slot pour permettre un nouveau fetch ulterieur
+      _inFlightFetchCustomerInvoices = null;
+    }
+  })();
+  return _inFlightFetchCustomerInvoices;
 }
 
 // Fetch supplier invoices (factures fournisseurs / charges)
@@ -3190,7 +3265,12 @@ function parseMasseSalariale(csvText) {
   if (!monthInfo) return { error: 'Structure non reconnue', months: [], categories: [] };
 
   const { headerRow, months } = monthInfo;
-  const dataStartRow = headerRow + 2; // skip TVA sub-header
+  // Demarre juste apres le header mois. Le parser skipe ensuite proprement les lignes vides
+  // ou sub-headers (col 2 vide → `if (!label) continue`), donc on n'a plus besoin de hardcoder
+  // un offset de 2 — qui faisait sauter "Salaires nets" sur le format CSV gviz (sans ligne
+  // vide au debut). Test debug confirme : sans ce fix, headerRow=1 → dataStartRow=3 → on
+  // commence a "Juliette" et "Salaires nets" (a rowIdx=2) etait skip → tous les nets perdus.
+  const dataStartRow = headerRow + 1;
 
   const categories = [];
   let currentCategory = null;
@@ -3265,7 +3345,10 @@ async function fetchAndParseMasseSalarialeDetailed() {
       if (n.startsWith('salaires nets'))        return 'net';
       if (n.startsWith('charges soci'))         return 'charges';
       if (n.startsWith('primes'))               return 'prime';
-      if (n.startsWith('aide'))                 return 'aide';
+      // 'Aide apprentissage' = aide d'Etat versee a l'entreprise (encaissement, pas une charge).
+      // Capturee par Plan_TRE_Prev cote financements 'Aide *'. On l'ignore ici pour eviter le double compte
+      // dans la masse salariale (qui doit refleter UNIQUEMENT le cout employeur).
+      if (n.startsWith('aide'))                 return null;
       if (n.startsWith('rémunération'))         return 'remuneration';
       if (n.startsWith('gratification'))        return 'gratification';
       return null;
@@ -3456,6 +3539,17 @@ function parsePlanTresorerie(csvText) {
   const chargesParCategorieByMonth = {};
   // Crédit de TVA = encaissement (cash-in) → exposé séparément
   const creditTvaByMonth = {};
+  // Décaissement de TVA = charge TVA M+1 → exposé séparément (en plus d'être dans chargesParCategorieByMonth['TVA'])
+  // Sert à pouvoir le soustraire du Total décaissements quand un override CA estimatif remplace le baseline.
+  const decaissementTvaByMonth = {};
+  // TVA collectée et déductible baseline (depuis section "Budget de TVA" du sheet) — utilisé
+  // pour recalculer le solde TVA quand un override CA estimatif remplace le baseline.
+  const tvaCollecteeBaselineByMonth = {};
+  const tvaDeductibleBaselineByMonth = {};
+  // TVA collectée provenant SPECIFIQUEMENT du CA (Enc. Acompte + Enc. Solde) — c'est cette part
+  // qui doit etre annulee quand CA estimatif remplace le CA baseline. Les autres sources de TVA
+  // collectee (s'il y en a, ex. revenus exceptionnels factures HT) sont conservees.
+  const tvaCollecteeFromCAByMonth = {};
 
   // Top-level section headers à ignorer / qui resettent le contexte cm.
   // - Lignes contenant "(ne rien écrire" : "Chiffre d'affaires (...)", "Charges Fixes (...)", "Charges Variables (...)"
@@ -3514,12 +3608,29 @@ function parsePlanTresorerie(csvText) {
     }
     if (SKIP_AFTER_LABELS.has(label)) {
       currentSection = null;
-      skipMode = true; // skip TVA collectée, TVA déductible, Solde de TVA qui suivent
+      skipMode = true; // skip Solde de TVA (derivee, pas besoin de la capter)
       continue;
     }
+
+    // Cas spéciaux TVA — captures AVANT le check skipMode (sinon "TVA collectée" / "TVA déductible"
+    // sont skip par le header "Budget de TVA" qui set skipMode=true). "Solde de TVA" reste skippe.
+    if (label === 'TVA collectée') {
+      months.forEach((m, i) => {
+        const key = `${m.year}-${String(m.month).padStart(2, '0')}`;
+        tvaCollecteeBaselineByMonth[key] = (tvaCollecteeBaselineByMonth[key] || 0) + (values[i] || 0);
+      });
+      continue;
+    }
+    if (label === 'TVA déductible') {
+      months.forEach((m, i) => {
+        const key = `${m.year}-${String(m.month).padStart(2, '0')}`;
+        tvaDeductibleBaselineByMonth[key] = (tvaDeductibleBaselineByMonth[key] || 0) + (values[i] || 0);
+      });
+      continue;
+    }
+
     if (skipMode) continue;
 
-    // Cas spéciaux TVA
     if (label === 'Crédit de TVA') {
       // ENCAISSEMENT TVA (remboursement) — exposé séparément
       months.forEach((m, i) => {
@@ -3529,12 +3640,12 @@ function parsePlanTresorerie(csvText) {
       continue;
     }
     if (label === 'Décaissement de TVA') {
-      // Catégorie dédiée "TVA" dans les charges
+      // Catégorie dédiée "TVA" dans les charges + exposé séparément
       months.forEach((m, i) => {
         const v = values[i] || 0;
-        if (v === 0) return;
         const key = `${m.year}-${String(m.month).padStart(2, '0')}`;
-        pushChargeLine(i, key, 'TVA', label, v);
+        decaissementTvaByMonth[key] = (decaissementTvaByMonth[key] || 0) + v;
+        if (v !== 0) pushChargeLine(i, key, 'TVA', label, v);
       });
       continue;
     }
@@ -3542,8 +3653,18 @@ function parsePlanTresorerie(csvText) {
     // Skip les lignes financements (subv/aide/prêt/avance/remb_opco/remb_avance) — déjà capturées plus haut, hors charges
     if (matchedFin) continue;
 
-    // Skip les lignes encaissement CA (Enc. Acompte / Enc. Solde)
-    if (/^Enc\./i.test(label)) continue;
+    // Capture la TVA collectée provenant du CA (lignes Enc. Acompte / Enc. Solde) AVANT le skip.
+    // La colonne TVA d'une ligne est a `m.col + 1` (apres la colonne valeur).
+    if (/^Enc\./i.test(label)) {
+      months.forEach((m, i) => {
+        const tvaCell = (row[m.col + 1] || '').trim();
+        const tvaVal = parseFrenchNumber(tvaCell);
+        if (tvaVal === 0) return;
+        const key = `${m.year}-${String(m.month).padStart(2, '0')}`;
+        tvaCollecteeFromCAByMonth[key] = (tvaCollecteeFromCAByMonth[key] || 0) + tvaVal;
+      });
+      continue;
+    }
 
     // Skip totaux / soldes / variations
     if (/^Total\b/i.test(label) || /^Trésorerie\b/i.test(label) || /^Variation\b/i.test(label)) continue;
@@ -3573,6 +3694,11 @@ function parsePlanTresorerie(csvText) {
     // Phase 2 UX : breakdown auto par catégorie cm.X + cas spéciaux TVA
     chargesParCategorieByMonth,
     creditTvaByMonth,
+    // Phase E++ : TVA baseline detaillee pour recalcul live quand override CA estimatif actif
+    decaissementTvaByMonth,
+    tvaCollecteeBaselineByMonth,
+    tvaDeductibleBaselineByMonth,
+    tvaCollecteeFromCAByMonth,
   };
 }
 
@@ -4154,10 +4280,22 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
   const rembOpcoPlanTreByMonth = {};
   const rembAvancePlanTreByMonth = {};
   const planTreDecByMonth = {};
-  const planTreDecDetailByMonth = {}; // { mKey: { 'Frais de personnel': X, 'Logiciels': Y, ... } } — totaux par catégorie
+  const planTreDecDetailByMonth = {}; // { mKey: { 'Frais de personnel': X, 'Logiciels': Y, ... } } — totaux par catégorie (positifs uniquement)
   const planTreDecLinesByMonth = {};  // { mKey: { 'Frais de personnel': { 'Salaires nets': X, 'Primes': Y } } } — lignes individuelles par catégorie
+  // Crédits Plan TRE : catégories cm.X dont le total mensuel est négatif (ex. crédit d'impôt, avoir
+  // fournisseur). Reclassées en encaissement (montant en valeur absolue). Cf. discussion utilisateur :
+  // "si la valeur est négative, ça devient un encaissement et non un décaissement".
+  const planTreCreditsDetailByMonth = {}; // { mKey: { 'Impôts et taxes': 15852, ... } } — montant POSITIF (abs)
+  const planTreCreditsLinesByMonth = {};  // { mKey: { 'Impôts et taxes': { 'IS (...)': 15852 } } } — détail lignes
+  const planTreCreditsTotalByMonth = {};  // { mKey: 15852 } — somme des crédits du mois (à ajouter à encForSolde)
   const financementsDetailByMonth = {}; // { mKey: [{ name, category, direction, inEBE, amount }] } — pour modale validation
   const creditTvaByMonth_local = {};   // { mKey: amount } — Crédit de TVA = encaissement TVA
+  // Phase E++ : TVA baseline detaillee, utilisee pour recalcul du solde TVA quand override CA
+  // estimatif remplace le baseline. Permet d'eviter le doublon de TVA collectee.
+  const decaissementTvaBaselineByMonth = {};
+  const tvaCollecteeBaselineByMonth = {};
+  const tvaDeductibleBaselineByMonth = {};
+  const tvaCollecteeFromCAByMonth = {};
   if (includeGSheet) {
     try {
       const planData = await fetchAndParsePlanTresorerie();
@@ -4200,10 +4338,22 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
         for (const [mKey, sections] of Object.entries(planData.chargesParCategorieByMonth)) {
           const totals = {};
           const lineDetails = {};
+          const creditTotals = {};
+          const creditLineDetails = {};
+          let creditSum = 0;
           for (const [secName, secData] of Object.entries(sections)) {
-            if (Math.abs(secData.total) > 0.01) {
+            if (Math.abs(secData.total) <= 0.01) continue;
+            // Total catégorie négatif → reclasse en encaissement (crédit)
+            if (secData.total < 0) {
+              const absTotal = Math.round(-secData.total);
+              creditTotals[secName] = absTotal;
+              creditSum += absTotal;
+              creditLineDetails[secName] = {};
+              for (const [lineName, lineVal] of Object.entries(secData.lines)) {
+                if (Math.abs(lineVal) > 0.01) creditLineDetails[secName][lineName] = Math.round(-lineVal);
+              }
+            } else {
               totals[secName] = Math.round(secData.total);
-              // Garde aussi le détail ligne par ligne (pour expansion accordéon)
               lineDetails[secName] = {};
               for (const [lineName, lineVal] of Object.entries(secData.lines)) {
                 if (Math.abs(lineVal) > 0.01) lineDetails[secName][lineName] = Math.round(lineVal);
@@ -4212,12 +4362,36 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
           }
           planTreDecDetailByMonth[mKey] = totals;
           planTreDecLinesByMonth[mKey] = lineDetails;
+          planTreCreditsDetailByMonth[mKey] = creditTotals;
+          planTreCreditsLinesByMonth[mKey] = creditLineDetails;
+          planTreCreditsTotalByMonth[mKey] = creditSum;
         }
       }
       // Crédit de TVA (encaissement TVA) — exposé séparément côté encaissements
       if (planData.creditTvaByMonth) {
         for (const [mKey, val] of Object.entries(planData.creditTvaByMonth)) {
           creditTvaByMonth_local[mKey] = Math.round(val);
+        }
+      }
+      // Phase E++ : capter aussi les flux TVA baseline pour recalcul live (CA estimatif)
+      if (planData.decaissementTvaByMonth) {
+        for (const [mKey, val] of Object.entries(planData.decaissementTvaByMonth)) {
+          decaissementTvaBaselineByMonth[mKey] = Math.round(val);
+        }
+      }
+      if (planData.tvaCollecteeBaselineByMonth) {
+        for (const [mKey, val] of Object.entries(planData.tvaCollecteeBaselineByMonth)) {
+          tvaCollecteeBaselineByMonth[mKey] = Math.round(val);
+        }
+      }
+      if (planData.tvaDeductibleBaselineByMonth) {
+        for (const [mKey, val] of Object.entries(planData.tvaDeductibleBaselineByMonth)) {
+          tvaDeductibleBaselineByMonth[mKey] = Math.round(val);
+        }
+      }
+      if (planData.tvaCollecteeFromCAByMonth) {
+        for (const [mKey, val] of Object.entries(planData.tvaCollecteeFromCAByMonth)) {
+          tvaCollecteeFromCAByMonth[mKey] = Math.round(val);
         }
       }
     } catch (err) {
@@ -4248,9 +4422,15 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
     }
   }
 
-  // --- CA estimatif mensuel HT ---
+  // --- CA estimatif mensuel HT et TTC ---
+  // _tva est calcule dans applyOverrides via getOverrideTvaInfo : il porte le HT et TTC
+  // calcules selon le mode saisie (HT ou TTC) et le taux TVA. On expose les deux pour
+  // que le P&L (HT) et la TRE (TTC) utilisent chacun le bon montant.
   const caMensuelHT = caEstimatif
-    ? Math.round((caEstimatif.montant_annuel || 0) / (caEstimatif.nb_mois || 12))
+    ? (caEstimatif._tva ? Math.round(caEstimatif._tva.ht) : Math.round((caEstimatif.montant_annuel || 0) / (caEstimatif.nb_mois || 12)))
+    : null;
+  const caMensuelTTC = caEstimatif
+    ? (caEstimatif._tva ? Math.round(caEstimatif._tva.ttc) : caMensuelHT)
     : null;
 
   // Track la TVA du CA estimatif : applique _tva.tva à chaque mois non-clos où caMensuelHT est utilisé
@@ -4264,30 +4444,114 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
     }
   }
 
-  // --- Reversement TVA M+1 (overrides uniquement, avec carry-forward du crédit TVA) ---
-  // La baseline Plan_TRE_Prév a déjà sa propre ligne "Décaissement de TVA" remplie manuellement.
-  // Ici on n'ajoute QUE le delta overrides : collectée(M) - déductible(M) à payer en M+1 si positif,
-  // sinon crédit reporté sur les mois suivants.
+  // --- Reversement TVA M+1 ---
+  // Mode normal (pas d'override CA estimatif ni ligne_gsheet_override) : seuls les overrides de
+  // TVA sont integres ici. La baseline du sheet (Decaissement/Credit de TVA) reste intacte → pas de doublon.
+  //
+  // Mode CA estimatif actif : le baseline TVA collectee provenant du CA Notion est INVALIDE
+  // (CA remplace par scenario). On reconstruit le solde TVA :
+  //   collectee_recalc = (baseline collectee - baseline collectee FROM CA) + override collectee
+  //   deductible_recalc = baseline deductible + override deductible
+  // Puis on annule le Decaissement/Credit de TVA baseline du sheet (sera recalcule via reversement).
+  //
+  // Mode ligne_gsheet_override actif : un override remplace une catégorie de charges sur une plage
+  // de mois. Le baseline TVA déductible inclut la TVA originale de cette catégorie qui est désormais
+  // remplacée. On reconstruit le solde TVA pour ces mois :
+  //   deductible_recalc = (baseline deductible - sum(baseline_HT_cat × taux_cat)) + override deductible
+  // Idem : on annule le Decaissement/Credit de TVA baseline pour eviter le doublon avec le reversement recalcule.
+  const isCaEstimatifActive = caEstimatif !== null && caMensuelHT !== null;
+  // Précalcul des gsheetOverrides actifs par mois pour eviter scan répété dans la boucle TVA.
+  const activeGsheetOverridesByMonth = {};
+  if (gsheetOverrides && gsheetOverrides.length > 0) {
+    for (const ov of gsheetOverrides) {
+      for (const mois of qontoData.previsionnel) {
+        const mKey = `${mois.annee}-${String(mois.mois).padStart(2, '0')}`;
+        if (mKey >= ov.mois_debut && mKey <= ov.mois_fin) {
+          if (!activeGsheetOverridesByMonth[mKey]) activeGsheetOverridesByMonth[mKey] = [];
+          activeGsheetOverridesByMonth[mKey].push(ov);
+        }
+      }
+    }
+  }
+  const hasGsheetOverridesActive = Object.keys(activeGsheetOverridesByMonth).length > 0;
+  const needsTvaRecalcGlobal = isCaEstimatifActive || hasGsheetOverridesActive;
   const reversementTvaByMonth = {};
   let tvaCreditBalance = 0;
   for (const mois of qontoData.previsionnel) {
     const mKey = `${mois.annee}-${String(mois.mois).padStart(2, '0')}`;
-    const collectee = tvaCollecteeByMonth[mKey] || 0;
-    const deductible = tvaDeductibleByMonth[mKey] || 0;
-    const netSolde = collectee - deductible;
-    const netEffective = netSolde - tvaCreditBalance;
-    // M+1 key
-    const nextDate = new Date(mois.annee, mois.mois, 1); // mois.mois est 1-indexed → nextDate = M+1 (0-indexed)
-    const nextMKey = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
-    if (netEffective > 0) {
-      reversementTvaByMonth[nextMKey] = (reversementTvaByMonth[nextMKey] || 0) + Math.round(netEffective);
-      tvaCreditBalance = 0;
-    } else {
-      tvaCreditBalance = -netEffective; // accumule (netEffective est négatif → on stocke sa valeur positive)
+    const isClos = mois.isClos === true;
+    let collectee = tvaCollecteeByMonth[mKey] || 0; // overrides only (excl. gsheetOverrides, intégrés dans la branche recalc)
+    let deductible = tvaDeductibleByMonth[mKey] || 0; // overrides only (excl. gsheetOverrides)
+
+    // Le mois M a-t-il un override actif (CA estimatif global ou ligne_gsheet_override) ?
+    const monthHasOverride = isCaEstimatifActive || (activeGsheetOverridesByMonth[mKey] || []).length > 0;
+    // On ne recalcule (et n'émet vers M+1) que si M a un override OU porte un crédit reporté
+    // d'un override antérieur. Sinon le baseline du sheet (Décaissement/Crédit de TVA en M+1) reste
+    // la source de vérité pour le M+1 — pas besoin de le ré-émettre, sinon on double-compte.
+    const needsRecalcThisMonth = needsTvaRecalcGlobal && !isClos && (monthHasOverride || tvaCreditBalance > 0);
+
+    if (needsRecalcThisMonth) {
+      // Démarre du baseline du sheet, puis ajuste selon les overrides actifs.
+      let baselineCol = tvaCollecteeBaselineByMonth[mKey] || 0;
+      let baselineDed = tvaDeductibleBaselineByMonth[mKey] || 0;
+
+      if (isCaEstimatifActive) {
+        const baselineFromCA = tvaCollecteeFromCAByMonth[mKey] || 0;
+        baselineCol = Math.max(0, baselineCol - baselineFromCA);
+      }
+
+      // ligne_gsheet_override : retire la TVA baseline pour la catégorie remplacée et ajoute la TVA de l'override.
+      const activeGSO = activeGsheetOverridesByMonth[mKey] || [];
+      for (const ov of activeGSO) {
+        const baselineCatHT = (crPrevData && crPrevData.categories && crPrevData.categories[ov.categorie]
+                              ? crPrevData.categories[ov.categorie][mKey] : 0) || 0;
+        const tauxCat = ov._tva ? (ov._tva.taux || 0) : 0;
+        if (tauxCat > 0 && ov._tva && ov._tva.direction === 'decaissement') {
+          baselineDed = Math.max(0, baselineDed - (baselineCatHT * tauxCat));
+        }
+        // Ajoute la TVA de l'override (positive)
+        if (ov._tva && ov._tva.tva) {
+          const v = Math.abs(ov._tva.tva);
+          if (ov._tva.direction === 'decaissement') deductible += v;
+          else if (ov._tva.direction === 'encaissement') collectee += v;
+        }
+      }
+
+      collectee += baselineCol;
+      deductible += baselineDed;
     }
+
+    // N'émettre un reversement vers M+1 que si on a effectivement recalculé ce mois (override actif
+    // ou balance reportée). Sinon on laisse le baseline `Décaissement/Crédit de TVA` du sheet faire foi.
+    if (needsRecalcThisMonth) {
+      const netSolde = collectee - deductible;
+      const netEffective = netSolde - tvaCreditBalance;
+      const nextDate = new Date(mois.annee, mois.mois, 1); // mois.mois est 1-indexed → nextDate = M+1
+      const nextMKey = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
+      if (netEffective > 0) {
+        reversementTvaByMonth[nextMKey] = (reversementTvaByMonth[nextMKey] || 0) + Math.round(netEffective);
+        tvaCreditBalance = 0;
+      } else {
+        tvaCreditBalance = -netEffective;
+      }
+    } else if (!needsTvaRecalcGlobal) {
+      // Mode normal (pas de recalc global) : on conserve la logique d'origine — overrides directs uniquement.
+      const netSolde = collectee - deductible;
+      const netEffective = netSolde - tvaCreditBalance;
+      const nextDate = new Date(mois.annee, mois.mois, 1);
+      const nextMKey = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
+      if (netEffective > 0) {
+        reversementTvaByMonth[nextMKey] = (reversementTvaByMonth[nextMKey] || 0) + Math.round(netEffective);
+        tvaCreditBalance = 0;
+      } else {
+        tvaCreditBalance = -netEffective;
+      }
+    }
+    // else : recalc global actif mais pas de override ce mois et pas de balance reportée → ne rien faire,
+    //        baseline du sheet reste la source de vérité pour le M+1 de ce mois.
   }
 
-  const previsionnelFinal = qontoData.previsionnel.map((mois) => {
+  const previsionnelFinal = qontoData.previsionnel.map((mois, moisIdx) => {
     const mKey = `${mois.annee}-${String(mois.mois).padStart(2, '0')}`;
     // Régime : isClos (mois passé clos) → encaissements/charges = Qonto réel uniquement.
     //          !isClos (mois en cours + futurs) → CR_Prev pour charges, factures Notion + pipeline pour encaissements.
@@ -4407,8 +4671,10 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
       encaissementsTRE = Math.round(qontoData.encaissementsParMois ? (qontoData.encaissementsParMois[mKey] || 0) : 0);
       encaissementsTRESource = 'qonto';
     } else if (caMensuelHT !== null) {
-      // Scénario CA estimatif : remplace le baseline Notion (user-entered, opaque HT/TTC)
-      encaissementsTRE = caMensuelHT;
+      // Scenario CA estimatif : remplace le baseline Notion. Pour la TRE (cash flow), on
+      // utilise le TTC : la TVA collectee est trackee separement et reversee en M+1, donc
+      // le cash-in du mois doit refleter le TTC reellement encaisse.
+      encaissementsTRE = caMensuelTTC;
       encaissementsTRESource = 'ca-estimatif';
     } else if (isCaSourceCRPrev) {
       // Mode Scenarios : la vue P&L (encaissementsTotal) utilise CR_Prev via encBase, donc on a
@@ -4429,17 +4695,57 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
 
     // Décaissements TRE TTC (redesign Patch 1) : Qonto pour mois clos, Plan_TRE_Prév pour mois non-clos.
     // pastMode n'a plus d'effet sur les mois clos (Qonto fait foi pour le passé).
+    // Phase E++ : si CA estimatif actif, on ANNULE le Decaissement de TVA baseline du sheet
+    // (puisqu'on recalcule le solde TVA via reversementTvaByMonth qui inclut deja la baseline non-CA).
+    // Sinon doublon : sheet payerait la TVA sur CA Notion ET override payerait sur CA estimatif.
     let decaissementsTREBase, decaissementsTRESource;
+    const creditsPlanTreMois = Math.round(planTreCreditsTotalByMonth[mKey] || 0);
+    // Le baseline `Décaissement de TVA` (et `Crédit de TVA`) du mois M représente le M+1 du solde
+    // TVA du mois M-1. On ne strippe le baseline que si M-1 a été effectivement recalculé avec un
+    // override actif (sinon le recalc produit la même valeur que la baseline et stripper ferait
+    // perdre le flux TVA visible). Conditions :
+    //   1. M-1 non-clos (sinon recalc skip → pas de remplacement)
+    //   2. CA estimatif global OU gsheetOverride actif sur M-1
+    // Sinon on conserve la baseline TVA intacte (cas septembre vs override en mai).
+    const prevMois = moisIdx > 0 ? qontoData.previsionnel[moisIdx - 1] : null;
+    const prevWasNonClos = prevMois && !prevMois.isClos;
+    const prevMKey = prevMois ? `${prevMois.annee}-${String(prevMois.mois).padStart(2, '0')}` : null;
+    const prevHadOverride = prevMKey && (
+      isCaEstimatifActive ||
+      (activeGsheetOverridesByMonth[prevMKey] || []).length > 0
+    );
+    const shouldStripBaselineTva = prevWasNonClos && prevHadOverride;
     if (isClos) {
       decaissementsTREBase = Math.round(mois.decaissements || 0); // Qonto réel TTC (set par buildTresorerieFromQonto)
       decaissementsTRESource = 'qonto';
     } else {
       decaissementsTREBase = Math.round(planTreDecByMonth[mKey] || 0);
+      if (shouldStripBaselineTva) {
+        // M-1 a été recalculé avec un override → on annule la baseline TVA decaissement (sera
+        // remplacée par tvaReversementM1 issu du recalc, ou absorbée dans tvaCreditBalance si négative).
+        decaissementsTREBase -= Math.round(decaissementTvaBaselineByMonth[mKey] || 0);
+      }
+      // ligne_gsheet_override : applique le delta TTC (override - baseline) sur la catégorie remplacée.
+      // Sinon le cash TTC reste figé sur la valeur Plan_TRE_Prév baseline et le scénario n'a pas d'effet
+      // visible sur le total des charges (seulement sur la TVA via tvaReversementM1).
+      const activeGSO = activeGsheetOverridesByMonth[mKey] || [];
+      for (const ov of activeGSO) {
+        const baselineCatHT = (crPrevData && crPrevData.categories && crPrevData.categories[ov.categorie]
+                              ? crPrevData.categories[ov.categorie][mKey] : 0) || 0;
+        const tauxCat = ov._tva ? (ov._tva.taux || 0) : 0;
+        const baselineCatTTC = baselineCatHT * (1 + tauxCat);
+        const overrideCatTTC = ov._tva ? (ov._tva.ttc || 0) : 0;
+        decaissementsTREBase += Math.round(overrideCatTTC - baselineCatTTC);
+      }
+      // Reclasse les catégories à total négatif (ex. crédit IS) en encaissement : on ajoute leur valeur
+      // absolue à decaissementsTREBase (qui devient le total des charges "pures" hors crédits) puis le
+      // même montant est ajouté à encForSolde plus bas → variation cash inchangée, affichage clarifié.
+      decaissementsTREBase += creditsPlanTreMois;
       decaissementsTRESource = 'plan-tre';
     }
 
-    // Reversement TVA M+1 (overrides uniquement). S'ajoute aux décaissements TTC de ce mois
-    // si overrides CA des mois précédents ont généré un solde TVA positif.
+    // Reversement TVA M+1. Mode normal : overrides only. Mode CA estimatif : inclut la TVA baseline
+    // recalculee (collectee non-CA + deductible) mixee avec la TVA des overrides.
     const tvaReversementM1 = Math.round(reversementTvaByMonth[mKey] || 0);
     const tvaCollecteeMois = Math.round(tvaCollecteeByMonth[mKey] || 0);
     const tvaDeductibleMois = Math.round(tvaDeductibleByMonth[mKey] || 0);
@@ -4482,18 +4788,37 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
       decaissementsTRE: decaissementsTREBase + chargesFixesExtra + masseDelta + tvaReversementM1,
       decaissementsTREBase,
       decaissementsTRESource, // 'plan-tre' | 'qonto'
-      // Phase 2 UX : breakdown TTC par grands postes Plan TRE Prév (utilisé par modale Tréso au lieu du HT CR_Prév)
-      chargesPlanTreDetail: planTreDecDetailByMonth[mKey] || {},
+      // Phase 2 UX : breakdown TTC par grands postes Plan TRE Prév (utilisé par modale Tréso au lieu du HT CR_Prév).
+      // Phase E++ : si CA estimatif actif, on retire la categorie 'TVA' du breakdown (deja annulee
+      // dans decaissementsTREBase pour eviter le doublon avec le reversement recalcule).
+      chargesPlanTreDetail: (() => {
+        const d = { ...(planTreDecDetailByMonth[mKey] || {}) };
+        if (shouldStripBaselineTva && 'TVA' in d) delete d.TVA;
+        return d;
+      })(),
       // Phase 2 UX : Pennylane factures payées dans ce mois (paid_at). Pour clos = 0 (Qonto réel les inclut déjà
       // via encaissementsTRE). Pour non-clos (current month) = montant à ajouter à encForSolde pour solde précis.
-      pennylanePaidThisMonth: isClos ? 0 : Math.round(pennylanePaidByMonth[mKey] || 0),
-      pennylanePaidDetailThisMonth: isClos ? [] : (pennylanePaidDetailByMonth[mKey] || []),
+      // Pennylane paid : zero pour mois clos (deja inclus via Qonto cash-in) ET pour mois avec
+      // CA estimatif scenario (qui remplace tout le baseline Notion+Pennylane → sinon doublon).
+      pennylanePaidThisMonth: (isClos || caMensuelHT !== null) ? 0 : Math.round(pennylanePaidByMonth[mKey] || 0),
+      pennylanePaidDetailThisMonth: (isClos || caMensuelHT !== null) ? [] : (pennylanePaidDetailByMonth[mKey] || []),
       // Détail individuel des lignes Plan TRE Prév (pour dropdown validation dans modale Tréso)
       financementsDetail: financementsDetailByMonth[mKey] || [],
-      // Phase 2 UX : Crédit de TVA = encaissement (remboursement TVA), exposé séparément
-      creditTvaPlanTre: showPlanTreFinancements ? Math.round(creditTvaByMonth_local[mKey] || 0) : 0,
+      // Phase 2 UX : Crédit de TVA = encaissement (remboursement TVA), exposé séparément.
+      // Phase E++ : zero seulement si M-1 a été recalculé avec override (shouldStripBaselineTva).
+      // Si M-1 n'a pas d'override, le baseline credit est conservé (recalc = baseline → identique).
+      creditTvaPlanTre: (showPlanTreFinancements && !shouldStripBaselineTva) ? Math.round(creditTvaByMonth_local[mKey] || 0) : 0,
       // Détail lignes par catégorie (pour expansion accordéon dans modale)
-      chargesPlanTreLines: planTreDecLinesByMonth[mKey] || {},
+      chargesPlanTreLines: (() => {
+        const l = { ...(planTreDecLinesByMonth[mKey] || {}) };
+        if (shouldStripBaselineTva && 'TVA' in l) delete l.TVA;
+        return l;
+      })(),
+      // Crédits Plan TRE (catégories à total négatif reclassées en encaissement). Montants en valeur
+      // absolue pour affichage. creditsPlanTre = somme totale, ajoutée à encForSolde plus bas.
+      creditsPlanTre: creditsPlanTreMois,
+      creditsPlanTreDetail: { ...(planTreCreditsDetailByMonth[mKey] || {}) },
+      creditsPlanTreLines: { ...(planTreCreditsLinesByMonth[mKey] || {}) },
       // Phase E complète : info TVA overrides du mois + reversement M+1 (delta overrides, pas baseline)
       tvaCollectee: tvaCollecteeMois,
       tvaDeductible: tvaDeductibleMois,
@@ -4528,6 +4853,7 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
                       + (mois.subvPlanTre || 0) + (mois.aidePlanTre || 0)
                       + (mois.pretPlanTre || 0) + (mois.avancePlanTre || 0) + (mois.rembOpcoPlanTre || 0)
                       + (mois.creditTvaPlanTre || 0)
+                      + (mois.creditsPlanTre || 0)
                       + (mois.revenusExceptionnels || 0)
                       + (mois.fictionalEncaissements || 0) + (mois.revenusRecurrents || 0)
                       + (mois.subventionsAnnoncees || 0) + (mois.pipelinePondereEncaissements || 0);
@@ -5029,6 +5355,116 @@ app.get('/api/categories-tva', async (req, res) => {
     res.json({ categories: list, nbDetected: data.nbDetected });
   } catch (err) {
     console.error('Erreur categories-tva:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Expose la masse salariale GSheet mois par mois (vrais montants, pas une moyenne).
+// Utilise par la modale "Masse salariale baseline" cote frontend pour permettre
+// au user de selectionner un mois et constater l'evolution de l'equipe / des couts.
+// Inclut les dirigeants (flag isDirigeant resolu via le tab Salaires).
+// === DEBUG (temporaire) : dump du parsing de l'onglet Masse_salariale ===
+// Retourne :
+// - rows : echantillon des lignes brutes (label col2 + qq valeurs des mois detectes)
+// - monthsDetected : colonnes mois detectees (col index + key)
+// - categories : categories detectees avec leurs items
+// - byMonthSample : echantillon de byMonth pour 3 mois (mois courant + 2 voisins)
+app.get('/api/debug/masse-salariale', async (req, res) => {
+  try {
+    const csv = await fetchGoogleSheetCSV(GID_MASSE_SALARIALE);
+    const rows = parseCSV(csv);
+    const monthInfo = findMonthColumns(rows);
+    if (!monthInfo) return res.json({ error: 'Structure non reconnue', firstRows: rows.slice(0, 10) });
+    const { headerRow, months } = monthInfo;
+    const dataStartRow = headerRow + 2;
+
+    // Dump des lignes parsees avec label + values pour chaque mois
+    const rowsParsed = [];
+    for (let r = dataStartRow; r < rows.length; r++) {
+      const row = rows[r];
+      const label = (row[2] || '').trim();
+      const labelD = (row[3] || '').trim();
+      const labelB = (row[1] || '').trim();
+      const labelE = (row[4] || '').trim();
+      // Capture aussi les premieres colonnes pour voir si label est ailleurs
+      const cols0to5 = [0,1,2,3,4,5].map(c => (row[c] || '').trim());
+      const values = months.map(m => parseFrenchNumber(row[m.col] || ''));
+      const hasValues = values.some(v => v !== 0);
+      if (!label && !labelD && !labelB && !labelE && !hasValues) continue;
+      rowsParsed.push({
+        rowIdx: r, // index 0-based dans le CSV
+        gsheetRow: r + 1, // pour matcher le numero affiche dans GSheet
+        cols0to5,
+        labelCol2: label,
+        hasValues,
+        values: months.map((m, i) => ({ mKey: `${m.year}-${String(m.month).padStart(2,'0')}`, val: values[i] })).filter(v => v.val !== 0),
+      });
+    }
+
+    const parsed = parseMasseSalariale(csv);
+    const detailed = await fetchAndParseMasseSalarialeDetailed();
+
+    // Echantillon byMonth pour mois courant + voisins
+    const today = new Date();
+    const currentMKey = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0');
+    const sortedKeys = Object.keys(detailed.byMonth || {}).sort();
+    const idx = sortedKeys.indexOf(currentMKey);
+    const sampleKeys = idx >= 0 ? sortedKeys.slice(Math.max(0, idx - 1), idx + 2) : sortedKeys.slice(-3);
+    const byMonthSample = {};
+    for (const k of sampleKeys) byMonthSample[k] = detailed.byMonth[k];
+
+    res.json({
+      headerRow,
+      dataStartRow,
+      monthsDetected: months,
+      totalRows: rows.length,
+      rowsParsed,
+      categoriesDetected: parsed.categories.map(c => ({
+        name: c.name,
+        nbItems: c.items.length,
+        items: c.items.map(it => ({ name: it.name, hasValues: it.values.some(v => v !== 0), nonZeroCount: it.values.filter(v => v !== 0).length })),
+      })),
+      byMonthSample,
+      currentMKey,
+    });
+  } catch (err) {
+    console.error('Erreur /api/debug/masse-salariale:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/scenarios/baseline/masse-salariale-monthly', async (req, res) => {
+  try {
+    const [meta, masseData] = await Promise.all([
+      fetchAndParseSalariesMeta().catch(() => []),
+      fetchAndParseMasseSalarialeDetailed().catch(() => null),
+    ]);
+    if (!masseData) return res.json({ months: [], byMonth: {}, meta: meta || [] });
+
+    // Map "nom GSheet Salaires" → isDirigeant. Permet de flagger les lignes du detail.
+    const isDirigeantByNom = {};
+    for (const m of (meta || [])) isDirigeantByNom[m.nom] = !!m.isDirigeant;
+
+    // Enrichit chaque slot de byMonth avec isDirigeant + tri par cout descendant.
+    const byMonth = {};
+    for (const [mKey, slot] of Object.entries(masseData.byMonth || {})) {
+      const enrichedDetail = (slot.detail || []).map(emp => ({
+        ...emp,
+        isDirigeant: !!isDirigeantByNom[emp.nom],
+      })).sort((a, b) => (b.cout || 0) - (a.cout || 0));
+      byMonth[mKey] = {
+        total: slot.total || 0,
+        detail: enrichedDetail,
+      };
+    }
+
+    const months = (masseData.months || []).map(m => ({
+      mKey: m.mKey, label: m.label, year: m.year, month: m.month,
+    }));
+
+    res.json({ months, byMonth, meta: meta || [] });
+  } catch (err) {
+    console.error('Erreur masse-salariale-monthly:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
