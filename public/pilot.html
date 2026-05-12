@@ -9,6 +9,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
@@ -698,7 +699,7 @@
     /* --- Kanban --- */
     .kanban-board {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(4, 1fr) auto auto;
       gap: 0.75rem;
     }
 
@@ -1103,8 +1104,118 @@
 
     .forecast-bar strong { color: var(--primary); }
 
+    /* --- Colonne Gagné repliable --- */
+    .kanban-column-won {
+      background: var(--bg-secondary);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      width: 44px;
+      min-width: 44px;
+      transition: width 0.2s ease, min-width 0.2s ease;
+      overflow: hidden;
+    }
+    .kanban-column-won.expanded {
+      width: 260px;
+      min-width: 260px;
+    }
+    .kanban-column-won .kanban-header {
+      cursor: pointer;
+      user-select: none;
+    }
+    .kanban-column-won.expanded .kanban-header {
+      background: var(--success-bg);
+    }
+    .kanban-column-won.collapsed .kanban-header {
+      flex-direction: column;
+      align-items: center;
+      padding: 0.6rem 0.3rem;
+      gap: 0.5rem;
+      border-bottom: none;
+      height: 100%;
+    }
+    .kanban-column-won.collapsed .won-collapsed-label {
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      letter-spacing: 0.06em;
+      white-space: nowrap;
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--success);
+      text-transform: uppercase;
+    }
+    .kanban-column-won.collapsed .won-toggle-icon {
+      font-size: 0.65rem;
+      color: var(--success);
+    }
+    .won-month-picker {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.35rem 0.5rem;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.75rem;
+      background: var(--bg);
+      gap: 0.4rem;
+    }
+    .won-month-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      cursor: pointer;
+      padding: 0.1rem 0.45rem;
+      color: var(--text);
+      font-size: 0.85rem;
+      line-height: 1;
+    }
+    .won-month-btn:hover { background: var(--hover); border-color: var(--primary); }
+    .won-month-label {
+      font-weight: 500;
+      color: var(--text);
+      flex: 1;
+      text-align: center;
+      text-transform: capitalize;
+    }
+    .kanban-card-won {
+      cursor: pointer;
+      border-left: 3px solid var(--success);
+    }
+    .kanban-card-won .kanban-card-name {
+      color: var(--text);
+      font-weight: 600;
+    }
+    .kanban-card-won-date {
+      font-size: 0.7rem;
+      color: var(--text-light);
+    }
+    .won-empty {
+      padding: 1rem 0.5rem;
+      text-align: center;
+      color: var(--text-light);
+      font-size: 0.78rem;
+    }
+
+    /* Variant "À relancer plus tard" — orange */
+    .kanban-column-relancer.expanded .kanban-header {
+      background: var(--warning-bg);
+    }
+    .kanban-column-relancer.collapsed .won-collapsed-label,
+    .kanban-column-relancer.collapsed .won-toggle-icon {
+      color: var(--warning);
+    }
+    .kanban-column-relancer.expanded .kanban-header-label {
+      color: var(--warning) !important;
+    }
+    .kanban-card-relancer {
+      cursor: pointer;
+      border-left: 3px solid var(--warning);
+    }
+
     @media (max-width: 768px) {
       .kanban-board { grid-template-columns: 1fr 1fr; }
+      .kanban-column-won { grid-column: 1 / -1; width: auto; min-width: 0; }
+      .kanban-column-won.expanded { width: auto; min-width: 0; }
     }
 
     @media (max-width: 480px) {
@@ -2284,6 +2395,337 @@
       font-size: 0.85rem;
     }
 
+    /* ============================================================
+       🎮 GAMIFICATION
+       ============================================================ */
+
+    /* Bandeau gamification (XP / niveau / streak / objectif) */
+    .gami-bar {
+      display: grid;
+      grid-template-columns: 1.4fr 0.8fr 2fr;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    @media (max-width: 900px) {
+      .gami-bar { grid-template-columns: 1fr; }
+    }
+
+    .gami-card {
+      background: linear-gradient(135deg, var(--card) 0%, var(--bg-secondary) 100%);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      position: relative;
+      overflow: hidden;
+    }
+    .gami-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0; height: 3px;
+      background: linear-gradient(90deg, var(--primary), var(--success));
+    }
+
+    .gami-level-card::before {
+      background: linear-gradient(90deg, #6940a5, #e03e3e, #d9730d);
+    }
+    .gami-streak-card::before {
+      background: linear-gradient(90deg, #ff8c42, #ff3d3d);
+    }
+    .gami-goal-card::before {
+      background: linear-gradient(90deg, #0f7b6c, #34d399);
+    }
+
+    .gami-label {
+      font-size: 0.65rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.4rem;
+    }
+    .gami-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: 0.4rem;
+    }
+    .gami-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .gami-sub {
+      font-size: 0.7rem;
+      color: var(--text-light);
+    }
+    .gami-emoji { font-size: 1.4rem; line-height: 1; }
+    .gami-big {
+      font-size: 1.6rem;
+      font-weight: 800;
+      color: var(--text);
+      line-height: 1.1;
+    }
+
+    /* Barre XP */
+    .xp-bar {
+      height: 10px;
+      background: var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+      position: relative;
+    }
+    .xp-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #6940a5, #e03e3e, #d9730d);
+      border-radius: 6px;
+      transition: width 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+      box-shadow: 0 0 8px rgba(217,115,13,0.5);
+    }
+
+    /* Streak — flamme */
+    .streak-flame {
+      display: inline-block;
+      animation: streak-flicker 1.6s ease-in-out infinite;
+    }
+    @keyframes streak-flicker {
+      0%, 100% { transform: scale(1) rotate(-2deg); }
+      50% { transform: scale(1.08) rotate(3deg); }
+    }
+    .streak-cold { filter: grayscale(1); opacity: 0.4; animation: none; }
+
+    /* Jauge objectif */
+    .goal-bar-wrap {
+      position: relative;
+      height: 22px;
+      background: var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      margin-top: 0.3rem;
+    }
+    .goal-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #0f7b6c 0%, #34d399 70%, #ffd166 100%);
+      border-radius: 12px;
+      transition: width 0.8s cubic-bezier(0.34, 1.56, 0.64, 1);
+      position: relative;
+      box-shadow: 0 0 12px rgba(52,211,153,0.4);
+    }
+    .goal-bar-fill::after {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: repeating-linear-gradient(45deg,
+        rgba(255,255,255,0.15) 0px, rgba(255,255,255,0.15) 8px,
+        transparent 8px, transparent 16px);
+      animation: goal-stripes 1.4s linear infinite;
+      border-radius: 12px;
+    }
+    @keyframes goal-stripes {
+      from { background-position: 0 0; }
+      to { background-position: 32px 0; }
+    }
+    .goal-milestones {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      pointer-events: none;
+    }
+    .goal-milestone {
+      position: absolute;
+      top: 0; bottom: 0;
+      width: 2px;
+      background: rgba(255,255,255,0.7);
+    }
+    .goal-milestone.hit { background: rgba(255,255,255,0); }
+    .goal-bar-label {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: white;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+
+    /* Modal célébration plein écran */
+    .celebration-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: radial-gradient(circle at center, rgba(0,61,46,0.85), rgba(0,0,0,0.9));
+      z-index: 99999;
+      justify-content: center;
+      align-items: center;
+      backdrop-filter: blur(4px);
+    }
+    .celebration-overlay.active {
+      display: flex;
+      animation: celebration-fade-in 0.3s ease-out;
+    }
+    @keyframes celebration-fade-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    .celebration-card {
+      text-align: center;
+      color: white;
+      padding: 2.5rem 4rem;
+      max-width: 90vw;
+      animation: celebration-pop 0.7s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    @keyframes celebration-pop {
+      0% { transform: scale(0.4) rotate(-12deg); opacity: 0; }
+      60% { transform: scale(1.12) rotate(2deg); opacity: 1; }
+      100% { transform: scale(1) rotate(0); opacity: 1; }
+    }
+    .celebration-emoji {
+      font-size: 5rem;
+      margin-bottom: 1rem;
+      animation: celebration-bounce 0.9s ease infinite alternate;
+    }
+    @keyframes celebration-bounce {
+      from { transform: translateY(0) scale(1); }
+      to { transform: translateY(-12px) scale(1.05); }
+    }
+    .celebration-title {
+      font-size: 3rem;
+      font-weight: 900;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(90deg, #ffd166, #f9c74f, #ff8c42);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      text-transform: uppercase;
+    }
+    .celebration-deal {
+      font-size: 1.4rem;
+      font-weight: 600;
+      margin-bottom: 0.4rem;
+      color: white;
+    }
+    .celebration-amount {
+      font-size: 2.6rem;
+      font-weight: 800;
+      color: #34d399;
+      margin-bottom: 1.2rem;
+    }
+    .celebration-xp {
+      display: inline-block;
+      padding: 0.5rem 1.2rem;
+      border-radius: 999px;
+      background: rgba(255,209,102,0.18);
+      border: 1.5px solid #ffd166;
+      color: #ffd166;
+      font-weight: 700;
+      font-size: 1rem;
+      margin-bottom: 1.2rem;
+    }
+    .celebration-close {
+      display: block;
+      margin: 1rem auto 0;
+      padding: 0.6rem 1.6rem;
+      background: rgba(255,255,255,0.12);
+      border: 1.5px solid rgba(255,255,255,0.4);
+      color: white;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+      transition: all 0.15s;
+    }
+    .celebration-close:hover {
+      background: rgba(255,255,255,0.22);
+      transform: translateY(-1px);
+    }
+
+    /* Toasts d'achievement */
+    .achievement-stack {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      display: flex;
+      flex-direction: column-reverse;
+      gap: 0.5rem;
+      z-index: 9998;
+      pointer-events: none;
+    }
+    .achievement-toast {
+      pointer-events: auto;
+      background: linear-gradient(135deg, var(--card) 0%, var(--bg-secondary) 100%);
+      border: 1px solid var(--border);
+      border-left: 4px solid #ffd166;
+      border-radius: 6px;
+      padding: 0.6rem 0.9rem;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      min-width: 240px;
+      max-width: 360px;
+      animation: toast-slide-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), toast-fade-out 0.4s ease-in 4.6s forwards;
+    }
+    .achievement-toast.xp { border-left-color: #d9730d; }
+    .achievement-toast.level { border-left-color: #6940a5; }
+    .achievement-toast.streak { border-left-color: #e03e3e; }
+    .achievement-toast.milestone { border-left-color: #34d399; }
+    @keyframes toast-slide-in {
+      from { transform: translateX(120%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    @keyframes toast-fade-out {
+      to { transform: translateX(120%); opacity: 0; }
+    }
+    .achievement-toast .at-icon { font-size: 1.4rem; line-height: 1; }
+    .achievement-toast .at-body { flex: 1; }
+    .achievement-toast .at-title { font-size: 0.78rem; font-weight: 700; color: var(--text); }
+    .achievement-toast .at-sub { font-size: 0.7rem; color: var(--text-secondary); }
+
+    /* Toggle "Gamifier" */
+    .gami-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      cursor: pointer;
+      user-select: none;
+      padding: 0.25rem 0.55rem;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font-size: 0.78rem;
+      color: var(--text-secondary);
+      background: var(--bg);
+      transition: all 0.15s;
+    }
+    .gami-toggle:hover { border-color: var(--primary); }
+    .gami-toggle input { accent-color: var(--primary); cursor: pointer; }
+    .gami-toggle.active {
+      color: var(--text);
+      background: linear-gradient(90deg, rgba(105,64,165,0.1), rgba(217,115,13,0.1));
+      border-color: rgba(217,115,13,0.4);
+      font-weight: 600;
+    }
+
+    /* Toggle son */
+    .sound-toggle {
+      position: fixed;
+      bottom: 1rem;
+      left: 1rem;
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      background: var(--card);
+      border: 1px solid var(--border);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      z-index: 9000;
+      transition: all 0.15s;
+    }
+    .sound-toggle:hover { transform: scale(1.08); }
+
   </style>
 </head>
 <body>
@@ -2525,13 +2967,58 @@
           <div class="section-title" style="margin-bottom:0">Pipeline &mdash; Deals en cours</div>
           <button class="new-deal-btn" onclick="openNewDealModal()">&#43; Nouveau deal</button>
         </div>
-        <div style="display:flex;align-items:center;gap:0.5rem;font-size:0.8rem;color:var(--text-secondary)">
-          <span>Activité du</span>
-          <input type="date" id="pipelineFrom" oninput="renderKanban()" style="font-size:0.78rem;padding:0.2rem 0.4rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text)">
-          <span>au</span>
-          <input type="date" id="pipelineTo" oninput="renderKanban()" style="font-size:0.78rem;padding:0.2rem 0.4rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text)">
+        <div style="display:flex;align-items:center;gap:1rem;font-size:0.8rem;color:var(--text-secondary)">
+          <label class="gami-toggle" title="Activer XP, streak, célébrations">
+            <input type="checkbox" id="gamiToggle" onchange="setGamiEnabled(this.checked)">
+            <span>🎮 Gamifier</span>
+          </label>
+          <div style="display:flex;align-items:center;gap:0.5rem">
+            <span>Activité du</span>
+            <input type="date" id="pipelineFrom" oninput="renderKanban()" style="font-size:0.78rem;padding:0.2rem 0.4rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text)">
+            <span>au</span>
+            <input type="date" id="pipelineTo" oninput="renderKanban()" style="font-size:0.78rem;padding:0.2rem 0.4rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text)">
+          </div>
         </div>
       </div>
+
+      <!-- 🎮 Bandeau Gamification (visible uniquement si Gamifier activé) -->
+      <div class="gami-bar" id="gamiBar" style="display:none">
+        <div class="gami-card gami-level-card">
+          <div class="gami-label">Niveau</div>
+          <div class="gami-row">
+            <div>
+              <span class="gami-emoji" id="gamiLevelEmoji">🥋</span>
+              <span class="gami-title" id="gamiLevelName">Padawan closer</span>
+            </div>
+            <span class="gami-sub" id="gamiLevelXp">0 XP</span>
+          </div>
+          <div class="xp-bar"><div class="xp-bar-fill" id="gamiXpFill" style="width:0%"></div></div>
+          <div class="gami-sub" id="gamiNextLevel" style="margin-top:0.3rem">—</div>
+        </div>
+
+        <div class="gami-card gami-streak-card">
+          <div class="gami-label">Streak</div>
+          <div class="gami-row">
+            <div class="gami-big"><span class="streak-flame" id="gamiStreakFlame">🔥</span> <span id="gamiStreakDays">0</span><span style="font-size:0.9rem;color:var(--text-secondary)">j</span></div>
+            <span class="gami-sub" id="gamiStreakBest">Best : 0j</span>
+          </div>
+          <div class="gami-sub" id="gamiStreakHint">Fais une action commerciale pour démarrer</div>
+        </div>
+
+        <div class="gami-card gami-goal-card">
+          <div class="gami-label">Objectif du mois</div>
+          <div class="gami-row">
+            <div class="gami-title" id="gamiGoalTitle">—</div>
+            <span class="gami-sub" id="gamiGoalRemaining"></span>
+          </div>
+          <div class="goal-bar-wrap">
+            <div class="goal-bar-fill" id="gamiGoalFill" style="width:0%"></div>
+            <div class="goal-milestones" id="gamiGoalMilestones"></div>
+            <div class="goal-bar-label" id="gamiGoalLabel">0%</div>
+          </div>
+        </div>
+      </div>
+
       <div class="pipeline-activity" id="pipelineActivity"></div>
       <div class="forecast-bar" id="forecastBar">
         <span><strong id="forecastCount">0</strong> deal(s) selectionne(s) &mdash; Forecast : <strong id="forecastAmount">0 €</strong></span>
@@ -4363,7 +4850,452 @@
     </div>
   </div>
 
+  <!-- 🎉 Modal célébration -->
+  <div class="celebration-overlay" id="celebrationOverlay" onclick="closeCelebration()">
+    <div class="celebration-card" onclick="event.stopPropagation()">
+      <div class="celebration-emoji" id="celebrationEmoji">🎉</div>
+      <div class="celebration-title" id="celebrationTitle">Deal Closed</div>
+      <div class="celebration-deal" id="celebrationDeal"></div>
+      <div class="celebration-amount" id="celebrationAmount"></div>
+      <div class="celebration-xp" id="celebrationXp"></div>
+      <div id="celebrationLevelUp" style="display:none;font-size:1rem;color:#ffd166;font-weight:600;margin-bottom:0.4rem"></div>
+      <button class="celebration-close" onclick="closeCelebration()">Continuer à closer ↵</button>
+    </div>
+  </div>
+
+  <!-- 🏅 Toasts achievements -->
+  <div class="achievement-stack" id="achievementStack"></div>
+
+  <!-- 🔊 Toggle son -->
+  <button class="sound-toggle" id="soundToggle" onclick="toggleSound()" title="Activer / désactiver les sons">🔊</button>
+
   <script>
+    // ============================================================
+    // 🎮 GAMIFICATION ENGINE
+    // ============================================================
+    const GAMI_KEY = 'gami_state_v1';
+    const GAMI_LEVELS = [
+      { min: 0,     name: 'Padawan closer',  emoji: '🥋' },
+      { min: 500,   name: 'Junior closer',   emoji: '🌱' },
+      { min: 1500,  name: 'Closer confirmé', emoji: '⚡' },
+      { min: 4000,  name: 'Senior closer',   emoji: '🎯' },
+      { min: 10000, name: 'Closer machine',  emoji: '🚀' },
+      { min: 25000, name: 'Closer légende',  emoji: '👑' },
+      { min: 60000, name: 'Closer immortel', emoji: '🔥' },
+    ];
+    const XP_REWARDS = {
+      deal_won_base: 500,
+      deal_won_per_100: 1,
+      deal_lost: 20,
+      proposal_sent: 50,
+      stage_advance: 25,
+      deal_created: 10,
+    };
+
+    function gamiState() {
+      try {
+        const raw = localStorage.getItem(GAMI_KEY);
+        if (raw) return JSON.parse(raw);
+      } catch {}
+      return {
+        xp: 0,
+        streak: 0,
+        bestStreak: 0,
+        lastActionDate: null,
+        achievements: {},
+        soundOn: true,
+      };
+    }
+
+    // Toggle "Gamifier" : OFF par défaut, persistant dans localStorage
+    const GAMI_ENABLED_KEY = 'gami_enabled_v1';
+    function gamiEnabled() {
+      try { return localStorage.getItem(GAMI_ENABLED_KEY) === '1'; } catch { return false; }
+    }
+    function setGamiEnabled(on) {
+      try { localStorage.setItem(GAMI_ENABLED_KEY, on ? '1' : '0'); } catch {}
+      applyGamiVisibility();
+      if (on) renderGamiBar();
+    }
+    function applyGamiVisibility() {
+      const on = gamiEnabled();
+      const bar = document.getElementById('gamiBar');
+      if (bar) bar.style.display = on ? '' : 'none';
+      const stack = document.getElementById('achievementStack');
+      if (stack) stack.style.display = on ? '' : 'none';
+      const sb = document.getElementById('soundToggle');
+      if (sb) sb.style.display = on ? '' : 'none';
+      const cb = document.getElementById('gamiToggle');
+      if (cb) {
+        cb.checked = on;
+        const lbl = cb.closest('.gami-toggle');
+        if (lbl) lbl.classList.toggle('active', on);
+      }
+    }
+    function gamiSave(s) {
+      try { localStorage.setItem(GAMI_KEY, JSON.stringify(s)); } catch {}
+    }
+    function gamiGetLevel(xp) {
+      let lvl = GAMI_LEVELS[0];
+      let nextLvl = null;
+      for (let i = 0; i < GAMI_LEVELS.length; i++) {
+        if (xp >= GAMI_LEVELS[i].min) {
+          lvl = GAMI_LEVELS[i];
+          nextLvl = GAMI_LEVELS[i + 1] || null;
+        }
+      }
+      return { current: lvl, next: nextLvl };
+    }
+    function dateKey(d = new Date()) {
+      return d.toISOString().slice(0, 10);
+    }
+    function daysBetween(a, b) {
+      const da = new Date(a + 'T00:00:00Z');
+      const db = new Date(b + 'T00:00:00Z');
+      return Math.round((db - da) / (1000 * 60 * 60 * 24));
+    }
+
+    // Audio (WebAudio, sans fichiers externes)
+    let _audioCtx = null;
+    function _ensureAudio() {
+      if (!_audioCtx) {
+        try { _audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch {}
+      }
+      return _audioCtx;
+    }
+    function playTone(freq, duration = 0.08, type = 'sine', vol = 0.08) {
+      const s = gamiState();
+      if (!s.soundOn) return;
+      const ctx = _ensureAudio();
+      if (!ctx) return;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = type;
+      osc.frequency.value = freq;
+      gain.gain.value = vol;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      const now = ctx.currentTime;
+      gain.gain.setValueAtTime(vol, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+      osc.start(now);
+      osc.stop(now + duration);
+    }
+    function soundPop() { playTone(880, 0.06, 'sine', 0.06); }
+    function soundDing() {
+      playTone(660, 0.1, 'triangle', 0.1);
+      setTimeout(() => playTone(880, 0.12, 'triangle', 0.1), 80);
+      setTimeout(() => playTone(1320, 0.18, 'triangle', 0.1), 180);
+    }
+    function soundWhoosh() { playTone(420, 0.18, 'sawtooth', 0.05); }
+    function soundFanfare() {
+      playTone(523, 0.12, 'square', 0.08);
+      setTimeout(() => playTone(659, 0.12, 'square', 0.08), 110);
+      setTimeout(() => playTone(784, 0.12, 'square', 0.08), 220);
+      setTimeout(() => playTone(1047, 0.32, 'square', 0.09), 330);
+    }
+
+    function toggleSound() {
+      const s = gamiState();
+      s.soundOn = !s.soundOn;
+      gamiSave(s);
+      const btn = document.getElementById('soundToggle');
+      if (btn) btn.textContent = s.soundOn ? '🔊' : '🔇';
+      if (s.soundOn) soundPop();
+    }
+
+    // Toasts
+    function showAchievement({ icon = '✨', title, sub = '', kind = '' } = {}) {
+      if (!gamiEnabled()) return;
+      const stack = document.getElementById('achievementStack');
+      if (!stack) return;
+      const el = document.createElement('div');
+      el.className = 'achievement-toast' + (kind ? ' ' + kind : '');
+      el.innerHTML = `
+        <span class="at-icon">${icon}</span>
+        <div class="at-body">
+          <div class="at-title">${title}</div>
+          ${sub ? `<div class="at-sub">${sub}</div>` : ''}
+        </div>`;
+      stack.appendChild(el);
+      setTimeout(() => { el.remove(); }, 5200);
+      soundPop();
+    }
+
+    // Streak
+    function bumpStreak() {
+      const s = gamiState();
+      const today = dateKey();
+      if (s.lastActionDate === today) return s; // déjà compté aujourd'hui
+      if (!s.lastActionDate) {
+        s.streak = 1;
+      } else {
+        const diff = daysBetween(s.lastActionDate, today);
+        if (diff === 1) s.streak += 1;
+        else if (diff > 1) s.streak = 1;
+      }
+      if (s.streak > s.bestStreak) s.bestStreak = s.streak;
+      s.lastActionDate = today;
+      gamiSave(s);
+
+      // Achievement de streak
+      if (s.streak === 3) showAchievement({ icon: '🔥', title: 'Streak 3 jours !', sub: 'On chauffe', kind: 'streak' });
+      if (s.streak === 7) { showAchievement({ icon: '🔥', title: 'Streak 7 jours !', sub: 'Une semaine sans rater', kind: 'streak' }); soundFanfare(); }
+      if (s.streak === 14) showAchievement({ icon: '🔥', title: 'Streak 14 jours !', sub: 'Deux semaines de feu', kind: 'streak' });
+      if (s.streak === 30) { showAchievement({ icon: '👑', title: 'Streak 30 jours !', sub: 'LÉGENDE', kind: 'streak' }); soundFanfare(); }
+      return s;
+    }
+
+    function maybeResetStreak() {
+      const s = gamiState();
+      if (!s.lastActionDate) return s;
+      const today = dateKey();
+      const diff = daysBetween(s.lastActionDate, today);
+      if (diff > 1) {
+        s.streak = 0;
+        gamiSave(s);
+      }
+      return s;
+    }
+
+    // Gain XP
+    function gainXP(amount, opts = {}) {
+      if (!amount || amount <= 0) return;
+      const s = gamiState();
+      const before = s.xp;
+      const beforeLevel = gamiGetLevel(before).current;
+      s.xp += amount;
+      gamiSave(s);
+      const afterLevel = gamiGetLevel(s.xp).current;
+
+      if (!opts.silent) {
+        showAchievement({
+          icon: opts.icon || '⭐',
+          title: `+${amount} XP`,
+          sub: opts.reason || '',
+          kind: 'xp',
+        });
+      }
+
+      if (afterLevel.min > beforeLevel.min && !opts.silent) {
+        // LEVEL UP ! (skip si silent — la célébration de deal s'en charge)
+        setTimeout(() => {
+          showAchievement({
+            icon: afterLevel.emoji,
+            title: `LEVEL UP — ${afterLevel.name}`,
+            sub: `${s.xp.toLocaleString('fr-FR')} XP`,
+            kind: 'level',
+          });
+          soundFanfare();
+          if (window.confetti) {
+            confetti({
+              particleCount: 120,
+              spread: 90,
+              origin: { y: 0.7 },
+              colors: ['#ffd166', '#f9c74f', '#ff8c42', '#6940a5', '#34d399'],
+            });
+          }
+        }, 400);
+      }
+      renderGamiBar();
+    }
+
+    function recordAction(actionType, payload = {}) {
+      if (!gamiEnabled()) return;
+      bumpStreak();
+      switch (actionType) {
+        case 'deal_won': {
+          const xp = XP_REWARDS.deal_won_base + Math.round((payload.amount || 0) / 100) * XP_REWARDS.deal_won_per_100;
+          gainXP(xp, { reason: 'Deal gagné', icon: '🏆', silent: true });
+          break;
+        }
+        case 'deal_lost':
+          gainXP(XP_REWARDS.deal_lost, { reason: 'Deal perdu (XP de courage)', icon: '🪦' });
+          break;
+        case 'proposal_sent':
+          gainXP(XP_REWARDS.proposal_sent, { reason: 'Propale envoyée', icon: '📄' });
+          checkProposalAchievements();
+          break;
+        case 'stage_advance':
+          gainXP(XP_REWARDS.stage_advance, { reason: `Deal avancé → ${payload.to || ''}`, icon: '⬆️' });
+          break;
+        case 'deal_created':
+          gainXP(XP_REWARDS.deal_created, { reason: 'Nouveau deal', icon: '✨' });
+          break;
+      }
+      renderGamiBar();
+    }
+
+    // Achievements basés sur compteurs (mensuel, propales, etc.)
+    function _monthKey(d = new Date()) { return `${d.getFullYear()}-${d.getMonth()}`; }
+    function _bumpCounter(name) {
+      const s = gamiState();
+      s.counters = s.counters || {};
+      const k = _monthKey() + ':' + name;
+      s.counters[k] = (s.counters[k] || 0) + 1;
+      gamiSave(s);
+      return s.counters[k];
+    }
+    function _firstTime(achKey) {
+      const s = gamiState();
+      s.achievements = s.achievements || {};
+      if (s.achievements[achKey]) return false;
+      s.achievements[achKey] = Date.now();
+      gamiSave(s);
+      return true;
+    }
+    function checkProposalAchievements() {
+      const c = _bumpCounter('proposals');
+      if (c === 5) showAchievement({ icon: '🚀', title: '5 propales ce mois !', sub: 'Belle cadence', kind: 'milestone' });
+      if (c === 10) showAchievement({ icon: '💪', title: '10 propales ce mois !', sub: 'Machine de guerre', kind: 'milestone' });
+    }
+    function checkWinAchievements({ amount }) {
+      const c = _bumpCounter('wins');
+      const monthKey = _monthKey();
+      if (_firstTime('first_win_' + monthKey)) {
+        showAchievement({ icon: '🥇', title: 'Premier deal du mois !', sub: 'Lance la machine', kind: 'milestone' });
+      }
+      if (amount >= 50000 && _firstTime('big_deal_' + Date.now())) {
+        showAchievement({ icon: '💎', title: 'Deal monstre !', sub: `${formatEuro(amount)} signés`, kind: 'milestone' });
+      }
+      if (c === 3) showAchievement({ icon: '🔥', title: '3 deals gagnés ce mois !', kind: 'milestone' });
+      if (c === 5) showAchievement({ icon: '🏆', title: '5 deals gagnés ce mois !', kind: 'milestone' });
+    }
+
+    // Modal de célébration
+    function celebrateWin({ name, amount, xp, leveledUp = false, newLevel = null }) {
+      if (!gamiEnabled()) return;
+      const overlay = document.getElementById('celebrationOverlay');
+      document.getElementById('celebrationDeal').textContent = name || '';
+      document.getElementById('celebrationAmount').textContent = formatEuro(amount);
+      document.getElementById('celebrationXp').textContent = `+${xp.toLocaleString('fr-FR')} XP`;
+      document.getElementById('celebrationEmoji').textContent = amount >= 50000 ? '💎' : '🎉';
+      document.getElementById('celebrationTitle').textContent = amount >= 50000 ? 'Monster Deal' : 'Deal Closed';
+      const lvlEl = document.getElementById('celebrationLevelUp');
+      if (leveledUp && newLevel) {
+        lvlEl.innerHTML = `🚀 LEVEL UP — ${newLevel.emoji} ${newLevel.name}`;
+        lvlEl.style.display = 'block';
+      } else {
+        lvlEl.style.display = 'none';
+      }
+      overlay.classList.add('active');
+
+      // Confettis cascade
+      if (window.confetti) {
+        const burst = (originX, count = 80) => confetti({
+          particleCount: count,
+          spread: 80,
+          origin: { x: originX, y: 0.7 },
+          colors: ['#ffd166', '#f9c74f', '#ff8c42', '#0f7b6c', '#34d399', '#6940a5'],
+        });
+        burst(0.2, 100);
+        setTimeout(() => burst(0.8, 100), 250);
+        setTimeout(() => burst(0.5, 140), 500);
+        setTimeout(() => confetti({
+          particleCount: 200, spread: 160, startVelocity: 45,
+          origin: { y: 0.6 },
+        }), 800);
+      }
+      soundFanfare();
+    }
+    function closeCelebration() {
+      document.getElementById('celebrationOverlay').classList.remove('active');
+    }
+
+    // Jauges & UI
+    function _milestonePopIfCrossed(prevPct, newPct) {
+      const milestones = [25, 50, 75, 100];
+      for (const m of milestones) {
+        if (prevPct < m && newPct >= m) {
+          if (window.confetti) {
+            confetti({ particleCount: 70, spread: 70, origin: { y: 0.4 }, colors: ['#34d399','#0f7b6c','#ffd166'] });
+          }
+          soundDing();
+          showAchievement({
+            icon: m === 100 ? '🎯' : '✅',
+            title: m === 100 ? 'OBJECTIF ATTEINT !' : `${m}% de l'objectif`,
+            sub: m === 100 ? 'Tu déchires' : 'Continue comme ça',
+            kind: 'milestone',
+          });
+        }
+      }
+    }
+    let _prevGoalPct = 0;
+
+    function renderGamiBar() {
+      if (!gamiEnabled()) return;
+      const s = maybeResetStreak();
+      const lvl = gamiGetLevel(s.xp);
+      const lvlEl = document.getElementById('gamiLevelEmoji');
+      if (!lvlEl) return;
+
+      lvlEl.textContent = lvl.current.emoji;
+      document.getElementById('gamiLevelName').textContent = lvl.current.name;
+      document.getElementById('gamiLevelXp').textContent = `${s.xp.toLocaleString('fr-FR')} XP`;
+      const fillPct = lvl.next
+        ? ((s.xp - lvl.current.min) / (lvl.next.min - lvl.current.min)) * 100
+        : 100;
+      document.getElementById('gamiXpFill').style.width = Math.max(2, Math.min(100, fillPct)) + '%';
+      document.getElementById('gamiNextLevel').textContent = lvl.next
+        ? `Prochain : ${lvl.next.emoji} ${lvl.next.name} (${(lvl.next.min - s.xp).toLocaleString('fr-FR')} XP)`
+        : '🏆 Niveau max atteint';
+
+      // Streak
+      const flameEl = document.getElementById('gamiStreakFlame');
+      flameEl.classList.toggle('streak-cold', s.streak === 0);
+      document.getElementById('gamiStreakDays').textContent = s.streak;
+      document.getElementById('gamiStreakBest').textContent = `Best : ${s.bestStreak}j`;
+      const today = dateKey();
+      const actedToday = s.lastActionDate === today;
+      const hint = s.streak === 0
+        ? 'Fais une action commerciale pour démarrer'
+        : actedToday
+          ? '✅ Action faite aujourd\'hui'
+          : '⚠️ Fais une action avant minuit pour garder la streak';
+      document.getElementById('gamiStreakHint').textContent = hint;
+
+      // Objectif du mois
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = now.getMonth();
+      const objectives = (typeof getObjectives === 'function') ? getObjectives(year) : Array(12).fill(0);
+      const monthlyObjective = objectives[month] || 0;
+      let monthlyCA = 0;
+      if (typeof dashboardData !== 'undefined' && dashboardData && dashboardData.yearlyData && dashboardData.yearlyData[year]) {
+        const m = dashboardData.yearlyData[year][month];
+        if (m) monthlyCA = m.total || 0;
+      }
+      const monthLabel = MONTH_LABELS_FR[month];
+      document.getElementById('gamiGoalTitle').textContent = monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1) + ' ' + year;
+
+      const pct = monthlyObjective > 0 ? Math.min(100, (monthlyCA / monthlyObjective) * 100) : 0;
+      const fill = document.getElementById('gamiGoalFill');
+      const label = document.getElementById('gamiGoalLabel');
+      fill.style.width = pct + '%';
+      const remaining = Math.max(0, monthlyObjective - monthlyCA);
+      label.textContent = monthlyObjective > 0
+        ? `${formatEuro(monthlyCA)} / ${formatEuro(monthlyObjective)} · ${pct.toFixed(0)}%`
+        : 'Pas d\'objectif défini ce mois-ci';
+      document.getElementById('gamiGoalRemaining').textContent = remaining > 0
+        ? `Reste ${formatEuro(remaining)}`
+        : (monthlyObjective > 0 ? '🎯 Atteint !' : '');
+
+      // Milestones
+      const milestonesEl = document.getElementById('gamiGoalMilestones');
+      milestonesEl.innerHTML = [25, 50, 75].map(m =>
+        `<div class="goal-milestone${pct >= m ? ' hit' : ''}" style="left:${m}%"></div>`
+      ).join('');
+
+      _milestonePopIfCrossed(_prevGoalPct, pct);
+      _prevGoalPct = pct;
+
+      // Sound toggle icon
+      const sndBtn = document.getElementById('soundToggle');
+      if (sndBtn) sndBtn.textContent = s.soundOn ? '🔊' : '🔇';
+    }
+
+    // ============================================================
+
     // --- Dark mode ---
     function initTheme() {
       const saved = localStorage.getItem('theme');
@@ -4628,7 +5560,11 @@
 
     function confirmProposalDate(dealId) {
       const val = document.getElementById('_proposalDateVal')?.value;
-      if (val) saveDealMetadata(dealId, { proposal_sent_at: val });
+      if (val) {
+        const wasSet = (dealMetadata[dealId] || {}).proposal_sent_at;
+        saveDealMetadata(dealId, { proposal_sent_at: val });
+        if (!wasSet) recordAction('proposal_sent');
+      }
       closeProposalPicker();
     }
 
@@ -4744,12 +5680,13 @@
       document.getElementById('kpiObjYtd').textContent = formatEuro(objYTD);
       document.getElementById('kpiObjYtdSub').textContent = objAnnual > 0 ? `Annuel : ${formatEuro(objAnnual)}` : 'Non defini';
 
-      // Pipeline KPI (brut + pondéré)
+      // Pipeline KPI (brut + pondéré) — uniquement les stages "forecast" (exclut "À relancer plus tard")
       let pipelineTotal = 0;
       let pipelineWeighted = 0;
       let pipelineCount = 0;
       if (dashboardData.pipelineDeals) {
-        for (const deals of Object.values(dashboardData.pipelineDeals)) {
+        for (const stageName of KANBAN_STAGES_ORDER) {
+          const deals = dashboardData.pipelineDeals[stageName] || [];
           pipelineCount += deals.length;
           for (const d of deals) {
             pipelineTotal += d.amount;
@@ -4783,6 +5720,7 @@
       renderTable(data, prevData, objectives);
       initPipelinePeriod();
       renderKanban();
+      renderGamiBar();
     }
 
     function renderChart(data, prevData, objectives) {
@@ -5157,6 +6095,176 @@
     let pipelineNewDeals = [];
     let pipelineMovedDeals = [];
 
+    // --- Colonne Gagné (repliable) ---
+    let wonColumnOpen = false;
+    const _nowWon = new Date();
+    let wonColumnYear = _nowWon.getFullYear();
+    let wonColumnMonth = _nowWon.getMonth();
+    const wonDealsCache = {};
+    let wonDealsLoading = false;
+    const MONTH_LABELS_FR = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+    const wonCacheKey = (y, m) => `${y}-${m}`;
+
+    async function loadWonDeals(year, month) {
+      const key = wonCacheKey(year, month);
+      if (wonDealsCache[key]) return wonDealsCache[key];
+      wonDealsLoading = true;
+      renderWonColumn();
+      try {
+        const res = await fetch(`/api/won-deals?year=${year}&month=${month}`);
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        wonDealsCache[key] = data;
+        return data;
+      } catch {
+        return null;
+      } finally {
+        wonDealsLoading = false;
+        renderWonColumn();
+      }
+    }
+
+    function toggleWonColumn() {
+      wonColumnOpen = !wonColumnOpen;
+      renderWonColumn();
+      if (wonColumnOpen && !wonDealsCache[wonCacheKey(wonColumnYear, wonColumnMonth)]) {
+        loadWonDeals(wonColumnYear, wonColumnMonth);
+      }
+    }
+
+    function changeWonMonth(delta) {
+      let y = wonColumnYear;
+      let m = wonColumnMonth + delta;
+      if (m < 0) { m = 11; y--; }
+      if (m > 11) { m = 0; y++; }
+      wonColumnYear = y;
+      wonColumnMonth = m;
+      const key = wonCacheKey(y, m);
+      if (wonDealsCache[key]) renderWonColumn();
+      else loadWonDeals(y, m);
+    }
+
+    // --- Colonne "À relancer plus tard" (repliable, données locales) ---
+    let relancerColumnOpen = false;
+    const RELANCER_STAGE_LABEL = 'À relancer plus tard';
+
+    function toggleRelancerColumn() {
+      relancerColumnOpen = !relancerColumnOpen;
+      renderRelancerColumn();
+    }
+
+    function renderRelancerColumn() {
+      const col = document.getElementById('kanbanRelancerColumn');
+      if (!col) return;
+      col.classList.toggle('expanded', relancerColumnOpen);
+      col.classList.toggle('collapsed', !relancerColumnOpen);
+
+      const deals = (dashboardData && dashboardData.pipelineDeals && dashboardData.pipelineDeals[RELANCER_STAGE_LABEL]) || [];
+      const total = deals.reduce((s, d) => s + d.amount, 0);
+
+      if (!relancerColumnOpen) {
+        col.innerHTML = `
+          <div class="kanban-header" onclick="toggleRelancerColumn()" title="Voir les deals à relancer">
+            <span class="won-toggle-icon">&#9654;</span>
+            <span class="won-collapsed-label">À relancer · ${deals.length}</span>
+          </div>`;
+        return;
+      }
+
+      let cardsHtml = '';
+      if (deals.length === 0) {
+        cardsHtml = `<div class="won-empty">Aucun deal à relancer</div>`;
+      } else {
+        for (const d of deals) {
+          const since = d.stageEnteredAt ? formatShortDate(d.stageEnteredAt) : '';
+          cardsHtml += `<div class="kanban-card kanban-card-relancer"
+              draggable="true"
+              data-deal-id="${d.id}"
+              data-deal-amount="${d.amount}"
+              data-deal-stage="${RELANCER_STAGE_LABEL}"
+              ondragstart="onDragStart(event)"
+              ondragend="onDragEnd(event)"
+              onclick="openDealSidebar('${d.id}')">
+            <div class="kanban-card-name">${d.name}</div>
+            <div class="kanban-card-meta">
+              <span class="kanban-card-amount">${formatEuro(d.amount)}</span>
+              <span class="kanban-card-won-date">${since ? 'depuis ' + since : ''}</span>
+            </div>
+          </div>`;
+        }
+      }
+
+      col.innerHTML = `
+        <div class="kanban-header" onclick="toggleRelancerColumn()" title="Replier">
+          <span class="kanban-header-label">&#9660; À relancer</span>
+          <span class="kanban-header-count">${deals.length} &middot; ${formatEuro(total)}</span>
+        </div>
+        <div class="kanban-cards">${cardsHtml}</div>`;
+
+      // Drop zone : on attache les handlers sur la colonne quand elle est ouverte
+      col.ondragover = (e) => { e.preventDefault(); col.classList.add('drag-over'); };
+      col.ondragleave = () => col.classList.remove('drag-over');
+      col.ondrop = (e) => onDropStage(e, RELANCER_STAGE_LABEL);
+    }
+
+    function renderWonColumn() {
+      const col = document.getElementById('kanbanWonColumn');
+      if (!col) return;
+      col.classList.toggle('expanded', wonColumnOpen);
+      col.classList.toggle('collapsed', !wonColumnOpen);
+
+      const key = wonCacheKey(wonColumnYear, wonColumnMonth);
+      const data = wonDealsCache[key];
+      const monthLabel = `${MONTH_LABELS_FR[wonColumnMonth]} ${wonColumnYear}`;
+      const countLabel = data ? data.count : (wonDealsLoading ? '…' : '?');
+      const totalLabel = data ? formatEuro(data.total) : '';
+
+      if (!wonColumnOpen) {
+        col.innerHTML = `
+          <div class="kanban-header" onclick="toggleWonColumn()" title="Voir les deals gagnés">
+            <span class="won-toggle-icon">&#9654;</span>
+            <span class="won-collapsed-label">Gagné</span>
+          </div>`;
+        return;
+      }
+
+      let cardsHtml = '';
+      if (wonDealsLoading && !data) {
+        cardsHtml = `<div class="won-empty">Chargement…</div>`;
+      } else if (!data) {
+        cardsHtml = `<div class="won-empty" style="color:var(--danger)">Erreur de chargement</div>`;
+      } else if (data.deals.length === 0) {
+        cardsHtml = `<div class="won-empty">Aucun deal gagné ce mois-ci</div>`;
+      } else {
+        for (const d of data.deals) {
+          const dt = d.closedate ? formatShortDate(d.closedate) : '';
+          cardsHtml += `<div class="kanban-card kanban-card-won" onclick="openDealSidebar('${d.id}')">
+            <div class="kanban-card-name">${d.name}</div>
+            <div class="kanban-card-meta">
+              <span class="kanban-card-amount">${formatEuro(d.amount)}</span>
+              <span class="kanban-card-won-date">${dt}</span>
+            </div>
+          </div>`;
+        }
+      }
+
+      const headerCount = data
+        ? `${data.count} &middot; ${totalLabel}`
+        : (wonDealsLoading ? '…' : '');
+
+      col.innerHTML = `
+        <div class="kanban-header" onclick="toggleWonColumn()" title="Replier">
+          <span class="kanban-header-label" style="color:var(--success)">&#9660; Gagné</span>
+          <span class="kanban-header-count">${headerCount}</span>
+        </div>
+        <div class="won-month-picker" onclick="event.stopPropagation()">
+          <button class="won-month-btn" onclick="changeWonMonth(-1)" title="Mois précédent">&#8249;</button>
+          <span class="won-month-label">${monthLabel}</span>
+          <button class="won-month-btn" onclick="changeWonMonth(1)" title="Mois suivant">&#8250;</button>
+        </div>
+        <div class="kanban-cards">${cardsHtml}</div>`;
+    }
+
     function renderKanban() {
       if (!dashboardData || !dashboardData.pipelineDeals) return;
       if (repeatClientsData) renderRepeatKpis();
@@ -5247,7 +6355,13 @@
         html += `</div></div>`;
       }
 
+      // Colonnes repliables (fermées par défaut)
+      html += `<div id="kanbanRelancerColumn" class="kanban-column-won kanban-column-relancer ${relancerColumnOpen ? 'expanded' : 'collapsed'}"></div>`;
+      html += `<div id="kanbanWonColumn" class="kanban-column-won ${wonColumnOpen ? 'expanded' : 'collapsed'}"></div>`;
+
       board.innerHTML = html;
+      renderRelancerColumn();
+      renderWonColumn();
 
       // Activity summary
       const activityEl = document.getElementById('pipelineActivity');
@@ -5513,6 +6627,7 @@
         });
         closeNewDealModal();
         renderKanban();
+        recordAction('deal_created');
       } catch (e) {
         btn.disabled = false;
         btn.textContent = 'Créer le deal';
@@ -5661,6 +6776,11 @@
             if (d) { d.amount = amount; break; }
           }
         }
+        // Si on a touché au closedate, vider le cache "Gagné" pour que la colonne se re-fetch
+        if (closedate) {
+          for (const k of Object.keys(wonDealsCache)) delete wonDealsCache[k];
+          if (wonColumnOpen) loadWonDeals(wonColumnYear, wonColumnMonth);
+        }
         renderKanban();
         btn.textContent = 'Enregistré ✓';
         setTimeout(() => { if (btn) btn.textContent = 'Enregistrer'; btn.disabled = false; }, 1500);
@@ -5675,7 +6795,26 @@
       const dealId = currentSidebarDealId;
       if (!dealId) return;
       const label = outcome === 'closedwon' ? 'Gagné' : 'Perdu';
-      if (!confirm(`Marquer ce deal comme ${label} dans HubSpot ?`)) return;
+
+      // Capture nom + montant avant suppression locale (pour la célébration)
+      const _local = findDealInPipeline(dealId);
+      const dealName = _local ? _local.name : '';
+      const dealAmount = _local ? _local.amount : 0;
+
+      // Date de signature : on lit le champ sbClosedate de la sidebar (sinon aujourd'hui).
+      // HubSpot écrase le closedate quand le stage passe à closedwon/closedlost,
+      // donc on doit l'envoyer dans la même requête PATCH.
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const sbInput = document.getElementById('sbClosedate');
+      const defaultDate = (sbInput && sbInput.value) ? sbInput.value : todayStr;
+      const userDate = prompt(
+        `Date de signature (${label}) au format AAAA-MM-JJ :`,
+        defaultDate
+      );
+      if (userDate === null) return; // annulé
+      const dateOk = /^\d{4}-\d{2}-\d{2}$/.test(userDate.trim());
+      if (!dateOk) { alert('Date invalide. Format attendu : AAAA-MM-JJ'); return; }
+      const closedate = new Date(userDate.trim() + 'T12:00:00Z').toISOString();
 
       const wonBtn = document.getElementById('sidebarWonBtn');
       const lostBtn = document.getElementById('sidebarLostBtn');
@@ -5686,7 +6825,7 @@
         await fetch(`/api/deals/${dealId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ stage: outcome }),
+          body: JSON.stringify({ stage: outcome, closedate }),
         }).then(r => { if (!r.ok) throw new Error(); });
 
         // Remove deal from local pipeline
@@ -5695,10 +6834,40 @@
           if (idx !== -1) { deals.splice(idx, 1); break; }
         }
         selectedDealIds.delete(dealId);
+        // Invalider le cache des deals gagnés (au cas où le deal vient d'y entrer)
+        if (outcome === 'closedwon') {
+          for (const k of Object.keys(wonDealsCache)) delete wonDealsCache[k];
+          if (wonColumnOpen) loadWonDeals(wonColumnYear, wonColumnMonth);
+        }
         closeDealSidebar();
         renderKanban();
         updateForecastBar();
         render();
+
+        // 🎉 Célébration / XP / streak
+        if (outcome === 'closedwon') {
+          const xpGained = XP_REWARDS.deal_won_base + Math.round((dealAmount || 0) / 100) * XP_REWARDS.deal_won_per_100;
+          const levelBefore = gamiGetLevel(gamiState().xp).current;
+          recordAction('deal_won', { amount: dealAmount });
+          const levelAfter = gamiGetLevel(gamiState().xp).current;
+          const leveledUp = levelAfter.min > levelBefore.min;
+          checkWinAchievements({ amount: dealAmount });
+          celebrateWin({
+            name: dealName,
+            amount: dealAmount,
+            xp: xpGained,
+            leveledUp,
+            newLevel: leveledUp ? levelAfter : null,
+          });
+          // Refetch des données pour que la jauge d'objectif reflète le nouveau CA
+          if (typeof refreshData === 'function') {
+            refreshData().then(() => renderGamiBar()).catch(() => {});
+          } else {
+            setTimeout(renderGamiBar, 600);
+          }
+        } else {
+          recordAction('deal_lost');
+        }
       } catch {
         wonBtn.disabled = false;
         lostBtn.disabled = false;
@@ -6664,6 +7833,7 @@
       col.classList.remove('drag-over');
       if (!dragDealId || dragDealStage === targetStage) return;
       const id = dragDealId;
+      const sourceStage = dragDealStage;
       const card = document.querySelector(`[data-deal-id="${id}"]`);
       if (card) card.classList.add('kanban-saving');
       try {
@@ -6683,6 +7853,21 @@
           }
         }
         renderKanban();
+
+        // 🎮 XP : avance dans le pipeline principal seulement (no-op si Gamifier désactivé)
+        if (gamiEnabled()) {
+          const srcIdx = KANBAN_STAGES_ORDER.indexOf(sourceStage);
+          const dstIdx = KANBAN_STAGES_ORDER.indexOf(targetStage);
+          if (dstIdx > srcIdx && dstIdx !== -1) {
+            recordAction('stage_advance', { to: targetStage });
+          } else if (sourceStage === RELANCER_STAGE_LABEL && dstIdx !== -1) {
+            recordAction('stage_advance', { to: targetStage });
+            showAchievement({ icon: '♻️', title: 'Deal réactivé !', sub: targetStage, kind: 'milestone' });
+          } else {
+            bumpStreak();
+            renderGamiBar();
+          }
+        }
       } catch {
         if (card) card.classList.remove('kanban-saving');
         alert('Erreur lors du changement de stage');
@@ -7871,6 +9056,16 @@
     document.addEventListener('DOMContentLoaded', () => {
       const mm = document.getElementById('modalMissions');
       if (mm) mm.addEventListener('click', function(e) { if (e.target === this) closeModalMissions(); });
+
+      // 🎮 Init gamification : applique la visibilité selon le toggle (OFF par défaut)
+      try { applyGamiVisibility(); } catch {}
+      try { renderGamiBar(); } catch (e) { /* DOM elts pas encore là, ok */ }
+      // Init icône son
+      try {
+        const s = gamiState();
+        const sb = document.getElementById('soundToggle');
+        if (sb) sb.textContent = s.soundOn ? '🔊' : '🔇';
+      } catch {}
     });
 
     function initAnalytics() {

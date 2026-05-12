@@ -320,11 +320,13 @@ async function fetchPipelineStages() {
 }
 
 // --- Target pipeline stages for kanban ---
+// `forecast: false` -> stage exclu du pipeline pondéré / projections (ex: deals en pause)
 const KANBAN_STAGES = [
   { id: 'qualifiedtobuy', label: 'RDV Qualif', probability: 30 },
   { id: 'presentationscheduled', label: 'RDV Propale', probability: 50 },
   { id: 'decisionmakerboughtin', label: 'Négociation', probability: 60 },
   { id: 'contractsent', label: 'Contrat envoyé', probability: 80 },
+  { id: '2077692138', label: 'À relancer plus tard', probability: 20, forecast: false },
 ];
 
 // --- Fetch open deals for pipeline kanban ---
@@ -424,13 +426,74 @@ function aggregateByMonth(deals) {
 // --- Main dashboard endpoint ---
 // --- Deal mutations ---
 const STAGE_ID_MAP = {
-  'RDV Qualif':     'qualifiedtobuy',
-  'RDV Propale':    'presentationscheduled',
-  'Négociation':    'decisionmakerboughtin',
-  'Contrat envoyé': 'contractsent',
-  'closedwon':      'closedwon',
-  'closedlost':     'closedlost',
+  'RDV Qualif':           'qualifiedtobuy',
+  'RDV Propale':          'presentationscheduled',
+  'Négociation':          'decisionmakerboughtin',
+  'Contrat envoyé':       'contractsent',
+  'À relancer plus tard': '2077692138',
+  'closedwon':            'closedwon',
+  'closedlost':           'closedlost',
 };
+
+// --- Fetch won deals for a given month ---
+async function fetchWonDealsForMonth(year, month) {
+  const from = new Date(Date.UTC(year, month, 1)).toISOString();
+  const to = new Date(Date.UTC(year, month + 1, 1)).toISOString();
+  const allDeals = [];
+  let after = undefined;
+
+  while (true) {
+    const body = {
+      filterGroups: [
+        {
+          filters: [
+            { propertyName: 'hs_is_closed_won', operator: 'EQ', value: 'true' },
+            { propertyName: 'closedate', operator: 'GTE', value: from },
+            { propertyName: 'closedate', operator: 'LT', value: to },
+          ],
+        },
+      ],
+      properties: ['dealname', 'amount', 'closedate', 'createdate', 'pipeline'],
+      sorts: [{ propertyName: 'closedate', direction: 'DESCENDING' }],
+      limit: 100,
+    };
+    if (after) body.after = after;
+
+    const result = await hubspotSearch(body);
+    if (result.results) allDeals.push(...result.results);
+
+    if (result.paging && result.paging.next && result.paging.next.after) {
+      after = result.paging.next.after;
+    } else {
+      break;
+    }
+  }
+
+  return allDeals
+    .filter(d => !d.properties.pipeline || d.properties.pipeline === 'default')
+    .map(d => ({
+      id: d.id,
+      name: d.properties.dealname || 'Sans nom',
+      amount: parseFloat(d.properties.amount) || 0,
+      closedate: d.properties.closedate || null,
+      createdate: d.properties.createdate || null,
+    }));
+}
+
+app.get('/api/won-deals', async (req, res) => {
+  const year = parseInt(req.query.year, 10);
+  const month = parseInt(req.query.month, 10);
+  if (Number.isNaN(year) || Number.isNaN(month) || month < 0 || month > 11) {
+    return res.status(400).json({ error: 'year et month (0-11) requis' });
+  }
+  try {
+    const deals = await fetchWonDealsForMonth(year, month);
+    const total = deals.reduce((s, d) => s + d.amount, 0);
+    res.json({ year, month, count: deals.length, total, deals });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 app.post('/api/deals', async (req, res) => {
   const { name, amount, stage, closedate } = req.body;
@@ -4127,6 +4190,7 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
   if (includePipeline) {
     const fallbackDate = new Date(); fallbackDate.setMonth(fallbackDate.getMonth() + 1);
     for (const stage of KANBAN_STAGES) {
+      if (stage.forecast === false) continue;
       const deals = pipelineDeals[stage.label] || [];
       for (const deal of deals) {
         const weighted = deal.amount * (deal.probability / 100) * factor;
@@ -6383,6 +6447,7 @@ async function computePipelinePondere() {
   const pipelineDeals = await fetchOpenDeals();
   let total = 0;
   for (const stage of KANBAN_STAGES) {
+    if (stage.forecast === false) continue;
     const deals = pipelineDeals[stage.label] || [];
     for (const deal of deals) {
       total += deal.amount * (deal.probability / 100);
