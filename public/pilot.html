@@ -940,6 +940,196 @@
       color: var(--primary);
     }
 
+    /* Modale d'activité pipeline (nouveaux / progressions / critiques) — plus large */
+    #paModalOverlay .modal {
+      max-width: 820px;
+      max-height: 85vh;
+    }
+
+    /* Filtres par stage */
+    .pa-filter-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      padding: 0.7rem 1.5rem 0.4rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .pa-filter-row:empty { display: none; }
+    .pa-filter-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      font-size: 0.74rem;
+      font-weight: 600;
+      padding: 0.28rem 0.65rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.12s;
+    }
+    .pa-filter-chip:hover { border-color: var(--primary); color: var(--primary); }
+    .pa-filter-chip.active {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+    }
+    .pa-filter-chip-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      padding: 0 0.3rem;
+      font-size: 0.66rem;
+      font-weight: 700;
+      border-radius: 9px;
+      background: rgba(0,0,0,0.08);
+    }
+    .pa-filter-chip.active .pa-filter-chip-count {
+      background: rgba(255,255,255,0.25);
+      color: white;
+    }
+    .pa-deal-row.filtered-out { display: none !important; }
+
+    /* --- Modale "deals critiques" : ligne avec actions rapides --- */
+    .pa-deal-row.has-actions {
+      display: grid;
+      grid-template-columns: 32px 1fr auto;
+      grid-template-rows: auto auto auto;
+      grid-template-areas:
+        "icon info amount"
+        "icon actions actions"
+        "form form form";
+      align-items: start;
+      gap: 0.5rem 0.75rem;
+      padding: 0.7rem 0;
+    }
+    .pa-deal-row.has-actions .pa-deal-icon { grid-area: icon; }
+    .pa-deal-row.has-actions .pa-deal-info { grid-area: info; }
+    .pa-deal-row.has-actions .pa-deal-amount { grid-area: amount; align-self: start; }
+    .pa-critical-actions {
+      grid-area: actions;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.3rem;
+    }
+    .pa-critical-action-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 0.25rem 0.55rem;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.12s;
+    }
+    .pa-critical-action-btn:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,0.07); }
+    .pa-critical-action-btn.note  { border-color: rgba(100,116,139,0.4); color: #475569; }
+    .pa-critical-action-btn.email { border-color: rgba(59,130,246,0.4); color: #1d4ed8; }
+    .pa-critical-action-btn.phone { border-color: rgba(217,115,13,0.4); color: #d9730d; }
+    .pa-critical-action-btn.rdv   { border-color: rgba(34,197,94,0.5); color: #166534; background: rgba(34,197,94,0.06); }
+    .pa-critical-action-btn.rdv:hover { background: rgba(34,197,94,0.12); }
+    .pa-critical-action-btn.active { background: var(--primary-bg); border-color: var(--primary); color: var(--primary); }
+
+    .pa-critical-form {
+      grid-area: form;
+      display: none;
+      margin-top: 0.4rem;
+      padding: 0.55rem;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      gap: 0.4rem;
+    }
+    .pa-critical-form.open { display: flex; flex-direction: column; }
+    .pa-critical-form-row { display: flex; align-items: center; gap: 0.4rem; }
+    .pa-critical-form-row label {
+      font-size: 0.68rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      min-width: 40px;
+    }
+    .pa-critical-form input[type="date"],
+    .pa-critical-form input[type="datetime-local"],
+    .pa-critical-form textarea {
+      flex: 1;
+      font-size: 0.76rem;
+      padding: 0.3rem 0.45rem;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: var(--bg);
+      color: var(--text);
+      outline: none;
+      font-family: inherit;
+    }
+    .pa-critical-form textarea { resize: vertical; min-height: 44px; }
+    .pa-critical-form-actions { display: flex; justify-content: flex-end; gap: 0.35rem; margin-top: 0.1rem; }
+    .pa-critical-form-actions button {
+      font-size: 0.72rem;
+      padding: 0.3rem 0.7rem;
+      border-radius: 3px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .pa-critical-form-actions button.primary {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+    }
+    .pa-critical-form-actions button.primary:disabled { opacity: 0.55; cursor: not-allowed; }
+
+    /* Animation : ligne résolue */
+    .pa-deal-row.resolved {
+      background: linear-gradient(90deg, rgba(34,197,94,0.18), rgba(34,197,94,0.04));
+      border-radius: 6px;
+      animation: pa-resolve-flash 0.5s ease-out;
+    }
+    .pa-deal-row.resolved .pa-deal-name::before {
+      content: '✓ ';
+      color: #16a34a;
+      font-weight: 800;
+    }
+    .pa-deal-row.resolved .pa-critical-actions,
+    .pa-deal-row.resolved .pa-critical-form { display: none !important; }
+    .pa-deal-row.resolved-out {
+      animation: pa-resolve-out 0.45s ease-in forwards;
+      pointer-events: none;
+    }
+    @keyframes pa-resolve-flash {
+      0% { background: rgba(34,197,94,0); transform: scale(1); }
+      40% { background: rgba(34,197,94,0.35); transform: scale(1.01); }
+      100% { background: rgba(34,197,94,0.10); transform: scale(1); }
+    }
+    @keyframes pa-resolve-out {
+      0% { opacity: 1; transform: translateX(0); max-height: 200px; }
+      100% { opacity: 0; transform: translateX(20px); max-height: 0; padding-top: 0; padding-bottom: 0; margin: 0; border: 0; }
+    }
+
+    .pa-critical-empty {
+      text-align: center;
+      padding: 2.5rem 1rem 1.5rem;
+    }
+    .pa-critical-empty-emoji { font-size: 3rem; line-height: 1; }
+    .pa-critical-empty-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #166534;
+      margin-top: 0.6rem;
+    }
+    .pa-critical-empty-sub {
+      color: var(--text-secondary);
+      font-size: 0.85rem;
+      margin-top: 0.3rem;
+    }
+
     .new-deal-btn {
       display: flex;
       align-items: center;
@@ -4484,7 +4674,7 @@
 
   <!-- Modal Pipeline Activity -->
   <div class="modal-overlay" id="paModalOverlay">
-    <div class="modal" style="max-width:440px">
+    <div class="modal">
       <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
         <div>
           <h2 id="paModalTitle">Nouveaux deals</h2>
@@ -4492,6 +4682,7 @@
         </div>
         <button onclick="document.getElementById('paModalOverlay').classList.remove('active')" style="background:none;border:none;cursor:pointer;font-size:1.1rem;color:var(--text-secondary);padding:0.2rem">&#10005;</button>
       </div>
+      <div class="pa-filter-row" id="paFilterRow"></div>
       <div class="modal-body" id="paModalBody"></div>
     </div>
   </div>
@@ -6909,7 +7100,57 @@
             : (d.stageEnteredAt ? fmtDate(d.stageEnteredAt) : '');
           metaExtra = dateStr ? `<span class="pa-date">${dateStr}</span>` : '';
         }
-        return `<div class="pa-deal-row" onclick="document.getElementById('paModalOverlay').classList.remove('active'); openDealSidebar('${d.id}')" style="cursor:pointer">
+
+        if (type === 'critical') {
+          // Ligne enrichie : actions rapides pour faire sortir de l'état critique sans quitter la modale
+          const todayStr = new Date().toISOString().slice(0, 10);
+          const now = new Date();
+          const defaultRdv = new Date(now.getTime() + 24 * 3600 * 1000);
+          defaultRdv.setMinutes(0, 0, 0);
+          defaultRdv.setHours(10);
+          const pad = n => String(n).padStart(2, '0');
+          const defaultRdvVal = `${defaultRdv.getFullYear()}-${pad(defaultRdv.getMonth()+1)}-${pad(defaultRdv.getDate())}T${pad(defaultRdv.getHours())}:${pad(defaultRdv.getMinutes())}`;
+
+          return `<div class="pa-deal-row has-actions" data-critical-row="${d.id}" data-stage="${d.stage}" data-amount="${d.amount}">
+            <div class="pa-deal-icon">${icons[type]}</div>
+            <div class="pa-deal-info">
+              <div class="pa-deal-name" onclick="document.getElementById('paModalOverlay').classList.remove('active'); openDealSidebar('${d.id}')" style="cursor:pointer" title="Ouvrir la sidebar">${d.name}</div>
+              <div class="pa-deal-meta">
+                <span class="pa-stage-tag" style="background:${sc.bg};color:${sc.color}">${d.stage}</span>
+                ${metaExtra}
+              </div>
+            </div>
+            <div class="pa-deal-amount">${formatEuro(d.amount)}</div>
+
+            <div class="pa-critical-actions">
+              <button class="pa-critical-action-btn note"  onclick="openCriticalAction('${d.id}','note')"  title="Ajouter une note (figée)">📝 Note</button>
+              <button class="pa-critical-action-btn email" onclick="openCriticalAction('${d.id}','email')" title="Logger une relance email">📧 Email</button>
+              <button class="pa-critical-action-btn phone" onclick="openCriticalAction('${d.id}','phone')" title="Logger une relance tél">📞 Tél</button>
+              <button class="pa-critical-action-btn rdv"   onclick="openCriticalAction('${d.id}','rdv')"   title="Planifier un RDV futur — retire l'état critique">📅 RDV</button>
+            </div>
+
+            <div class="pa-critical-form" data-critical-form="${d.id}">
+              <div class="pa-critical-form-row" data-only="note,email,phone">
+                <label>Date</label>
+                <input type="date" data-field="date" value="${todayStr}">
+              </div>
+              <div class="pa-critical-form-row" data-only="rdv" style="display:none">
+                <label>Quand</label>
+                <input type="datetime-local" data-field="datetime" value="${defaultRdvVal}">
+              </div>
+              <div class="pa-critical-form-row" data-only="note,email,phone" style="align-items:flex-start">
+                <label data-field-label="note">Note*</label>
+                <textarea data-field="note" placeholder="Que s'est-il passé / dit ? (obligatoire)"></textarea>
+              </div>
+              <div class="pa-critical-form-actions">
+                <button onclick="closeCriticalAction('${d.id}')">Annuler</button>
+                <button class="primary" data-submit-btn onclick="submitCriticalAction('${d.id}')">Enregistrer</button>
+              </div>
+            </div>
+          </div>`;
+        }
+
+        return `<div class="pa-deal-row" data-stage="${d.stage}" data-amount="${d.amount}" onclick="document.getElementById('paModalOverlay').classList.remove('active'); openDealSidebar('${d.id}')" style="cursor:pointer">
           <div class="pa-deal-icon">${icons[type]}</div>
           <div class="pa-deal-info">
             <div class="pa-deal-name">${d.name}</div>
@@ -6922,7 +7163,7 @@
         </div>`;
       }).join('');
 
-      rows += `<div class="pa-total-row">
+      rows += `<div class="pa-total-row" id="paTotalRow">
         <span>${type === 'critical' ? 'Total en jeu' : 'Total pipeline'}</span>
         <span>${formatEuro(total)}</span>
       </div>`;
@@ -6930,7 +7171,245 @@
       document.getElementById('paModalTitle').textContent = title;
       document.getElementById('paModalSubtitle').textContent = subtitle;
       document.getElementById('paModalBody').innerHTML = rows;
+      document.getElementById('paModalBody').dataset.modalType = type;
+      document.getElementById('paFilterRow').dataset.activeStage = '';
+      _renderPaStageFilters();
       document.getElementById('paModalOverlay').classList.add('active');
+    }
+
+    // --- Filtres par stage dans la modale ---
+    // Ordre canonique des stages (cf. KANBAN_STAGES)
+    const PA_STAGE_ORDER = ['RDV Qualif', 'RDV Propale', 'Négociation', 'Contrat envoyé', 'À relancer plus tard'];
+
+    function _renderPaStageFilters() {
+      const filterRow = document.getElementById('paFilterRow');
+      const body = document.getElementById('paModalBody');
+      if (!filterRow || !body) return;
+      // Liste les rows VISIBLES + leur stage
+      const rows = Array.from(body.querySelectorAll('.pa-deal-row'));
+      if (rows.length <= 1) { filterRow.innerHTML = ''; return; }
+      const counts = {};
+      rows.forEach(r => {
+        const s = r.dataset.stage || '';
+        if (s) counts[s] = (counts[s] || 0) + 1;
+      });
+      const stages = PA_STAGE_ORDER.filter(s => counts[s]);
+      // Ajoute d'éventuels stages inconnus à la fin (au cas où)
+      Object.keys(counts).forEach(s => { if (!stages.includes(s)) stages.push(s); });
+      if (stages.length < 2) { filterRow.innerHTML = ''; return; }
+
+      const currentFilter = filterRow.dataset.activeStage || '';
+      const total = rows.length;
+      let html = `<button class="pa-filter-chip${!currentFilter ? ' active' : ''}" data-stage-filter="" onclick="filterPaByStage('')">Tous <span class="pa-filter-chip-count">${total}</span></button>`;
+      for (const s of stages) {
+        const active = currentFilter === s ? ' active' : '';
+        html += `<button class="pa-filter-chip${active}" data-stage-filter="${s}" onclick="filterPaByStage('${s.replace(/'/g, "\\'")}')">${s} <span class="pa-filter-chip-count">${counts[s]}</span></button>`;
+      }
+      filterRow.innerHTML = html;
+    }
+
+    function filterPaByStage(stage) {
+      const filterRow = document.getElementById('paFilterRow');
+      const body = document.getElementById('paModalBody');
+      if (!filterRow || !body) return;
+      filterRow.dataset.activeStage = stage;
+      filterRow.querySelectorAll('.pa-filter-chip').forEach(c => {
+        c.classList.toggle('active', (c.dataset.stageFilter || '') === stage);
+      });
+      let visibleCount = 0;
+      let visibleTotal = 0;
+      body.querySelectorAll('.pa-deal-row').forEach(row => {
+        const rowStage = row.dataset.stage || '';
+        const show = !stage || rowStage === stage;
+        row.classList.toggle('filtered-out', !show);
+        if (show) {
+          visibleCount++;
+          visibleTotal += parseFloat(row.dataset.amount || 0) || 0;
+        }
+      });
+      // Maj du total affiché en bas
+      const totalRow = document.getElementById('paTotalRow');
+      if (totalRow) {
+        const spans = totalRow.querySelectorAll('span');
+        if (spans[0]) spans[0].textContent = stage ? `Filtré : ${stage}` : (body.dataset.modalType === 'critical' ? 'Total en jeu' : 'Total pipeline');
+        if (spans[1]) spans[1].textContent = formatEuro(visibleTotal);
+      }
+    }
+
+    // --- Actions rapides depuis la modale "Deals critiques" ---
+    function openCriticalAction(dealId, action) {
+      // Ferme toute action déjà ouverte sur ce deal et marque le bouton actif
+      const row = document.querySelector(`[data-critical-row="${dealId}"]`);
+      if (!row) return;
+      const form = row.querySelector('.pa-critical-form');
+      if (!form) return;
+      row.querySelectorAll('.pa-critical-action-btn').forEach(b => b.classList.remove('active'));
+      const btn = row.querySelector(`.pa-critical-action-btn.${action}`);
+      if (btn) btn.classList.add('active');
+
+      // Affiche les bonnes lignes selon l'action
+      form.dataset.action = action;
+      form.querySelectorAll('[data-only]').forEach(el => {
+        const allowed = el.getAttribute('data-only').split(',');
+        el.style.display = allowed.includes(action) ? '' : 'none';
+      });
+      // Label de la note selon le type
+      const lbl = form.querySelector('[data-field-label="note"]');
+      if (lbl) {
+        lbl.textContent = action === 'note' ? 'Note*' : (action === 'email' ? 'Email*' : (action === 'phone' ? 'Échange*' : 'Note'));
+      }
+      const noteEl = form.querySelector('[data-field="note"]');
+      if (noteEl) {
+        noteEl.placeholder = action === 'email' ? 'Sujet / contenu envoyé'
+                           : action === 'phone' ? 'Personne jointe ? Suite à donner ?'
+                           : action === 'note'  ? 'Ce que tu retiens de l\'échange (figée après save)'
+                           : '';
+        noteEl.style.borderColor = '';
+        if (action === 'rdv') noteEl.value = '';
+      }
+      form.classList.add('open');
+      // Focus utile
+      setTimeout(() => {
+        if (action === 'rdv') {
+          form.querySelector('[data-field="datetime"]')?.focus();
+        } else {
+          noteEl?.focus();
+        }
+      }, 30);
+    }
+
+    function closeCriticalAction(dealId) {
+      const row = document.querySelector(`[data-critical-row="${dealId}"]`);
+      if (!row) return;
+      row.querySelector('.pa-critical-form')?.classList.remove('open');
+      row.querySelectorAll('.pa-critical-action-btn').forEach(b => b.classList.remove('active'));
+    }
+
+    async function submitCriticalAction(dealId) {
+      const row = document.querySelector(`[data-critical-row="${dealId}"]`);
+      if (!row) return;
+      const form = row.querySelector('.pa-critical-form');
+      const action = form?.dataset?.action;
+      if (!action) return;
+      const submitBtn = form.querySelector('[data-submit-btn]');
+
+      try {
+        if (action === 'rdv') {
+          const dt = form.querySelector('[data-field="datetime"]').value;
+          if (!dt) return;
+          const iso = new Date(dt).toISOString();
+          if (new Date(iso).getTime() <= Date.now()) {
+            alert('Le RDV doit être dans le futur pour retirer l\'état critique.');
+            return;
+          }
+          submitBtn.disabled = true; submitBtn.textContent = '…';
+          const res = await fetch(`/api/deals/${dealId}/metadata`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ next_meeting_at: iso }),
+          });
+          if (!res.ok) throw new Error();
+          dealMetadata[dealId] = { ...(dealMetadata[dealId] || {}), next_meeting_at: iso };
+        } else {
+          const date = form.querySelector('[data-field="date"]').value;
+          const noteEl = form.querySelector('[data-field="note"]');
+          const note = (noteEl.value || '').trim();
+          if (!note) {
+            noteEl.style.borderColor = 'var(--danger)';
+            noteEl.focus();
+            return;
+          }
+          const at = date ? new Date(date + 'T12:00:00').toISOString() : new Date().toISOString();
+          submitBtn.disabled = true; submitBtn.textContent = '…';
+          if (action === 'note') {
+            const res = await fetch(`/api/deals/${dealId}/note`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text: note, at }),
+            });
+            if (!res.ok) throw new Error();
+            const data = await res.json();
+            dealMetadata[dealId] = { ...(dealMetadata[dealId] || {}), notes: data.notes };
+          } else {
+            const res = await fetch(`/api/deals/${dealId}/relance`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ type: action, note, at }),
+            });
+            if (!res.ok) throw new Error();
+            const data = await res.json();
+            dealMetadata[dealId] = { ...(dealMetadata[dealId] || {}), relances: data.relances };
+          }
+        }
+        if (typeof recordAction === 'function') {
+          recordAction(action === 'rdv' ? 'rdv_scheduled' : (action === 'note' ? 'note_added' : 'relance'), action === 'rdv' ? {} : { type: action });
+        }
+        _resolveCriticalRow(dealId);
+      } catch (e) {
+        submitBtn.textContent = 'Erreur';
+        submitBtn.disabled = false;
+        setTimeout(() => { if (submitBtn) submitBtn.textContent = 'Enregistrer'; }, 1500);
+      }
+    }
+
+    function _resolveCriticalRow(dealId) {
+      const row = document.querySelector(`[data-critical-row="${dealId}"]`);
+      if (!row) return;
+      row.classList.add('resolved');
+      // Retire du pool des critiques
+      const idx = pipelineCriticalDeals.findIndex(d => d.id === dealId);
+      if (idx !== -1) pipelineCriticalDeals.splice(idx, 1);
+      // Update KPI sticker + total + subtitle
+      _refreshCriticalKanbanCounter();
+      _refreshCriticalModalMeta();
+      // Animation de sortie
+      setTimeout(() => row.classList.add('resolved-out'), 700);
+      setTimeout(() => {
+        row.remove();
+        if (pipelineCriticalDeals.length === 0) {
+          _showCriticalEmptyState();
+          document.getElementById('paFilterRow').innerHTML = '';
+        } else {
+          // Rebuild chips puis ré-applique le filtre actif
+          const activeFilter = document.getElementById('paFilterRow').dataset.activeStage || '';
+          _renderPaStageFilters();
+          filterPaByStage(activeFilter);
+        }
+        renderKanban();
+      }, 1150);
+    }
+
+    function _refreshCriticalKanbanCounter() {
+      const critEl = document.getElementById('criticalCounter');
+      const txt = document.getElementById('criticalCounterText');
+      const n = pipelineCriticalDeals.length;
+      if (critEl) critEl.classList.toggle('active', n > 0);
+      if (txt) txt.textContent = `${n} deal${n > 1 ? 's' : ''} critique${n > 1 ? 's' : ''} — c'est très grave !`;
+    }
+
+    function _refreshCriticalModalMeta() {
+      const body = document.getElementById('paModalBody');
+      if (!body || body.dataset.modalType !== 'critical') return;
+      const n = pipelineCriticalDeals.length;
+      const sub = document.getElementById('paModalSubtitle');
+      if (sub) sub.textContent = n
+        ? `${n} deal${n > 1 ? 's' : ''} sans relance > ${CRITICAL_RELANCE_DAYS}j ou sans note — action urgente !`
+        : 'Pipeline propre 🎉';
+      // Total
+      const total = pipelineCriticalDeals.reduce((s, d) => s + (d.amount || 0), 0);
+      const totalRow = document.getElementById('paTotalRow');
+      if (totalRow) {
+        const spans = totalRow.querySelectorAll('span');
+        if (spans[1]) spans[1].textContent = formatEuro(total);
+      }
+    }
+
+    function _showCriticalEmptyState() {
+      const body = document.getElementById('paModalBody');
+      if (!body) return;
+      body.innerHTML = `
+        <div class="pa-critical-empty">
+          <div class="pa-critical-empty-emoji">🎉</div>
+          <div class="pa-critical-empty-title">Zéro deal critique !</div>
+          <div class="pa-critical-empty-sub">Pipeline propre — continue comme ça.</div>
+        </div>`;
     }
 
     document.getElementById('paModalOverlay').addEventListener('click', e => {
