@@ -741,9 +741,17 @@
       display: flex;
       flex-direction: column;
       gap: 0.4rem;
-      max-height: 340px;
+      max-height: 560px;
       overflow-y: auto;
       flex: 1;
+    }
+
+    /* Pipeline élargi : déborde la largeur max de .page pour gagner de l'espace
+       --extra = (min(viewport, 1600px) - page max-width) / 2, jamais négatif */
+    .section-wide {
+      --extra: max(0px, calc((min(100vw, 1600px) - 1100px) / 2));
+      margin-left: calc(-1 * var(--extra));
+      margin-right: calc(-1 * var(--extra));
     }
     .kanban-cards::-webkit-scrollbar {
       width: 4px;
@@ -1194,6 +1202,30 @@
       text-align: center;
       color: var(--text-light);
       font-size: 0.78rem;
+    }
+
+    /* Chip discret "prochain RDV" sur la carte Kanban */
+    .kanban-card-meeting {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.2rem;
+      font-size: 0.66rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      padding: 0.05rem 0.32rem;
+      border-radius: 3px;
+      background: rgba(100,116,139,0.08);
+      border: 1px solid rgba(100,116,139,0.18);
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+    }
+    .kanban-card-meeting.soon {
+      color: #1d4ed8;
+      background: rgba(59,130,246,0.08);
+      border-color: rgba(59,130,246,0.28);
+    }
+    [data-theme="dark"] .kanban-card-meeting.soon {
+      color: #93c5fd;
     }
 
     /* --- Deals CRITIQUES (sans relance > 15j OU sans notes) --- */
@@ -3177,7 +3209,7 @@
     <hr class="divider">
 
     <!-- Pipeline Kanban -->
-    <div class="section">
+    <div class="section section-wide">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.75rem">
         <div style="display:flex;align-items:center;gap:0.75rem">
           <div class="section-title" style="margin-bottom:0">Pipeline &mdash; Deals en cours</div>
@@ -3251,33 +3283,36 @@
     <hr class="divider">
 
     <!-- Repeat clients -->
-    <div class="section" id="sectionRepeat">
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.75rem">
-        <div class="section-title" style="margin-bottom:0">Repeat &mdash; Clients à recontacter</div>
-        <button class="btn" onclick="refreshRepeatClients()" style="font-size:0.75rem;padding:0.25rem 0.6rem">&#8635; Actualiser</button>
-      </div>
-      <div class="repeat-kpis" id="repeatKpis" style="display:none"></div>
-      <div class="repeat-partner-stats-wrapper">
-        <button class="rps-toggle" id="rpsToggle" type="button" onclick="toggleRepeatPartnerStats()">
-          <span class="rps-toggle-chevron" id="rpsChevron">&#9654;</span>
-          <span>Stats par associé</span>
-        </button>
-        <div class="repeat-partner-stats" id="repeatPartnerStats" style="display:none"></div>
-      </div>
-      <div class="repeat-toolbar">
-        <input class="repeat-search" type="text" id="repeatSearch" placeholder="&#128269; Rechercher un client…" oninput="renderRepeatList()">
-        <div class="repeat-partner-filters">
-          <span style="font-size:0.7rem;color:var(--text-secondary)">Par :</span>
-          <button class="repeat-partner-btn p-Guillaume" data-partner="Guillaume" onclick="toggleRepeatPartner('Guillaume',this)">G</button>
-          <button class="repeat-partner-btn p-Nathan"    data-partner="Nathan"    onclick="toggleRepeatPartner('Nathan',this)">N</button>
-          <button class="repeat-partner-btn p-Vincent"   data-partner="Vincent"   onclick="toggleRepeatPartner('Vincent',this)">V</button>
+    <details class="section" id="sectionRepeat">
+      <summary>
+        Repeat &mdash; Clients à recontacter
+        <span id="repeatSummaryCount" style="font-size:0.75rem;font-weight:500;color:var(--text-secondary);margin-left:0.6rem"></span>
+        <button class="btn" onclick="event.stopPropagation(); refreshRepeatClients()" style="font-size:0.72rem;padding:0.2rem 0.55rem;margin-left:0.6rem">&#8635; Actualiser</button>
+      </summary>
+      <div class="accordion-body"><div class="accordion-inner">
+        <div class="repeat-kpis" id="repeatKpis" style="display:none"></div>
+        <div class="repeat-partner-stats-wrapper">
+          <button class="rps-toggle" id="rpsToggle" type="button" onclick="toggleRepeatPartnerStats()">
+            <span class="rps-toggle-chevron" id="rpsChevron">&#9654;</span>
+            <span>Stats par associé</span>
+          </button>
+          <div class="repeat-partner-stats" id="repeatPartnerStats" style="display:none"></div>
         </div>
-        <span class="repeat-stats" id="repeatStats"></span>
-      </div>
-      <div class="repeat-list" id="repeatList">
-        <div class="repeat-empty">Chargement…</div>
-      </div>
-    </div>
+        <div class="repeat-toolbar">
+          <input class="repeat-search" type="text" id="repeatSearch" placeholder="&#128269; Rechercher un client…" oninput="renderRepeatList()">
+          <div class="repeat-partner-filters">
+            <span style="font-size:0.7rem;color:var(--text-secondary)">Par :</span>
+            <button class="repeat-partner-btn p-Guillaume" data-partner="Guillaume" onclick="toggleRepeatPartner('Guillaume',this)">G</button>
+            <button class="repeat-partner-btn p-Nathan"    data-partner="Nathan"    onclick="toggleRepeatPartner('Nathan',this)">N</button>
+            <button class="repeat-partner-btn p-Vincent"   data-partner="Vincent"   onclick="toggleRepeatPartner('Vincent',this)">V</button>
+          </div>
+          <span class="repeat-stats" id="repeatStats"></span>
+        </div>
+        <div class="repeat-list" id="repeatList">
+          <div class="repeat-empty">Chargement…</div>
+        </div>
+      </div></div>
+    </details>
 
     <hr class="divider">
 
@@ -6328,29 +6363,47 @@
     let pipelineMovedDeals = [];
     let pipelineCriticalDeals = [];
 
-    // 🚨 Critère "deal critique" : aucune relance dans les 15 derniers jours
-    // (fallback createdate si jamais aucune relance) OU aucune note (ni notes figées, ni description)
+    // 🚨 Critère "deal critique" — deux signaux indépendants, un seul suffit :
+    //   (A) "aucune note"  = ni description, ni note figée, ni relance (jamais)
+    //   (B) "trop ancien"  = > 15j depuis le dernier "contact" (= max(dernière relance, dernière note),
+    //                        fallback createdate si rien)
+    // Note ≡ Relance : ajouter l'une OU l'autre suffit à éteindre les deux raisons.
+    // Échappatoire : un prochain RDV futur (meta.next_meeting_at) court-circuite tout.
     const CRITICAL_RELANCE_DAYS = 15;
     function computeDealCriticality(deal, meta) {
+      const nextMeetingTime = (meta && meta.next_meeting_at)
+        ? new Date(meta.next_meeting_at).getTime() : 0;
+      if (nextMeetingTime > Date.now()) {
+        return { critical: false, reasons: [], daysSinceTouch: null, nextMeetingAt: meta.next_meeting_at };
+      }
+
       const reasons = [];
+
       const desc = ((deal && deal.description) || '').trim();
       const notesArr = (meta && Array.isArray(meta.notes)) ? meta.notes : [];
-      if (!desc && notesArr.length === 0) reasons.push('❌ aucune note');
-
       const relances = (meta && Array.isArray(meta.relances)) ? meta.relances : [];
-      const lastRelance = relances.length
-        ? relances.reduce((acc, r) => (new Date(r.at) > new Date(acc.at) ? r : acc), relances[0])
-        : null;
-      const refDate = lastRelance ? new Date(lastRelance.at) : (deal && deal.createdate ? new Date(deal.createdate) : null);
+      const hasAnyDoc = !!desc || notesArr.length > 0 || relances.length > 0;
+      if (!hasAnyDoc) reasons.push('❌ aucune note');
+
+      // Last touch = max(dernière relance, dernière note)
+      const touchDates = [
+        ...relances.map(r => r && r.at ? new Date(r.at).getTime() : 0),
+        ...notesArr.map(n => n && n.at ? new Date(n.at).getTime() : 0),
+      ].filter(t => t > 0);
+      const lastTouchTime = touchDates.length ? Math.max(...touchDates) : null;
+      const fallbackTime = (lastTouchTime === null && deal && deal.createdate)
+        ? new Date(deal.createdate).getTime() : null;
+      const refTime = lastTouchTime !== null ? lastTouchTime : fallbackTime;
       let daysSinceTouch = null;
-      if (refDate) {
-        daysSinceTouch = Math.floor((Date.now() - refDate.getTime()) / (24 * 3600 * 1000));
+      if (refTime !== null) {
+        daysSinceTouch = Math.floor((Date.now() - refTime) / (24 * 3600 * 1000));
         if (daysSinceTouch > CRITICAL_RELANCE_DAYS) {
-          reasons.push(lastRelance
+          reasons.push(lastTouchTime !== null
             ? `⏱ ${daysSinceTouch}j sans relance`
             : `⏱ ${daysSinceTouch}j sans contact`);
         }
       }
+
       return { critical: reasons.length > 0, reasons, daysSinceTouch };
     }
 
@@ -6582,6 +6635,16 @@
             ? `<div class="kanban-card-critical-reasons">${crit.reasons.map(r => `<span class="kanban-card-critical-reason">${r}</span>`).join('')}</div>`
             : '';
 
+          // 📅 Chip discret prochain RDV si futur
+          const nextMeetingTime = meta.next_meeting_at ? new Date(meta.next_meeting_at).getTime() : 0;
+          let meetingChip = '';
+          if (nextMeetingTime > Date.now()) {
+            const daysUntil = Math.ceil((nextMeetingTime - Date.now()) / (24 * 3600 * 1000));
+            const soonClass = daysUntil <= 7 ? ' soon' : '';
+            const tip = `Prochain RDV : ${new Date(meta.next_meeting_at).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' })}`;
+            meetingChip = `<span class="kanban-card-meeting${soonClass}" title="${tip}">📅 ${formatShortDate(meta.next_meeting_at)}</span>`;
+          }
+
           // Tags + proposal — même ligne
           const MISSION_SHORT = { 'Bilan Carbone':'BC', 'ACV':'ACV', 'FDES':'FDES', 'EPD':'EPD', 'Outil sur-mesure':'Outil' };
           const missionLabel = proposalMission ? (MISSION_SHORT[proposalMission] || proposalMission) : '';
@@ -6622,6 +6685,7 @@
             <div class="kanban-card-meta">
               <span class="kanban-card-amount" onclick="startEditAmount(event, this, '${deal.id}', ${deal.amount})" title="Cliquer pour modifier">${formatEuro(deal.amount)}</span>
               <span class="kanban-card-proba ${probaClass}">${deal.probability}%</span>
+              ${meetingChip}
             </div>
           </div>`;
         }
@@ -6992,6 +7056,76 @@
       return null;
     }
 
+    // ISO timestamp → valeur pour input datetime-local (heure locale)
+    function _isoToLocalInput(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return '';
+      const pad = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    async function saveNextMeeting(dealId) {
+      const input = document.getElementById('sbNextMeeting');
+      const btn = document.getElementById('sbNextMeetingSaveBtn');
+      const val = input ? input.value : '';
+      if (!val) { input && input.focus(); return; }
+      const iso = new Date(val).toISOString();
+      if (btn) { btn.disabled = true; btn.textContent = '…'; }
+      try {
+        const res = await fetch(`/api/deals/${dealId}/metadata`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ next_meeting_at: iso }),
+        });
+        if (!res.ok) throw new Error();
+        dealMetadata[dealId] = { ...(dealMetadata[dealId] || {}), next_meeting_at: iso };
+        if (btn) { btn.textContent = 'Enregistré ✓'; setTimeout(() => { if (btn) { btn.textContent = 'Enregistrer'; btn.disabled = false; } }, 1200); }
+        renderKanban();
+        // Re-render uniquement le champ RDV (préserve saisies en cours dans les autres champs)
+        const d = findDealInPipeline(dealId);
+        if (d) _refreshNextMeetingField(d, dealMetadata[dealId]);
+      } catch {
+        if (btn) { btn.textContent = 'Erreur'; btn.disabled = false; setTimeout(() => { if (btn) btn.textContent = 'Enregistrer'; }, 1500); }
+      }
+    }
+
+    async function clearNextMeeting(dealId) {
+      try {
+        const res = await fetch(`/api/deals/${dealId}/metadata`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ next_meeting_at: null }),
+        });
+        if (!res.ok) throw new Error();
+        dealMetadata[dealId] = { ...(dealMetadata[dealId] || {}), next_meeting_at: null };
+        renderKanban();
+        const d = findDealInPipeline(dealId);
+        if (d) _refreshNextMeetingField(d, dealMetadata[dealId]);
+      } catch {}
+    }
+
+    // Re-render localisé du seul bloc "Prochain rendez-vous" dans la sidebar
+    function _refreshNextMeetingField(deal, meta) {
+      const input = document.getElementById('sbNextMeeting');
+      if (!input) return;
+      const wrap = input.closest('.deal-sidebar-field');
+      if (!wrap) return;
+      const nextMeetingLocalVal = _isoToLocalInput(meta && meta.next_meeting_at);
+      const nextMeetingTime = (meta && meta.next_meeting_at) ? new Date(meta.next_meeting_at).getTime() : 0;
+      const nextMeetingIsFuture = nextMeetingTime > Date.now();
+      const nextMeetingIsPast = nextMeetingTime > 0 && nextMeetingTime <= Date.now();
+      wrap.innerHTML = `
+        <div class="deal-sidebar-label">📅 Prochain rendez-vous ${nextMeetingIsFuture ? '<span style="color:#1d4ed8;font-weight:600">· planifié</span>' : (nextMeetingIsPast ? '<span style="color:var(--text-light);font-weight:500">· passé</span>' : '')}</div>
+        <div style="display:flex;gap:0.4rem;align-items:center">
+          <input class="deal-sidebar-input" id="sbNextMeeting" type="datetime-local" value="${nextMeetingLocalVal}" style="flex:1">
+          <button class="relance-btn" id="sbNextMeetingSaveBtn" onclick="saveNextMeeting('${deal.id}')" style="flex:0 0 auto;padding:0.45rem 0.8rem">Enregistrer</button>
+          ${meta && meta.next_meeting_at ? `<button class="relance-btn" onclick="clearNextMeeting('${deal.id}')" style="flex:0 0 auto;padding:0.45rem 0.6rem;color:#b91c1c;border-color:rgba(239,68,68,0.3)" title="Effacer le RDV">✕</button>` : ''}
+        </div>
+        ${nextMeetingIsFuture ? `<div style="font-size:0.72rem;color:var(--text-secondary);margin-top:0.3rem;font-style:italic">Un RDV futur retire l'état critique du deal.</div>` : ''}
+      `;
+    }
+
     function _renderLastRelance(relances) {
       const arr = Array.isArray(relances) ? relances : [];
       const lastEmail = arr.filter(r => r.type === 'email').sort((a,b) => new Date(b.at) - new Date(a.at))[0];
@@ -7035,6 +7169,10 @@
       const todayStr = new Date().toISOString().slice(0, 10);
       const relances = Array.isArray(meta.relances) ? meta.relances : [];
       const relancesCount = relances.length;
+      const nextMeetingLocalVal = _isoToLocalInput(meta.next_meeting_at);
+      const nextMeetingTime = meta.next_meeting_at ? new Date(meta.next_meeting_at).getTime() : 0;
+      const nextMeetingIsFuture = nextMeetingTime > Date.now();
+      const nextMeetingIsPast = nextMeetingTime > 0 && nextMeetingTime <= Date.now();
 
       document.getElementById('sidebarBody').innerHTML = `
         <div class="deal-sidebar-field">
@@ -7050,6 +7188,16 @@
         <div class="deal-sidebar-field">
           <div class="deal-sidebar-label">Date de clôture prévue</div>
           <input class="deal-sidebar-input" id="sbClosedate" type="date" value="${closedateVal}">
+        </div>
+
+        <div class="deal-sidebar-field">
+          <div class="deal-sidebar-label">📅 Prochain rendez-vous ${nextMeetingIsFuture ? '<span style="color:#1d4ed8;font-weight:600">· planifié</span>' : (nextMeetingIsPast ? '<span style="color:var(--text-light);font-weight:500">· passé</span>' : '')}</div>
+          <div style="display:flex;gap:0.4rem;align-items:center">
+            <input class="deal-sidebar-input" id="sbNextMeeting" type="datetime-local" value="${nextMeetingLocalVal}" style="flex:1">
+            <button class="relance-btn" id="sbNextMeetingSaveBtn" onclick="saveNextMeeting('${deal.id}')" style="flex:0 0 auto;padding:0.45rem 0.8rem">Enregistrer</button>
+            ${meta.next_meeting_at ? `<button class="relance-btn" onclick="clearNextMeeting('${deal.id}')" style="flex:0 0 auto;padding:0.45rem 0.6rem;color:#b91c1c;border-color:rgba(239,68,68,0.3)" title="Effacer le RDV">✕</button>` : ''}
+          </div>
+          ${nextMeetingIsFuture ? `<div style="font-size:0.72rem;color:var(--text-secondary);margin-top:0.3rem;font-style:italic">Un RDV futur retire l'état critique du deal.</div>` : ''}
         </div>
 
         <div class="deal-sidebar-field">
@@ -7181,6 +7329,8 @@
         const wrap = document.getElementById('relanceLastWrap');
         if (wrap) wrap.innerHTML = _renderLastRelance(data.relances);
         closeRelanceForm();
+        // Re-render kanban pour mettre à jour le flag critique
+        renderKanban();
         if (typeof recordAction === 'function') {
           recordAction('relance', { type });
         }
@@ -7740,6 +7890,10 @@
         repeatClientsData = await fetch('/api/repeat-clients').then(r => r.json());
         renderRepeatKpis();
         renderRepeatList();
+        const sumEl = document.getElementById('repeatSummaryCount');
+        if (sumEl && Array.isArray(repeatClientsData)) {
+          sumEl.textContent = `· ${repeatClientsData.length} client${repeatClientsData.length > 1 ? 's' : ''}`;
+        }
       } catch {
         document.getElementById('repeatList').innerHTML = '<div class="repeat-empty">Erreur de chargement</div>';
       }

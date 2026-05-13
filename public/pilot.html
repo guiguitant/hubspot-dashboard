@@ -1204,6 +1204,30 @@
       font-size: 0.78rem;
     }
 
+    /* Chip discret "prochain RDV" sur la carte Kanban */
+    .kanban-card-meeting {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.2rem;
+      font-size: 0.66rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      padding: 0.05rem 0.32rem;
+      border-radius: 3px;
+      background: rgba(100,116,139,0.08);
+      border: 1px solid rgba(100,116,139,0.18);
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+    }
+    .kanban-card-meeting.soon {
+      color: #1d4ed8;
+      background: rgba(59,130,246,0.08);
+      border-color: rgba(59,130,246,0.28);
+    }
+    [data-theme="dark"] .kanban-card-meeting.soon {
+      color: #93c5fd;
+    }
+
     /* --- Deals CRITIQUES (sans relance > 15j OU sans notes) --- */
     .kanban-card-critical {
       border: 2px solid #ef4444 !important;
@@ -6344,8 +6368,15 @@
     //   (B) "trop ancien"  = > 15j depuis le dernier "contact" (= max(dernière relance, dernière note),
     //                        fallback createdate si rien)
     // Note ≡ Relance : ajouter l'une OU l'autre suffit à éteindre les deux raisons.
+    // Échappatoire : un prochain RDV futur (meta.next_meeting_at) court-circuite tout.
     const CRITICAL_RELANCE_DAYS = 15;
     function computeDealCriticality(deal, meta) {
+      const nextMeetingTime = (meta && meta.next_meeting_at)
+        ? new Date(meta.next_meeting_at).getTime() : 0;
+      if (nextMeetingTime > Date.now()) {
+        return { critical: false, reasons: [], daysSinceTouch: null, nextMeetingAt: meta.next_meeting_at };
+      }
+
       const reasons = [];
 
       const desc = ((deal && deal.description) || '').trim();
@@ -6604,6 +6635,16 @@
             ? `<div class="kanban-card-critical-reasons">${crit.reasons.map(r => `<span class="kanban-card-critical-reason">${r}</span>`).join('')}</div>`
             : '';
 
+          // 📅 Chip discret prochain RDV si futur
+          const nextMeetingTime = meta.next_meeting_at ? new Date(meta.next_meeting_at).getTime() : 0;
+          let meetingChip = '';
+          if (nextMeetingTime > Date.now()) {
+            const daysUntil = Math.ceil((nextMeetingTime - Date.now()) / (24 * 3600 * 1000));
+            const soonClass = daysUntil <= 7 ? ' soon' : '';
+            const tip = `Prochain RDV : ${new Date(meta.next_meeting_at).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' })}`;
+            meetingChip = `<span class="kanban-card-meeting${soonClass}" title="${tip}">📅 ${formatShortDate(meta.next_meeting_at)}</span>`;
+          }
+
           // Tags + proposal — même ligne
           const MISSION_SHORT = { 'Bilan Carbone':'BC', 'ACV':'ACV', 'FDES':'FDES', 'EPD':'EPD', 'Outil sur-mesure':'Outil' };
           const missionLabel = proposalMission ? (MISSION_SHORT[proposalMission] || proposalMission) : '';
@@ -6644,6 +6685,7 @@
             <div class="kanban-card-meta">
               <span class="kanban-card-amount" onclick="startEditAmount(event, this, '${deal.id}', ${deal.amount})" title="Cliquer pour modifier">${formatEuro(deal.amount)}</span>
               <span class="kanban-card-proba ${probaClass}">${deal.probability}%</span>
+              ${meetingChip}
             </div>
           </div>`;
         }
@@ -7014,6 +7056,76 @@
       return null;
     }
 
+    // ISO timestamp → valeur pour input datetime-local (heure locale)
+    function _isoToLocalInput(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return '';
+      const pad = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    async function saveNextMeeting(dealId) {
+      const input = document.getElementById('sbNextMeeting');
+      const btn = document.getElementById('sbNextMeetingSaveBtn');
+      const val = input ? input.value : '';
+      if (!val) { input && input.focus(); return; }
+      const iso = new Date(val).toISOString();
+      if (btn) { btn.disabled = true; btn.textContent = '…'; }
+      try {
+        const res = await fetch(`/api/deals/${dealId}/metadata`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ next_meeting_at: iso }),
+        });
+        if (!res.ok) throw new Error();
+        dealMetadata[dealId] = { ...(dealMetadata[dealId] || {}), next_meeting_at: iso };
+        if (btn) { btn.textContent = 'Enregistré ✓'; setTimeout(() => { if (btn) { btn.textContent = 'Enregistrer'; btn.disabled = false; } }, 1200); }
+        renderKanban();
+        // Re-render uniquement le champ RDV (préserve saisies en cours dans les autres champs)
+        const d = findDealInPipeline(dealId);
+        if (d) _refreshNextMeetingField(d, dealMetadata[dealId]);
+      } catch {
+        if (btn) { btn.textContent = 'Erreur'; btn.disabled = false; setTimeout(() => { if (btn) btn.textContent = 'Enregistrer'; }, 1500); }
+      }
+    }
+
+    async function clearNextMeeting(dealId) {
+      try {
+        const res = await fetch(`/api/deals/${dealId}/metadata`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ next_meeting_at: null }),
+        });
+        if (!res.ok) throw new Error();
+        dealMetadata[dealId] = { ...(dealMetadata[dealId] || {}), next_meeting_at: null };
+        renderKanban();
+        const d = findDealInPipeline(dealId);
+        if (d) _refreshNextMeetingField(d, dealMetadata[dealId]);
+      } catch {}
+    }
+
+    // Re-render localisé du seul bloc "Prochain rendez-vous" dans la sidebar
+    function _refreshNextMeetingField(deal, meta) {
+      const input = document.getElementById('sbNextMeeting');
+      if (!input) return;
+      const wrap = input.closest('.deal-sidebar-field');
+      if (!wrap) return;
+      const nextMeetingLocalVal = _isoToLocalInput(meta && meta.next_meeting_at);
+      const nextMeetingTime = (meta && meta.next_meeting_at) ? new Date(meta.next_meeting_at).getTime() : 0;
+      const nextMeetingIsFuture = nextMeetingTime > Date.now();
+      const nextMeetingIsPast = nextMeetingTime > 0 && nextMeetingTime <= Date.now();
+      wrap.innerHTML = `
+        <div class="deal-sidebar-label">📅 Prochain rendez-vous ${nextMeetingIsFuture ? '<span style="color:#1d4ed8;font-weight:600">· planifié</span>' : (nextMeetingIsPast ? '<span style="color:var(--text-light);font-weight:500">· passé</span>' : '')}</div>
+        <div style="display:flex;gap:0.4rem;align-items:center">
+          <input class="deal-sidebar-input" id="sbNextMeeting" type="datetime-local" value="${nextMeetingLocalVal}" style="flex:1">
+          <button class="relance-btn" id="sbNextMeetingSaveBtn" onclick="saveNextMeeting('${deal.id}')" style="flex:0 0 auto;padding:0.45rem 0.8rem">Enregistrer</button>
+          ${meta && meta.next_meeting_at ? `<button class="relance-btn" onclick="clearNextMeeting('${deal.id}')" style="flex:0 0 auto;padding:0.45rem 0.6rem;color:#b91c1c;border-color:rgba(239,68,68,0.3)" title="Effacer le RDV">✕</button>` : ''}
+        </div>
+        ${nextMeetingIsFuture ? `<div style="font-size:0.72rem;color:var(--text-secondary);margin-top:0.3rem;font-style:italic">Un RDV futur retire l'état critique du deal.</div>` : ''}
+      `;
+    }
+
     function _renderLastRelance(relances) {
       const arr = Array.isArray(relances) ? relances : [];
       const lastEmail = arr.filter(r => r.type === 'email').sort((a,b) => new Date(b.at) - new Date(a.at))[0];
@@ -7057,6 +7169,10 @@
       const todayStr = new Date().toISOString().slice(0, 10);
       const relances = Array.isArray(meta.relances) ? meta.relances : [];
       const relancesCount = relances.length;
+      const nextMeetingLocalVal = _isoToLocalInput(meta.next_meeting_at);
+      const nextMeetingTime = meta.next_meeting_at ? new Date(meta.next_meeting_at).getTime() : 0;
+      const nextMeetingIsFuture = nextMeetingTime > Date.now();
+      const nextMeetingIsPast = nextMeetingTime > 0 && nextMeetingTime <= Date.now();
 
       document.getElementById('sidebarBody').innerHTML = `
         <div class="deal-sidebar-field">
@@ -7072,6 +7188,16 @@
         <div class="deal-sidebar-field">
           <div class="deal-sidebar-label">Date de clôture prévue</div>
           <input class="deal-sidebar-input" id="sbClosedate" type="date" value="${closedateVal}">
+        </div>
+
+        <div class="deal-sidebar-field">
+          <div class="deal-sidebar-label">📅 Prochain rendez-vous ${nextMeetingIsFuture ? '<span style="color:#1d4ed8;font-weight:600">· planifié</span>' : (nextMeetingIsPast ? '<span style="color:var(--text-light);font-weight:500">· passé</span>' : '')}</div>
+          <div style="display:flex;gap:0.4rem;align-items:center">
+            <input class="deal-sidebar-input" id="sbNextMeeting" type="datetime-local" value="${nextMeetingLocalVal}" style="flex:1">
+            <button class="relance-btn" id="sbNextMeetingSaveBtn" onclick="saveNextMeeting('${deal.id}')" style="flex:0 0 auto;padding:0.45rem 0.8rem">Enregistrer</button>
+            ${meta.next_meeting_at ? `<button class="relance-btn" onclick="clearNextMeeting('${deal.id}')" style="flex:0 0 auto;padding:0.45rem 0.6rem;color:#b91c1c;border-color:rgba(239,68,68,0.3)" title="Effacer le RDV">✕</button>` : ''}
+          </div>
+          ${nextMeetingIsFuture ? `<div style="font-size:0.72rem;color:var(--text-secondary);margin-top:0.3rem;font-style:italic">Un RDV futur retire l'état critique du deal.</div>` : ''}
         </div>
 
         <div class="deal-sidebar-field">

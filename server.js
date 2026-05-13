@@ -580,10 +580,20 @@ app.get('/api/deals/:id', async (req, res) => {
 
 app.put('/api/deals/:id/metadata', async (req, res) => {
   const { id } = req.params;
-  const { tags, proposal_sent_at } = req.body;
+  const { tags, proposal_sent_at, next_meeting_at } = req.body;
   const update = { deal_id: id, updated_at: new Date().toISOString() };
   if (tags !== undefined) update.tags = tags;
   if (proposal_sent_at !== undefined) update.proposal_sent_at = proposal_sent_at;
+  if (next_meeting_at !== undefined) {
+    // null/'' → on efface ; sinon on tente de parser en ISO
+    if (next_meeting_at === null || next_meeting_at === '') {
+      update.next_meeting_at = null;
+    } else {
+      const d = new Date(next_meeting_at);
+      if (isNaN(d.getTime())) return res.status(400).json({ error: 'next_meeting_at invalide' });
+      update.next_meeting_at = d.toISOString();
+    }
+  }
   try {
     const { error } = await supabaseAdmin
       .from('deal_metadata')
