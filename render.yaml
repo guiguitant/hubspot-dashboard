@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: hubspot-dashboard
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .

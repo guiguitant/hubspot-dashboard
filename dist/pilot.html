@@ -1196,6 +1196,92 @@
       font-size: 0.78rem;
     }
 
+    /* --- Deals CRITIQUES (sans relance > 15j OU sans notes) --- */
+    .kanban-card-critical {
+      border: 2px solid #ef4444 !important;
+      background: linear-gradient(180deg, rgba(239,68,68,0.06), rgba(239,68,68,0.02)) !important;
+      box-shadow: 0 0 0 0 rgba(239,68,68,0.6);
+      animation: card-critical-pulse 1.8s ease-in-out infinite;
+      position: relative;
+    }
+    @keyframes card-critical-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.55); }
+      50% { box-shadow: 0 0 0 6px rgba(239,68,68,0); }
+    }
+    .kanban-card-critical .kanban-card-name {
+      color: #b91c1c;
+    }
+    [data-theme="dark"] .kanban-card-critical .kanban-card-name {
+      color: #fca5a5;
+    }
+    .kanban-card-critical-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.2rem;
+      font-size: 0.62rem;
+      font-weight: 800;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      padding: 0.1rem 0.35rem;
+      border-radius: 3px;
+      background: #ef4444;
+      color: white;
+      margin-left: 0.3rem;
+      vertical-align: middle;
+      animation: badge-shake 1.4s ease-in-out infinite;
+    }
+    @keyframes badge-shake {
+      0%, 100% { transform: rotate(0); }
+      25% { transform: rotate(-2deg); }
+      75% { transform: rotate(2deg); }
+    }
+    .kanban-card-critical-reasons {
+      font-size: 0.66rem;
+      color: #b91c1c;
+      font-weight: 600;
+      margin-top: 0.2rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.3rem;
+    }
+    [data-theme="dark"] .kanban-card-critical-reasons { color: #fca5a5; }
+    .kanban-card-critical-reason {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.2rem;
+      padding: 0.05rem 0.3rem;
+      border-radius: 2px;
+      background: rgba(239,68,68,0.12);
+      border: 1px solid rgba(239,68,68,0.3);
+    }
+
+    /* Compteur "deals critiques" au-dessus du Kanban */
+    .critical-counter {
+      display: none;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.45rem 0.85rem;
+      background: linear-gradient(90deg, #ef4444, #dc2626);
+      color: white;
+      font-size: 0.82rem;
+      font-weight: 700;
+      border-radius: var(--radius);
+      cursor: pointer;
+      margin-bottom: 0.6rem;
+      animation: counter-pulse 1.6s ease-in-out infinite;
+      box-shadow: 0 2px 12px rgba(239,68,68,0.35);
+    }
+    .critical-counter.active { display: inline-flex; }
+    .critical-counter:hover { filter: brightness(1.1); }
+    .critical-counter-icon {
+      font-size: 1.1rem;
+      animation: badge-shake 1.2s ease-in-out infinite;
+    }
+    @keyframes counter-pulse {
+      0%, 100% { box-shadow: 0 2px 12px rgba(239,68,68,0.35); }
+      50% { box-shadow: 0 2px 22px rgba(239,68,68,0.7); }
+    }
+
     /* Variant "À relancer plus tard" — orange */
     .kanban-column-relancer.expanded .kanban-header {
       background: var(--warning-bg);
@@ -2348,6 +2434,136 @@
     [data-theme="dark"] .deal-sidebar-lost-btn { background: rgba(239,68,68,0.1); }
     [data-theme="dark"] .deal-sidebar-lost-btn:hover { background: rgba(239,68,68,0.18); }
 
+    /* --- Relances dans la sidebar --- */
+    .relance-row {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 0.6rem;
+    }
+    .relance-btn {
+      flex: 1;
+      padding: 0.45rem 0.4rem;
+      border-radius: var(--radius);
+      border: 1.5px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35rem;
+    }
+    .relance-btn:hover { border-color: var(--primary); background: var(--primary-bg); }
+    .relance-btn.email { border-color: #3b82f6; color: #1d4ed8; }
+    .relance-btn.email:hover { background: rgba(59,130,246,0.08); }
+    .relance-btn.phone { border-color: #d9730d; color: #d9730d; }
+    .relance-btn.phone:hover { background: rgba(217,115,13,0.08); }
+    .relance-btn.note { border-color: #64748b; color: #475569; }
+    .relance-btn.note:hover { background: rgba(100,116,139,0.08); }
+
+    .relance-form {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.6rem;
+      margin-bottom: 0.6rem;
+      display: none;
+    }
+    .relance-form.open { display: block; }
+    .relance-form-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.45rem;
+    }
+    .relance-form-row label {
+      font-size: 0.7rem;
+      color: var(--text-secondary);
+      font-weight: 600;
+      min-width: 38px;
+    }
+    .relance-form-row input[type="date"],
+    .relance-form-row textarea {
+      flex: 1;
+      font-size: 0.78rem;
+      padding: 0.3rem 0.45rem;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      outline: none;
+      color: var(--text);
+      background: var(--bg);
+      font-family: inherit;
+    }
+    .relance-form-row textarea {
+      resize: vertical;
+      min-height: 50px;
+    }
+    .relance-form-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.4rem;
+      margin-top: 0.3rem;
+    }
+    .relance-form-actions button {
+      font-size: 0.72rem;
+      padding: 0.3rem 0.7rem;
+      border-radius: 3px;
+      cursor: pointer;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+    }
+    .relance-form-actions button.primary {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+    }
+    .relance-form-actions button.primary:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .relance-last {
+      font-size: 0.74rem;
+      color: var(--text-secondary);
+      padding: 0.4rem 0.5rem;
+      background: var(--bg-secondary);
+      border-radius: var(--radius);
+      border-left: 3px solid transparent;
+      margin-bottom: 0.35rem;
+    }
+    .relance-last.email { border-left-color: #3b82f6; }
+    .relance-last.phone { border-left-color: #d9730d; }
+    .relance-last.note { border-left-color: #64748b; }
+    .relance-last-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 0.15rem;
+    }
+    .relance-last-note {
+      color: var(--text-secondary);
+      font-style: italic;
+      line-height: 1.35;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .relance-history-link {
+      font-size: 0.7rem;
+      color: var(--text-light);
+      cursor: pointer;
+      text-decoration: underline;
+      margin-top: 0.25rem;
+      display: inline-block;
+    }
+    .relance-history-link:hover { color: var(--primary); }
+
     .deal-sidebar-stage-badge {
       display: inline-block;
       font-size: 0.75rem;
@@ -3019,6 +3235,11 @@
         </div>
       </div>
 
+      <div class="critical-counter" id="criticalCounter" onclick="openPipelineModal('critical')" title="Voir les deals critiques">
+        <span class="critical-counter-icon">🚨</span>
+        <span id="criticalCounterText">0 deal(s) critique(s)</span>
+        <span style="opacity:0.85;font-weight:500;font-size:0.72rem">cliquer pour voir</span>
+      </div>
       <div class="pipeline-activity" id="pipelineActivity"></div>
       <div class="forecast-bar" id="forecastBar">
         <span><strong id="forecastCount">0</strong> deal(s) selectionne(s) &mdash; Forecast : <strong id="forecastAmount">0 €</strong></span>
@@ -4890,6 +5111,8 @@
       proposal_sent: 50,
       stage_advance: 25,
       deal_created: 10,
+      relance: 30,
+      note_added: 15,
     };
 
     function gamiState() {
@@ -5121,6 +5344,15 @@
           break;
         case 'deal_created':
           gainXP(XP_REWARDS.deal_created, { reason: 'Nouveau deal', icon: '✨' });
+          break;
+        case 'relance':
+          gainXP(XP_REWARDS.relance, {
+            reason: payload.type === 'email' ? 'Relance email' : 'Relance téléphonique',
+            icon: payload.type === 'email' ? '📧' : '📞',
+          });
+          break;
+        case 'note_added':
+          gainXP(XP_REWARDS.note_added, { reason: 'Note figée', icon: '📝' });
           break;
       }
       renderGamiBar();
@@ -6094,6 +6326,33 @@
 
     let pipelineNewDeals = [];
     let pipelineMovedDeals = [];
+    let pipelineCriticalDeals = [];
+
+    // 🚨 Critère "deal critique" : aucune relance dans les 15 derniers jours
+    // (fallback createdate si jamais aucune relance) OU aucune note (ni notes figées, ni description)
+    const CRITICAL_RELANCE_DAYS = 15;
+    function computeDealCriticality(deal, meta) {
+      const reasons = [];
+      const desc = ((deal && deal.description) || '').trim();
+      const notesArr = (meta && Array.isArray(meta.notes)) ? meta.notes : [];
+      if (!desc && notesArr.length === 0) reasons.push('❌ aucune note');
+
+      const relances = (meta && Array.isArray(meta.relances)) ? meta.relances : [];
+      const lastRelance = relances.length
+        ? relances.reduce((acc, r) => (new Date(r.at) > new Date(acc.at) ? r : acc), relances[0])
+        : null;
+      const refDate = lastRelance ? new Date(lastRelance.at) : (deal && deal.createdate ? new Date(deal.createdate) : null);
+      let daysSinceTouch = null;
+      if (refDate) {
+        daysSinceTouch = Math.floor((Date.now() - refDate.getTime()) / (24 * 3600 * 1000));
+        if (daysSinceTouch > CRITICAL_RELANCE_DAYS) {
+          reasons.push(lastRelance
+            ? `⏱ ${daysSinceTouch}j sans relance`
+            : `⏱ ${daysSinceTouch}j sans contact`);
+        }
+      }
+      return { critical: reasons.length > 0, reasons, daysSinceTouch };
+    }
 
     // --- Colonne Gagné (repliable) ---
     let wonColumnOpen = false;
@@ -6272,6 +6531,7 @@
       let html = '';
       pipelineNewDeals = [];
       pipelineMovedDeals = [];
+      pipelineCriticalDeals = [];
 
       for (const stageName of KANBAN_STAGES_ORDER) {
         const deals = dashboardData.pipelineDeals[stageName] || [];
@@ -6309,6 +6569,19 @@
           const proposalNom         = meta.proposal_nom || null;
           const proposalStoragePath = meta.proposal_storage_path || null;
 
+          // 🚨 Détection deal critique (sans relance > 15j OU sans notes)
+          const crit = computeDealCriticality(deal, meta);
+          if (crit.critical) {
+            pipelineCriticalDeals.push({ ...deal, stage: stageName, reasons: crit.reasons, daysSinceTouch: crit.daysSinceTouch });
+          }
+          const criticalClass = crit.critical ? ' kanban-card-critical' : '';
+          const criticalBadge = crit.critical
+            ? `<span class="kanban-card-critical-badge" title="${crit.reasons.join(' · ')}">🚨 Critique</span>`
+            : '';
+          const criticalReasons = crit.critical
+            ? `<div class="kanban-card-critical-reasons">${crit.reasons.map(r => `<span class="kanban-card-critical-reason">${r}</span>`).join('')}</div>`
+            : '';
+
           // Tags + proposal — même ligne
           const MISSION_SHORT = { 'Bilan Carbone':'BC', 'ACV':'ACV', 'FDES':'FDES', 'EPD':'EPD', 'Outil sur-mesure':'Outil' };
           const missionLabel = proposalMission ? (MISSION_SHORT[proposalMission] || proposalMission) : '';
@@ -6334,7 +6607,7 @@
           }<span class="deal-tag-add" onclick="openTagMenu(event,'${deal.id}')">+</span><span style="flex:1"></span>${redownloadBtn}${proposalChip}</div>`;
 
           const cbChecked = selectedDealIds.has(deal.id) ? ' checked' : '';
-          html += `<div class="kanban-card${selected}"
+          html += `<div class="kanban-card${selected}${criticalClass}"
               draggable="true"
               data-deal-id="${deal.id}"
               data-deal-amount="${deal.amount}"
@@ -6343,7 +6616,8 @@
               ondragend="onDragEnd(event)"
               onclick="openDealSidebar('${deal.id}')">
             <div class="kanban-card-forecast-cb${cbChecked}" onclick="toggleDealForecast(event,'${deal.id}')" title="Ajouter au forecast">&#10003;</div>
-            <div class="kanban-card-name" style="padding-right:1.4rem">${deal.name}${badge}</div>
+            <div class="kanban-card-name" style="padding-right:1.4rem">${deal.name}${badge}${criticalBadge}</div>
+            ${criticalReasons}
             ${tagsHtml}
             <div class="kanban-card-meta">
               <span class="kanban-card-amount" onclick="startEditAmount(event, this, '${deal.id}', ${deal.amount})" title="Cliquer pour modifier">${formatEuro(deal.amount)}</span>
@@ -6373,6 +6647,15 @@
         activityHtml += `<span class="pipeline-activity-badge moved" style="cursor:pointer" onclick="openPipelineModal('moved')">&#8599; ${pipelineMovedDeals.length} progression${pipelineMovedDeals.length > 1 ? 's' : ''}</span>`;
       }
       activityEl.innerHTML = activityHtml;
+
+      // 🚨 Compteur deals critiques
+      const critEl = document.getElementById('criticalCounter');
+      const critN = pipelineCriticalDeals.length;
+      if (critEl) {
+        critEl.classList.toggle('active', critN > 0);
+        const txt = document.getElementById('criticalCounterText');
+        if (txt) txt.textContent = `${critN} deal${critN > 1 ? 's' : ''} critique${critN > 1 ? 's' : ''} — c'est très grave !`;
+      }
 
       updateForecastBar();
     }
@@ -6523,35 +6806,52 @@
     }
 
     function openPipelineModal(type) {
-      const deals = type === 'new' ? pipelineNewDeals : pipelineMovedDeals;
-      const title = type === 'new' ? 'Nouveaux leads' : 'Progressions';
-      const fromVal = document.getElementById('pipelineFrom').value;
-      const toVal = document.getElementById('pipelineTo').value;
+      let deals, title, subtitle;
       const fmtDate = s => s ? new Date(s).toLocaleDateString('fr-FR', { day:'numeric', month:'short' }) : '';
-      const subtitle = `${fmtDate(fromVal)} → ${fmtDate(toVal)} · ${deals.length} deal${deals.length > 1 ? 's' : ''}`;
+
+      if (type === 'critical') {
+        // tri : plus de jours sans contact en premier
+        deals = [...pipelineCriticalDeals].sort((a, b) => (b.daysSinceTouch || 0) - (a.daysSinceTouch || 0));
+        title = '🚨 Deals critiques';
+        subtitle = `${deals.length} deal${deals.length > 1 ? 's' : ''} sans relance > ${CRITICAL_RELANCE_DAYS}j ou sans note — action urgente !`;
+      } else {
+        deals = type === 'new' ? pipelineNewDeals : pipelineMovedDeals;
+        title = type === 'new' ? 'Nouveaux leads' : 'Progressions';
+        const fromVal = document.getElementById('pipelineFrom').value;
+        const toVal = document.getElementById('pipelineTo').value;
+        subtitle = `${fmtDate(fromVal)} → ${fmtDate(toVal)} · ${deals.length} deal${deals.length > 1 ? 's' : ''}`;
+      }
+
       const total = deals.reduce((s, d) => s + d.amount, 0);
 
       const stageColors = {
-        'RDV Qualif':       { bg: 'rgba(105,64,165,0.1)',  color: '#6940a5' },
-        'RDV Propale':      { bg: 'rgba(217,115,13,0.1)',  color: '#d9730d' },
-        'Négociation':      { bg: 'rgba(15,123,108,0.1)',  color: '#0f7b6c' },
-        'Contrat envoyé':   { bg: 'rgba(0,61,46,0.1)',     color: '#003D2E' },
+        'RDV Qualif':            { bg: 'rgba(105,64,165,0.1)',  color: '#6940a5' },
+        'RDV Propale':           { bg: 'rgba(217,115,13,0.1)',  color: '#d9730d' },
+        'Négociation':           { bg: 'rgba(15,123,108,0.1)',  color: '#0f7b6c' },
+        'Contrat envoyé':        { bg: 'rgba(0,61,46,0.1)',     color: '#003D2E' },
+        'À relancer plus tard':  { bg: 'rgba(217,115,13,0.12)', color: '#d9730d' },
       };
 
-      const icons = { 'new': '✦', 'moved': '↗' };
+      const icons = { 'new': '✦', 'moved': '↗', 'critical': '🚨' };
 
       let rows = deals.map(d => {
         const sc = stageColors[d.stage] || { bg: 'var(--primary-bg)', color: 'var(--primary)' };
-        const dateStr = type === 'new'
-          ? (d.createdate ? fmtDate(d.createdate) : '')
-          : (d.stageEnteredAt ? fmtDate(d.stageEnteredAt) : '');
-        return `<div class="pa-deal-row">
+        let metaExtra = '';
+        if (type === 'critical') {
+          metaExtra = (d.reasons || []).map(r => `<span class="pa-date" style="color:#b91c1c;font-weight:600">${r}</span>`).join(' ');
+        } else {
+          const dateStr = type === 'new'
+            ? (d.createdate ? fmtDate(d.createdate) : '')
+            : (d.stageEnteredAt ? fmtDate(d.stageEnteredAt) : '');
+          metaExtra = dateStr ? `<span class="pa-date">${dateStr}</span>` : '';
+        }
+        return `<div class="pa-deal-row" onclick="document.getElementById('paModalOverlay').classList.remove('active'); openDealSidebar('${d.id}')" style="cursor:pointer">
           <div class="pa-deal-icon">${icons[type]}</div>
           <div class="pa-deal-info">
             <div class="pa-deal-name">${d.name}</div>
             <div class="pa-deal-meta">
               <span class="pa-stage-tag" style="background:${sc.bg};color:${sc.color}">${d.stage}</span>
-              ${dateStr ? `<span class="pa-date">${dateStr}</span>` : ''}
+              ${metaExtra}
             </div>
           </div>
           <div class="pa-deal-amount">${formatEuro(d.amount)}</div>
@@ -6559,7 +6859,7 @@
       }).join('');
 
       rows += `<div class="pa-total-row">
-        <span>Total pipeline</span>
+        <span>${type === 'critical' ? 'Total en jeu' : 'Total pipeline'}</span>
         <span>${formatEuro(total)}</span>
       </div>`;
 
@@ -6692,6 +6992,38 @@
       return null;
     }
 
+    function _renderLastRelance(relances) {
+      const arr = Array.isArray(relances) ? relances : [];
+      const lastEmail = arr.filter(r => r.type === 'email').sort((a,b) => new Date(b.at) - new Date(a.at))[0];
+      const lastPhone = arr.filter(r => r.type === 'phone').sort((a,b) => new Date(b.at) - new Date(a.at))[0];
+      const block = (r, type, icon) => r
+        ? `<div class="relance-last ${type}">
+            <div class="relance-last-header">
+              <span>${icon} ${type === 'email' ? 'Email' : 'Tél'}</span>
+              <span style="font-weight:500;color:var(--text-secondary);font-size:0.72rem">${formatShortDate(r.at)}</span>
+            </div>
+            <div class="relance-last-note">${(r.note || '').replace(/</g,'&lt;')}</div>
+          </div>`
+        : '';
+      const out = block(lastEmail, 'email', '📧') + block(lastPhone, 'phone', '📞');
+      return out || '<div style="font-size:0.74rem;color:var(--text-light);font-style:italic;margin-bottom:0.3rem">Aucune relance enregistrée</div>';
+    }
+
+    function _renderNotesLog(notes) {
+      const arr = Array.isArray(notes) ? [...notes] : [];
+      if (!arr.length) {
+        return '<div style="font-size:0.74rem;color:var(--text-light);font-style:italic;margin-bottom:0.3rem">Aucune note enregistrée</div>';
+      }
+      arr.sort((a, b) => new Date(b.at) - new Date(a.at));
+      return arr.map(n => `<div class="relance-last note">
+        <div class="relance-last-header">
+          <span>📝 Note</span>
+          <span style="font-weight:500;color:var(--text-secondary);font-size:0.72rem">${formatShortDate(n.at)}</span>
+        </div>
+        <div class="relance-last-note">${(n.text || '').replace(/</g,'&lt;')}</div>
+      </div>`).join('');
+    }
+
     function renderSidebarBody(deal, meta) {
       const tags = meta.tags || [];
       const tagsHtml = tags.length
@@ -6700,6 +7032,9 @@
 
       const closedateVal = deal.closedate ? deal.closedate.slice(0, 10) : '';
       const createdStr = deal.createdate ? new Date(deal.createdate).toLocaleDateString('fr-FR') : '—';
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const relances = Array.isArray(meta.relances) ? meta.relances : [];
+      const relancesCount = relances.length;
 
       document.getElementById('sidebarBody').innerHTML = `
         <div class="deal-sidebar-field">
@@ -6718,12 +7053,58 @@
         </div>
 
         <div class="deal-sidebar-field">
-          <div class="deal-sidebar-label">Notes</div>
-          <textarea class="deal-sidebar-input deal-sidebar-textarea" id="sbDescription" placeholder="Ajouter des notes…">${deal.description || ''}</textarea>
+          <div class="deal-sidebar-label">Notes (figées)</div>
+          <div id="notesLogWrap">${_renderNotesLog(meta.notes)}</div>
+          <div class="relance-row" style="margin-top:0.5rem">
+            <button class="relance-btn note" onclick="openNoteForm('${deal.id}')" style="flex:1">📝 Ajouter une note</button>
+          </div>
+          <div class="relance-form" id="noteForm">
+            <div class="relance-form-row">
+              <label for="noteDate">Date</label>
+              <input type="date" id="noteDate" value="${todayStr}">
+            </div>
+            <div class="relance-form-row" style="align-items:flex-start">
+              <label for="noteText" style="margin-top:0.3rem">Note*</label>
+              <textarea id="noteText" placeholder="Ce que tu retiens de l'échange (sera figée après enregistrement)"></textarea>
+            </div>
+            <div class="relance-form-actions">
+              <button onclick="closeNoteForm()">Annuler</button>
+              <button class="primary" id="noteSubmitBtn" onclick="submitNote('${deal.id}')">Enregistrer & figer</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="deal-sidebar-field">
+          <div class="deal-sidebar-label">Description (HubSpot)</div>
+          <textarea class="deal-sidebar-input deal-sidebar-textarea" id="sbDescription" placeholder="Description du deal (modifiable, sync HubSpot)…">${deal.description || ''}</textarea>
         </div>
 
         <div class="deal-sidebar-save-row">
           <button class="deal-sidebar-save-btn" id="sbSaveBtn" onclick="saveSidebarChanges('${deal.id}')">Enregistrer</button>
+        </div>
+
+        <div class="deal-sidebar-field">
+          <div class="deal-sidebar-label">Relances</div>
+          <div id="relanceLastWrap">${_renderLastRelance(relances)}</div>
+          ${relancesCount > 1 ? `<span class="relance-history-link" onclick="openRelanceHistory('${deal.id}')">Voir l'historique (${relancesCount})</span>` : ''}
+          <div class="relance-row" style="margin-top:0.5rem">
+            <button class="relance-btn email" onclick="openRelanceForm('email','${deal.id}')">📧 Relance email</button>
+            <button class="relance-btn phone" onclick="openRelanceForm('phone','${deal.id}')">📞 Relance tél</button>
+          </div>
+          <div class="relance-form" id="relanceForm">
+            <div class="relance-form-row">
+              <label for="relanceDate">Date</label>
+              <input type="date" id="relanceDate" value="${todayStr}">
+            </div>
+            <div class="relance-form-row" style="align-items:flex-start">
+              <label for="relanceNote" style="margin-top:0.3rem">Note*</label>
+              <textarea id="relanceNote" placeholder="Que s'est-il passé / dit ? (obligatoire)"></textarea>
+            </div>
+            <div class="relance-form-actions">
+              <button onclick="closeRelanceForm()">Annuler</button>
+              <button class="primary" id="relanceSubmitBtn" onclick="submitRelance('${deal.id}')">Enregistrer</button>
+            </div>
+          </div>
         </div>
 
         <div class="deal-sidebar-field">
@@ -6747,6 +7128,139 @@
           <div class="deal-sidebar-value">${formatShortDate(meta.proposal_sent_at)}${meta.proposal_mission ? ' · ' + meta.proposal_mission : ''}</div>
         </div>` : ''}
       `;
+    }
+
+    // --- Relances ---
+    let _relanceCurrentType = null;
+    function openRelanceForm(type, dealId) {
+      _relanceCurrentType = type;
+      const form = document.getElementById('relanceForm');
+      if (!form) return;
+      form.classList.add('open');
+      form.dataset.type = type;
+      const note = document.getElementById('relanceNote');
+      note.placeholder = type === 'email'
+        ? "Sujet / contenu envoyé (obligatoire)"
+        : "Personne jointe ? Suite à donner ? (obligatoire)";
+      note.value = '';
+      const today = new Date().toISOString().slice(0, 10);
+      document.getElementById('relanceDate').value = today;
+      setTimeout(() => note.focus(), 30);
+    }
+    function closeRelanceForm() {
+      const form = document.getElementById('relanceForm');
+      if (form) form.classList.remove('open');
+      _relanceCurrentType = null;
+    }
+    async function submitRelance(dealId) {
+      const form = document.getElementById('relanceForm');
+      const type = form?.dataset?.type || _relanceCurrentType;
+      if (!type) return;
+      const date = document.getElementById('relanceDate').value;
+      const note = (document.getElementById('relanceNote').value || '').trim();
+      if (!note) {
+        document.getElementById('relanceNote').focus();
+        document.getElementById('relanceNote').style.borderColor = 'var(--danger)';
+        return;
+      }
+      const btn = document.getElementById('relanceSubmitBtn');
+      btn.disabled = true;
+      btn.textContent = '…';
+      try {
+        const at = date ? new Date(date + 'T12:00:00').toISOString() : undefined;
+        const res = await fetch(`/api/deals/${dealId}/relance`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type, note, at }),
+        });
+        if (!res.ok) throw new Error((await res.json()).error || 'Erreur');
+        const data = await res.json();
+        // Maj du cache local des metadata
+        dealMetadata[dealId] = { ...(dealMetadata[dealId] || {}), relances: data.relances };
+        // Re-render de la zone "dernières relances"
+        const wrap = document.getElementById('relanceLastWrap');
+        if (wrap) wrap.innerHTML = _renderLastRelance(data.relances);
+        closeRelanceForm();
+        if (typeof recordAction === 'function') {
+          recordAction('relance', { type });
+        }
+      } catch (e) {
+        btn.textContent = 'Erreur';
+        btn.disabled = false;
+        setTimeout(() => { if (btn) btn.textContent = 'Enregistrer'; }, 1500);
+      }
+    }
+
+    // --- Notes append-only (figées après save) ---
+    function openNoteForm(dealId) {
+      const form = document.getElementById('noteForm');
+      if (!form) return;
+      form.classList.add('open');
+      const txt = document.getElementById('noteText');
+      txt.value = '';
+      txt.style.borderColor = '';
+      document.getElementById('noteDate').value = new Date().toISOString().slice(0, 10);
+      setTimeout(() => txt.focus(), 30);
+    }
+    function closeNoteForm() {
+      const form = document.getElementById('noteForm');
+      if (form) form.classList.remove('open');
+    }
+    async function submitNote(dealId) {
+      const date = document.getElementById('noteDate').value;
+      const text = (document.getElementById('noteText').value || '').trim();
+      if (!text) {
+        const t = document.getElementById('noteText');
+        t.focus();
+        t.style.borderColor = 'var(--danger)';
+        return;
+      }
+      const btn = document.getElementById('noteSubmitBtn');
+      btn.disabled = true;
+      btn.textContent = '…';
+      try {
+        const at = date ? new Date(date + 'T12:00:00').toISOString() : undefined;
+        const res = await fetch(`/api/deals/${dealId}/note`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, at }),
+        });
+        if (!res.ok) throw new Error((await res.json()).error || 'Erreur');
+        const data = await res.json();
+        dealMetadata[dealId] = { ...(dealMetadata[dealId] || {}), notes: data.notes };
+        const wrap = document.getElementById('notesLogWrap');
+        if (wrap) wrap.innerHTML = _renderNotesLog(data.notes);
+        closeNoteForm();
+        btn.disabled = false;
+        btn.textContent = 'Enregistrer & figer';
+        // Re-render kanban pour mettre à jour le flag critique si concerné
+        renderKanban();
+        if (typeof recordAction === 'function') {
+          recordAction('note_added');
+        }
+      } catch (e) {
+        btn.textContent = 'Erreur';
+        setTimeout(() => { btn.disabled = false; btn.textContent = 'Enregistrer & figer'; }, 1500);
+      }
+    }
+
+    function openRelanceHistory(dealId) {
+      const meta = dealMetadata[dealId] || {};
+      const arr = Array.isArray(meta.relances) ? [...meta.relances].sort((a,b) => new Date(b.at) - new Date(a.at)) : [];
+      if (!arr.length) return;
+      const rows = arr.map(r => {
+        const icon = r.type === 'email' ? '📧' : '📞';
+        const cls = r.type === 'email' ? 'email' : 'phone';
+        return `<div class="relance-last ${cls}" style="margin-bottom:0.4rem">
+          <div class="relance-last-header">
+            <span>${icon} ${r.type === 'email' ? 'Email' : 'Tél'}</span>
+            <span style="font-weight:500;color:var(--text-secondary);font-size:0.72rem">${formatShortDate(r.at)}</span>
+          </div>
+          <div class="relance-last-note">${(r.note || '').replace(/</g,'&lt;')}</div>
+        </div>`;
+      }).join('');
+      const wrap = document.getElementById('relanceLastWrap');
+      if (wrap) wrap.innerHTML = rows;
     }
 
     async function saveSidebarChanges(dealId) {

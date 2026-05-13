@@ -352,7 +352,7 @@ async function fetchOpenDeals() {
           ],
         },
       ],
-      properties: ['dealname', 'amount', 'dealstage', 'closedate', 'createdate', 'hs_date_entered_qualifiedtobuy', 'hs_date_entered_presentationscheduled', 'hs_date_entered_decisionmakerboughtin', 'hs_date_entered_contractsent'],
+      properties: ['dealname', 'amount', 'dealstage', 'closedate', 'createdate', 'description', 'hs_date_entered_qualifiedtobuy', 'hs_date_entered_presentationscheduled', 'hs_date_entered_decisionmakerboughtin', 'hs_date_entered_contractsent'],
       limit: 100,
     };
     if (after) body.after = after;
@@ -387,6 +387,7 @@ async function fetchOpenDeals() {
       createdate: deal.properties.createdate || null,
       closedate: deal.properties.closedate || null,
       stageEnteredAt: deal.properties[stageEnteredKey] || null,
+      description: deal.properties.description || '',
     });
   }
 
@@ -589,6 +590,62 @@ app.put('/api/deals/:id/metadata', async (req, res) => {
       .upsert(update, { onConflict: 'deal_id' });
     if (error) return res.status(500).json({ error: error.message });
     res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Append d'une note append-only (figée après save)
+app.post('/api/deals/:id/note', async (req, res) => {
+  const { id } = req.params;
+  const { text, at } = req.body || {};
+  const textClean = (text || '').trim();
+  if (!textClean) return res.status(400).json({ error: 'texte obligatoire' });
+  const entry = {
+    at: at && !isNaN(new Date(at).getTime()) ? new Date(at).toISOString() : new Date().toISOString(),
+    text: textClean,
+  };
+  try {
+    const { data: existing, error: selErr } = await supabaseAdmin
+      .from('deal_metadata').select('notes').eq('deal_id', id).maybeSingle();
+    if (selErr) return res.status(500).json({ error: selErr.message });
+    const notes = Array.isArray(existing?.notes) ? existing.notes : [];
+    notes.push(entry);
+    const { error: upErr } = await supabaseAdmin
+      .from('deal_metadata')
+      .upsert({ deal_id: id, notes, updated_at: new Date().toISOString() }, { onConflict: 'deal_id' });
+    if (upErr) return res.status(500).json({ error: upErr.message });
+    res.json({ ok: true, note: entry, notes });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Append d'une relance (email ou tél) avec note obligatoire
+app.post('/api/deals/:id/relance', async (req, res) => {
+  const { id } = req.params;
+  const { type, note, at } = req.body || {};
+  if (type !== 'email' && type !== 'phone') {
+    return res.status(400).json({ error: 'type doit être "email" ou "phone"' });
+  }
+  const noteClean = (note || '').trim();
+  if (!noteClean) return res.status(400).json({ error: 'note obligatoire' });
+  const entry = {
+    type,
+    at: at && !isNaN(new Date(at).getTime()) ? new Date(at).toISOString() : new Date().toISOString(),
+    note: noteClean,
+  };
+  try {
+    const { data: existing, error: selErr } = await supabaseAdmin
+      .from('deal_metadata').select('relances').eq('deal_id', id).maybeSingle();
+    if (selErr) return res.status(500).json({ error: selErr.message });
+    const relances = Array.isArray(existing?.relances) ? existing.relances : [];
+    relances.push(entry);
+    const { error: upErr } = await supabaseAdmin
+      .from('deal_metadata')
+      .upsert({ deal_id: id, relances, updated_at: new Date().toISOString() }, { onConflict: 'deal_id' });
+    if (upErr) return res.status(500).json({ error: upErr.message });
+    res.json({ ok: true, relance: entry, relances });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
