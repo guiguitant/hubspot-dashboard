@@ -555,6 +555,50 @@ app.get('/api/deals/metadata', async (req, res) => {
   }
 });
 
+// --- External read-only endpoint: open deals joined with Supabase metadata ---
+// Pour consommation par une appli sœur. Protégé par EXTERNAL_API_TOKEN (Bearer).
+app.get('/api/deals/full', async (req, res) => {
+  const expected = process.env.EXTERNAL_API_TOKEN;
+  if (!expected) return res.status(503).json({ error: 'EXTERNAL_API_TOKEN non configuré côté serveur' });
+  const auth = req.headers.authorization || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+  if (token !== expected) return res.status(401).json({ error: 'Unauthorized' });
+
+  try {
+    const [pipelineDeals, metaResult] = await Promise.all([
+      fetchOpenDeals(),
+      supabaseAdmin.from('deal_metadata').select('*'),
+    ]);
+    if (metaResult.error) return res.status(500).json({ error: metaResult.error.message });
+
+    const metaByDeal = {};
+    for (const row of metaResult.data || []) metaByDeal[row.deal_id] = row;
+
+    const deals = [];
+    for (const [stageLabel, list] of Object.entries(pipelineDeals)) {
+      const stageInfo = KANBAN_STAGES.find(s => s.label === stageLabel);
+      for (const d of list) {
+        deals.push({
+          id: d.id,
+          name: d.name,
+          amount: d.amount,
+          stage: stageLabel,
+          stageId: stageInfo ? stageInfo.id : null,
+          probability: d.probability,
+          createdate: d.createdate,
+          closedate: d.closedate,
+          stageEnteredAt: d.stageEnteredAt,
+          description: d.description,
+          metadata: metaByDeal[d.id] || null,
+        });
+      }
+    }
+    res.json({ count: deals.length, fetched_at: new Date().toISOString(), deals });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/deals/:id', async (req, res) => {
   const { id } = req.params;
   try {
