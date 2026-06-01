@@ -624,10 +624,20 @@ app.get('/api/deals/:id', async (req, res) => {
 
 app.put('/api/deals/:id/metadata', async (req, res) => {
   const { id } = req.params;
-  const { tags, proposal_sent_at, next_meeting_at } = req.body;
+  const { tags, proposal_sent_at, next_meeting_at, assignee } = req.body;
   const update = { deal_id: id, updated_at: new Date().toISOString() };
   if (tags !== undefined) update.tags = tags;
   if (proposal_sent_at !== undefined) update.proposal_sent_at = proposal_sent_at;
+  if (assignee !== undefined) {
+    const ALLOWED_ASSIGNEES = ['Guillaume', 'Vincent', 'Nathan'];
+    if (assignee === null || assignee === '') {
+      update.assignee = null;
+    } else if (ALLOWED_ASSIGNEES.includes(assignee)) {
+      update.assignee = assignee;
+    } else {
+      return res.status(400).json({ error: 'assignee invalide' });
+    }
+  }
   if (next_meeting_at !== undefined) {
     // null/'' → on efface ; sinon on tente de parser en ISO
     if (next_meeting_at === null || next_meeting_at === '') {
@@ -700,6 +710,136 @@ app.post('/api/deals/:id/relance', async (req, res) => {
       .upsert({ deal_id: id, relances, updated_at: new Date().toISOString() }, { onConflict: 'deal_id' });
     if (upErr) return res.status(500).json({ error: upErr.message });
     res.json({ ok: true, relance: entry, relances });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// --- Tâches par deal (file de tâches : ajout / maj / suppression) ---
+// Réutilise le système existant : compléter une tâche logge une relance/note ou
+// écrit next_meeting_at, ce qui remet à zéro le compteur "critique". Pas de
+// nouvelle règle de criticité — les tâches ne pèsent pas sur le flag critique.
+const TASK_TYPES = ['call', 'email', 'proposal', 'meeting', 'contract', 'custom'];
+const TASK_DONE_TEXT = {
+  call: 'Appel effectué', email: 'Email envoyé', proposal: 'Propale envoyée',
+  meeting: 'RDV planifié', contract: 'Contrat envoyé', custom: 'Tâche effectuée',
+};
+
+app.post('/api/deals/:id/task', async (req, res) => {
+  const { id } = req.params;
+  const { type, label, due_at } = req.body || {};
+  if (!TASK_TYPES.includes(type)) {
+    return res.status(400).json({ error: 'type de tâche invalide' });
+  }
+  let dueIso = null;
+  if (due_at) {
+    const d = new Date(due_at);
+    if (isNaN(d.getTime())) return res.status(400).json({ error: 'due_at invalide' });
+    dueIso = d.toISOString();
+  }
+  const task = {
+    id: `${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`,
+    type,
+    label: (label || '').trim(),
+    due_at: dueIso,
+    status: 'todo',
+    created_at: new Date().toISOString(),
+    done_at: null,
+  };
+  try {
+    const { data: existing, error: selErr } = await supabaseAdmin
+      .from('deal_metadata').select('tasks').eq('deal_id', id).maybeSingle();
+    if (selErr) return res.status(500).json({ error: selErr.message });
+    const tasks = Array.isArray(existing?.tasks) ? existing.tasks : [];
+    tasks.push(task);
+    const { error: upErr } = await supabaseAdmin
+      .from('deal_metadata')
+      .upsert({ deal_id: id, tasks, updated_at: new Date().toISOString() }, { onConflict: 'deal_id' });
+    if (upErr) return res.status(500).json({ error: upErr.message });
+    res.json({ ok: true, task, tasks });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.patch('/api/deals/:id/task/:taskId', async (req, res) => {
+  const { id, taskId } = req.params;
+  const { label, due_at, status } = req.body || {};
+  try {
+    const { data: existing, error: selErr } = await supabaseAdmin
+      .from('deal_metadata')
+      .select('tasks, relances, notes, next_meeting_at')
+      .eq('deal_id', id).maybeSingle();
+    if (selErr) return res.status(500).json({ error: selErr.message });
+    const tasks = Array.isArray(existing?.tasks) ? existing.tasks : [];
+    const idx = tasks.findIndex(t => t && t.id === taskId);
+    if (idx === -1) return res.status(404).json({ error: 'tâche introuvable' });
+    const task = tasks[idx];
+
+    if (label !== undefined) task.label = (label || '').trim();
+    if (due_at !== undefined) {
+      if (due_at === null || due_at === '') {
+        task.due_at = null;
+      } else {
+        const d = new Date(due_at);
+        if (isNaN(d.getTime())) return res.status(400).json({ error: 'due_at invalide' });
+        task.due_at = d.toISOString();
+      }
+    }
+
+    const update = { deal_id: id, updated_at: new Date().toISOString() };
+
+    if (status !== undefined && status !== task.status) {
+      task.status = status === 'done' ? 'done' : 'todo';
+      task.done_at = task.status === 'done' ? new Date().toISOString() : null;
+
+      // Réutilisation du système existant à la complétion d'une tâche
+      if (task.status === 'done') {
+        const nowIso = new Date().toISOString();
+        const text = task.label || TASK_DONE_TEXT[task.type] || 'Tâche effectuée';
+        if (task.type === 'call' || task.type === 'email') {
+          const relances = Array.isArray(existing?.relances) ? existing.relances : [];
+          relances.push({ type: task.type === 'call' ? 'phone' : 'email', at: nowIso, note: text });
+          update.relances = relances;
+        } else if (task.type === 'meeting' && task.due_at && new Date(task.due_at).getTime() > Date.now()) {
+          update.next_meeting_at = task.due_at;
+        } else {
+          const notes = Array.isArray(existing?.notes) ? existing.notes : [];
+          notes.push({ at: nowIso, text: `✅ ${text}` });
+          update.notes = notes;
+        }
+      }
+    }
+
+    update.tasks = tasks;
+    const { error: upErr } = await supabaseAdmin
+      .from('deal_metadata')
+      .upsert(update, { onConflict: 'deal_id' });
+    if (upErr) return res.status(500).json({ error: upErr.message });
+    res.json({
+      ok: true,
+      tasks,
+      relances: update.relances,
+      notes: update.notes,
+      next_meeting_at: update.next_meeting_at,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/deals/:id/task/:taskId', async (req, res) => {
+  const { id, taskId } = req.params;
+  try {
+    const { data: existing, error: selErr } = await supabaseAdmin
+      .from('deal_metadata').select('tasks').eq('deal_id', id).maybeSingle();
+    if (selErr) return res.status(500).json({ error: selErr.message });
+    const tasks = (Array.isArray(existing?.tasks) ? existing.tasks : []).filter(t => t && t.id !== taskId);
+    const { error: upErr } = await supabaseAdmin
+      .from('deal_metadata')
+      .upsert({ deal_id: id, tasks, updated_at: new Date().toISOString() }, { onConflict: 'deal_id' });
+    if (upErr) return res.status(500).json({ error: upErr.message });
+    res.json({ ok: true, tasks });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

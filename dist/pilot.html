@@ -9,7 +9,6 @@
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
@@ -946,6 +945,52 @@
       max-height: 85vh;
     }
 
+    /* Filtres par stage */
+    .pa-filter-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      padding: 0.7rem 1.5rem 0.4rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .pa-filter-row:empty { display: none; }
+    .pa-filter-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      font-size: 0.74rem;
+      font-weight: 600;
+      padding: 0.28rem 0.65rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.12s;
+    }
+    .pa-filter-chip:hover { border-color: var(--primary); color: var(--primary); }
+    .pa-filter-chip.active {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+    }
+    .pa-filter-chip-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      padding: 0 0.3rem;
+      font-size: 0.66rem;
+      font-weight: 700;
+      border-radius: 9px;
+      background: rgba(0,0,0,0.08);
+    }
+    .pa-filter-chip.active .pa-filter-chip-count {
+      background: rgba(255,255,255,0.25);
+      color: white;
+    }
+    .pa-deal-row.filtered-out { display: none !important; }
+
     /* --- Modale "deals critiques" : ligne avec actions rapides --- */
     .pa-deal-row.has-actions {
       display: grid;
@@ -988,6 +1033,19 @@
     .pa-critical-action-btn.phone { border-color: rgba(217,115,13,0.4); color: #d9730d; }
     .pa-critical-action-btn.rdv   { border-color: rgba(34,197,94,0.5); color: #166534; background: rgba(34,197,94,0.06); }
     .pa-critical-action-btn.rdv:hover { background: rgba(34,197,94,0.12); }
+    .pa-critical-action-btn.task  { border-color: rgba(105,64,165,0.4); color: #6940a5; }
+    .pa-critical-action-btn.task:hover { background: rgba(105,64,165,0.08); }
+    .pa-critical-form-row select {
+      flex: 1;
+      font-size: 0.78rem;
+      padding: 0.3rem 0.45rem;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      outline: none;
+      color: var(--text);
+      background: var(--bg);
+      font-family: inherit;
+    }
     .pa-critical-action-btn.active { background: var(--primary-bg); border-color: var(--primary); color: var(--primary); }
 
     .pa-critical-form {
@@ -1083,6 +1141,48 @@
       font-size: 0.85rem;
       margin-top: 0.3rem;
     }
+
+    /* Encart "règles du critique" en tête de la modale */
+    .pa-critical-rules {
+      border: 1px solid rgba(239,68,68,0.25);
+      background: rgba(239,68,68,0.04);
+      border-radius: var(--radius);
+      padding: 0.7rem 0.85rem;
+      margin-bottom: 0.85rem;
+      font-size: 0.78rem;
+      line-height: 1.45;
+      color: var(--text-secondary);
+    }
+    .pa-critical-rules-title {
+      font-weight: 700;
+      color: var(--text-primary);
+      font-size: 0.82rem;
+      margin-bottom: 0.4rem;
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .pa-critical-rules ul {
+      margin: 0.25rem 0 0;
+      padding-left: 1.1rem;
+    }
+    .pa-critical-rules li { margin-bottom: 0.2rem; }
+    .pa-critical-rules .ok {
+      margin-top: 0.5rem;
+      padding-top: 0.5rem;
+      border-top: 1px solid rgba(239,68,68,0.15);
+      color: #166534;
+      font-weight: 600;
+    }
+    [data-theme="dark"] .pa-critical-rules .ok { color: #86efac; }
+    .pa-critical-rules code {
+      background: rgba(239,68,68,0.1);
+      color: #b91c1c;
+      padding: 0.05rem 0.3rem;
+      border-radius: 3px;
+      font-weight: 600;
+    }
+    [data-theme="dark"] .pa-critical-rules code { color: #fca5a5; }
 
     .new-deal-btn {
       display: flex;
@@ -1374,21 +1474,10 @@
 
     /* --- Deals CRITIQUES (sans relance > 15j OU sans notes) --- */
     .kanban-card-critical {
-      border: 2px solid #ef4444 !important;
-      background: linear-gradient(180deg, rgba(239,68,68,0.06), rgba(239,68,68,0.02)) !important;
-      box-shadow: 0 0 0 0 rgba(239,68,68,0.6);
-      animation: card-critical-pulse 1.8s ease-in-out infinite;
+      border: 1px solid rgba(239,68,68,0.45) !important;
+      border-left: 3px solid #ef4444 !important;
+      background: rgba(239,68,68,0.035) !important;
       position: relative;
-    }
-    @keyframes card-critical-pulse {
-      0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.55); }
-      50% { box-shadow: 0 0 0 6px rgba(239,68,68,0); }
-    }
-    .kanban-card-critical .kanban-card-name {
-      color: #b91c1c;
-    }
-    [data-theme="dark"] .kanban-card-critical .kanban-card-name {
-      color: #fca5a5;
     }
     .kanban-card-critical-badge {
       display: inline-flex;
@@ -1400,17 +1489,13 @@
       text-transform: uppercase;
       padding: 0.1rem 0.35rem;
       border-radius: 3px;
-      background: #ef4444;
-      color: white;
+      background: rgba(239,68,68,0.12);
+      color: #b91c1c;
+      border: 1px solid rgba(239,68,68,0.35);
       margin-left: 0.3rem;
       vertical-align: middle;
-      animation: badge-shake 1.4s ease-in-out infinite;
     }
-    @keyframes badge-shake {
-      0%, 100% { transform: rotate(0); }
-      25% { transform: rotate(-2deg); }
-      75% { transform: rotate(2deg); }
-    }
+    [data-theme="dark"] .kanban-card-critical-badge { color: #fca5a5; }
     .kanban-card-critical-reasons {
       font-size: 0.66rem;
       color: #b91c1c;
@@ -1437,25 +1522,20 @@
       align-items: center;
       gap: 0.5rem;
       padding: 0.45rem 0.85rem;
-      background: linear-gradient(90deg, #ef4444, #dc2626);
-      color: white;
+      background: rgba(239,68,68,0.1);
+      color: #b91c1c;
+      border: 1px solid rgba(239,68,68,0.3);
       font-size: 0.82rem;
-      font-weight: 700;
+      font-weight: 600;
       border-radius: var(--radius);
       cursor: pointer;
       margin-bottom: 0.6rem;
-      animation: counter-pulse 1.6s ease-in-out infinite;
-      box-shadow: 0 2px 12px rgba(239,68,68,0.35);
     }
+    [data-theme="dark"] .critical-counter { color: #fca5a5; }
     .critical-counter.active { display: inline-flex; }
-    .critical-counter:hover { filter: brightness(1.1); }
+    .critical-counter:hover { background: rgba(239,68,68,0.16); }
     .critical-counter-icon {
       font-size: 1.1rem;
-      animation: badge-shake 1.2s ease-in-out infinite;
-    }
-    @keyframes counter-pulse {
-      0%, 100% { box-shadow: 0 2px 12px rgba(239,68,68,0.35); }
-      50% { box-shadow: 0 2px 22px rgba(239,68,68,0.7); }
     }
 
     /* Variant "À relancer plus tard" — orange */
@@ -2740,6 +2820,294 @@
     }
     .relance-history-link:hover { color: var(--primary); }
 
+    /* --- File de tâches par deal --- */
+    .task-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+      padding: 0.4rem 0.5rem;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 0.35rem;
+    }
+    .task-item.soon { border-left-color: #d9730d; }
+    .task-item.overdue {
+      border-left-color: #ef4444;
+      background: rgba(239,68,68,0.04);
+    }
+    .task-item.done { opacity: 0.6; }
+    .task-check {
+      position: relative;
+      flex: 0 0 auto;
+      width: 20px;
+      height: 20px;
+      margin-top: 0.05rem;
+      padding: 0;
+      border: 2px solid var(--border);
+      border-radius: 50%;
+      background: var(--bg);
+      cursor: pointer;
+      font-size: 0;               /* masque le glyphe ○ / ✓ du HTML */
+      transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+    }
+    .task-check::after {          /* coche dessinée en CSS */
+      content: '';
+      position: absolute;
+      left: 50%;
+      top: 48%;
+      width: 5px;
+      height: 9px;
+      border: solid transparent;
+      border-width: 0 2px 2px 0;
+      transform: translate(-50%, -58%) rotate(45deg);
+      transition: border-color 0.15s ease;
+    }
+    .task-check:hover {
+      border-color: #16a34a;
+      background: rgba(22,163,74,0.1);
+    }
+    .task-check:hover::after { border-color: #16a34a; }   /* aperçu de la coche au survol */
+    .task-check:active { transform: scale(0.9); }
+    .task-check.done {
+      background: #16a34a;
+      border-color: #16a34a;
+      cursor: pointer;
+    }
+    .task-check.done::after { border-color: #fff; }
+    .task-check.done:hover { background: #15803d; border-color: #15803d; }
+    .task-reopen-link {
+      cursor: pointer;
+      text-decoration: underline;
+      color: var(--text-light);
+    }
+    .task-reopen-link:hover { color: var(--primary); }
+    .gt-reopen {
+      flex: 0 0 auto;
+      border: none;
+      background: transparent;
+      color: var(--text-light);
+      font-size: 0.85rem;
+      cursor: pointer;
+      padding: 0.1rem 0.3rem;
+      line-height: 1;
+    }
+    .gt-reopen:hover { color: var(--primary); }
+    .task-body { flex: 1; min-width: 0; }
+    .task-title {
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text);
+      line-height: 1.3;
+      word-break: break-word;
+    }
+    .task-due {
+      font-size: 0.7rem;
+      color: var(--text-secondary);
+      margin-top: 0.1rem;
+    }
+    .task-due.soon { color: #d9730d; font-weight: 600; }
+    .task-due.overdue { color: #b91c1c; font-weight: 700; }
+    .task-del {
+      flex: 0 0 auto;
+      border: none;
+      background: transparent;
+      color: var(--text-light);
+      font-size: 0.8rem;
+      cursor: pointer;
+      padding: 0.1rem 0.2rem;
+      line-height: 1;
+    }
+    .task-del:hover { color: #b91c1c; }
+    .tasks-done-list { display: none; margin-top: 0.35rem; }
+    .tasks-done-list.open { display: block; }
+
+    /* Modale globale "Toutes les tâches" */
+    /* Modale globale "Toutes les tâches" */
+    #tasksModalOverlay .modal { max-width: 640px; }
+    #tasksAssigneeFilter {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: #fff;
+      margin: -1rem -1.5rem 0.85rem;
+      padding: 0.85rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+    [data-theme="dark"] #tasksAssigneeFilter { background: var(--card); }
+
+    .gt-group-title {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+      margin: 1.1rem 0 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+    }
+    .gt-group-title::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+    .gt-group-title:first-child { margin-top: 0; }
+    .gt-group-title.overdue { color: #b91c1c; }
+    .gt-group-title.soon { color: #d9730d; }
+
+    .gt-row {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      padding: 0.6rem 0.7rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 0.4rem;
+      transition: box-shadow 0.15s, transform 0.15s, border-color 0.15s;
+    }
+    .gt-row:hover { box-shadow: 0 2px 10px rgba(0,0,0,0.06); transform: translateY(-1px); }
+    .gt-row.soon { border-left-color: #d9730d; }
+    .gt-row.overdue { border-left-color: #ef4444; background: rgba(239,68,68,0.035); }
+    .gt-row.done { opacity: 0.55; }
+    .gt-row.done:hover { opacity: 0.85; box-shadow: none; transform: none; }
+    .gt-body { flex: 1; min-width: 0; }
+    .gt-title {
+      font-size: 0.84rem;
+      font-weight: 600;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .gt-meta {
+      font-size: 0.72rem;
+      color: var(--text-secondary);
+      margin-top: 0.15rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .gt-due {
+      flex: 0 0 auto;
+      font-size: 0.68rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      white-space: nowrap;
+      padding: 0.18rem 0.5rem;
+      border-radius: 12px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+    }
+    .gt-due.soon { color: #d9730d; background: rgba(217,115,13,0.1); border-color: rgba(217,115,13,0.25); }
+    .gt-due.overdue { color: #b91c1c; background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.3); }
+
+    /* --- Assignation de deal --- */
+    .deal-assignee {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      color: #fff;
+      font-size: 0.66rem;
+      font-weight: 700;
+      cursor: pointer;
+      flex: 0 0 auto;
+      margin-left: auto;
+    }
+    .deal-assignee:hover { filter: brightness(1.1); }
+    .deal-assignee.unassigned {
+      background: var(--bg-secondary);
+      color: var(--text-light);
+      border: 1px dashed var(--border);
+      font-weight: 600;
+    }
+    .assignee-dot {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      color: #fff;
+      font-size: 0.6rem;
+      font-weight: 700;
+      flex: 0 0 auto;
+    }
+    .assignee-seg { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+    .assignee-seg-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      font-size: 0.74rem;
+      font-weight: 600;
+      padding: 0.25rem 0.55rem;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: var(--bg);
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .assignee-seg-btn:hover { border-color: var(--primary); }
+    .assignee-filter { display: inline-flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
+    .af-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      font-size: 0.74rem;
+      font-weight: 600;
+      padding: 0.2rem 0.5rem;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--bg);
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .af-btn:hover { border-color: var(--primary); }
+    .af-btn.active { background: var(--primary-bg); border-color: var(--primary); color: var(--primary); }
+    .task-quick-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+    .task-quick-chips button {
+      font-size: 0.68rem;
+      padding: 0.18rem 0.5rem;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--bg);
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .task-quick-chips button:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-bg); }
+    .relance-form-row select {
+      flex: 1;
+      font-size: 0.78rem;
+      padding: 0.3rem 0.45rem;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      outline: none;
+      color: var(--text);
+      background: var(--bg);
+      font-family: inherit;
+    }
+    .relance-form-row input[type="datetime-local"] {
+      flex: 1;
+      font-size: 0.78rem;
+      padding: 0.3rem 0.45rem;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      outline: none;
+      color: var(--text);
+      background: var(--bg);
+      font-family: inherit;
+    }
+
     .deal-sidebar-stage-badge {
       display: inline-block;
       font-size: 0.75rem;
@@ -2749,6 +3117,46 @@
       background: var(--primary-bg);
       color: var(--primary);
     }
+
+    /* Sections repliables de la sidebar deal */
+    .sb-section {
+      border-top: 1px solid var(--border);
+      margin-top: 0.4rem;
+    }
+    .sb-section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+      padding: 0.6rem 0 0.5rem;
+    }
+    .sb-section-title {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .sb-section-count {
+      font-size: 0.68rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.05rem 0.4rem;
+    }
+    .sb-section-chevron {
+      color: var(--text-light);
+      font-size: 0.8rem;
+      transition: transform 0.15s;
+    }
+    .sb-section.open .sb-section-chevron { transform: rotate(90deg); }
+    .sb-section-body { display: none; padding-bottom: 0.3rem; }
+    .sb-section.open .sb-section-body { display: block; }
+    .sb-section-body .deal-sidebar-field:first-child { margin-top: 0; }
 
     /* Forecast checkbox on card */
     .kanban-card-forecast-cb {
@@ -2787,336 +3195,7 @@
       font-size: 0.85rem;
     }
 
-    /* ============================================================
-       🎮 GAMIFICATION
-       ============================================================ */
-
-    /* Bandeau gamification (XP / niveau / streak / objectif) */
-    .gami-bar {
-      display: grid;
-      grid-template-columns: 1.4fr 0.8fr 2fr;
-      gap: 0.75rem;
-      margin-bottom: 1rem;
-    }
-    @media (max-width: 900px) {
-      .gami-bar { grid-template-columns: 1fr; }
-    }
-
-    .gami-card {
-      background: linear-gradient(135deg, var(--card) 0%, var(--bg-secondary) 100%);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 0.75rem 1rem;
-      position: relative;
-      overflow: hidden;
-    }
-    .gami-card::before {
-      content: '';
-      position: absolute;
-      top: 0; left: 0; right: 0; height: 3px;
-      background: linear-gradient(90deg, var(--primary), var(--success));
-    }
-
-    .gami-level-card::before {
-      background: linear-gradient(90deg, #6940a5, #e03e3e, #d9730d);
-    }
-    .gami-streak-card::before {
-      background: linear-gradient(90deg, #ff8c42, #ff3d3d);
-    }
-    .gami-goal-card::before {
-      background: linear-gradient(90deg, #0f7b6c, #34d399);
-    }
-
-    .gami-label {
-      font-size: 0.65rem;
-      font-weight: 600;
-      color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      margin-bottom: 0.4rem;
-    }
-    .gami-row {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      margin-bottom: 0.4rem;
-    }
-    .gami-title {
-      font-size: 1rem;
-      font-weight: 700;
-      color: var(--text);
-    }
-    .gami-sub {
-      font-size: 0.7rem;
-      color: var(--text-light);
-    }
-    .gami-emoji { font-size: 1.4rem; line-height: 1; }
-    .gami-big {
-      font-size: 1.6rem;
-      font-weight: 800;
-      color: var(--text);
-      line-height: 1.1;
-    }
-
-    /* Barre XP */
-    .xp-bar {
-      height: 10px;
-      background: var(--border);
-      border-radius: 6px;
-      overflow: hidden;
-      position: relative;
-    }
-    .xp-bar-fill {
-      height: 100%;
-      background: linear-gradient(90deg, #6940a5, #e03e3e, #d9730d);
-      border-radius: 6px;
-      transition: width 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
-      box-shadow: 0 0 8px rgba(217,115,13,0.5);
-    }
-
-    /* Streak — flamme */
-    .streak-flame {
-      display: inline-block;
-      animation: streak-flicker 1.6s ease-in-out infinite;
-    }
-    @keyframes streak-flicker {
-      0%, 100% { transform: scale(1) rotate(-2deg); }
-      50% { transform: scale(1.08) rotate(3deg); }
-    }
-    .streak-cold { filter: grayscale(1); opacity: 0.4; animation: none; }
-
-    /* Jauge objectif */
-    .goal-bar-wrap {
-      position: relative;
-      height: 22px;
-      background: var(--border);
-      border-radius: 12px;
-      overflow: hidden;
-      margin-top: 0.3rem;
-    }
-    .goal-bar-fill {
-      height: 100%;
-      background: linear-gradient(90deg, #0f7b6c 0%, #34d399 70%, #ffd166 100%);
-      border-radius: 12px;
-      transition: width 0.8s cubic-bezier(0.34, 1.56, 0.64, 1);
-      position: relative;
-      box-shadow: 0 0 12px rgba(52,211,153,0.4);
-    }
-    .goal-bar-fill::after {
-      content: '';
-      position: absolute;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: repeating-linear-gradient(45deg,
-        rgba(255,255,255,0.15) 0px, rgba(255,255,255,0.15) 8px,
-        transparent 8px, transparent 16px);
-      animation: goal-stripes 1.4s linear infinite;
-      border-radius: 12px;
-    }
-    @keyframes goal-stripes {
-      from { background-position: 0 0; }
-      to { background-position: 32px 0; }
-    }
-    .goal-milestones {
-      position: absolute;
-      top: 0; left: 0; right: 0; bottom: 0;
-      pointer-events: none;
-    }
-    .goal-milestone {
-      position: absolute;
-      top: 0; bottom: 0;
-      width: 2px;
-      background: rgba(255,255,255,0.7);
-    }
-    .goal-milestone.hit { background: rgba(255,255,255,0); }
-    .goal-bar-label {
-      position: absolute;
-      top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      font-size: 0.7rem;
-      font-weight: 700;
-      color: white;
-      text-shadow: 0 1px 2px rgba(0,0,0,0.4);
-      letter-spacing: 0.02em;
-      white-space: nowrap;
-    }
-
-    /* Modal célébration plein écran */
-    .celebration-overlay {
-      display: none;
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: radial-gradient(circle at center, rgba(0,61,46,0.85), rgba(0,0,0,0.9));
-      z-index: 99999;
-      justify-content: center;
-      align-items: center;
-      backdrop-filter: blur(4px);
-    }
-    .celebration-overlay.active {
-      display: flex;
-      animation: celebration-fade-in 0.3s ease-out;
-    }
-    @keyframes celebration-fade-in {
-      from { opacity: 0; }
-      to { opacity: 1; }
-    }
-    .celebration-card {
-      text-align: center;
-      color: white;
-      padding: 2.5rem 4rem;
-      max-width: 90vw;
-      animation: celebration-pop 0.7s cubic-bezier(0.34, 1.56, 0.64, 1);
-    }
-    @keyframes celebration-pop {
-      0% { transform: scale(0.4) rotate(-12deg); opacity: 0; }
-      60% { transform: scale(1.12) rotate(2deg); opacity: 1; }
-      100% { transform: scale(1) rotate(0); opacity: 1; }
-    }
-    .celebration-emoji {
-      font-size: 5rem;
-      margin-bottom: 1rem;
-      animation: celebration-bounce 0.9s ease infinite alternate;
-    }
-    @keyframes celebration-bounce {
-      from { transform: translateY(0) scale(1); }
-      to { transform: translateY(-12px) scale(1.05); }
-    }
-    .celebration-title {
-      font-size: 3rem;
-      font-weight: 900;
-      letter-spacing: 0.05em;
-      margin-bottom: 0.5rem;
-      background: linear-gradient(90deg, #ffd166, #f9c74f, #ff8c42);
-      -webkit-background-clip: text;
-      background-clip: text;
-      -webkit-text-fill-color: transparent;
-      text-transform: uppercase;
-    }
-    .celebration-deal {
-      font-size: 1.4rem;
-      font-weight: 600;
-      margin-bottom: 0.4rem;
-      color: white;
-    }
-    .celebration-amount {
-      font-size: 2.6rem;
-      font-weight: 800;
-      color: #34d399;
-      margin-bottom: 1.2rem;
-    }
-    .celebration-xp {
-      display: inline-block;
-      padding: 0.5rem 1.2rem;
-      border-radius: 999px;
-      background: rgba(255,209,102,0.18);
-      border: 1.5px solid #ffd166;
-      color: #ffd166;
-      font-weight: 700;
-      font-size: 1rem;
-      margin-bottom: 1.2rem;
-    }
-    .celebration-close {
-      display: block;
-      margin: 1rem auto 0;
-      padding: 0.6rem 1.6rem;
-      background: rgba(255,255,255,0.12);
-      border: 1.5px solid rgba(255,255,255,0.4);
-      color: white;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 0.85rem;
-      font-weight: 600;
-      transition: all 0.15s;
-    }
-    .celebration-close:hover {
-      background: rgba(255,255,255,0.22);
-      transform: translateY(-1px);
-    }
-
-    /* Toasts d'achievement */
-    .achievement-stack {
-      position: fixed;
-      bottom: 1.5rem;
-      right: 1.5rem;
-      display: flex;
-      flex-direction: column-reverse;
-      gap: 0.5rem;
-      z-index: 9998;
-      pointer-events: none;
-    }
-    .achievement-toast {
-      pointer-events: auto;
-      background: linear-gradient(135deg, var(--card) 0%, var(--bg-secondary) 100%);
-      border: 1px solid var(--border);
-      border-left: 4px solid #ffd166;
-      border-radius: 6px;
-      padding: 0.6rem 0.9rem;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.18);
-      display: flex;
-      align-items: center;
-      gap: 0.6rem;
-      min-width: 240px;
-      max-width: 360px;
-      animation: toast-slide-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), toast-fade-out 0.4s ease-in 4.6s forwards;
-    }
-    .achievement-toast.xp { border-left-color: #d9730d; }
-    .achievement-toast.level { border-left-color: #6940a5; }
-    .achievement-toast.streak { border-left-color: #e03e3e; }
-    .achievement-toast.milestone { border-left-color: #34d399; }
-    @keyframes toast-slide-in {
-      from { transform: translateX(120%); opacity: 0; }
-      to { transform: translateX(0); opacity: 1; }
-    }
-    @keyframes toast-fade-out {
-      to { transform: translateX(120%); opacity: 0; }
-    }
-    .achievement-toast .at-icon { font-size: 1.4rem; line-height: 1; }
-    .achievement-toast .at-body { flex: 1; }
-    .achievement-toast .at-title { font-size: 0.78rem; font-weight: 700; color: var(--text); }
-    .achievement-toast .at-sub { font-size: 0.7rem; color: var(--text-secondary); }
-
-    /* Toggle "Gamifier" */
-    .gami-toggle {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.4rem;
-      cursor: pointer;
-      user-select: none;
-      padding: 0.25rem 0.55rem;
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      font-size: 0.78rem;
-      color: var(--text-secondary);
-      background: var(--bg);
-      transition: all 0.15s;
-    }
-    .gami-toggle:hover { border-color: var(--primary); }
-    .gami-toggle input { accent-color: var(--primary); cursor: pointer; }
-    .gami-toggle.active {
-      color: var(--text);
-      background: linear-gradient(90deg, rgba(105,64,165,0.1), rgba(217,115,13,0.1));
-      border-color: rgba(217,115,13,0.4);
-      font-weight: 600;
-    }
-
-    /* Toggle son */
-    .sound-toggle {
-      position: fixed;
-      bottom: 1rem;
-      left: 1rem;
-      width: 36px; height: 36px;
-      border-radius: 50%;
-      background: var(--card);
-      border: 1px solid var(--border);
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1rem;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-      z-index: 9000;
-      transition: all 0.15s;
-    }
-    .sound-toggle:hover { transform: scale(1.08); }
+    /* (Styles gamification supprimés) */
 
   </style>
 </head>
@@ -3358,55 +3437,21 @@
         <div style="display:flex;align-items:center;gap:0.75rem">
           <div class="section-title" style="margin-bottom:0">Pipeline &mdash; Deals en cours</div>
           <button class="new-deal-btn" onclick="openNewDealModal()">&#43; Nouveau deal</button>
+          <button class="new-deal-btn" onclick="openTasksModal()" style="background:var(--bg);color:var(--text);border:1px solid var(--border)" title="Voir toutes les tâches, classées par échéance">&#128203; Toutes les tâches</button>
         </div>
-        <div style="display:flex;align-items:center;gap:1rem;font-size:0.8rem;color:var(--text-secondary)">
-          <label class="gami-toggle" title="Activer XP, streak, célébrations">
-            <input type="checkbox" id="gamiToggle" onchange="setGamiEnabled(this.checked)">
-            <span>🎮 Gamifier</span>
-          </label>
+        <div style="display:flex;align-items:center;gap:1rem;font-size:0.8rem;color:var(--text-secondary);flex-wrap:wrap">
+          <div class="assignee-filter" id="assigneeFilter">
+            <button class="af-btn active" data-af="" onclick="setKanbanAssigneeFilter('')">Tous</button>
+            <button class="af-btn" data-af="Guillaume" onclick="setKanbanAssigneeFilter('Guillaume')" title="Deals de Guillaume"><span class="assignee-dot" style="background:#6940a5">G</span></button>
+            <button class="af-btn" data-af="Vincent" onclick="setKanbanAssigneeFilter('Vincent')" title="Deals de Vincent"><span class="assignee-dot" style="background:#0f7b6c">V</span></button>
+            <button class="af-btn" data-af="Nathan" onclick="setKanbanAssigneeFilter('Nathan')" title="Deals de Nathan"><span class="assignee-dot" style="background:#d9730d">N</span></button>
+            <button class="af-btn" data-af="__none__" onclick="setKanbanAssigneeFilter('__none__')">Non assigné</button>
+          </div>
           <div style="display:flex;align-items:center;gap:0.5rem">
             <span>Activité du</span>
             <input type="date" id="pipelineFrom" oninput="renderKanban()" style="font-size:0.78rem;padding:0.2rem 0.4rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text)">
             <span>au</span>
             <input type="date" id="pipelineTo" oninput="renderKanban()" style="font-size:0.78rem;padding:0.2rem 0.4rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text)">
-          </div>
-        </div>
-      </div>
-
-      <!-- 🎮 Bandeau Gamification (visible uniquement si Gamifier activé) -->
-      <div class="gami-bar" id="gamiBar" style="display:none">
-        <div class="gami-card gami-level-card">
-          <div class="gami-label">Niveau</div>
-          <div class="gami-row">
-            <div>
-              <span class="gami-emoji" id="gamiLevelEmoji">🥋</span>
-              <span class="gami-title" id="gamiLevelName">Padawan closer</span>
-            </div>
-            <span class="gami-sub" id="gamiLevelXp">0 XP</span>
-          </div>
-          <div class="xp-bar"><div class="xp-bar-fill" id="gamiXpFill" style="width:0%"></div></div>
-          <div class="gami-sub" id="gamiNextLevel" style="margin-top:0.3rem">—</div>
-        </div>
-
-        <div class="gami-card gami-streak-card">
-          <div class="gami-label">Streak</div>
-          <div class="gami-row">
-            <div class="gami-big"><span class="streak-flame" id="gamiStreakFlame">🔥</span> <span id="gamiStreakDays">0</span><span style="font-size:0.9rem;color:var(--text-secondary)">j</span></div>
-            <span class="gami-sub" id="gamiStreakBest">Best : 0j</span>
-          </div>
-          <div class="gami-sub" id="gamiStreakHint">Fais une action commerciale pour démarrer</div>
-        </div>
-
-        <div class="gami-card gami-goal-card">
-          <div class="gami-label">Objectif du mois</div>
-          <div class="gami-row">
-            <div class="gami-title" id="gamiGoalTitle">—</div>
-            <span class="gami-sub" id="gamiGoalRemaining"></span>
-          </div>
-          <div class="goal-bar-wrap">
-            <div class="goal-bar-fill" id="gamiGoalFill" style="width:0%"></div>
-            <div class="goal-milestones" id="gamiGoalMilestones"></div>
-            <div class="goal-bar-label" id="gamiGoalLabel">0%</div>
           </div>
         </div>
       </div>
@@ -4636,7 +4681,22 @@
         </div>
         <button onclick="document.getElementById('paModalOverlay').classList.remove('active')" style="background:none;border:none;cursor:pointer;font-size:1.1rem;color:var(--text-secondary);padding:0.2rem">&#10005;</button>
       </div>
+      <div class="pa-filter-row" id="paFilterRow"></div>
       <div class="modal-body" id="paModalBody"></div>
+    </div>
+  </div>
+
+  <!-- Modal : toutes les tâches (chronologique) -->
+  <div class="modal-overlay" id="tasksModalOverlay">
+    <div class="modal">
+      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <h2>📋 Toutes les tâches</h2>
+          <div id="tasksModalSubtitle" style="font-size:0.75rem;color:var(--text-secondary);margin-top:0.1rem"></div>
+        </div>
+        <button onclick="document.getElementById('tasksModalOverlay').classList.remove('active')" style="background:none;border:none;cursor:pointer;font-size:1.1rem;color:var(--text-secondary);padding:0.2rem">&#10005;</button>
+      </div>
+      <div class="modal-body" id="tasksModalBody"></div>
     </div>
   </div>
 
@@ -5250,462 +5310,9 @@
     </div>
   </div>
 
-  <!-- 🎉 Modal célébration -->
-  <div class="celebration-overlay" id="celebrationOverlay" onclick="closeCelebration()">
-    <div class="celebration-card" onclick="event.stopPropagation()">
-      <div class="celebration-emoji" id="celebrationEmoji">🎉</div>
-      <div class="celebration-title" id="celebrationTitle">Deal Closed</div>
-      <div class="celebration-deal" id="celebrationDeal"></div>
-      <div class="celebration-amount" id="celebrationAmount"></div>
-      <div class="celebration-xp" id="celebrationXp"></div>
-      <div id="celebrationLevelUp" style="display:none;font-size:1rem;color:#ffd166;font-weight:600;margin-bottom:0.4rem"></div>
-      <button class="celebration-close" onclick="closeCelebration()">Continuer à closer ↵</button>
-    </div>
-  </div>
-
-  <!-- 🏅 Toasts achievements -->
-  <div class="achievement-stack" id="achievementStack"></div>
-
-  <!-- 🔊 Toggle son -->
-  <button class="sound-toggle" id="soundToggle" onclick="toggleSound()" title="Activer / désactiver les sons">🔊</button>
 
   <script>
-    // ============================================================
-    // 🎮 GAMIFICATION ENGINE
-    // ============================================================
-    const GAMI_KEY = 'gami_state_v1';
-    const GAMI_LEVELS = [
-      { min: 0,     name: 'Padawan closer',  emoji: '🥋' },
-      { min: 500,   name: 'Junior closer',   emoji: '🌱' },
-      { min: 1500,  name: 'Closer confirmé', emoji: '⚡' },
-      { min: 4000,  name: 'Senior closer',   emoji: '🎯' },
-      { min: 10000, name: 'Closer machine',  emoji: '🚀' },
-      { min: 25000, name: 'Closer légende',  emoji: '👑' },
-      { min: 60000, name: 'Closer immortel', emoji: '🔥' },
-    ];
-    const XP_REWARDS = {
-      deal_won_base: 500,
-      deal_won_per_100: 1,
-      deal_lost: 20,
-      proposal_sent: 50,
-      stage_advance: 25,
-      deal_created: 10,
-      relance: 30,
-      note_added: 15,
-    };
-
-    function gamiState() {
-      try {
-        const raw = localStorage.getItem(GAMI_KEY);
-        if (raw) return JSON.parse(raw);
-      } catch {}
-      return {
-        xp: 0,
-        streak: 0,
-        bestStreak: 0,
-        lastActionDate: null,
-        achievements: {},
-        soundOn: true,
-      };
-    }
-
-    // Toggle "Gamifier" : OFF par défaut, persistant dans localStorage
-    const GAMI_ENABLED_KEY = 'gami_enabled_v1';
-    function gamiEnabled() {
-      try { return localStorage.getItem(GAMI_ENABLED_KEY) === '1'; } catch { return false; }
-    }
-    function setGamiEnabled(on) {
-      try { localStorage.setItem(GAMI_ENABLED_KEY, on ? '1' : '0'); } catch {}
-      applyGamiVisibility();
-      if (on) renderGamiBar();
-    }
-    function applyGamiVisibility() {
-      const on = gamiEnabled();
-      const bar = document.getElementById('gamiBar');
-      if (bar) bar.style.display = on ? '' : 'none';
-      const stack = document.getElementById('achievementStack');
-      if (stack) stack.style.display = on ? '' : 'none';
-      const sb = document.getElementById('soundToggle');
-      if (sb) sb.style.display = on ? '' : 'none';
-      const cb = document.getElementById('gamiToggle');
-      if (cb) {
-        cb.checked = on;
-        const lbl = cb.closest('.gami-toggle');
-        if (lbl) lbl.classList.toggle('active', on);
-      }
-    }
-    function gamiSave(s) {
-      try { localStorage.setItem(GAMI_KEY, JSON.stringify(s)); } catch {}
-    }
-    function gamiGetLevel(xp) {
-      let lvl = GAMI_LEVELS[0];
-      let nextLvl = null;
-      for (let i = 0; i < GAMI_LEVELS.length; i++) {
-        if (xp >= GAMI_LEVELS[i].min) {
-          lvl = GAMI_LEVELS[i];
-          nextLvl = GAMI_LEVELS[i + 1] || null;
-        }
-      }
-      return { current: lvl, next: nextLvl };
-    }
-    function dateKey(d = new Date()) {
-      return d.toISOString().slice(0, 10);
-    }
-    function daysBetween(a, b) {
-      const da = new Date(a + 'T00:00:00Z');
-      const db = new Date(b + 'T00:00:00Z');
-      return Math.round((db - da) / (1000 * 60 * 60 * 24));
-    }
-
-    // Audio (WebAudio, sans fichiers externes)
-    let _audioCtx = null;
-    function _ensureAudio() {
-      if (!_audioCtx) {
-        try { _audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch {}
-      }
-      return _audioCtx;
-    }
-    function playTone(freq, duration = 0.08, type = 'sine', vol = 0.08) {
-      const s = gamiState();
-      if (!s.soundOn) return;
-      const ctx = _ensureAudio();
-      if (!ctx) return;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = type;
-      osc.frequency.value = freq;
-      gain.gain.value = vol;
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      const now = ctx.currentTime;
-      gain.gain.setValueAtTime(vol, now);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-      osc.start(now);
-      osc.stop(now + duration);
-    }
-    function soundPop() { playTone(880, 0.06, 'sine', 0.06); }
-    function soundDing() {
-      playTone(660, 0.1, 'triangle', 0.1);
-      setTimeout(() => playTone(880, 0.12, 'triangle', 0.1), 80);
-      setTimeout(() => playTone(1320, 0.18, 'triangle', 0.1), 180);
-    }
-    function soundWhoosh() { playTone(420, 0.18, 'sawtooth', 0.05); }
-    function soundFanfare() {
-      playTone(523, 0.12, 'square', 0.08);
-      setTimeout(() => playTone(659, 0.12, 'square', 0.08), 110);
-      setTimeout(() => playTone(784, 0.12, 'square', 0.08), 220);
-      setTimeout(() => playTone(1047, 0.32, 'square', 0.09), 330);
-    }
-
-    function toggleSound() {
-      const s = gamiState();
-      s.soundOn = !s.soundOn;
-      gamiSave(s);
-      const btn = document.getElementById('soundToggle');
-      if (btn) btn.textContent = s.soundOn ? '🔊' : '🔇';
-      if (s.soundOn) soundPop();
-    }
-
-    // Toasts
-    function showAchievement({ icon = '✨', title, sub = '', kind = '' } = {}) {
-      if (!gamiEnabled()) return;
-      const stack = document.getElementById('achievementStack');
-      if (!stack) return;
-      const el = document.createElement('div');
-      el.className = 'achievement-toast' + (kind ? ' ' + kind : '');
-      el.innerHTML = `
-        <span class="at-icon">${icon}</span>
-        <div class="at-body">
-          <div class="at-title">${title}</div>
-          ${sub ? `<div class="at-sub">${sub}</div>` : ''}
-        </div>`;
-      stack.appendChild(el);
-      setTimeout(() => { el.remove(); }, 5200);
-      soundPop();
-    }
-
-    // Streak
-    function bumpStreak() {
-      const s = gamiState();
-      const today = dateKey();
-      if (s.lastActionDate === today) return s; // déjà compté aujourd'hui
-      if (!s.lastActionDate) {
-        s.streak = 1;
-      } else {
-        const diff = daysBetween(s.lastActionDate, today);
-        if (diff === 1) s.streak += 1;
-        else if (diff > 1) s.streak = 1;
-      }
-      if (s.streak > s.bestStreak) s.bestStreak = s.streak;
-      s.lastActionDate = today;
-      gamiSave(s);
-
-      // Achievement de streak
-      if (s.streak === 3) showAchievement({ icon: '🔥', title: 'Streak 3 jours !', sub: 'On chauffe', kind: 'streak' });
-      if (s.streak === 7) { showAchievement({ icon: '🔥', title: 'Streak 7 jours !', sub: 'Une semaine sans rater', kind: 'streak' }); soundFanfare(); }
-      if (s.streak === 14) showAchievement({ icon: '🔥', title: 'Streak 14 jours !', sub: 'Deux semaines de feu', kind: 'streak' });
-      if (s.streak === 30) { showAchievement({ icon: '👑', title: 'Streak 30 jours !', sub: 'LÉGENDE', kind: 'streak' }); soundFanfare(); }
-      return s;
-    }
-
-    function maybeResetStreak() {
-      const s = gamiState();
-      if (!s.lastActionDate) return s;
-      const today = dateKey();
-      const diff = daysBetween(s.lastActionDate, today);
-      if (diff > 1) {
-        s.streak = 0;
-        gamiSave(s);
-      }
-      return s;
-    }
-
-    // Gain XP
-    function gainXP(amount, opts = {}) {
-      if (!amount || amount <= 0) return;
-      const s = gamiState();
-      const before = s.xp;
-      const beforeLevel = gamiGetLevel(before).current;
-      s.xp += amount;
-      gamiSave(s);
-      const afterLevel = gamiGetLevel(s.xp).current;
-
-      if (!opts.silent) {
-        showAchievement({
-          icon: opts.icon || '⭐',
-          title: `+${amount} XP`,
-          sub: opts.reason || '',
-          kind: 'xp',
-        });
-      }
-
-      if (afterLevel.min > beforeLevel.min && !opts.silent) {
-        // LEVEL UP ! (skip si silent — la célébration de deal s'en charge)
-        setTimeout(() => {
-          showAchievement({
-            icon: afterLevel.emoji,
-            title: `LEVEL UP — ${afterLevel.name}`,
-            sub: `${s.xp.toLocaleString('fr-FR')} XP`,
-            kind: 'level',
-          });
-          soundFanfare();
-          if (window.confetti) {
-            confetti({
-              particleCount: 120,
-              spread: 90,
-              origin: { y: 0.7 },
-              colors: ['#ffd166', '#f9c74f', '#ff8c42', '#6940a5', '#34d399'],
-            });
-          }
-        }, 400);
-      }
-      renderGamiBar();
-    }
-
-    function recordAction(actionType, payload = {}) {
-      if (!gamiEnabled()) return;
-      bumpStreak();
-      switch (actionType) {
-        case 'deal_won': {
-          const xp = XP_REWARDS.deal_won_base + Math.round((payload.amount || 0) / 100) * XP_REWARDS.deal_won_per_100;
-          gainXP(xp, { reason: 'Deal gagné', icon: '🏆', silent: true });
-          break;
-        }
-        case 'deal_lost':
-          gainXP(XP_REWARDS.deal_lost, { reason: 'Deal perdu (XP de courage)', icon: '🪦' });
-          break;
-        case 'proposal_sent':
-          gainXP(XP_REWARDS.proposal_sent, { reason: 'Propale envoyée', icon: '📄' });
-          checkProposalAchievements();
-          break;
-        case 'stage_advance':
-          gainXP(XP_REWARDS.stage_advance, { reason: `Deal avancé → ${payload.to || ''}`, icon: '⬆️' });
-          break;
-        case 'deal_created':
-          gainXP(XP_REWARDS.deal_created, { reason: 'Nouveau deal', icon: '✨' });
-          break;
-        case 'relance':
-          gainXP(XP_REWARDS.relance, {
-            reason: payload.type === 'email' ? 'Relance email' : 'Relance téléphonique',
-            icon: payload.type === 'email' ? '📧' : '📞',
-          });
-          break;
-        case 'note_added':
-          gainXP(XP_REWARDS.note_added, { reason: 'Note figée', icon: '📝' });
-          break;
-      }
-      renderGamiBar();
-    }
-
-    // Achievements basés sur compteurs (mensuel, propales, etc.)
-    function _monthKey(d = new Date()) { return `${d.getFullYear()}-${d.getMonth()}`; }
-    function _bumpCounter(name) {
-      const s = gamiState();
-      s.counters = s.counters || {};
-      const k = _monthKey() + ':' + name;
-      s.counters[k] = (s.counters[k] || 0) + 1;
-      gamiSave(s);
-      return s.counters[k];
-    }
-    function _firstTime(achKey) {
-      const s = gamiState();
-      s.achievements = s.achievements || {};
-      if (s.achievements[achKey]) return false;
-      s.achievements[achKey] = Date.now();
-      gamiSave(s);
-      return true;
-    }
-    function checkProposalAchievements() {
-      const c = _bumpCounter('proposals');
-      if (c === 5) showAchievement({ icon: '🚀', title: '5 propales ce mois !', sub: 'Belle cadence', kind: 'milestone' });
-      if (c === 10) showAchievement({ icon: '💪', title: '10 propales ce mois !', sub: 'Machine de guerre', kind: 'milestone' });
-    }
-    function checkWinAchievements({ amount }) {
-      const c = _bumpCounter('wins');
-      const monthKey = _monthKey();
-      if (_firstTime('first_win_' + monthKey)) {
-        showAchievement({ icon: '🥇', title: 'Premier deal du mois !', sub: 'Lance la machine', kind: 'milestone' });
-      }
-      if (amount >= 50000 && _firstTime('big_deal_' + Date.now())) {
-        showAchievement({ icon: '💎', title: 'Deal monstre !', sub: `${formatEuro(amount)} signés`, kind: 'milestone' });
-      }
-      if (c === 3) showAchievement({ icon: '🔥', title: '3 deals gagnés ce mois !', kind: 'milestone' });
-      if (c === 5) showAchievement({ icon: '🏆', title: '5 deals gagnés ce mois !', kind: 'milestone' });
-    }
-
-    // Modal de célébration
-    function celebrateWin({ name, amount, xp, leveledUp = false, newLevel = null }) {
-      if (!gamiEnabled()) return;
-      const overlay = document.getElementById('celebrationOverlay');
-      document.getElementById('celebrationDeal').textContent = name || '';
-      document.getElementById('celebrationAmount').textContent = formatEuro(amount);
-      document.getElementById('celebrationXp').textContent = `+${xp.toLocaleString('fr-FR')} XP`;
-      document.getElementById('celebrationEmoji').textContent = amount >= 50000 ? '💎' : '🎉';
-      document.getElementById('celebrationTitle').textContent = amount >= 50000 ? 'Monster Deal' : 'Deal Closed';
-      const lvlEl = document.getElementById('celebrationLevelUp');
-      if (leveledUp && newLevel) {
-        lvlEl.innerHTML = `🚀 LEVEL UP — ${newLevel.emoji} ${newLevel.name}`;
-        lvlEl.style.display = 'block';
-      } else {
-        lvlEl.style.display = 'none';
-      }
-      overlay.classList.add('active');
-
-      // Confettis cascade
-      if (window.confetti) {
-        const burst = (originX, count = 80) => confetti({
-          particleCount: count,
-          spread: 80,
-          origin: { x: originX, y: 0.7 },
-          colors: ['#ffd166', '#f9c74f', '#ff8c42', '#0f7b6c', '#34d399', '#6940a5'],
-        });
-        burst(0.2, 100);
-        setTimeout(() => burst(0.8, 100), 250);
-        setTimeout(() => burst(0.5, 140), 500);
-        setTimeout(() => confetti({
-          particleCount: 200, spread: 160, startVelocity: 45,
-          origin: { y: 0.6 },
-        }), 800);
-      }
-      soundFanfare();
-    }
-    function closeCelebration() {
-      document.getElementById('celebrationOverlay').classList.remove('active');
-    }
-
-    // Jauges & UI
-    function _milestonePopIfCrossed(prevPct, newPct) {
-      const milestones = [25, 50, 75, 100];
-      for (const m of milestones) {
-        if (prevPct < m && newPct >= m) {
-          if (window.confetti) {
-            confetti({ particleCount: 70, spread: 70, origin: { y: 0.4 }, colors: ['#34d399','#0f7b6c','#ffd166'] });
-          }
-          soundDing();
-          showAchievement({
-            icon: m === 100 ? '🎯' : '✅',
-            title: m === 100 ? 'OBJECTIF ATTEINT !' : `${m}% de l'objectif`,
-            sub: m === 100 ? 'Tu déchires' : 'Continue comme ça',
-            kind: 'milestone',
-          });
-        }
-      }
-    }
-    let _prevGoalPct = 0;
-
-    function renderGamiBar() {
-      if (!gamiEnabled()) return;
-      const s = maybeResetStreak();
-      const lvl = gamiGetLevel(s.xp);
-      const lvlEl = document.getElementById('gamiLevelEmoji');
-      if (!lvlEl) return;
-
-      lvlEl.textContent = lvl.current.emoji;
-      document.getElementById('gamiLevelName').textContent = lvl.current.name;
-      document.getElementById('gamiLevelXp').textContent = `${s.xp.toLocaleString('fr-FR')} XP`;
-      const fillPct = lvl.next
-        ? ((s.xp - lvl.current.min) / (lvl.next.min - lvl.current.min)) * 100
-        : 100;
-      document.getElementById('gamiXpFill').style.width = Math.max(2, Math.min(100, fillPct)) + '%';
-      document.getElementById('gamiNextLevel').textContent = lvl.next
-        ? `Prochain : ${lvl.next.emoji} ${lvl.next.name} (${(lvl.next.min - s.xp).toLocaleString('fr-FR')} XP)`
-        : '🏆 Niveau max atteint';
-
-      // Streak
-      const flameEl = document.getElementById('gamiStreakFlame');
-      flameEl.classList.toggle('streak-cold', s.streak === 0);
-      document.getElementById('gamiStreakDays').textContent = s.streak;
-      document.getElementById('gamiStreakBest').textContent = `Best : ${s.bestStreak}j`;
-      const today = dateKey();
-      const actedToday = s.lastActionDate === today;
-      const hint = s.streak === 0
-        ? 'Fais une action commerciale pour démarrer'
-        : actedToday
-          ? '✅ Action faite aujourd\'hui'
-          : '⚠️ Fais une action avant minuit pour garder la streak';
-      document.getElementById('gamiStreakHint').textContent = hint;
-
-      // Objectif du mois
-      const now = new Date();
-      const year = now.getFullYear();
-      const month = now.getMonth();
-      const objectives = (typeof getObjectives === 'function') ? getObjectives(year) : Array(12).fill(0);
-      const monthlyObjective = objectives[month] || 0;
-      let monthlyCA = 0;
-      if (typeof dashboardData !== 'undefined' && dashboardData && dashboardData.yearlyData && dashboardData.yearlyData[year]) {
-        const m = dashboardData.yearlyData[year][month];
-        if (m) monthlyCA = m.total || 0;
-      }
-      const monthLabel = MONTH_LABELS_FR[month];
-      document.getElementById('gamiGoalTitle').textContent = monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1) + ' ' + year;
-
-      const pct = monthlyObjective > 0 ? Math.min(100, (monthlyCA / monthlyObjective) * 100) : 0;
-      const fill = document.getElementById('gamiGoalFill');
-      const label = document.getElementById('gamiGoalLabel');
-      fill.style.width = pct + '%';
-      const remaining = Math.max(0, monthlyObjective - monthlyCA);
-      label.textContent = monthlyObjective > 0
-        ? `${formatEuro(monthlyCA)} / ${formatEuro(monthlyObjective)} · ${pct.toFixed(0)}%`
-        : 'Pas d\'objectif défini ce mois-ci';
-      document.getElementById('gamiGoalRemaining').textContent = remaining > 0
-        ? `Reste ${formatEuro(remaining)}`
-        : (monthlyObjective > 0 ? '🎯 Atteint !' : '');
-
-      // Milestones
-      const milestonesEl = document.getElementById('gamiGoalMilestones');
-      milestonesEl.innerHTML = [25, 50, 75].map(m =>
-        `<div class="goal-milestone${pct >= m ? ' hit' : ''}" style="left:${m}%"></div>`
-      ).join('');
-
-      _milestonePopIfCrossed(_prevGoalPct, pct);
-      _prevGoalPct = pct;
-
-      // Sound toggle icon
-      const sndBtn = document.getElementById('soundToggle');
-      if (sndBtn) sndBtn.textContent = s.soundOn ? '🔊' : '🔇';
-    }
-
-    // ============================================================
+    // (Gamification supprimée — XP / niveaux / streak / célébrations retirés)
 
     // --- Dark mode ---
     function initTheme() {
@@ -5951,6 +5558,90 @@
       saveDealMetadata(dealId, { tags });
     }
 
+    // --- Assignation d'un deal à une personne ---
+    const ASSIGNEES = {
+      Guillaume: { initial: 'G', color: '#6940a5' },
+      Vincent:   { initial: 'V', color: '#0f7b6c' },
+      Nathan:    { initial: 'N', color: '#d9730d' },
+    };
+    function assigneeAvatarHtml(dealId, assignee) {
+      const a = assignee && ASSIGNEES[assignee];
+      return a
+        ? `<span class="deal-assignee" style="background:${a.color}" title="Assigné à ${assignee} — cliquer pour changer" onclick="openAssigneeMenu(event,'${dealId}')">${a.initial}</span>`
+        : `<span class="deal-assignee unassigned" title="Assigner ce deal" onclick="openAssigneeMenu(event,'${dealId}')">+</span>`;
+    }
+    function openAssigneeMenu(e, dealId) {
+      e.stopPropagation();
+      closeAssigneeMenu();
+      const current = (dealMetadata[dealId] || {}).assignee || null;
+      const rect = e.target.getBoundingClientRect();
+      const menu = document.createElement('div');
+      menu.className = 'tag-menu';
+      menu.id = 'assigneeMenu';
+      menu.style.top = (rect.bottom + 4) + 'px';
+      menu.style.left = rect.left + 'px';
+      for (const [name, info] of Object.entries(ASSIGNEES)) {
+        const active = current === name;
+        const item = document.createElement('div');
+        item.className = 'tag-menu-item' + (active ? ' active' : '');
+        item.innerHTML = `<span class="assignee-dot" style="background:${info.color}">${info.initial}</span>${name}${active ? ' ✓' : ''}`;
+        item.onclick = (ev) => { ev.stopPropagation(); assignDeal(dealId, name); closeAssigneeMenu(); };
+        menu.appendChild(item);
+      }
+      const none = document.createElement('div');
+      none.className = 'tag-menu-item' + (!current ? ' active' : '');
+      none.innerHTML = `<span class="assignee-dot" style="background:var(--text-light)">∅</span>Personne${!current ? ' ✓' : ''}`;
+      none.onclick = (ev) => { ev.stopPropagation(); assignDeal(dealId, null); closeAssigneeMenu(); };
+      menu.appendChild(none);
+      document.body.appendChild(menu);
+      setTimeout(() => document.addEventListener('click', closeAssigneeMenu, { once: true }), 0);
+    }
+    function closeAssigneeMenu() {
+      document.getElementById('assigneeMenu')?.remove();
+    }
+    function assignDeal(dealId, name) {
+      saveDealMetadata(dealId, { assignee: name });
+      if (typeof currentSidebarDealId !== 'undefined' && currentSidebarDealId === dealId) {
+        _refreshAssigneeField(dealId);
+      }
+    }
+    function _renderAssigneeSeg(dealId, current) {
+      const btns = Object.entries(ASSIGNEES).map(([name, info]) => {
+        const active = current === name;
+        const style = active ? `background:${info.color};border-color:${info.color};color:#fff` : '';
+        const dotBg = active ? 'rgba(255,255,255,0.25)' : info.color;
+        return `<button class="assignee-seg-btn${active ? ' active' : ''}" style="${style}" onclick="assignDeal('${dealId}','${name}')"><span class="assignee-dot" style="background:${dotBg}">${info.initial}</span>${name}</button>`;
+      }).join('');
+      const none = `<button class="assignee-seg-btn${!current ? ' active' : ''}" onclick="assignDeal('${dealId}',null)">Personne</button>`;
+      return btns + none;
+    }
+    function _refreshAssigneeField(dealId) {
+      const seg = document.getElementById('sbAssigneeSeg');
+      if (seg) seg.innerHTML = _renderAssigneeSeg(dealId, (dealMetadata[dealId] || {}).assignee);
+    }
+
+    // --- Filtre Kanban par assigné ---
+    let kanbanAssigneeFilter = ''; // '' = tous, 'Guillaume'/'Vincent'/'Nathan', '__none__' = non assigné
+    function _dealMatchesAssignee(dealId) {
+      if (!kanbanAssigneeFilter) return true;
+      const a = (dealMetadata[dealId] || {}).assignee || '';
+      return kanbanAssigneeFilter === '__none__' ? !a : a === kanbanAssigneeFilter;
+    }
+    function setKanbanAssigneeFilter(name) {
+      kanbanAssigneeFilter = name || '';
+      document.querySelectorAll('#assigneeFilter .af-btn').forEach(b =>
+        b.classList.toggle('active', (b.dataset.af || '') === kanbanAssigneeFilter));
+      renderKanban();
+    }
+    function _renderAssigneeFilterBar(containerId, currentVal, onclickFn) {
+      const tous = `<button class="af-btn${!currentVal ? ' active' : ''}" data-af="" onclick="${onclickFn}('')">Tous</button>`;
+      const people = Object.entries(ASSIGNEES).map(([name, info]) =>
+        `<button class="af-btn${currentVal === name ? ' active' : ''}" data-af="${name}" onclick="${onclickFn}('${name}')" title="Deals de ${name}"><span class="assignee-dot" style="background:${info.color}">${info.initial}</span>${name}</button>`
+      ).join('');
+      const none = `<button class="af-btn${currentVal === '__none__' ? ' active' : ''}" data-af="__none__" onclick="${onclickFn}('__none__')">Non assigné</button>`;
+      return tous + people + none;
+    }
+
     // Proposal date
     function setProposalDate(e, dealId) {
       e.stopPropagation();
@@ -5972,9 +5663,7 @@
     function confirmProposalDate(dealId) {
       const val = document.getElementById('_proposalDateVal')?.value;
       if (val) {
-        const wasSet = (dealMetadata[dealId] || {}).proposal_sent_at;
         saveDealMetadata(dealId, { proposal_sent_at: val });
-        if (!wasSet) recordAction('proposal_sent');
       }
       closeProposalPicker();
     }
@@ -6131,7 +5820,6 @@
       renderTable(data, prevData, objectives);
       initPipelinePeriod();
       renderKanban();
-      renderGamiBar();
     }
 
     function renderChart(data, prevData, objectives) {
@@ -6512,13 +6200,23 @@
     //   (B) "trop ancien"  = > 15j depuis le dernier "contact" (= max(dernière relance, dernière note),
     //                        fallback createdate si rien)
     // Note ≡ Relance : ajouter l'une OU l'autre suffit à éteindre les deux raisons.
-    // Échappatoire : un prochain RDV futur (meta.next_meeting_at) court-circuite tout.
+    // Échappatoires (court-circuitent tout) :
+    //   - un prochain RDV futur (meta.next_meeting_at)
+    //   - une tâche ouverte dont l'échéance n'est pas encore passée (meta.tasks)
     const CRITICAL_RELANCE_DAYS = 15;
     function computeDealCriticality(deal, meta) {
       const nextMeetingTime = (meta && meta.next_meeting_at)
         ? new Date(meta.next_meeting_at).getTime() : 0;
       if (nextMeetingTime > Date.now()) {
         return { critical: false, reasons: [], daysSinceTouch: null, nextMeetingAt: meta.next_meeting_at };
+      }
+
+      // Une tâche à faire avec une échéance future désamorce la criticité.
+      const tasksArr = (meta && Array.isArray(meta.tasks)) ? meta.tasks : [];
+      const hasFutureTask = tasksArr.some(t =>
+        t && t.status !== 'done' && t.due_at && new Date(t.due_at).getTime() > Date.now());
+      if (hasFutureTask) {
+        return { critical: false, reasons: [], daysSinceTouch: null };
       }
 
       const reasons = [];
@@ -6615,7 +6313,8 @@
       col.classList.toggle('expanded', relancerColumnOpen);
       col.classList.toggle('collapsed', !relancerColumnOpen);
 
-      const deals = (dashboardData && dashboardData.pipelineDeals && dashboardData.pipelineDeals[RELANCER_STAGE_LABEL]) || [];
+      const allRelancer = (dashboardData && dashboardData.pipelineDeals && dashboardData.pipelineDeals[RELANCER_STAGE_LABEL]) || [];
+      const deals = kanbanAssigneeFilter ? allRelancer.filter(d => _dealMatchesAssignee(d.id)) : allRelancer;
       const total = deals.reduce((s, d) => s + d.amount, 0);
 
       if (!relancerColumnOpen) {
@@ -6645,6 +6344,7 @@
             <div class="kanban-card-meta">
               <span class="kanban-card-amount">${formatEuro(d.amount)}</span>
               <span class="kanban-card-won-date">${since ? 'depuis ' + since : ''}</span>
+              ${assigneeAvatarHtml(d.id, (dealMetadata[d.id] || {}).assignee)}
             </div>
           </div>`;
         }
@@ -6731,7 +6431,10 @@
       pipelineCriticalDeals = [];
 
       for (const stageName of KANBAN_STAGES_ORDER) {
-        const deals = dashboardData.pipelineDeals[stageName] || [];
+        const allStageDeals = dashboardData.pipelineDeals[stageName] || [];
+        const deals = kanbanAssigneeFilter
+          ? allStageDeals.filter(d => _dealMatchesAssignee(d.id))
+          : allStageDeals;
         const total = deals.reduce((s, d) => s + d.amount, 0);
 
         html += `<div class="kanban-column" data-stage="${stageName}"
@@ -6830,6 +6533,7 @@
               <span class="kanban-card-amount" onclick="startEditAmount(event, this, '${deal.id}', ${deal.amount})" title="Cliquer pour modifier">${formatEuro(deal.amount)}</span>
               <span class="kanban-card-proba ${probaClass}">${deal.probability}%</span>
               ${meetingChip}
+              ${assigneeAvatarHtml(deal.id, meta.assignee)}
             </div>
           </div>`;
         }
@@ -7064,7 +6768,7 @@
           const pad = n => String(n).padStart(2, '0');
           const defaultRdvVal = `${defaultRdv.getFullYear()}-${pad(defaultRdv.getMonth()+1)}-${pad(defaultRdv.getDate())}T${pad(defaultRdv.getHours())}:${pad(defaultRdv.getMinutes())}`;
 
-          return `<div class="pa-deal-row has-actions" data-critical-row="${d.id}">
+          return `<div class="pa-deal-row has-actions" data-critical-row="${d.id}" data-stage="${d.stage}" data-amount="${d.amount}">
             <div class="pa-deal-icon">${icons[type]}</div>
             <div class="pa-deal-info">
               <div class="pa-deal-name" onclick="document.getElementById('paModalOverlay').classList.remove('active'); openDealSidebar('${d.id}')" style="cursor:pointer" title="Ouvrir la sidebar">${d.name}</div>
@@ -7080,6 +6784,7 @@
               <button class="pa-critical-action-btn email" onclick="openCriticalAction('${d.id}','email')" title="Logger une relance email">📧 Email</button>
               <button class="pa-critical-action-btn phone" onclick="openCriticalAction('${d.id}','phone')" title="Logger une relance tél">📞 Tél</button>
               <button class="pa-critical-action-btn rdv"   onclick="openCriticalAction('${d.id}','rdv')"   title="Planifier un RDV futur — retire l'état critique">📅 RDV</button>
+              <button class="pa-critical-action-btn task"  onclick="openCriticalAction('${d.id}','task')"  title="Créer une tâche planifiée — une échéance future retire l'état critique">📋 Tâche</button>
             </div>
 
             <div class="pa-critical-form" data-critical-form="${d.id}">
@@ -7090,6 +6795,23 @@
               <div class="pa-critical-form-row" data-only="rdv" style="display:none">
                 <label>Quand</label>
                 <input type="datetime-local" data-field="datetime" value="${defaultRdvVal}">
+              </div>
+              <div class="pa-critical-form-row" data-only="task" style="display:none">
+                <label>Type</label>
+                <select data-field="task-type">${_taskTypeOptions()}</select>
+              </div>
+              <div class="pa-critical-form-row" data-only="task" style="display:none;align-items:flex-start">
+                <label>Échéance</label>
+                <div style="flex:1;display:flex;flex-direction:column;gap:0.35rem">
+                  <div class="task-quick-chips">
+                    <button type="button" onclick="_setCriticalTaskDue('${d.id}',0)">Auj.</button>
+                    <button type="button" onclick="_setCriticalTaskDue('${d.id}',1)">+1j</button>
+                    <button type="button" onclick="_setCriticalTaskDue('${d.id}',2)">+2j</button>
+                    <button type="button" onclick="_setCriticalTaskDue('${d.id}',3)">+3j</button>
+                    <button type="button" onclick="_setCriticalTaskDue('${d.id}',7)">+1 sem.</button>
+                  </div>
+                  <input type="datetime-local" data-field="task-due" value="${defaultRdvVal}">
+                </div>
               </div>
               <div class="pa-critical-form-row" data-only="note,email,phone" style="align-items:flex-start">
                 <label data-field-label="note">Note*</label>
@@ -7103,7 +6825,7 @@
           </div>`;
         }
 
-        return `<div class="pa-deal-row" onclick="document.getElementById('paModalOverlay').classList.remove('active'); openDealSidebar('${d.id}')" style="cursor:pointer">
+        return `<div class="pa-deal-row" data-stage="${d.stage}" data-amount="${d.amount}" onclick="document.getElementById('paModalOverlay').classList.remove('active'); openDealSidebar('${d.id}')" style="cursor:pointer">
           <div class="pa-deal-icon">${icons[type]}</div>
           <div class="pa-deal-info">
             <div class="pa-deal-name">${d.name}</div>
@@ -7116,6 +6838,18 @@
         </div>`;
       }).join('');
 
+      if (type === 'critical') {
+        rows = `<div class="pa-critical-rules">
+          <div class="pa-critical-rules-title">🚨 Qu'est-ce qu'un deal « critique » ?</div>
+          Un deal devient critique s'il <strong>n'a aucun RDV futur planifié</strong> et qu'au moins une de ces conditions est vraie :
+          <ul>
+            <li><strong>Aucune note</strong> — ni description, ni note, ni relance enregistrée.</li>
+            <li><strong>Plus de <code>${CRITICAL_RELANCE_DAYS} jours</code> sans relance</strong> — dernier contact (note ou relance, sinon date de création) trop ancien.</li>
+          </ul>
+          <div class="ok">✓ Pour le sortir de l'état critique : enregistre une note / relance (📝 📧 📞) ou planifie un RDV futur (📅) — un RDV à venir court-circuite tout.</div>
+        </div>` + rows;
+      }
+
       rows += `<div class="pa-total-row" id="paTotalRow">
         <span>${type === 'critical' ? 'Total en jeu' : 'Total pipeline'}</span>
         <span>${formatEuro(total)}</span>
@@ -7125,7 +6859,68 @@
       document.getElementById('paModalSubtitle').textContent = subtitle;
       document.getElementById('paModalBody').innerHTML = rows;
       document.getElementById('paModalBody').dataset.modalType = type;
+      document.getElementById('paFilterRow').dataset.activeStage = '';
+      _renderPaStageFilters();
       document.getElementById('paModalOverlay').classList.add('active');
+    }
+
+    // --- Filtres par stage dans la modale ---
+    // Ordre canonique des stages (cf. KANBAN_STAGES)
+    const PA_STAGE_ORDER = ['RDV Qualif', 'RDV Propale', 'Négociation', 'Contrat envoyé', 'À relancer plus tard'];
+
+    function _renderPaStageFilters() {
+      const filterRow = document.getElementById('paFilterRow');
+      const body = document.getElementById('paModalBody');
+      if (!filterRow || !body) return;
+      // Liste les rows VISIBLES + leur stage
+      const rows = Array.from(body.querySelectorAll('.pa-deal-row'));
+      if (rows.length <= 1) { filterRow.innerHTML = ''; return; }
+      const counts = {};
+      rows.forEach(r => {
+        const s = r.dataset.stage || '';
+        if (s) counts[s] = (counts[s] || 0) + 1;
+      });
+      const stages = PA_STAGE_ORDER.filter(s => counts[s]);
+      // Ajoute d'éventuels stages inconnus à la fin (au cas où)
+      Object.keys(counts).forEach(s => { if (!stages.includes(s)) stages.push(s); });
+      if (stages.length < 2) { filterRow.innerHTML = ''; return; }
+
+      const currentFilter = filterRow.dataset.activeStage || '';
+      const total = rows.length;
+      let html = `<button class="pa-filter-chip${!currentFilter ? ' active' : ''}" data-stage-filter="" onclick="filterPaByStage('')">Tous <span class="pa-filter-chip-count">${total}</span></button>`;
+      for (const s of stages) {
+        const active = currentFilter === s ? ' active' : '';
+        html += `<button class="pa-filter-chip${active}" data-stage-filter="${s}" onclick="filterPaByStage('${s.replace(/'/g, "\\'")}')">${s} <span class="pa-filter-chip-count">${counts[s]}</span></button>`;
+      }
+      filterRow.innerHTML = html;
+    }
+
+    function filterPaByStage(stage) {
+      const filterRow = document.getElementById('paFilterRow');
+      const body = document.getElementById('paModalBody');
+      if (!filterRow || !body) return;
+      filterRow.dataset.activeStage = stage;
+      filterRow.querySelectorAll('.pa-filter-chip').forEach(c => {
+        c.classList.toggle('active', (c.dataset.stageFilter || '') === stage);
+      });
+      let visibleCount = 0;
+      let visibleTotal = 0;
+      body.querySelectorAll('.pa-deal-row').forEach(row => {
+        const rowStage = row.dataset.stage || '';
+        const show = !stage || rowStage === stage;
+        row.classList.toggle('filtered-out', !show);
+        if (show) {
+          visibleCount++;
+          visibleTotal += parseFloat(row.dataset.amount || 0) || 0;
+        }
+      });
+      // Maj du total affiché en bas
+      const totalRow = document.getElementById('paTotalRow');
+      if (totalRow) {
+        const spans = totalRow.querySelectorAll('span');
+        if (spans[0]) spans[0].textContent = stage ? `Filtré : ${stage}` : (body.dataset.modalType === 'critical' ? 'Total en jeu' : 'Total pipeline');
+        if (spans[1]) spans[1].textContent = formatEuro(visibleTotal);
+      }
     }
 
     // --- Actions rapides depuis la modale "Deals critiques" ---
@@ -7164,6 +6959,8 @@
       setTimeout(() => {
         if (action === 'rdv') {
           form.querySelector('[data-field="datetime"]')?.focus();
+        } else if (action === 'task') {
+          form.querySelector('[data-field="task-type"]')?.focus();
         } else {
           noteEl?.focus();
         }
@@ -7201,6 +6998,26 @@
           });
           if (!res.ok) throw new Error();
           dealMetadata[dealId] = { ...(dealMetadata[dealId] || {}), next_meeting_at: iso };
+        } else if (action === 'task') {
+          const type = form.querySelector('[data-field="task-type"]').value;
+          const dueVal = form.querySelector('[data-field="task-due"]').value;
+          const due_at = dueVal ? new Date(dueVal).toISOString() : null;
+          submitBtn.disabled = true; submitBtn.textContent = '…';
+          const res = await fetch(`/api/deals/${dealId}/task`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type, label: '', due_at }),
+          });
+          if (!res.ok) throw new Error();
+          const data = await res.json();
+          dealMetadata[dealId] = { ...(dealMetadata[dealId] || {}), tasks: data.tasks };
+          // Une échéance future désamorce l'état critique → on résout la ligne.
+          if (due_at && new Date(due_at).getTime() > Date.now()) {
+            _resolveCriticalRow(dealId);
+          } else {
+            closeCriticalAction(dealId);
+            renderKanban();
+          }
+          return;
         } else {
           const date = form.querySelector('[data-field="date"]').value;
           const noteEl = form.querySelector('[data-field="note"]');
@@ -7230,9 +7047,6 @@
             dealMetadata[dealId] = { ...(dealMetadata[dealId] || {}), relances: data.relances };
           }
         }
-        if (typeof recordAction === 'function') {
-          recordAction(action === 'rdv' ? 'rdv_scheduled' : (action === 'note' ? 'note_added' : 'relance'), action === 'rdv' ? {} : { type: action });
-        }
         _resolveCriticalRow(dealId);
       } catch (e) {
         submitBtn.textContent = 'Erreur';
@@ -7255,7 +7069,15 @@
       setTimeout(() => row.classList.add('resolved-out'), 700);
       setTimeout(() => {
         row.remove();
-        if (pipelineCriticalDeals.length === 0) _showCriticalEmptyState();
+        if (pipelineCriticalDeals.length === 0) {
+          _showCriticalEmptyState();
+          document.getElementById('paFilterRow').innerHTML = '';
+        } else {
+          // Rebuild chips puis ré-applique le filtre actif
+          const activeFilter = document.getElementById('paFilterRow').dataset.activeStage || '';
+          _renderPaStageFilters();
+          filterPaByStage(activeFilter);
+        }
         renderKanban();
       }, 1150);
     }
@@ -7354,7 +7176,6 @@
         });
         closeNewDealModal();
         renderKanban();
-        recordAction('deal_created');
       } catch (e) {
         btn.disabled = false;
         btn.textContent = 'Créer le deal';
@@ -7532,6 +7353,8 @@
       const todayStr = new Date().toISOString().slice(0, 10);
       const relances = Array.isArray(meta.relances) ? meta.relances : [];
       const relancesCount = relances.length;
+      const notesCount = Array.isArray(meta.notes) ? meta.notes.length : 0;
+      const openTaskCount = (Array.isArray(meta.tasks) ? meta.tasks : []).filter(t => t && t.status !== 'done').length;
       const nextMeetingLocalVal = _isoToLocalInput(meta.next_meeting_at);
       const nextMeetingTime = meta.next_meeting_at ? new Date(meta.next_meeting_at).getTime() : 0;
       const nextMeetingIsFuture = nextMeetingTime > Date.now();
@@ -7539,105 +7362,168 @@
 
       document.getElementById('sidebarBody').innerHTML = `
         <div class="deal-sidebar-field">
-          <div class="deal-sidebar-label">Stage</div>
-          <div><span class="deal-sidebar-stage-badge">${deal.stage || '—'}</span></div>
-        </div>
-
-        <div class="deal-sidebar-field">
-          <div class="deal-sidebar-label">Montant</div>
-          <input class="deal-sidebar-input" id="sbAmount" type="number" value="${deal.amount}" min="0" step="100">
-        </div>
-
-        <div class="deal-sidebar-field">
-          <div class="deal-sidebar-label">Date de clôture prévue</div>
-          <input class="deal-sidebar-input" id="sbClosedate" type="date" value="${closedateVal}">
-        </div>
-
-        <div class="deal-sidebar-field">
-          <div class="deal-sidebar-label">📅 Prochain rendez-vous ${nextMeetingIsFuture ? '<span style="color:#1d4ed8;font-weight:600">· planifié</span>' : (nextMeetingIsPast ? '<span style="color:var(--text-light);font-weight:500">· passé</span>' : '')}</div>
-          <div style="display:flex;gap:0.4rem;align-items:center">
-            <input class="deal-sidebar-input" id="sbNextMeeting" type="datetime-local" value="${nextMeetingLocalVal}" style="flex:1">
-            <button class="relance-btn" id="sbNextMeetingSaveBtn" onclick="saveNextMeeting('${deal.id}')" style="flex:0 0 auto;padding:0.45rem 0.8rem">Enregistrer</button>
-            ${meta.next_meeting_at ? `<button class="relance-btn" onclick="clearNextMeeting('${deal.id}')" style="flex:0 0 auto;padding:0.45rem 0.6rem;color:#b91c1c;border-color:rgba(239,68,68,0.3)" title="Effacer le RDV">✕</button>` : ''}
+          <div style="display:flex;gap:1rem;align-items:flex-end">
+            <div style="flex:0 0 auto">
+              <div class="deal-sidebar-label">Stage</div>
+              <div><span class="deal-sidebar-stage-badge">${deal.stage || '—'}</span></div>
+            </div>
+            <div style="flex:1;min-width:0">
+              <div class="deal-sidebar-label">Montant</div>
+              <input class="deal-sidebar-input" id="sbAmount" type="number" value="${deal.amount}" min="0" step="100">
+            </div>
           </div>
-          ${nextMeetingIsFuture ? `<div style="font-size:0.72rem;color:var(--text-secondary);margin-top:0.3rem;font-style:italic">Un RDV futur retire l'état critique du deal.</div>` : ''}
-        </div>
-
-        <div class="deal-sidebar-field">
-          <div class="deal-sidebar-label">Notes (figées)</div>
-          <div id="notesLogWrap">${_renderNotesLog(meta.notes)}</div>
-          <div class="relance-row" style="margin-top:0.5rem">
-            <button class="relance-btn note" onclick="openNoteForm('${deal.id}')" style="flex:1">📝 Ajouter une note</button>
-          </div>
-          <div class="relance-form" id="noteForm">
-            <div class="relance-form-row">
-              <label for="noteDate">Date</label>
-              <input type="date" id="noteDate" value="${todayStr}">
-            </div>
-            <div class="relance-form-row" style="align-items:flex-start">
-              <label for="noteText" style="margin-top:0.3rem">Note*</label>
-              <textarea id="noteText" placeholder="Ce que tu retiens de l'échange (sera figée après enregistrement)"></textarea>
-            </div>
-            <div class="relance-form-actions">
-              <button onclick="closeNoteForm()">Annuler</button>
-              <button class="primary" id="noteSubmitBtn" onclick="submitNote('${deal.id}')">Enregistrer & figer</button>
-            </div>
+          <input type="hidden" id="sbClosedate" value="${closedateVal}">
+          <div class="deal-sidebar-save-row" style="margin-top:0.55rem">
+            <button class="deal-sidebar-save-btn" id="sbSaveBtn" onclick="saveSidebarChanges('${deal.id}')">Enregistrer</button>
           </div>
         </div>
 
         <div class="deal-sidebar-field">
-          <div class="deal-sidebar-label">Description (HubSpot)</div>
-          <textarea class="deal-sidebar-input deal-sidebar-textarea" id="sbDescription" placeholder="Description du deal (modifiable, sync HubSpot)…">${deal.description || ''}</textarea>
+          <div class="deal-sidebar-label">Assigné à</div>
+          <div class="assignee-seg" id="sbAssigneeSeg">${_renderAssigneeSeg(deal.id, meta.assignee)}</div>
         </div>
 
-        <div class="deal-sidebar-save-row">
-          <button class="deal-sidebar-save-btn" id="sbSaveBtn" onclick="saveSidebarChanges('${deal.id}')">Enregistrer</button>
-        </div>
-
-        <div class="deal-sidebar-field">
-          <div class="deal-sidebar-label">Relances</div>
-          <div id="relanceLastWrap">${_renderLastRelance(relances)}</div>
-          ${relancesCount > 1 ? `<span class="relance-history-link" onclick="openRelanceHistory('${deal.id}')">Voir l'historique (${relancesCount})</span>` : ''}
-          <div class="relance-row" style="margin-top:0.5rem">
-            <button class="relance-btn email" onclick="openRelanceForm('email','${deal.id}')">📧 Relance email</button>
-            <button class="relance-btn phone" onclick="openRelanceForm('phone','${deal.id}')">📞 Relance tél</button>
+        <div class="sb-section open">
+          <div class="sb-section-header" onclick="toggleSbSection(this)">
+            <span class="sb-section-title">🎯 Prochaines actions ${openTaskCount ? `<span class="sb-section-count">${openTaskCount}</span>` : ''}</span>
+            <span class="sb-section-chevron">▸</span>
           </div>
-          <div class="relance-form" id="relanceForm">
-            <div class="relance-form-row">
-              <label for="relanceDate">Date</label>
-              <input type="date" id="relanceDate" value="${todayStr}">
+          <div class="sb-section-body">
+            <div class="deal-sidebar-field">
+              <div class="deal-sidebar-label">📅 Prochain rendez-vous ${nextMeetingIsFuture ? '<span style="color:#1d4ed8;font-weight:600">· planifié</span>' : (nextMeetingIsPast ? '<span style="color:var(--text-light);font-weight:500">· passé</span>' : '')}</div>
+              <div style="display:flex;gap:0.4rem;align-items:center">
+                <input class="deal-sidebar-input" id="sbNextMeeting" type="datetime-local" value="${nextMeetingLocalVal}" style="flex:1">
+                <button class="relance-btn" id="sbNextMeetingSaveBtn" onclick="saveNextMeeting('${deal.id}')" style="flex:0 0 auto;padding:0.45rem 0.8rem">Enregistrer</button>
+                ${meta.next_meeting_at ? `<button class="relance-btn" onclick="clearNextMeeting('${deal.id}')" style="flex:0 0 auto;padding:0.45rem 0.6rem;color:#b91c1c;border-color:rgba(239,68,68,0.3)" title="Effacer le RDV">✕</button>` : ''}
+              </div>
+              ${nextMeetingIsFuture ? `<div style="font-size:0.72rem;color:var(--text-secondary);margin-top:0.3rem;font-style:italic">Un RDV futur retire l'état critique du deal.</div>` : ''}
             </div>
-            <div class="relance-form-row" style="align-items:flex-start">
-              <label for="relanceNote" style="margin-top:0.3rem">Note*</label>
-              <textarea id="relanceNote" placeholder="Que s'est-il passé / dit ? (obligatoire)"></textarea>
-            </div>
-            <div class="relance-form-actions">
-              <button onclick="closeRelanceForm()">Annuler</button>
-              <button class="primary" id="relanceSubmitBtn" onclick="submitRelance('${deal.id}')">Enregistrer</button>
+
+            <div class="deal-sidebar-field">
+              <div class="deal-sidebar-label">✅ Tâches ${openTaskCount ? `<span style="color:var(--primary);font-weight:600">· ${openTaskCount} à faire</span>` : ''}</div>
+              <div id="tasksWrap">${_renderTasks(meta.tasks, deal.id)}</div>
+              <div class="relance-row" style="margin-top:0.5rem">
+                <button class="relance-btn" onclick="openTaskForm('${deal.id}')" style="flex:1">➕ Ajouter une tâche</button>
+              </div>
+              <div class="relance-form" id="taskForm">
+                <div class="relance-form-row">
+                  <label for="taskType">Type</label>
+                  <select id="taskType" onchange="_onTaskTypeChange()">${_taskTypeOptions()}</select>
+                </div>
+                <div class="relance-form-row" style="align-items:flex-start">
+                  <label for="taskLabel" style="margin-top:0.3rem">Détail</label>
+                  <textarea id="taskLabel" placeholder="Précision (optionnel)"></textarea>
+                </div>
+                <div class="relance-form-row" style="align-items:flex-start">
+                  <label for="taskDue" style="margin-top:0.3rem">Échéance</label>
+                  <div style="flex:1;display:flex;flex-direction:column;gap:0.35rem">
+                    <div class="task-quick-chips">
+                      <button type="button" onclick="_setTaskDue(0)">Auj.</button>
+                      <button type="button" onclick="_setTaskDue(1)">+1j</button>
+                      <button type="button" onclick="_setTaskDue(2)">+2j</button>
+                      <button type="button" onclick="_setTaskDue(3)">+3j</button>
+                      <button type="button" onclick="_setTaskDue(7)">+1 sem.</button>
+                    </div>
+                    <input type="datetime-local" id="taskDue">
+                  </div>
+                </div>
+                <div class="relance-form-actions">
+                  <button onclick="closeTaskForm()">Annuler</button>
+                  <button class="primary" id="taskSubmitBtn" onclick="submitTask('${deal.id}')">Ajouter</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        <div class="deal-sidebar-field">
-          <div class="deal-sidebar-label">Tags</div>
-          <div style="display:flex;flex-wrap:wrap;gap:0.3rem">${tagsHtml}</div>
+        <div class="sb-section">
+          <div class="sb-section-header" onclick="toggleSbSection(this)">
+            <span class="sb-section-title">🗒️ Historique ${(notesCount + relancesCount) ? `<span class="sb-section-count">${notesCount + relancesCount}</span>` : ''}</span>
+            <span class="sb-section-chevron">▸</span>
+          </div>
+          <div class="sb-section-body">
+            <div class="deal-sidebar-field">
+              <div class="deal-sidebar-label">Notes (figées)</div>
+              <div id="notesLogWrap">${_renderNotesLog(meta.notes)}</div>
+              <div class="relance-row" style="margin-top:0.5rem">
+                <button class="relance-btn note" onclick="openNoteForm('${deal.id}')" style="flex:1">📝 Ajouter une note</button>
+              </div>
+              <div class="relance-form" id="noteForm">
+                <div class="relance-form-row">
+                  <label for="noteDate">Date</label>
+                  <input type="date" id="noteDate" value="${todayStr}">
+                </div>
+                <div class="relance-form-row" style="align-items:flex-start">
+                  <label for="noteText" style="margin-top:0.3rem">Note*</label>
+                  <textarea id="noteText" placeholder="Ce que tu retiens de l'échange (sera figée après enregistrement)"></textarea>
+                </div>
+                <div class="relance-form-actions">
+                  <button onclick="closeNoteForm()">Annuler</button>
+                  <button class="primary" id="noteSubmitBtn" onclick="submitNote('${deal.id}')">Enregistrer & figer</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="deal-sidebar-field">
+              <div class="deal-sidebar-label">Relances</div>
+              <div id="relanceLastWrap">${_renderLastRelance(relances)}</div>
+              ${relancesCount > 1 ? `<span class="relance-history-link" onclick="openRelanceHistory('${deal.id}')">Voir l'historique (${relancesCount})</span>` : ''}
+              <div class="relance-row" style="margin-top:0.5rem">
+                <button class="relance-btn email" onclick="openRelanceForm('email','${deal.id}')">📧 Relance email</button>
+                <button class="relance-btn phone" onclick="openRelanceForm('phone','${deal.id}')">📞 Relance tél</button>
+              </div>
+              <div class="relance-form" id="relanceForm">
+                <div class="relance-form-row">
+                  <label for="relanceDate">Date</label>
+                  <input type="date" id="relanceDate" value="${todayStr}">
+                </div>
+                <div class="relance-form-row" style="align-items:flex-start">
+                  <label for="relanceNote" style="margin-top:0.3rem">Note*</label>
+                  <textarea id="relanceNote" placeholder="Que s'est-il passé / dit ? (obligatoire)"></textarea>
+                </div>
+                <div class="relance-form-actions">
+                  <button onclick="closeRelanceForm()">Annuler</button>
+                  <button class="primary" id="relanceSubmitBtn" onclick="submitRelance('${deal.id}')">Enregistrer</button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div style="display:flex;gap:1.5rem">
-          <div class="deal-sidebar-field">
-            <div class="deal-sidebar-label">Créé le</div>
-            <div class="deal-sidebar-value">${createdStr}</div>
+        <div class="sb-section">
+          <div class="sb-section-header" onclick="toggleSbSection(this)">
+            <span class="sb-section-title">ℹ️ Infos deal</span>
+            <span class="sb-section-chevron">▸</span>
           </div>
-          <div class="deal-sidebar-field">
-            <div class="deal-sidebar-label">Probabilité</div>
-            <div class="deal-sidebar-value">${deal.probability}%</div>
+          <div class="sb-section-body">
+            <div class="deal-sidebar-field">
+              <div class="deal-sidebar-label">Description (HubSpot)</div>
+              <textarea class="deal-sidebar-input deal-sidebar-textarea" id="sbDescription" placeholder="Description du deal (modifiable, sync HubSpot)…">${deal.description || ''}</textarea>
+              <div style="font-size:0.7rem;color:var(--text-light);margin-top:0.25rem">Pense à « Enregistrer » en haut après modification.</div>
+            </div>
+
+            <div class="deal-sidebar-field">
+              <div class="deal-sidebar-label">Tags</div>
+              <div style="display:flex;flex-wrap:wrap;gap:0.3rem">${tagsHtml}</div>
+            </div>
+
+            <div style="display:flex;gap:1.5rem">
+              <div class="deal-sidebar-field">
+                <div class="deal-sidebar-label">Créé le</div>
+                <div class="deal-sidebar-value">${createdStr}</div>
+              </div>
+              <div class="deal-sidebar-field">
+                <div class="deal-sidebar-label">Probabilité</div>
+                <div class="deal-sidebar-value">${deal.probability}%</div>
+              </div>
+            </div>
+
+            ${meta.proposal_sent_at ? `<div class="deal-sidebar-field">
+              <div class="deal-sidebar-label">Propale envoyée</div>
+              <div class="deal-sidebar-value">${formatShortDate(meta.proposal_sent_at)}${meta.proposal_mission ? ' · ' + meta.proposal_mission : ''}</div>
+            </div>` : ''}
           </div>
         </div>
-
-        ${meta.proposal_sent_at ? `<div class="deal-sidebar-field">
-          <div class="deal-sidebar-label">Propale envoyée</div>
-          <div class="deal-sidebar-value">${formatShortDate(meta.proposal_sent_at)}${meta.proposal_mission ? ' · ' + meta.proposal_mission : ''}</div>
-        </div>` : ''}
       `;
     }
 
@@ -7694,9 +7580,6 @@
         closeRelanceForm();
         // Re-render kanban pour mettre à jour le flag critique
         renderKanban();
-        if (typeof recordAction === 'function') {
-          recordAction('relance', { type });
-        }
       } catch (e) {
         btn.textContent = 'Erreur';
         btn.disabled = false;
@@ -7748,13 +7631,326 @@
         btn.textContent = 'Enregistrer & figer';
         // Re-render kanban pour mettre à jour le flag critique si concerné
         renderKanban();
-        if (typeof recordAction === 'function') {
-          recordAction('note_added');
-        }
       } catch (e) {
         btn.textContent = 'Erreur';
         setTimeout(() => { btn.disabled = false; btn.textContent = 'Enregistrer & figer'; }, 1500);
       }
+    }
+
+    // --- Tâches par deal (file de tâches) ---
+    const TASK_TYPE_META = {
+      call:     { icon: '📞', label: 'Appeler' },
+      email:    { icon: '📧', label: 'Envoyer un email' },
+      proposal: { icon: '📄', label: 'Envoyer une propale' },
+      meeting:  { icon: '📅', label: 'Planifier un RDV' },
+      contract: { icon: '✍️', label: 'Envoyer le contrat' },
+      custom:   { icon: '✅', label: 'Tâche libre' },
+    };
+    function _taskTypeOptions() {
+      return Object.entries(TASK_TYPE_META)
+        .map(([k, v]) => `<option value="${k}">${v.icon} ${v.label}</option>`).join('');
+    }
+    function _taskDueInfo(dueAt) {
+      if (!dueAt) return { text: 'Sans échéance', cls: '' };
+      const d = new Date(dueAt);
+      if (isNaN(d.getTime())) return { text: 'Sans échéance', cls: '' };
+      const now = new Date();
+      const dayMs = 86400000;
+      const sToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const sDue = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+      const diff = Math.round((sDue - sToday) / dayMs);
+      let text;
+      if (diff < 0) text = `En retard · ${formatShortDate(dueAt)}`;
+      else if (diff === 0) text = "Aujourd'hui";
+      else if (diff === 1) text = 'Demain';
+      else if (diff <= 7) text = `Dans ${diff}j · ${formatShortDate(dueAt)}`;
+      else text = formatShortDate(dueAt);
+      const cls = d.getTime() < now.getTime() ? 'overdue' : (diff <= 1 ? 'soon' : '');
+      return { text, cls };
+    }
+    function _renderTasks(tasks, dealId) {
+      const arr = Array.isArray(tasks) ? tasks : [];
+      const open = arr.filter(t => t && t.status !== 'done').sort((a, b) => {
+        const ta = a.due_at ? new Date(a.due_at).getTime() : Infinity;
+        const tb = b.due_at ? new Date(b.due_at).getTime() : Infinity;
+        return ta - tb;
+      });
+      const done = arr.filter(t => t && t.status === 'done')
+        .sort((a, b) => new Date(b.done_at || 0) - new Date(a.done_at || 0));
+      const renderOne = (t, isDone) => {
+        const meta = TASK_TYPE_META[t.type] || TASK_TYPE_META.custom;
+        const title = (t.label || meta.label).replace(/</g, '&lt;');
+        if (isDone) {
+          return `<div class="task-item done">
+            <button class="task-check done" onclick="reopenTask('${dealId}','${t.id}')" title="Rouvrir — marquer comme pas terminée">✓</button>
+            <div class="task-body">
+              <div class="task-title">${meta.icon} ${title}</div>
+              <div class="task-due">Terminée${t.done_at ? ' · ' + formatShortDate(t.done_at) : ''} · <span class="task-reopen-link" onclick="reopenTask('${dealId}','${t.id}')">↩︎ rouvrir</span></div>
+            </div>
+            <button class="task-del" onclick="deleteTask('${dealId}','${t.id}')" title="Supprimer">✕</button>
+          </div>`;
+        }
+        const due = _taskDueInfo(t.due_at);
+        return `<div class="task-item ${due.cls}">
+          <button class="task-check" onclick="completeTask('${dealId}','${t.id}')" title="Marquer terminée">○</button>
+          <div class="task-body">
+            <div class="task-title">${meta.icon} ${title}</div>
+            <div class="task-due ${due.cls}">${due.text}</div>
+          </div>
+          <button class="task-del" onclick="deleteTask('${dealId}','${t.id}')" title="Supprimer">✕</button>
+        </div>`;
+      };
+      let html = open.length
+        ? open.map(t => renderOne(t, false)).join('')
+        : '<div style="font-size:0.74rem;color:var(--text-light);font-style:italic;margin-bottom:0.3rem">Aucune tâche en attente</div>';
+      if (done.length) {
+        html += `<span class="relance-history-link" onclick="toggleDoneTasks()">Voir terminées (${done.length})</span>
+          <div class="tasks-done-list" id="tasksDoneList">${done.map(t => renderOne(t, true)).join('')}</div>`;
+      }
+      return html;
+    }
+    function toggleDoneTasks() {
+      document.getElementById('tasksDoneList')?.classList.toggle('open');
+    }
+    function toggleSbSection(headerEl) {
+      headerEl.closest('.sb-section')?.classList.toggle('open');
+    }
+    function _refreshTasks(dealId) {
+      const wrap = document.getElementById('tasksWrap');
+      if (wrap) wrap.innerHTML = _renderTasks((dealMetadata[dealId] || {}).tasks, dealId);
+    }
+    function _onTaskTypeChange() {
+      // Les RDV se planifient sur une date/heure précise → on garde le datetime tel quel.
+      // Hook laissé pour d'éventuels ajustements futurs (placeholder du détail, etc.)
+    }
+    function _setTaskDue(daysFromNow) {
+      const input = document.getElementById('taskDue');
+      if (!input) return;
+      const d = new Date();
+      d.setDate(d.getDate() + daysFromNow);
+      d.setHours(10, 0, 0, 0);
+      input.value = _isoToLocalInput(d.toISOString());
+    }
+    function openTaskForm(dealId) {
+      const form = document.getElementById('taskForm');
+      if (!form) return;
+      form.classList.add('open');
+      const sel = document.getElementById('taskType');
+      if (sel) sel.value = 'call';
+      const lbl = document.getElementById('taskLabel');
+      if (lbl) lbl.value = '';
+      _setTaskDue(1);
+      setTimeout(() => lbl && lbl.focus(), 30);
+    }
+    function closeTaskForm() {
+      document.getElementById('taskForm')?.classList.remove('open');
+    }
+    async function submitTask(dealId) {
+      const type = document.getElementById('taskType').value;
+      const label = (document.getElementById('taskLabel').value || '').trim();
+      const dueVal = document.getElementById('taskDue').value;
+      const btn = document.getElementById('taskSubmitBtn');
+      btn.disabled = true;
+      btn.textContent = '…';
+      try {
+        const due_at = dueVal ? new Date(dueVal).toISOString() : null;
+        const res = await fetch(`/api/deals/${dealId}/task`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type, label, due_at }),
+        });
+        if (!res.ok) {
+          let msg = `HTTP ${res.status}`;
+          try { msg = (await res.json()).error || msg; } catch {}
+          throw new Error(msg);
+        }
+        const data = await res.json();
+        dealMetadata[dealId] = { ...(dealMetadata[dealId] || {}), tasks: data.tasks };
+        _refreshTasks(dealId);
+        closeTaskForm();
+        btn.disabled = false;
+        btn.textContent = 'Ajouter';
+      } catch (e) {
+        console.error('[task] ajout échoué :', e);
+        btn.textContent = 'Erreur';
+        btn.title = String(e && e.message || e);
+        setTimeout(() => { btn.disabled = false; btn.textContent = 'Ajouter'; }, 2500);
+      }
+    }
+    async function completeTask(dealId, taskId) {
+      try {
+        const res = await fetch(`/api/deals/${dealId}/task/${taskId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'done' }),
+        });
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        const m = { ...(dealMetadata[dealId] || {}), tasks: data.tasks };
+        if (data.relances) m.relances = data.relances;
+        if (data.notes) m.notes = data.notes;
+        if (data.next_meeting_at) m.next_meeting_at = data.next_meeting_at;
+        dealMetadata[dealId] = m;
+        _refreshTasks(dealId);
+        // Rafraîchit les blocs liés s'ils sont affichés (relances / notes / RDV)
+        const rWrap = document.getElementById('relanceLastWrap');
+        if (rWrap && data.relances) rWrap.innerHTML = _renderLastRelance(data.relances);
+        const nWrap = document.getElementById('notesLogWrap');
+        if (nWrap && data.notes) nWrap.innerHTML = _renderNotesLog(data.notes);
+        if (data.next_meeting_at) {
+          const d = findDealInPipeline(dealId);
+          if (d) _refreshNextMeetingField(d, dealMetadata[dealId]);
+        }
+        // Re-render kanban : le compteur "critique" a pu changer
+        renderKanban();
+      } catch (e) {}
+    }
+    async function deleteTask(dealId, taskId) {
+      try {
+        const res = await fetch(`/api/deals/${dealId}/task/${taskId}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        dealMetadata[dealId] = { ...(dealMetadata[dealId] || {}), tasks: data.tasks };
+        _refreshTasks(dealId);
+        if (document.getElementById('tasksModalOverlay')?.classList.contains('active')) renderTasksModal();
+      } catch (e) {}
+    }
+
+    // --- Modale globale : toutes les tâches de tous les deals, par échéance ---
+    function _dealNameLookup() {
+      const map = {};
+      if (typeof dashboardData !== 'undefined' && dashboardData && dashboardData.pipelineDeals) {
+        for (const [stage, deals] of Object.entries(dashboardData.pipelineDeals)) {
+          for (const d of deals) map[d.id] = { name: d.name, stage };
+        }
+      }
+      return map;
+    }
+    function openTasksModal() {
+      renderTasksModal();
+      document.getElementById('tasksModalOverlay').classList.add('active');
+    }
+    function _gtRow(t, isDone) {
+      const meta = TASK_TYPE_META[t.type] || TASK_TYPE_META.custom;
+      const title = (t.label || meta.label).replace(/</g, '&lt;');
+      const dealName = (t.dealName || '').replace(/</g, '&lt;');
+      const ai = t.assignee && ASSIGNEES[t.assignee];
+      const aDot = ai
+        ? `<span class="assignee-dot" style="background:${ai.color};width:13px;height:13px;font-size:0.52rem;margin-right:0.25rem;vertical-align:middle" title="Assigné à ${t.assignee}">${ai.initial}</span>`
+        : '';
+      const openSidebar = `document.getElementById('tasksModalOverlay').classList.remove('active'); openDealSidebar('${t.dealId}')`;
+      if (isDone) {
+        return `<div class="gt-row done">
+          <button class="task-check done" onclick="reopenTask('${t.dealId}','${t.id}')" title="Rouvrir — pas terminée">✓</button>
+          <div class="gt-body" onclick="${openSidebar}" style="cursor:pointer">
+            <div class="gt-title">${meta.icon} ${title}</div>
+            <div class="gt-meta">${aDot}${dealName}${t.stage ? ' · ' + t.stage : ''} — terminée${t.done_at ? ' ' + formatShortDate(t.done_at) : ''}</div>
+          </div>
+          <button class="gt-reopen" onclick="reopenTask('${t.dealId}','${t.id}')" title="Rouvrir — marquer comme pas terminée">↩︎</button>
+        </div>`;
+      }
+      const due = _taskDueInfo(t.due_at);
+      return `<div class="gt-row ${due.cls}">
+        <button class="task-check" onclick="completeTaskFromModal('${t.dealId}','${t.id}')" title="Marquer terminée">○</button>
+        <div class="gt-body" onclick="${openSidebar}" style="cursor:pointer">
+          <div class="gt-title">${meta.icon} ${title}</div>
+          <div class="gt-meta">${aDot}${dealName}${t.stage ? ' · ' + t.stage : ''}</div>
+        </div>
+        <div class="gt-due ${due.cls}">${due.text}</div>
+      </div>`;
+    }
+    let tasksModalAssigneeFilter = ''; // '' = tous, nom, ou '__none__'
+    function setTasksAssigneeFilter(name) {
+      tasksModalAssigneeFilter = name || '';
+      renderTasksModal();
+    }
+    function renderTasksModal() {
+      const lookup = _dealNameLookup();
+      const open = [], done = [];
+      for (const [dealId, meta] of Object.entries(dealMetadata || {})) {
+        const tasks = Array.isArray(meta && meta.tasks) ? meta.tasks : [];
+        const assignee = (meta && meta.assignee) || '';
+        // Filtre par assigné du deal
+        if (tasksModalAssigneeFilter === '__none__') { if (assignee) continue; }
+        else if (tasksModalAssigneeFilter && assignee !== tasksModalAssigneeFilter) continue;
+        for (const t of tasks) {
+          if (!t) continue;
+          const info = lookup[dealId] || { name: `Deal ${dealId}`, stage: '' };
+          const row = { ...t, dealId, dealName: info.name, stage: info.stage, assignee };
+          (t.status === 'done' ? done : open).push(row);
+        }
+      }
+      // Buckets chronologiques
+      const now = new Date();
+      const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const dayMs = 86400000;
+      const buckets = { overdue: [], today: [], week: [], later: [], none: [] };
+      for (const t of open) {
+        if (!t.due_at) { buckets.none.push(t); continue; }
+        const dd = new Date(t.due_at);
+        const startDue = new Date(dd.getFullYear(), dd.getMonth(), dd.getDate()).getTime();
+        if (startDue < startToday) buckets.overdue.push(t);
+        else if (startDue === startToday) buckets.today.push(t);
+        else if (startDue <= startToday + 7 * dayMs) buckets.week.push(t);
+        else buckets.later.push(t);
+      }
+      const byDue = (a, b) => (a.due_at ? new Date(a.due_at).getTime() : Infinity) - (b.due_at ? new Date(b.due_at).getTime() : Infinity);
+      Object.values(buckets).forEach(arr => arr.sort(byDue));
+      done.sort((a, b) => new Date(b.done_at || 0) - new Date(a.done_at || 0));
+
+      const section = (label, arr, cls) => arr.length
+        ? `<div class="gt-group-title ${cls || ''}">${label} <span class="sb-section-count">${arr.length}</span></div>${arr.map(t => _gtRow(t, false)).join('')}`
+        : '';
+
+      let body = '';
+      body += section('⏰ En retard', buckets.overdue, 'overdue');
+      body += section("Aujourd'hui", buckets.today, 'soon');
+      body += section('Cette semaine', buckets.week);
+      body += section('Plus tard', buckets.later);
+      body += section('Sans échéance', buckets.none);
+      if (!buckets.overdue.length && !buckets.today.length && !buckets.week.length && !buckets.later.length && !buckets.none.length) {
+        body = `<div style="text-align:center;padding:2rem 1rem;color:var(--text-secondary)">🎉 Aucune tâche en attente${tasksModalAssigneeFilter ? ' pour ce filtre' : ' sur l\'ensemble des deals'}.</div>`;
+      }
+      if (done.length) {
+        const recent = done.slice(0, 30);
+        body += `<div class="gt-group-title" style="margin-top:1rem">✓ Terminées récemment <span class="sb-section-count">${recent.length}</span></div>`;
+        body += recent.map(t => _gtRow(t, true)).join('');
+      }
+
+      const filterBar = `<div class="assignee-filter" id="tasksAssigneeFilter" style="margin-bottom:0.7rem">${_renderAssigneeFilterBar('tasksAssigneeFilter', tasksModalAssigneeFilter, 'setTasksAssigneeFilter')}</div>`;
+      document.getElementById('tasksModalBody').innerHTML = filterBar + body;
+      const totalOpen = open.length;
+      const sub = document.getElementById('tasksModalSubtitle');
+      if (sub) sub.textContent = `${totalOpen} tâche${totalOpen > 1 ? 's' : ''} à faire · classées par échéance${tasksModalAssigneeFilter && tasksModalAssigneeFilter !== '__none__' ? ' · ' + tasksModalAssigneeFilter : (tasksModalAssigneeFilter === '__none__' ? ' · non assignés' : '')}`;
+    }
+    function completeTaskFromModal(dealId, taskId) {
+      completeTask(dealId, taskId).then(() => renderTasksModal());
+    }
+    // Chips de planification rapide pour le formulaire tâche de la modale critique
+    function _setCriticalTaskDue(dealId, daysFromNow) {
+      const row = document.querySelector(`[data-critical-row="${dealId}"]`);
+      const input = row && row.querySelector('[data-field="task-due"]');
+      if (!input) return;
+      const d = new Date();
+      d.setDate(d.getDate() + daysFromNow);
+      d.setHours(10, 0, 0, 0);
+      input.value = _isoToLocalInput(d.toISOString());
+    }
+    // Rouvrir une tâche cochée par erreur (repasse en "à faire")
+    async function reopenTask(dealId, taskId) {
+      try {
+        const res = await fetch(`/api/deals/${dealId}/task/${taskId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'todo' }),
+        });
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        dealMetadata[dealId] = { ...(dealMetadata[dealId] || {}), tasks: data.tasks };
+        _refreshTasks(dealId);
+        if (document.getElementById('tasksModalOverlay')?.classList.contains('active')) renderTasksModal();
+        renderKanban();
+      } catch (e) {}
     }
 
     function openRelanceHistory(dealId) {
@@ -7871,29 +8067,9 @@
         updateForecastBar();
         render();
 
-        // 🎉 Célébration / XP / streak
-        if (outcome === 'closedwon') {
-          const xpGained = XP_REWARDS.deal_won_base + Math.round((dealAmount || 0) / 100) * XP_REWARDS.deal_won_per_100;
-          const levelBefore = gamiGetLevel(gamiState().xp).current;
-          recordAction('deal_won', { amount: dealAmount });
-          const levelAfter = gamiGetLevel(gamiState().xp).current;
-          const leveledUp = levelAfter.min > levelBefore.min;
-          checkWinAchievements({ amount: dealAmount });
-          celebrateWin({
-            name: dealName,
-            amount: dealAmount,
-            xp: xpGained,
-            leveledUp,
-            newLevel: leveledUp ? levelAfter : null,
-          });
-          // Refetch des données pour que la jauge d'objectif reflète le nouveau CA
-          if (typeof refreshData === 'function') {
-            refreshData().then(() => renderGamiBar()).catch(() => {});
-          } else {
-            setTimeout(renderGamiBar, 600);
-          }
-        } else {
-          recordAction('deal_lost');
+        // Refetch des données pour que les jauges reflètent le nouveau CA
+        if (outcome === 'closedwon' && typeof refreshData === 'function') {
+          refreshData().catch(() => {});
         }
       } catch {
         wonBtn.disabled = false;
@@ -8884,21 +9060,6 @@
           }
         }
         renderKanban();
-
-        // 🎮 XP : avance dans le pipeline principal seulement (no-op si Gamifier désactivé)
-        if (gamiEnabled()) {
-          const srcIdx = KANBAN_STAGES_ORDER.indexOf(sourceStage);
-          const dstIdx = KANBAN_STAGES_ORDER.indexOf(targetStage);
-          if (dstIdx > srcIdx && dstIdx !== -1) {
-            recordAction('stage_advance', { to: targetStage });
-          } else if (sourceStage === RELANCER_STAGE_LABEL && dstIdx !== -1) {
-            recordAction('stage_advance', { to: targetStage });
-            showAchievement({ icon: '♻️', title: 'Deal réactivé !', sub: targetStage, kind: 'milestone' });
-          } else {
-            bumpStreak();
-            renderGamiBar();
-          }
-        }
       } catch {
         if (card) card.classList.remove('kanban-saving');
         alert('Erreur lors du changement de stage');
@@ -10088,15 +10249,6 @@
       const mm = document.getElementById('modalMissions');
       if (mm) mm.addEventListener('click', function(e) { if (e.target === this) closeModalMissions(); });
 
-      // 🎮 Init gamification : applique la visibilité selon le toggle (OFF par défaut)
-      try { applyGamiVisibility(); } catch {}
-      try { renderGamiBar(); } catch (e) { /* DOM elts pas encore là, ok */ }
-      // Init icône son
-      try {
-        const s = gamiState();
-        const sb = document.getElementById('soundToggle');
-        if (sb) sb.textContent = s.soundOn ? '🔊' : '🔇';
-      } catch {}
     });
 
     function initAnalytics() {
