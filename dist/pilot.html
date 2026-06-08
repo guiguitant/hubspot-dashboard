@@ -3270,6 +3270,9 @@
         <button class="btn" id="themeToggle" onclick="toggleTheme()" title="Mode sombre" style="padding:0.4rem;color:var(--sidebar-text-secondary)">
           <svg id="themeIcon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1a7 7 0 1 0 0 14A5 5 0 0 1 8 1z"/></svg>
         </button>
+        <button class="btn" onclick="dashboardLogout()" title="Déconnexion" style="padding:0.4rem;color:var(--sidebar-text-secondary)">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 14H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h3M11 11l3-3-3-3M14 8H6"/></svg>
+        </button>
       </div>
     </nav>
 
@@ -5335,6 +5338,11 @@
       updateThemeIcon();
       // Re-render chart with correct colors
       if (dashboardData) render();
+    }
+
+    async function dashboardLogout() {
+      try { await fetch('/api/dashboard-logout', { method: 'POST' }); } catch (e) {}
+      window.location.href = '/';
     }
 
     function updateThemeIcon() {

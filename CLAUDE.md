@@ -29,6 +29,7 @@ Dual-stack LinkedIn prospecting & CRM management application.
 - Backend is CommonJS (`require`/`module.exports`) — no `import/export`
 
 ## Key Docs
+- `DASHBOARD_AUTH.md` - Dashboard auth (TOTP code only) protecting `/` and all dashboard `/api/*`; Prospector/Dispatch allowlisted
 - `AUTH_SETUP.md` - PIN-based authentication setup (birthdate PINs → JWT tokens)
 - `RLS_SETUP.md` - Row Level Security policies
 - `skill_prospector_V11.md` - Current Prospector API endpoints, status constants, workflow (Task 1 removed)

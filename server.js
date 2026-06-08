@@ -5,6 +5,8 @@ const http = require('http');
 const path = require('path');
 const AdmZip = require('adm-zip');
 const fs = require('fs');
+const crypto = require('crypto');
+const { authenticator } = require('otplib');
 const { execFile } = require('child_process');
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
@@ -54,6 +56,147 @@ const HUBSPOT_HOST = IS_EU ? 'api-eu1.hubapi.com' : 'api.hubapi.com';
 const IS_PAT = HUBSPOT_API_KEY.startsWith('pat-');
 
 app.use(express.json());
+
+// ============================================================
+// Authentification du dashboard pilote (mot de passe partagé + TOTP 2FA)
+// ------------------------------------------------------------
+// Protège la page dashboard (/) ET toutes ses routes /api.
+// Le Prospector et l'automatisation Dispatch gardent leur propre auth
+// (accountContext / X-Account-Id) — ils sont allowlistés ci-dessous.
+// ============================================================
+const DASHBOARD_TOTP_SECRET = process.env.DASHBOARD_TOTP_SECRET;
+const DASHBOARD_SESSION_SECRET = process.env.DASHBOARD_SESSION_SECRET;
+
+if (!DASHBOARD_TOTP_SECRET || !DASHBOARD_SESSION_SECRET) {
+  console.error('Auth dashboard incomplète : définissez DASHBOARD_TOTP_SECRET et DASHBOARD_SESSION_SECRET (voir DASHBOARD_AUTH.md).');
+  process.exit(1);
+}
+
+const DASHBOARD_COOKIE = 'dash_session';
+const DASHBOARD_SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12h
+
+// Surface Prospector / Dispatch : ne PAS gater (auth propre via accountContext).
+const PROSPECTOR_PREFIXES = [
+  '/prospector', '/campaigns',
+  '/api/accounts', '/api/prospector', '/api/sequences', '/api/prospects',
+  '/api/prospection', '/api/task-locks', '/api/dispatch', '/api/diagnostic',
+  '/api/admin', '/api/logs', '/api/emelia',
+];
+function isProspectorPath(p) {
+  return PROSPECTOR_PREFIXES.some(prefix =>
+    p === prefix || p.startsWith(prefix + '/') || p.startsWith(prefix + '-')
+  );
+}
+
+// --- Session signée (HMAC), sans dépendance cookie-parser ---
+function signDashboardSession(expMs) {
+  const payload = String(expMs);
+  const sig = crypto.createHmac('sha256', DASHBOARD_SESSION_SECRET).update(payload).digest('hex');
+  return payload + '.' + sig;
+}
+function verifyDashboardSession(token) {
+  if (!token || typeof token !== 'string') return false;
+  const idx = token.lastIndexOf('.');
+  if (idx < 0) return false;
+  const payload = token.slice(0, idx);
+  const sig = token.slice(idx + 1);
+  const expected = crypto.createHmac('sha256', DASHBOARD_SESSION_SECRET).update(payload).digest('hex');
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
+  const exp = Number(payload);
+  return Number.isFinite(exp) && Date.now() <= exp;
+}
+function readCookie(req, name) {
+  const header = req.headers.cookie;
+  if (!header) return null;
+  for (const part of header.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq < 0) continue;
+    if (part.slice(0, eq).trim() === name) return decodeURIComponent(part.slice(eq + 1).trim());
+  }
+  return null;
+}
+function hasDashboardSession(req) {
+  return verifyDashboardSession(readCookie(req, DASHBOARD_COOKIE));
+}
+function dashboardCookieString(value, maxAgeSec) {
+  const parts = [
+    `${DASHBOARD_COOKIE}=${encodeURIComponent(value)}`,
+    'HttpOnly', 'Path=/', 'SameSite=Lax', `Max-Age=${maxAgeSec}`,
+  ];
+  if (process.env.RENDER || process.env.NODE_ENV === 'production') parts.push('Secure');
+  return parts.join('; ');
+}
+
+// --- Anti brute-force : lockout simple en mémoire par IP ---
+const dashFailures = new Map();
+const DASH_MAX_FAILURES = 10;
+const DASH_LOCK_WINDOW_MS = 15 * 60 * 1000;
+function dashClientIp(req) {
+  const fwd = req.headers['x-forwarded-for'];
+  if (fwd) return String(fwd).split(',')[0].trim();
+  return req.ip || req.socket?.remoteAddress || 'unknown';
+}
+function dashIsLockedOut(ip) {
+  const e = dashFailures.get(ip);
+  if (!e) return false;
+  if (Date.now() - e.first > DASH_LOCK_WINDOW_MS) { dashFailures.delete(ip); return false; }
+  return e.count >= DASH_MAX_FAILURES;
+}
+function dashRecordFailure(ip) {
+  const e = dashFailures.get(ip) || { count: 0, first: Date.now() };
+  if (Date.now() - e.first > DASH_LOCK_WINDOW_MS) { e.count = 0; e.first = Date.now(); }
+  e.count++;
+  dashFailures.set(ip, e);
+}
+
+// --- Gate global : exige une session dashboard pour la page et les API dashboard ---
+function dashboardGate(req, res, next) {
+  const p = req.path;
+  // Endpoints du flow de login dashboard (toujours accessibles)
+  if (p === '/api/dashboard-login' || p === '/api/dashboard-logout' || p === '/api/dashboard-auth-status') return next();
+  // Prospector + Dispatch : auth propre
+  if (isProspectorPath(p)) return next();
+  // Assets statiques non sensibles (la page de login en a besoin)
+  if (/\.(css|js|mjs|map|svg|png|jpe?g|gif|webp|ico|woff2?|ttf|eot)$/i.test(p)) return next();
+  // Session valide → on passe
+  if (hasDashboardSession(req)) return next();
+  // Non authentifié
+  if (p.startsWith('/api/')) return res.status(401).json({ error: 'Authentification dashboard requise' });
+  return res.sendFile(path.join(__dirname, 'public', 'dashboard-login.html'));
+}
+app.use(dashboardGate);
+
+// POST /api/dashboard-login — vérifie le code TOTP, pose le cookie de session
+app.post('/api/dashboard-login', (req, res) => {
+  const ip = dashClientIp(req);
+  if (dashIsLockedOut(ip)) {
+    return res.status(429).json({ error: 'Trop de tentatives. Réessayez dans 15 minutes.' });
+  }
+  const { code } = req.body || {};
+  const okCode = typeof code === 'string' &&
+    authenticator.check(code.replace(/\s+/g, ''), DASHBOARD_TOTP_SECRET);
+  if (!okCode) {
+    dashRecordFailure(ip);
+    return res.status(401).json({ error: 'Code incorrect.' });
+  }
+  dashFailures.delete(ip);
+  const token = signDashboardSession(Date.now() + DASHBOARD_SESSION_TTL_MS);
+  res.setHeader('Set-Cookie', dashboardCookieString(token, DASHBOARD_SESSION_TTL_MS / 1000));
+  res.json({ ok: true });
+});
+
+// POST /api/dashboard-logout — efface le cookie de session
+app.post('/api/dashboard-logout', (req, res) => {
+  res.setHeader('Set-Cookie', `${DASHBOARD_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`);
+  res.json({ ok: true });
+});
+
+// GET /api/dashboard-auth-status — état de session (pour le front)
+app.get('/api/dashboard-auth-status', (req, res) => {
+  res.json({ authed: hasDashboardSession(req) });
+});
 
 // Route: / — Serve Releaf Pilot (main dashboard)
 app.get('/', (req, res) => {

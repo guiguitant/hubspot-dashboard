@@ -7,3 +7,6 @@ node_modules/
 # Local data files (CSV / Excel)
 *.csv
 *.xlsx
+
+# Scratch / secrets (QR 2FA, scripts de génération)
+tmp/

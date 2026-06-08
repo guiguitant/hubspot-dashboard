@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Releaf Pilot — Connexion</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --primary: #003D2E;
+      --primary-hover: #00523E;
+      --danger: #e03e3e;
+      --bg: #fbfbfa;
+      --card: #ffffff;
+      --text: #37352f;
+      --text-secondary: #787774;
+      --border: #e9e9e7;
+      --radius: 8px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --primary: #34d399;
+        --primary-hover: #2fc08a;
+        --danger: #f87171;
+        --bg: #191919;
+        --card: #252525;
+        --text: #ffffffde;
+        --text-secondary: #999999;
+        --border: #2e2e2e;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+      font-family: 'Poppins', system-ui, sans-serif;
+      background: var(--bg); color: var(--text);
+    }
+    .card {
+      width: 100%; max-width: 360px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 2rem 1.75rem;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.08);
+    }
+    .logo {
+      width: 44px; height: 44px; border-radius: 12px;
+      background: var(--primary);
+      display: flex; align-items: center; justify-content: center;
+      color: #fff; font-weight: 700; font-size: 1.2rem;
+      margin: 0 auto 1rem;
+    }
+    h1 { font-size: 1.15rem; font-weight: 600; text-align: center; margin: 0 0 0.25rem; }
+    .sub { text-align: center; color: var(--text-secondary); font-size: 0.85rem; margin: 0 0 1.5rem; }
+    label { display: block; font-size: 0.8rem; font-weight: 500; margin-bottom: 0.35rem; color: var(--text-secondary); }
+    input {
+      width: 100%; padding: 0.65rem 0.8rem;
+      border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--bg); color: var(--text);
+      font-family: inherit; font-size: 0.95rem; margin-bottom: 1rem;
+    }
+    input:focus { outline: none; border-color: var(--primary); }
+    #code { letter-spacing: 0.3em; text-align: center; font-size: 1.1rem; }
+    button {
+      width: 100%; padding: 0.7rem; border: none; border-radius: var(--radius);
+      background: var(--primary); color: #fff; font-family: inherit;
+      font-weight: 600; font-size: 0.95rem; cursor: pointer;
+      transition: background 0.15s;
+    }
+    button:hover:not(:disabled) { background: var(--primary-hover); }
+    button:disabled { opacity: 0.6; cursor: default; }
+    .error { color: var(--danger); font-size: 0.82rem; text-align: center; min-height: 1.1em; margin-top: 0.75rem; }
+  </style>
+</head>
+<body>
+  <form class="card" id="loginForm" autocomplete="off">
+    <div class="logo">R</div>
+    <h1>Releaf Pilot</h1>
+    <p class="sub">Code d'authentification</p>
+
+    <label for="code">Code à 6 chiffres</label>
+    <input type="text" id="code" inputmode="numeric" pattern="[0-9 ]*" maxlength="7"
+           autocomplete="one-time-code" placeholder="123456" required autofocus />
+
+    <button type="submit" id="submitBtn">Se connecter</button>
+    <div class="error" id="error"></div>
+  </form>
+
+  <script>
+    const form = document.getElementById('loginForm');
+    const errorEl = document.getElementById('error');
+    const btn = document.getElementById('submitBtn');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorEl.textContent = '';
+      btn.disabled = true;
+      btn.textContent = 'Vérification…';
+      try {
+        const res = await fetch('/api/dashboard-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code: document.getElementById('code').value,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.ok) {
+          window.location.href = '/';
+          return;
+        }
+        errorEl.textContent = data.error || 'Échec de la connexion.';
+      } catch (err) {
+        errorEl.textContent = 'Erreur réseau. Réessayez.';
+      }
+      btn.disabled = false;
+      btn.textContent = 'Se connecter';
+      document.getElementById('code').value = '';
+      document.getElementById('code').focus();
+    });
+  </script>
+</body>
+</html>
