@@ -5500,12 +5500,13 @@
     // --- Deal metadata (tags + proposal) ---
     let dealMetadata = {}; // map: deal_id -> { tags, proposal_sent_at }
 
-    const DEAL_TAGS = ['Bilan carbone', 'ACV', 'EPD', 'Web app'];
+    const DEAL_TAGS = ['Bilan carbone', 'ACV', 'EPD', 'Web app', 'Audit'];
     const TAG_STYLES = {
       'Bilan carbone': { bg: '#E8F5E9', color: '#2E7D32' },
       'ACV':           { bg: '#E3F2FD', color: '#1565C0' },
       'EPD':           { bg: '#FFF3E0', color: '#E65100' },
       'Web app':       { bg: '#F3E5F5', color: '#6A1B9A' },
+      'Audit':         { bg: '#E0F2F1', color: '#00695C' },
     };
 
     async function fetchDealMetadata() {
