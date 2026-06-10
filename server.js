@@ -639,6 +639,63 @@ app.get('/api/won-deals', async (req, res) => {
   }
 });
 
+// --- Deals gagnés sur une plage de dates (pour export), avec tags ---
+app.get('/api/won-deals/range', async (req, res) => {
+  const { from, to } = req.query;
+  if (!from || !to) return res.status(400).json({ error: 'from et to (YYYY-MM-DD) requis' });
+  const fromDate = new Date(`${from}T00:00:00.000Z`);
+  const toDate = new Date(`${to}T23:59:59.999Z`);
+  if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
+    return res.status(400).json({ error: 'dates invalides (format YYYY-MM-DD)' });
+  }
+  try {
+    const allDeals = [];
+    let after;
+    while (true) {
+      const body = {
+        filterGroups: [{
+          filters: [
+            { propertyName: 'hs_is_closed_won', operator: 'EQ', value: 'true' },
+            { propertyName: 'closedate', operator: 'GTE', value: fromDate.toISOString() },
+            { propertyName: 'closedate', operator: 'LTE', value: toDate.toISOString() },
+          ],
+        }],
+        properties: ['dealname', 'amount', 'closedate', 'createdate', 'pipeline'],
+        sorts: [{ propertyName: 'closedate', direction: 'DESCENDING' }],
+        limit: 100,
+      };
+      if (after) body.after = after;
+      const result = await hubspotSearch(body);
+      if (result.results) allDeals.push(...result.results);
+      if (result.paging && result.paging.next && result.paging.next.after) after = result.paging.next.after;
+      else break;
+    }
+    const filtered = allDeals.filter(d => !d.properties.pipeline || d.properties.pipeline === 'default');
+
+    // Jointure des tags (Supabase deal_metadata)
+    const { data: metaRows } = await supabaseAdmin.from('deal_metadata').select('deal_id, tags');
+    const tagsByDeal = {};
+    for (const r of metaRows || []) {
+      let t = r.tags;
+      if (typeof t === 'string') { try { t = JSON.parse(t); } catch { t = [t]; } }
+      tagsByDeal[String(r.deal_id)] = Array.isArray(t) ? t : (t ? [t] : []);
+    }
+
+    const deals = filtered.map(d => ({
+      id: d.id,
+      name: d.properties.dealname || 'Sans nom',
+      amount: parseFloat(d.properties.amount) || 0,
+      closedate: d.properties.closedate || null,
+      createdate: d.properties.createdate || null,
+      tags: tagsByDeal[String(d.id)] || [],
+    }));
+    const total = deals.reduce((s, d) => s + d.amount, 0);
+    res.json({ from, to, count: deals.length, total, deals });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/deals', async (req, res) => {
   const { name, amount, stage, closedate } = req.body;
   if (!name || !stage) return res.status(400).json({ error: 'Nom et stage requis' });
