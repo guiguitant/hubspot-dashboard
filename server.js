@@ -156,6 +156,8 @@ function dashboardGate(req, res, next) {
   const p = req.path;
   // Endpoints du flow de login dashboard (toujours accessibles)
   if (p === '/api/dashboard-login' || p === '/api/dashboard-logout' || p === '/api/dashboard-auth-status') return next();
+  // Pont CRM Canopy : auth Bearer dédiée (gérée dans le routeur), pas la session dashboard
+  if (p.startsWith('/api/releaf-deals')) return next();
   // Prospector + Dispatch : auth propre
   if (isProspectorPath(p)) return next();
   // Assets statiques non sensibles (la page de login en a besoin)
@@ -739,6 +741,132 @@ app.patch('/api/deals/:id', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// ============================================================================
+// API releaf-deals — pont CRM pour Canopy (agent de réponse cold email).
+// Contrat appelé par Canopy (src/lib/integrations/releaf-deals.ts), auth Bearer
+// dédiée (env CANOPY_API_TOKEN), distincte de la session dashboard TOTP.
+// Le DEAL est créé dans HubSpot ; notes / relances / tags / tâches vivent dans la
+// couche Supabase `deal_metadata`, comme le reste de Pilot.
+// ============================================================================
+function canopyAuth(req, res, next) {
+  const expected = process.env.CANOPY_API_TOKEN;
+  if (!expected) return res.status(503).json({ error: 'CANOPY_API_TOKEN non configuré côté serveur' });
+  const auth = req.headers.authorization || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+  if (token !== expected) return res.status(401).json({ error: 'Unauthorized' });
+  next();
+}
+
+// Append d'une valeur dans un champ tableau de deal_metadata (notes/relances/tasks).
+async function appendDealMetadata(dealId, field, value) {
+  const { data: existing, error: selErr } = await supabaseAdmin
+    .from('deal_metadata').select(field).eq('deal_id', dealId).maybeSingle();
+  if (selErr) throw new Error(selErr.message);
+  const arr = Array.isArray(existing?.[field]) ? existing[field] : [];
+  arr.push(value);
+  const { error: upErr } = await supabaseAdmin
+    .from('deal_metadata')
+    .upsert({ deal_id: dealId, [field]: arr, updated_at: new Date().toISOString() }, { onConflict: 'deal_id' });
+  if (upErr) throw new Error(upErr.message);
+  return arr;
+}
+
+// Associe un contact HubSpot (créé si absent) au deal — best-effort, non bloquant.
+async function associateContactByEmail(dealId, email, name, company) {
+  const search = await hubspotWrite('POST', '/crm/v3/objects/contacts/search', {
+    filterGroups: [{ filters: [{ propertyName: 'email', operator: 'EQ', value: email }] }],
+    properties: ['email'], limit: 1,
+  });
+  let contactId = search?.results?.[0]?.id;
+  if (!contactId) {
+    const props = { email };
+    if (name) { const [f, ...r] = String(name).trim().split(/\s+/); props.firstname = f; if (r.length) props.lastname = r.join(' '); }
+    if (company) props.company = company;
+    const created = await hubspotWrite('POST', '/crm/v3/objects/contacts', { properties: props });
+    contactId = created?.id;
+  }
+  if (!contactId) return;
+  await hubspotWrite('PUT', `/crm/v4/objects/deals/${dealId}/associations/default/contacts/${contactId}`, {});
+}
+
+// POST /api/releaf-deals/deals — crée le deal dans HubSpot + tags + association contact.
+app.post('/api/releaf-deals/deals', canopyAuth, async (req, res) => {
+  const { name, stage, contactEmail, contactName, company, tags } = req.body || {};
+  if (!name || !stage) return res.status(400).json({ error: 'name et stage requis' });
+  const stageId = STAGE_ID_MAP[stage];
+  if (!stageId) return res.status(400).json({ error: `stage inconnu: ${stage}` });
+  try {
+    const result = await hubspotWrite('POST', '/crm/v3/objects/deals', {
+      properties: { dealname: name, dealstage: stageId, pipeline: 'default' },
+    });
+    const dealId = result.id;
+    const meta = { deal_id: dealId, updated_at: new Date().toISOString() };
+    if (Array.isArray(tags) && tags.length) meta.tags = tags;
+    await supabaseAdmin.from('deal_metadata').upsert(meta, { onConflict: 'deal_id' });
+    if (contactEmail) {
+      associateContactByEmail(dealId, contactEmail, contactName, company).catch(
+        (e) => console.warn('releaf-deals: association contact échouée:', e.message)
+      );
+    }
+    res.json({ ok: true, dealId });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/releaf-deals/deals/:id/notes
+app.post('/api/releaf-deals/deals/:id/notes', canopyAuth, async (req, res) => {
+  const text = (req.body?.note || '').trim();
+  if (!text) return res.status(400).json({ error: 'note obligatoire' });
+  try {
+    await appendDealMetadata(req.params.id, 'notes', { at: new Date().toISOString(), text });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/releaf-deals/deals/:id/relances
+app.post('/api/releaf-deals/deals/:id/relances', canopyAuth, async (req, res) => {
+  const note = (req.body?.detail || 'Relance Canopy').trim() || 'Relance Canopy';
+  try {
+    await appendDealMetadata(req.params.id, 'relances', { type: 'email', at: new Date().toISOString(), note });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/releaf-deals/deals/:id/tags — fusion sans doublon
+app.post('/api/releaf-deals/deals/:id/tags', canopyAuth, async (req, res) => {
+  const { tags } = req.body || {};
+  if (!Array.isArray(tags)) return res.status(400).json({ error: 'tags doit être un tableau' });
+  try {
+    const id = req.params.id;
+    const { data: existing, error: selErr } = await supabaseAdmin
+      .from('deal_metadata').select('tags').eq('deal_id', id).maybeSingle();
+    if (selErr) throw new Error(selErr.message);
+    const merged = Array.from(new Set([...(Array.isArray(existing?.tags) ? existing.tags : []), ...tags]));
+    const { error: upErr } = await supabaseAdmin.from('deal_metadata')
+      .upsert({ deal_id: id, tags: merged, updated_at: new Date().toISOString() }, { onConflict: 'deal_id' });
+    if (upErr) throw new Error(upErr.message);
+    res.json({ ok: true, tags: merged });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/releaf-deals/deals/:id/tasks
+app.post('/api/releaf-deals/deals/:id/tasks', canopyAuth, async (req, res) => {
+  const { kind, title, due_date } = req.body || {};
+  const type = kind === 'meeting' ? 'meeting' : 'custom';
+  let dueIso = null;
+  if (due_date) { const d = new Date(due_date); if (!isNaN(d.getTime())) dueIso = d.toISOString(); }
+  const task = {
+    id: `${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`,
+    type, label: (title || '').trim(), due_at: dueIso, status: 'todo',
+    created_at: new Date().toISOString(), done_at: null,
+  };
+  try {
+    await appendDealMetadata(req.params.id, 'tasks', task);
+    res.json({ ok: true, task });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // --- Deal metadata (tags + proposal date, stored locally in Supabase) ---
