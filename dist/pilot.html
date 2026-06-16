@@ -1564,6 +1564,82 @@
       .kanban-board { grid-template-columns: 1fr; }
     }
 
+    /* --- Pipeline : bascule Kanban / Tableau --- */
+    .pipeline-view-toggle {
+      display: inline-flex;
+      gap: 2px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 2px;
+    }
+    .pv-btn {
+      font-size: 0.78rem;
+      font-weight: 600;
+      padding: 0.28rem 0.6rem;
+      border: none;
+      border-radius: calc(var(--radius) - 2px);
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.12s;
+    }
+    .pv-btn:hover { color: var(--text); }
+    .pv-btn.active { background: var(--bg); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+
+    /* --- Vue tableau des deals --- */
+    .deals-table-wrap { width: 100%; overflow-x: auto; }
+    table.deals-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+    .deals-table thead th {
+      position: sticky; top: 0;
+      background: var(--bg-secondary);
+      color: var(--text-secondary);
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      text-align: left;
+      padding: 0.45rem 0.6rem;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+      z-index: 1;
+    }
+    .deals-table tbody td {
+      padding: 0.4rem 0.6rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    .deals-table tbody tr:hover { background: var(--bg-secondary); }
+    .deals-table tbody tr.dt-critical { box-shadow: inset 3px 0 0 #d33; }
+    .dt-stage-group td {
+      background: var(--bg-secondary);
+      font-weight: 700;
+      font-size: 0.74rem;
+      color: var(--text);
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      padding: 0.5rem 0.6rem;
+    }
+    .dt-name { font-weight: 600; color: var(--text); cursor: pointer; }
+    .dt-name:hover { color: var(--primary); text-decoration: underline; }
+    .dt-tags { display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: center; min-width: 160px; }
+    .dt-amount { cursor: pointer; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .dt-amount:hover { text-decoration: underline; }
+    .dt-stage-select {
+      font-size: 0.78rem;
+      padding: 0.18rem 0.3rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg);
+      color: var(--text);
+      cursor: pointer;
+    }
+    .dt-proba { font-variant-numeric: tabular-nums; }
+
     /* --- Modal --- */
     .modal-overlay {
       display: none;
@@ -3441,8 +3517,15 @@
           <div class="section-title" style="margin-bottom:0">Pipeline &mdash; Deals en cours</div>
           <button class="new-deal-btn" onclick="openNewDealModal()">&#43; Nouveau deal</button>
           <button class="new-deal-btn" onclick="openTasksModal()" style="background:var(--bg);color:var(--text);border:1px solid var(--border)" title="Voir toutes les tâches, classées par échéance">&#128203; Toutes les tâches</button>
+          <div class="pipeline-view-toggle" id="pipelineViewToggle">
+            <button class="pv-btn active" data-pv="kanban" onclick="setPipelineView('kanban')" title="Vue Kanban">&#9783; Kanban</button>
+            <button class="pv-btn" data-pv="table" onclick="setPipelineView('table')" title="Vue tableau — éditer tags, stage, assigné sans ouvrir chaque deal">&#9776; Tableau</button>
+          </div>
         </div>
         <div style="display:flex;align-items:center;gap:1rem;font-size:0.8rem;color:var(--text-secondary);flex-wrap:wrap">
+          <input type="search" id="pipelineSearch" placeholder="🔍 Rechercher un deal…" oninput="setKanbanSearch(this.value)" autocomplete="off"
+            style="font-size:0.82rem;padding:0.3rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);min-width:200px">
+          <button class="new-deal-btn" onclick="openExportMenu(event)" style="background:var(--bg);color:var(--text);border:1px solid var(--border)" title="Exporter des deals au format Excel (.xlsx)">&#11015; Export</button>
           <div class="assignee-filter" id="assigneeFilter">
             <button class="af-btn active" data-af="" onclick="setKanbanAssigneeFilter('')">Tous</button>
             <button class="af-btn" data-af="Guillaume" onclick="setKanbanAssigneeFilter('Guillaume')" title="Deals de Guillaume"><span class="assignee-dot" style="background:#6940a5">G</span></button>
@@ -3470,6 +3553,7 @@
         <button class="btn" onclick="clearForecast()">Tout deselectionner</button>
       </div>
       <div class="kanban-board" id="kanbanBoard"></div>
+      <div class="deals-table-wrap" id="dealsTableView" style="display:none"></div>
     </div>
 
     <hr class="divider">
@@ -5500,12 +5584,22 @@
     // --- Deal metadata (tags + proposal) ---
     let dealMetadata = {}; // map: deal_id -> { tags, proposal_sent_at }
 
-    const DEAL_TAGS = ['Bilan carbone', 'ACV', 'EPD', 'Web app'];
+    // Tags "mission" : sélectionnables sur les cards ET le panneau de droite.
+    const DEAL_TAGS = ['Bilan carbone', 'ACV', 'EPD', 'Web app', 'Audit'];
+    // Tags "acquisition" : panneau de droite UNIQUEMENT (jamais sur les cards).
+    const ACQUISITION_TAGS = ['Prospection', 'Partenaire', 'Repeat', 'Réseau', 'Entrant'];
     const TAG_STYLES = {
       'Bilan carbone': { bg: '#E8F5E9', color: '#2E7D32' },
       'ACV':           { bg: '#E3F2FD', color: '#1565C0' },
       'EPD':           { bg: '#FFF3E0', color: '#E65100' },
       'Web app':       { bg: '#F3E5F5', color: '#6A1B9A' },
+      'Audit':         { bg: '#E0F2F1', color: '#00695C' },
+      // acquisition
+      'Prospection':   { bg: '#E8EAF6', color: '#3949AB' },
+      'Partenaire':    { bg: '#E0F7FA', color: '#00838F' },
+      'Repeat':        { bg: '#EFEBE9', color: '#6D4C41' },
+      'Réseau':        { bg: '#FCE4EC', color: '#AD1457' },
+      'Entrant':       { bg: '#FFF8E1', color: '#FF8F00' },
     };
 
     async function fetchDealMetadata() {
@@ -5564,6 +5658,20 @@
       const idx = tags.indexOf(tag);
       if (idx >= 0) tags.splice(idx, 1); else tags.push(tag);
       saveDealMetadata(dealId, { tags });
+    }
+
+    // Toggle d'un tag d'acquisition depuis le panneau de droite (panneau only).
+    // Met à jour le chip en place sans re-render complet du panneau.
+    function toggleAcquisitionTag(dealId, idx) {
+      const tag = ACQUISITION_TAGS[idx];
+      if (!tag) return;
+      const meta = dealMetadata[dealId] || {};
+      const tags = [...(meta.tags || [])];
+      const i = tags.indexOf(tag);
+      if (i >= 0) tags.splice(i, 1); else tags.push(tag);
+      saveDealMetadata(dealId, { tags });
+      const el = document.getElementById('acqchip-' + dealId + '-' + idx);
+      if (el) el.style.cssText = _acqChipStyle(tags.includes(tag), TAG_STYLES[tag] || {});
     }
 
     // --- Assignation d'un deal à une personne ---
@@ -5640,6 +5748,151 @@
       document.querySelectorAll('#assigneeFilter .af-btn').forEach(b =>
         b.classList.toggle('active', (b.dataset.af || '') === kanbanAssigneeFilter));
       renderKanban();
+    }
+
+    // --- Recherche de deals dans le pipeline (filtre par nom) ---
+    let kanbanSearchQuery = '';
+    function _dealMatchesSearch(d) {
+      if (!kanbanSearchQuery) return true;
+      return (d.name || '').toLowerCase().includes(kanbanSearchQuery);
+    }
+    function setKanbanSearch(q) {
+      kanbanSearchQuery = (q || '').trim().toLowerCase();
+      renderKanban();
+    }
+
+    // ===================== Export Excel (.xlsx) =====================
+    // SheetJS chargé à la demande (CDN) pour ne pas alourdir le chargement de la page.
+    function _loadSheetJS() {
+      if (window.XLSX) return Promise.resolve(window.XLSX);
+      return new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+        s.onload = () => resolve(window.XLSX);
+        s.onerror = () => reject(new Error('Échec du chargement de la librairie Excel (vérifie ta connexion).'));
+        document.head.appendChild(s);
+      });
+    }
+    function _downloadXlsx(rows, sheetName, filename) {
+      const ws = window.XLSX.utils.json_to_sheet(rows);
+      const wb = window.XLSX.utils.book_new();
+      window.XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
+      window.XLSX.writeFile(wb, filename);
+    }
+
+    function openExportMenu(e) {
+      e.stopPropagation();
+      closeExportMenu();
+      const rect = e.currentTarget.getBoundingClientRect();
+      const menu = document.createElement('div');
+      menu.className = 'tag-menu';
+      menu.id = 'exportMenu';
+      menu.style.top = (rect.bottom + 4) + 'px';
+      menu.style.left = rect.left + 'px';
+      menu.style.minWidth = '240px';
+      menu.style.padding = '0.5rem';
+      menu.onclick = (ev) => ev.stopPropagation();
+      menu.innerHTML = `
+        <div style="font-weight:700;font-size:0.7rem;color:var(--text-secondary);margin:0.2rem 0.3rem 0.35rem;letter-spacing:0.03em">DEALS GAGNÉS (.xlsx)</div>
+        <div class="tag-menu-item" onclick="exportWonPreset('month')">Ce mois-ci</div>
+        <div class="tag-menu-item" onclick="exportWonPreset('year')">Cette année</div>
+        <div class="tag-menu-item" onclick="exportWonPreset('lastyear')">Année dernière</div>
+        <div class="tag-menu-item" onclick="_toggleExportCustom()">Période personnalisée…</div>
+        <div id="exportCustom" style="display:none;padding:0.4rem 0.3rem 0.2rem">
+          <div style="display:flex;gap:0.3rem;align-items:center;margin-bottom:0.4rem">
+            <input type="date" id="exportFrom" style="flex:1;font-size:0.74rem;padding:0.2rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text)">
+            <span style="font-size:0.7rem">→</span>
+            <input type="date" id="exportTo" style="flex:1;font-size:0.74rem;padding:0.2rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text)">
+          </div>
+          <button class="new-deal-btn" style="width:100%;justify-content:center" onclick="_exportWonCustom()">Exporter cette période</button>
+        </div>
+        <div style="border-top:1px solid var(--border);margin:0.45rem 0"></div>
+        <div style="font-weight:700;font-size:0.7rem;color:var(--text-secondary);margin:0.2rem 0.3rem 0.35rem;letter-spacing:0.03em">PIPELINE OUVERT (.xlsx)</div>
+        <div class="tag-menu-item" onclick="exportOpenPipeline()">Exporter le pipeline (filtres actuels)</div>
+      `;
+      document.body.appendChild(menu);
+      setTimeout(() => document.addEventListener('click', closeExportMenu, { once: true }), 0);
+    }
+    function closeExportMenu() { const m = document.getElementById('exportMenu'); if (m) m.remove(); }
+    function _toggleExportCustom() {
+      const c = document.getElementById('exportCustom');
+      if (c) c.style.display = c.style.display === 'none' ? 'block' : 'none';
+    }
+
+    function exportWonPreset(kind) {
+      const now = new Date();
+      const y = now.getFullYear();
+      const pad = (n) => String(n).padStart(2, '0');
+      if (kind === 'month') {
+        const m = now.getMonth();
+        const from = `${y}-${pad(m + 1)}-01`;
+        const to = new Date(y, m + 1, 0).toISOString().slice(0, 10);
+        exportWonPeriod(from, to, `${y}-${pad(m + 1)}`);
+      } else if (kind === 'year') {
+        exportWonPeriod(`${y}-01-01`, `${y}-12-31`, String(y));
+      } else if (kind === 'lastyear') {
+        exportWonPeriod(`${y - 1}-01-01`, `${y - 1}-12-31`, String(y - 1));
+      }
+    }
+    function _exportWonCustom() {
+      const from = document.getElementById('exportFrom').value;
+      const to = document.getElementById('exportTo').value;
+      if (!from || !to) { alert('Choisis une date de début et de fin.'); return; }
+      if (from > to) { alert('La date de début doit précéder la date de fin.'); return; }
+      exportWonPeriod(from, to, `${from}_${to}`);
+    }
+
+    async function exportWonPeriod(from, to, label) {
+      closeExportMenu();
+      try {
+        await _loadSheetJS();
+        const res = await fetch(`/api/won-deals/range?from=${from}&to=${to}`);
+        if (!res.ok) throw new Error('La récupération des deals gagnés a échoué.');
+        const data = await res.json();
+        if (!data.deals || !data.deals.length) { alert(`Aucun deal gagné entre ${from} et ${to}.`); return; }
+        const rows = data.deals.map(d => ({
+          'Deal': d.name,
+          'Montant (€)': d.amount,
+          'Date de clôture': d.closedate ? new Date(d.closedate).toLocaleDateString('fr-FR') : '',
+          'Date de création': d.createdate ? new Date(d.createdate).toLocaleDateString('fr-FR') : '',
+          'Tags': (d.tags || []).join(', '),
+        }));
+        rows.push({ 'Deal': `TOTAL (${data.count})`, 'Montant (€)': data.total, 'Date de clôture': '', 'Date de création': '', 'Tags': '' });
+        _downloadXlsx(rows, 'Deals gagnés', `deals-gagnes-${label}.xlsx`);
+      } catch (e) {
+        alert('Erreur export : ' + e.message);
+      }
+    }
+
+    async function exportOpenPipeline() {
+      closeExportMenu();
+      try {
+        await _loadSheetJS();
+        if (!dashboardData || !dashboardData.pipelineDeals) { alert('Pipeline non chargé.'); return; }
+        const rows = [];
+        for (const stageName of [...KANBAN_STAGES_ORDER, RELANCER_STAGE_LABEL]) {
+          let deals = dashboardData.pipelineDeals[stageName] || [];
+          if (kanbanAssigneeFilter) deals = deals.filter(d => _dealMatchesAssignee(d.id));
+          if (kanbanSearchQuery) deals = deals.filter(_dealMatchesSearch);
+          for (const d of deals) {
+            const meta = dealMetadata[d.id] || {};
+            rows.push({
+              'Deal': d.name,
+              'Stage': stageName,
+              'Montant (€)': d.amount,
+              'Assigné': meta.assignee || '',
+              'Tags': (meta.tags || []).join(', '),
+              'Créé le': d.createdate ? new Date(d.createdate).toLocaleDateString('fr-FR') : '',
+            });
+          }
+        }
+        if (!rows.length) { alert('Aucun deal à exporter (avec les filtres actuels).'); return; }
+        const total = rows.reduce((s, r) => s + (r['Montant (€)'] || 0), 0);
+        rows.push({ 'Deal': `TOTAL (${rows.length})`, 'Stage': '', 'Montant (€)': total, 'Assigné': '', 'Tags': '', 'Créé le': '' });
+        _downloadXlsx(rows, 'Pipeline ouvert', `pipeline-ouvert-${new Date().toISOString().slice(0, 10)}.xlsx`);
+      } catch (e) {
+        alert('Erreur export : ' + e.message);
+      }
     }
     function _renderAssigneeFilterBar(containerId, currentVal, onclickFn) {
       const tous = `<button class="af-btn${!currentVal ? ' active' : ''}" data-af="" onclick="${onclickFn}('')">Tous</button>`;
@@ -6322,7 +6575,8 @@
       col.classList.toggle('collapsed', !relancerColumnOpen);
 
       const allRelancer = (dashboardData && dashboardData.pipelineDeals && dashboardData.pipelineDeals[RELANCER_STAGE_LABEL]) || [];
-      const deals = kanbanAssigneeFilter ? allRelancer.filter(d => _dealMatchesAssignee(d.id)) : allRelancer;
+      let deals = kanbanAssigneeFilter ? allRelancer.filter(d => _dealMatchesAssignee(d.id)) : allRelancer;
+      if (kanbanSearchQuery) deals = deals.filter(_dealMatchesSearch);
       const total = deals.reduce((s, d) => s + d.amount, 0);
 
       if (!relancerColumnOpen) {
@@ -6440,9 +6694,10 @@
 
       for (const stageName of KANBAN_STAGES_ORDER) {
         const allStageDeals = dashboardData.pipelineDeals[stageName] || [];
-        const deals = kanbanAssigneeFilter
+        let deals = kanbanAssigneeFilter
           ? allStageDeals.filter(d => _dealMatchesAssignee(d.id))
           : allStageDeals;
+        if (kanbanSearchQuery) deals = deals.filter(_dealMatchesSearch);
         const total = deals.reduce((s, d) => s + d.amount, 0);
 
         html += `<div class="kanban-column" data-stage="${stageName}"
@@ -6518,7 +6773,7 @@
             : '';
 
           const tagsHtml = `<div class="kanban-card-tags" onclick="event.stopPropagation()">${
-            tags.map(t => {
+            tags.filter(t => !ACQUISITION_TAGS.includes(t)).map(t => {
               const s = TAG_STYLES[t] || { bg: '#eee', color: '#555' };
               return `<span class="deal-tag" style="background:${s.bg};color:${s.color}" onclick="toggleTag('${deal.id}','${t}')">${t} ×</span>`;
             }).join('')
@@ -6578,6 +6833,151 @@
       }
 
       updateForecastBar();
+      if (pipelineViewMode === 'table') renderDealsTable();
+    }
+
+    // --- Bascule Kanban / Tableau ---
+    let pipelineViewMode = 'kanban';
+    function setPipelineView(mode) {
+      pipelineViewMode = (mode === 'table') ? 'table' : 'kanban';
+      document.querySelectorAll('#pipelineViewToggle .pv-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.pv === pipelineViewMode));
+      const board = document.getElementById('kanbanBoard');
+      const table = document.getElementById('dealsTableView');
+      if (pipelineViewMode === 'table') {
+        board.style.display = 'none';
+        table.style.display = 'block';
+        renderDealsTable();
+      } else {
+        table.style.display = 'none';
+        board.style.display = '';
+      }
+    }
+
+    // Vue tableau : éditer tags / stage / assigné / montant en ligne, sans ouvrir chaque deal.
+    function renderDealsTable() {
+      const wrap = document.getElementById('dealsTableView');
+      if (!wrap || !dashboardData || !dashboardData.pipelineDeals) return;
+
+      let rows = '';
+      for (const stageName of KANBAN_STAGES_ORDER) {
+        const allStageDeals = dashboardData.pipelineDeals[stageName] || [];
+        let deals = kanbanAssigneeFilter
+          ? allStageDeals.filter(d => _dealMatchesAssignee(d.id))
+          : allStageDeals;
+        if (kanbanSearchQuery) deals = deals.filter(_dealMatchesSearch);
+        if (!deals.length) continue;
+
+        const total = deals.reduce((s, d) => s + d.amount, 0);
+        rows += `<tr class="dt-stage-group"><td colspan="7">${stageName} &middot; ${deals.length} &middot; ${formatEuro(total)}</td></tr>`;
+
+        for (const deal of deals) {
+          const meta = dealMetadata[deal.id] || {};
+          const tags = meta.tags || [];
+          const crit = computeDealCriticality(deal, meta);
+
+          const tagChips = tags.map(t => {
+            const s = TAG_STYLES[t] || { bg: '#eee', color: '#555' };
+            return `<span class="deal-tag" style="background:${s.bg};color:${s.color}" onclick="toggleTag('${deal.id}','${t}')" title="Retirer ce tag">${t} ×</span>`;
+          }).join('');
+          const addBtn = `<span class="deal-tag-add" onclick="openTableTagMenu(event,'${deal.id}')" title="Ajouter un tag">+</span>`;
+
+          const stageSelect = `<select class="dt-stage-select" onchange="changeDealStage('${deal.id}', this.value)" onclick="event.stopPropagation()">${
+            KANBAN_STAGES_ORDER.map(s => `<option value="${s}"${s === stageName ? ' selected' : ''}>${s}</option>`).join('')
+          }</select>`;
+
+          let probaClass = 'proba-low';
+          if (deal.probability >= 70) probaClass = 'proba-high';
+          else if (deal.probability >= 50) probaClass = 'proba-mid';
+
+          rows += `<tr class="${crit.critical ? 'dt-critical' : ''}" data-deal-id="${deal.id}">
+            <td><div class="kanban-card-forecast-cb${selectedDealIds.has(deal.id) ? ' checked' : ''}" onclick="toggleDealForecast(event,'${deal.id}')" title="Ajouter au forecast">&#10003;</div></td>
+            <td><span class="dt-name" onclick="openDealSidebar('${deal.id}')" title="Ouvrir le détail">${deal.name}</span></td>
+            <td>${stageSelect}</td>
+            <td><span class="dt-amount" onclick="startEditAmount(event, this, '${deal.id}', ${deal.amount})" title="Cliquer pour modifier">${formatEuro(deal.amount)}</span></td>
+            <td><span class="kanban-card-proba ${probaClass} dt-proba">${deal.probability}%</span></td>
+            <td><div class="dt-tags">${tagChips}${addBtn}</div></td>
+            <td>${assigneeAvatarHtml(deal.id, meta.assignee)}</td>
+          </tr>`;
+        }
+      }
+
+      if (!rows) {
+        wrap.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-secondary)">Aucun deal ne correspond aux filtres.</div>`;
+        return;
+      }
+
+      wrap.innerHTML = `<table class="deals-table">
+        <thead><tr>
+          <th></th>
+          <th>Deal</th>
+          <th>Stage</th>
+          <th>Montant</th>
+          <th>Proba</th>
+          <th>Tags</th>
+          <th>Assigné</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+    }
+
+    // Menu de tags pour la vue tableau : tags mission + acquisition réunis.
+    function openTableTagMenu(e, dealId) {
+      e.stopPropagation();
+      closeTagMenu();
+      tagMenuDealId = dealId;
+      const currentTags = (dealMetadata[dealId] || {}).tags || [];
+      const rect = e.target.getBoundingClientRect();
+      const menu = document.createElement('div');
+      menu.className = 'tag-menu';
+      menu.id = 'tagMenu';
+      menu.style.top = (rect.bottom + 4) + 'px';
+      menu.style.left = rect.left + 'px';
+      const groups = [['Mission', DEAL_TAGS], ['Acquisition', ACQUISITION_TAGS]];
+      for (const [label, list] of groups) {
+        const head = document.createElement('div');
+        head.style.cssText = 'padding:0.25rem 0.7rem;font-size:0.62rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-secondary)';
+        head.textContent = label;
+        menu.appendChild(head);
+        for (const tag of list) {
+          const style = TAG_STYLES[tag] || { color: '#555' };
+          const active = currentTags.includes(tag);
+          const item = document.createElement('div');
+          item.className = 'tag-menu-item' + (active ? ' active' : '');
+          item.innerHTML = `<span class="tag-menu-dot" style="background:${style.color}"></span>${tag}${active ? ' ✓' : ''}`;
+          item.onclick = (ev) => { ev.stopPropagation(); toggleTag(dealId, tag); closeTagMenu(); };
+          menu.appendChild(item);
+        }
+      }
+      document.body.appendChild(menu);
+      setTimeout(() => document.addEventListener('click', closeTagMenu, { once: true }), 0);
+    }
+
+    // Changement de stage depuis le <select> de la vue tableau (même API que le drag&drop).
+    async function changeDealStage(dealId, targetStage) {
+      let sourceStage = null;
+      for (const [stage, deals] of Object.entries(dashboardData.pipelineDeals)) {
+        if (deals.some(d => d.id === dealId)) { sourceStage = stage; break; }
+      }
+      if (!sourceStage || sourceStage === targetStage) return;
+      try {
+        await fetch(`/api/deals/${dealId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stage: targetStage }),
+        }).then(r => { if (!r.ok) throw new Error(); });
+        const deals = dashboardData.pipelineDeals[sourceStage];
+        const idx = deals.findIndex(d => d.id === dealId);
+        if (idx !== -1) {
+          const [deal] = deals.splice(idx, 1);
+          deal.stageEnteredAt = new Date().toISOString();
+          dashboardData.pipelineDeals[targetStage].push(deal);
+        }
+        renderKanban();
+      } catch {
+        alert('Erreur lors du changement de stage');
+        renderKanban();
+      }
     }
 
     // --- Analyse des tags (donuts) ---
@@ -7350,11 +7750,25 @@
       </div>`).join('');
     }
 
+    function _acqChipStyle(active, s) {
+      return (active
+        ? `background:${s.bg};color:${s.color};border:1px solid ${s.color}33;`
+        : 'background:#f4f4f5;color:#9ca3af;border:1px solid transparent;')
+        + 'cursor:pointer;padding:0.2rem 0.6rem;border-radius:999px;font-size:0.72rem;font-weight:600;user-select:none';
+    }
+
     function renderSidebarBody(deal, meta) {
       const tags = meta.tags || [];
-      const tagsHtml = tags.length
-        ? tags.map(t => { const s = TAG_STYLES[t] || {}; return `<span class="deal-tag" style="background:${s.bg||'#eee'};color:${s.color||'#555'}">${t}</span>`; }).join('')
+      // Tags "mission" uniquement (on exclut l'acquisition, affichée à part)
+      const missionTags = tags.filter(t => !ACQUISITION_TAGS.includes(t));
+      const tagsHtml = missionTags.length
+        ? missionTags.map(t => { const s = TAG_STYLES[t] || {}; return `<span class="deal-tag" style="background:${s.bg||'#eee'};color:${s.color||'#555'}">${t}</span>`; }).join('')
         : '<span style="color:var(--text-secondary);font-size:0.8rem">Aucun tag</span>';
+      // Chips d'acquisition cliquables (toggle)
+      const acqHtml = ACQUISITION_TAGS.map((t, i) => {
+        const s = TAG_STYLES[t] || {};
+        return `<span id="acqchip-${deal.id}-${i}" onclick="toggleAcquisitionTag('${deal.id}',${i})" style="${_acqChipStyle(tags.includes(t), s)}">${t}</span>`;
+      }).join('');
 
       const closedateVal = deal.closedate ? deal.closedate.slice(0, 10) : '';
       const createdStr = deal.createdate ? new Date(deal.createdate).toLocaleDateString('fr-FR') : '—';
@@ -7513,6 +7927,11 @@
             <div class="deal-sidebar-field">
               <div class="deal-sidebar-label">Tags</div>
               <div style="display:flex;flex-wrap:wrap;gap:0.3rem">${tagsHtml}</div>
+            </div>
+
+            <div class="deal-sidebar-field">
+              <div class="deal-sidebar-label">Acquisition</div>
+              <div style="display:flex;flex-wrap:wrap;gap:0.3rem">${acqHtml}</div>
             </div>
 
             <div style="display:flex;gap:1.5rem">
