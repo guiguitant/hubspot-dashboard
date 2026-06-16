@@ -869,6 +869,75 @@ app.post('/api/releaf-deals/deals/:id/tasks', canopyAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/releaf-deals/deals?tag=prospection — liste LECTURE SEULE des deals
+// portant un tag donné, enrichis du stage / montant HubSpot. Sert le suivi closing
+// dans Canopy (écran /closing, suivi de Léo). Aucune écriture.
+app.get('/api/releaf-deals/deals', canopyAuth, async (req, res) => {
+  const tag = (req.query.tag || 'prospection').toString().trim();
+  try {
+    // 1) deals taggés (métadonnées locales Supabase)
+    const { data: metaRows, error } = await supabaseAdmin
+      .from('deal_metadata')
+      .select('deal_id, tags, relances, tasks, next_meeting_at')
+      .contains('tags', [tag]);
+    if (error) throw new Error(error.message);
+    const metas = metaRows || [];
+    if (!metas.length) return res.json({ tag, deals: [] });
+
+    // 2) propriétés HubSpot en batch (stage, montant, dates) — 100 ids max / appel
+    const ids = metas.map((m) => m.deal_id);
+    const props = ['dealname', 'amount', 'dealstage', 'closedate', 'createdate', 'hs_is_closed', 'hs_is_closed_won'];
+    const hsById = {};
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100);
+      const batch = await hubspotWrite('POST', '/crm/v3/objects/deals/batch/read', {
+        properties: props,
+        inputs: chunk.map((id) => ({ id })),
+      });
+      for (const d of (batch?.results || [])) hsById[d.id] = d.properties || {};
+    }
+
+    const stageLabel = {};
+    const stageProb = {};
+    for (const s of KANBAN_STAGES) { stageLabel[s.id] = s.label; stageProb[s.id] = s.probability; }
+    stageLabel['closedwon'] = 'Gagné';
+    stageLabel['closedlost'] = 'Perdu';
+
+    const deals = metas
+      .map((m) => {
+        const p = hsById[m.deal_id];
+        if (!p) return null; // deal supprimé dans HubSpot → ignoré
+        const relances = Array.isArray(m.relances) ? m.relances : [];
+        const tasks = Array.isArray(m.tasks) ? m.tasks : [];
+        const lastRelance = relances.length ? relances[relances.length - 1] : null;
+        const name = p.dealname || '';
+        return {
+          dealId: m.deal_id,
+          name,
+          company: name.includes(' – ') ? name.split(' – ')[0] : null,
+          stageId: p.dealstage || null,
+          stage: stageLabel[p.dealstage] || p.dealstage || '',
+          probability: stageProb[p.dealstage] ?? null,
+          amount: p.amount ? parseFloat(p.amount) : null,
+          isClosed: p.hs_is_closed === 'true',
+          isWon: p.hs_is_closed_won === 'true',
+          createdAt: p.createdate || null,
+          closeDate: p.closedate || null,
+          lastRelanceAt: lastRelance?.at || null,
+          relanceCount: relances.length,
+          nextMeetingAt: m.next_meeting_at || null,
+          openTasks: tasks.filter((t) => t.status !== 'done').length,
+          tags: Array.isArray(m.tags) ? m.tags : [],
+        };
+      })
+      .filter(Boolean);
+
+    res.json({ tag, deals });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // --- Deal metadata (tags + proposal date, stored locally in Supabase) ---
 
 app.get('/api/deals/metadata', async (req, res) => {
