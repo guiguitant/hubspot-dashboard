@@ -874,14 +874,23 @@ app.post('/api/releaf-deals/deals/:id/tasks', canopyAuth, async (req, res) => {
 // dans Canopy (écran /closing, suivi de Léo). Aucune écriture.
 app.get('/api/releaf-deals/deals', canopyAuth, async (req, res) => {
   const tag = (req.query.tag || 'prospection').toString().trim();
+  const tagLc = tag.toLowerCase();
   try {
-    // 1) deals taggés (métadonnées locales Supabase)
-    const { data: metaRows, error } = await supabaseAdmin
+    // 1) deals taggés. NB : en prod `tags` peut être stocké en chaîne JSON et pas
+    // en TEXT[] → on charge tout et on normalise/filtre en JS (même pattern que
+    // /api/won-deals/range), au lieu d'un .contains() array qui ne matcherait pas.
+    const { data: allRows, error } = await supabaseAdmin
       .from('deal_metadata')
-      .select('deal_id, tags, relances, tasks, next_meeting_at')
-      .contains('tags', [tag]);
+      .select('deal_id, tags, relances, tasks, next_meeting_at');
     if (error) throw new Error(error.message);
-    const metas = metaRows || [];
+    const normTags = (raw) => {
+      let t = raw;
+      if (typeof t === 'string') { try { t = JSON.parse(t); } catch { t = [t]; } }
+      return Array.isArray(t) ? t : (t ? [t] : []);
+    };
+    const metas = (allRows || [])
+      .map((r) => ({ ...r, _tags: normTags(r.tags) }))
+      .filter((r) => r._tags.some((x) => String(x).toLowerCase() === tagLc));
     if (!metas.length) return res.json({ tag, deals: [] });
 
     // 2) propriétés HubSpot en batch (stage, montant, dates) — 100 ids max / appel
@@ -927,7 +936,7 @@ app.get('/api/releaf-deals/deals', canopyAuth, async (req, res) => {
           relanceCount: relances.length,
           nextMeetingAt: m.next_meeting_at || null,
           openTasks: tasks.filter((t) => t.status !== 'done').length,
-          tags: Array.isArray(m.tags) ? m.tags : [],
+          tags: m._tags,
         };
       })
       .filter(Boolean);
