@@ -499,6 +499,32 @@
     .kpi-tooltip-content .tt-row { display: flex; justify-content: space-between; gap: 1rem; padding: 0.15rem 0; }
     .kpi-tooltip-content .tt-row strong { font-weight: 600; }
 
+    /* Point d'info ⓘ inline : ouvre l'infobulle au survol/focus du point uniquement (pas de la carte) */
+    .info-tip { position: relative; display: inline-block; margin-left: 0.15rem; }
+    .info-tip-dot { color: var(--text-secondary); cursor: help; font-style: normal; }
+    /* Le popup : ces propriétés n'existaient que sous .kpi-tooltip-wrapper, on les redonne ici */
+    .info-tip .kpi-tooltip-content {
+      display: none;
+      position: absolute;
+      top: calc(100% + 0.4rem);
+      left: 0;
+      z-index: 100;
+      min-width: 280px;
+      max-width: 360px;
+      padding: 0.8rem 1rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+      font-size: 0.82rem;
+      line-height: 1.5;
+      color: var(--text);
+      white-space: normal;
+      text-transform: none;
+    }
+    .info-tip:hover .kpi-tooltip-content,
+    .info-tip:focus-within .kpi-tooltip-content { display: block; }
+
     .kpi-positive { color: var(--success) !important; }
     .kpi-negative { color: var(--danger) !important; }
 
@@ -3816,6 +3842,15 @@
         <div class="kpi-label">Solde bancaire <span class="kpi-unit">TTC</span></div>
         <div class="kpi-value" id="tresoKpiTreso">--</div>
         <div class="kpi-sub" id="tresoKpiTresoSub"></div>
+        <!-- Trésorerie nette de l'avance remboursable (BPI) — affichée seulement si une avance reste à rembourser.
+             L'infobulle de détail s'ouvre au survol du point d'info ⓘ uniquement (pas de toute la carte). -->
+        <div class="kpi-sub" id="tresoKpiNetteRow" style="display:none;margin-top:0.35rem;padding-top:0.35rem;border-top:1px solid var(--border)">
+          Tréso nette : <strong id="tresoKpiNette" style="font-weight:600">--</strong>
+          <span class="info-tip">
+            <span class="info-tip-dot" aria-label="Détail du calcul" tabindex="0">&#9432;</span>
+            <span class="kpi-tooltip-content" id="tresoNetteTooltip"></span>
+          </span>
+        </div>
       </div>
       <div class="kpi-block" onclick="openFacturesImpayeesModal()" style="cursor:pointer">
         <div class="kpi-label">A encaisser <span class="kpi-unit">TTC</span></div>
@@ -11895,6 +11930,33 @@
       soldeEl.textContent = solde != null ? formatEuro(solde) : 'N/A';
       soldeEl.style.color = (solde != null && solde < 0) ? 'var(--danger)' : '';
       document.getElementById('tresoKpiTresoSub').textContent = 'Compte Qonto';
+
+      // Trésorerie nette de l'avance remboursable (BPI) : solde bancaire − capital restant dû.
+      // Indicateur "net cash" : le cash réel une fois l'avance remboursable déduite.
+      // On n'affiche la ligne que s'il reste effectivement une avance à rembourser.
+      const avanceRestante = tresoData.avanceRemboursableRestante || 0;
+      const netteRow = document.getElementById('tresoKpiNetteRow');
+      if (solde != null && avanceRestante > 0) {
+        const tresoNette = solde - avanceRestante;
+        const netteEl = document.getElementById('tresoKpiNette');
+        netteEl.textContent = formatEuro(tresoNette);
+        netteEl.style.color = tresoNette < 0 ? 'var(--danger)' : '';
+        // Détail du calcul dans l'infobulle (au survol du point ⓘ)
+        const recue = tresoData.avanceTotaleRecue || 0;
+        const remb = tresoData.avanceDejaRemboursee || 0;
+        let tip = '<div class="tt-formula">Solde bancaire − avance remboursable restante</div>';
+        tip += '<div class="tt-row"><span>Solde bancaire (Qonto)</span><span>' + formatEuro(solde) + '</span></div>';
+        tip += '<div class="tt-row"><span>− Avance remboursable restante</span><span>' + formatEuro(avanceRestante) + '</span></div>';
+        tip += '<div class="tt-row"><strong>Trésorerie nette</strong><strong>' + formatEuro(tresoNette) + '</strong></div>';
+        tip += '<div class="tt-section">Détail de l\'avance (BPI)</div>';
+        tip += '<div class="tt-row"><span>Total encaissé</span><span>' + formatEuro(recue) + '</span></div>';
+        tip += '<div class="tt-row"><span>Déjà remboursé</span><span>' + formatEuro(remb) + '</span></div>';
+        tip += '<div class="tt-row"><strong>Reste à rembourser</strong><strong>' + formatEuro(avanceRestante) + '</strong></div>';
+        document.getElementById('tresoNetteTooltip').innerHTML = tip;
+        netteRow.style.display = 'block';
+      } else {
+        netteRow.style.display = 'none';
+      }
 
       // A encaisser
       const aEncaisser = tresoData.totalAEncaisser || 0;

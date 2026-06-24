@@ -5120,6 +5120,27 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
     }
   }
 
+  // --- Avance remboursable : capital restant dû (pour la trésorerie nette de dette) ---
+  // Une avance remboursable (ex. BPI) gonfle le solde bancaire d'un cash qu'il faudra rendre :
+  // on calcule combien il reste à rembourser pour pouvoir afficher une "trésorerie nette".
+  //   capital restant dû = avances déjà encaissées − remboursements déjà effectués
+  // Deux filtres pour rester cohérent avec le solde Qonto et prudent :
+  // - Avances : on ne compte que celles des mois <= mois courant (déjà reçues, donc déjà dans le
+  //   solde Qonto). On exclut les avances FUTURES planifiées dans le Plan_TRE (pas encore en banque),
+  //   sinon on déduirait une dette pour un cash absent du solde.
+  // - Remboursements : seulement les mois strictement passés (mKey < moisCourantKey) ; l'échéance du
+  //   mois en cours n'est pas forcément prélevée → dette légèrement surestimée plutôt que sous-estimée.
+  // Source 100% Plan_TRE_Prév, donc toujours synchro avec le Google Sheet.
+  let avanceTotaleRecue = 0;
+  for (const [k, v] of Object.entries(avancePlanTreByMonth)) {
+    if (k <= moisCourantKey) avanceTotaleRecue += v;
+  }
+  let avanceDejaRemboursee = 0;
+  for (const [k, v] of Object.entries(rembAvancePlanTreByMonth)) {
+    if (k < moisCourantKey) avanceDejaRemboursee += v;
+  }
+  const avanceRemboursableRestante = Math.max(0, Math.round(avanceTotaleRecue - avanceDejaRemboursee));
+
   // Note redesign Patch 1 : le CA prévi TTC est alimenté par `facturesAEncaisser` enrichi TTC
   // (Pennylane émises + Notion prévi converties HT×1.2). Voir `encaissementsFactures` plus bas.
 
@@ -5595,6 +5616,9 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
     pipelineDetail,
     notionWarnings,        // [{ missionNom, type, code, message }]
     pennylaneOrphans,      // [{ invoiceNumber, customerName, amount, date, dueDate, status, isLate }]
+    avanceRemboursableRestante, // capital restant dû sur avances remboursables (BPI) — pour tréso nette
+    avanceTotaleRecue: Math.round(avanceTotaleRecue),
+    avanceDejaRemboursee: Math.round(avanceDejaRemboursee),
   };
 }
 
@@ -5634,6 +5658,9 @@ app.get('/api/tresorerie', async (req, res) => {
     res.json({
       source: 'qonto',
       soldeActuel: qontoData.soldeActuel,
+      avanceRemboursableRestante: result.avanceRemboursableRestante || 0,
+      avanceTotaleRecue: result.avanceTotaleRecue || 0,
+      avanceDejaRemboursee: result.avanceDejaRemboursee || 0,
       totalAEncaisser: Math.round(result.totalAEncaisserNotion),
       totalEnvoye: Math.round(result.totalEnvoye),
       totalPrevisionnel: Math.round(result.totalPrevisionnel),
