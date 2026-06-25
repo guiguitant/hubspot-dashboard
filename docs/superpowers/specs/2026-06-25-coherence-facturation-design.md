@@ -81,16 +81,17 @@ Enrichir la réponse :
     ecartPct            // ecart / invoiceTTC
   }]
   ```
-  `lineTTC` = `(type==='acompte' ? montantAcompte : montantFinal) × 1.2`, avec repli
-  `ca − montantAcompte` si `montantFinal` absent.
+  `lineTTC` = `(type==='acompte' ? montantAcompte : (ca − montantAcompte)) × 1.2`.
+  Formule canonique retenue : `ca − montantAcompte` pour le solde (convention du moteur de
+  scoring server.js:2438-2439), plutôt que `montantFinal`, pour éviter une seconde source de vérité.
 
 ### 3. Front — modale matching — public/pilot.html
 
 #### 3a. Indicateur live permanent — `renderFactMatchingModalBody` (public/pilot.html:11455)
 Construire un **lookup montants** `{ n° → amount }` à partir des `suggestions` ET de
 `linkedDetails`. À chaque rendu / coche / décoche, afficher un encart :
-- `Attendu TTC` = `(type==='acompte' ? mission.montantAcompte : mission.montantFinal) × 1.2`
-  (repli `ca − montantAcompte`).
+- `Attendu TTC` = `(type==='acompte' ? mission.montantAcompte : (ca − mission.montantAcompte)) × 1.2`
+  (formule canonique `ca − montantAcompte` pour le solde, cf. §2).
 - `Lié TTC` = Σ des montants TTC des factures cochées présentes dans le lookup.
 - `Écart` = `Lié TTC − Attendu TTC`, affiché en € et % ; surligné orange si ≠ 0.
 - Factures cochées **absentes du lookup** (saisie manuelle, montant inconnu) : exclues de la somme,
