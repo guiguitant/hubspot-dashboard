@@ -6919,10 +6919,13 @@ async function computeChargesHybride(start, end) {
     const prevMonth    = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const prevMonthKey = `${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, '0')}`;
 
+    // On compare sur les clés MOIS (YYYY-MM), pas sur `start`/`end` qui contiennent le jour :
+    // sinon "2026-08" >= "2026-08-01" est faux (la chaîne plus courte est "inférieure"), ce qui
+    // excluait à tort la colonne du mois cliqué → modale "Aucune charge" sur un mois futur.
     const realEndKey   = endKey <= prevMonthKey ? endKey : prevMonthKey;
-    const hasReal      = start <= realEndKey;
-    const prevStartKey = start > todayKey ? start : todayKey;
-    const hasPrev      = prevStartKey <= end;
+    const hasReal      = startKey <= realEndKey;
+    const prevStartKey = startKey > todayKey ? startKey : todayKey;
+    const hasPrev      = prevStartKey <= endKey;
 
     // --- Partie réelle (Qonto) ---
     let realTotal = 0;
