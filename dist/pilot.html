@@ -11284,12 +11284,54 @@
           expectedCurrent: data.currentlyLinked || '',
           currentList: currentList.slice(),
           suggestions: data.suggestions || [],
+          linkedDetails: data.linkedDetails || [],
           mission: data.mission || {},
         };
         renderFactMatchingModalBody();
       } catch (err) {
         body.innerHTML = '<p style="color:var(--danger);font-size:0.85rem">Erreur chargement : ' + err.message + '</p>';
       }
+    }
+
+    // Construit un lookup { n°facture(min) → montant TTC } à partir des propositions + factures liées.
+    function buildFactAmountLookup() {
+      const map = new Map();
+      for (const s of (factMatchingModalState.suggestions || [])) {
+        if (s && s.invoiceNumber && s.amount != null) map.set(s.invoiceNumber.toLowerCase(), s.amount);
+      }
+      for (const d of (factMatchingModalState.linkedDetails || [])) {
+        if (d && d.invoiceNumber && d.amount != null) map.set(d.invoiceNumber.toLowerCase(), d.amount);
+      }
+      return map;
+    }
+
+    // Recalcule et réécrit l'indicateur de cohérence (Σ TTC factures cochées vs attendu TTC ligne).
+    function updateCoherenceIndicator() {
+      const el = document.getElementById('factCoherenceIndicator');
+      if (!el) return;
+      const { mission: m, type, currentList } = factMatchingModalState;
+      const ca = Number(m.ca) || 0;
+      const acpt = Number(m.montantAcompte) || 0;
+      const expectedHT = type === 'acompte' ? acpt : (ca - acpt);
+      const expectedTTC = expectedHT * 1.2; // TTC = HT × 1.2 (Notion HT → Pennylane TTC)
+      const lookup = buildFactAmountLookup();
+      let sumTTC = 0, unknown = 0;
+      for (const inv of currentList) {
+        const amt = lookup.get(inv.toLowerCase());
+        if (amt == null) unknown++; else sumTTC += amt;
+      }
+      const ecart = sumTTC - expectedTTC;
+      const ecartPct = expectedTTC !== 0 ? (ecart / expectedTTC) * 100 : null;
+      const ok = Math.abs(ecart) < 1;
+      const color = ok ? 'var(--success)' : 'var(--warning)';
+      let html = '<div style="font-size:0.75rem;font-weight:700;text-transform:uppercase;color:var(--text-secondary);margin-bottom:0.3rem">Cohérence (TTC)</div>';
+      html += '<div style="display:flex;justify-content:space-between"><span>Attendu (Notion HT × 1,2)</span><span style="font-family:monospace">' + formatEuro(expectedTTC) + '</span></div>';
+      html += '<div style="display:flex;justify-content:space-between"><span>Lié (' + currentList.length + ' facture' + (currentList.length > 1 ? 's' : '') + ')</span><span style="font-family:monospace">' + formatEuro(sumTTC) + '</span></div>';
+      html += '<div style="display:flex;justify-content:space-between;font-weight:700;color:' + color + '"><span>Écart</span><span style="font-family:monospace">' + (ecart >= 0 ? '+' : '') + formatEuro(ecart) + (ecartPct != null ? ' (' + (ecart >= 0 ? '+' : '') + ecartPct.toFixed(1) + '%)' : '') + '</span></div>';
+      if (unknown > 0) {
+        html += '<div style="margin-top:0.3rem;font-size:0.72rem;color:var(--text-secondary);font-style:italic">' + unknown + ' facture(s) au montant inconnu (saisie manuelle), exclue(s) du calcul.</div>';
+      }
+      el.innerHTML = html;
     }
 
     // Re-render le body de la popup à partir de factMatchingModalState (utile pour MAJ instant après check/uncheck/manuel)
@@ -11312,6 +11354,9 @@
       }
       html += '<p style="margin-top:0.4rem;font-size:0.72rem;color:var(--text-secondary);font-style:italic">Plusieurs factures possibles (ex: solde payé en 2 virements). Coche celles qui composent ce ' + (type === 'acompte' ? 'acompte' : 'solde') + '.</p>';
       html += '</div>';
+
+      // Indicateur de cohérence (rempli après injection via updateCoherenceIndicator)
+      html += '<div id="factCoherenceIndicator" style="margin-bottom:0.8rem;padding:0.6rem;background:var(--bg-secondary);border-radius:6px;font-size:0.8rem"></div>';
 
       // Liens actuels (toujours en haut, pré-cochés)
       if (currentList.length > 0) {
@@ -11380,6 +11425,11 @@
       html += '</div>';
 
       body.innerHTML = html;
+      rebindFactMatchingModalEvents();
+    }
+
+    function rebindFactMatchingModalEvents() {
+      const body = document.getElementById('factMatchingModalBody');
 
       // Bind checkbox toggle (in-memory, pas d'écriture Notion avant Enregistrer)
       body.querySelectorAll('.fact-matching-checkbox').forEach(cb => {
@@ -11393,8 +11443,11 @@
             factMatchingModalState.currentList = factMatchingModalState.currentList.filter(c => c.toLowerCase() !== inv.toLowerCase());
           }
           // Pas de re-render complet pour éviter de perdre le focus ; on laisse les checkboxes tels quels.
+          updateCoherenceIndicator();
         });
       });
+
+      updateCoherenceIndicator();
 
       // Bind saisie manuelle (ajoute à la liste in-memory + re-render pour faire apparaître la ligne dans "Liens actuels")
       const manualForm = body.querySelector('#factMatchingManualForm');
@@ -11420,7 +11473,7 @@
       if (saveBtn) saveBtn.addEventListener('click', () => confirmFactMatchingMulti());
     }
 
-    async function confirmFactMatchingMulti(confirmDuplicates) {
+    async function confirmFactMatchingMulti(action) {
       const { missionNom, type, expectedCurrent, currentList } = factMatchingModalState;
       if (!missionNom || !type) return;
       const body = document.getElementById('factMatchingModalBody');
@@ -11430,23 +11483,44 @@
         const res = await fetch('/api/facturation-matching/link', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ missionNom, type, invoiceNumbers: currentList, expectedCurrent, confirmDuplicates: !!confirmDuplicates }),
+          body: JSON.stringify({
+            missionNom, type, invoiceNumbers: currentList, expectedCurrent,
+            confirmDuplicates: action === 'move',
+            keepDuplicates: action === 'keep',
+          }),
         });
         const json = await res.json();
         if (!res.ok) {
           if (json.code === 'INVALID_DUPLICATE') {
-            // Patch 2++++ : conflits détectés. Construire un message explicite et demander confirmation.
             const conflictsList = (json.conflicts || []).map(c =>
-              '• ' + c.invoice + ' → déjà lié à "' + c.otherMission + '" / ' + c.otherType
-            ).join('\n');
-            const msg = 'Conflit(s) de matching détecté(s) :\n\n' + conflictsList +
-              '\n\nConfirmer remplacera ces liens — les factures seront RETIRÉES des autres emplacements avant d\'être liées ici.\n\nContinuer ?';
-            if (confirm(msg)) {
-              return confirmFactMatchingMulti(true); // re-call avec confirmDuplicates: true
-            } else {
-              body.innerHTML = prev;
-              return;
+              '• ' + c.invoice + ' → déjà liée à "' + c.otherMission + '" / ' + c.otherType
+            ).join('<br>');
+            let panel = '<div style="font-size:0.85rem">';
+            panel += '<div style="font-weight:700;color:var(--warning);margin-bottom:0.5rem">⚠️ Conflit(s) de matching</div>';
+            panel += '<div style="margin-bottom:0.8rem">' + conflictsList + '</div>';
+            // Tableau de cohérence englobante (Σ lignes couvertes vs montant facture)
+            for (const co of (json.coherence || [])) {
+              const ok = Math.abs(co.ecart) < 1;
+              const color = ok ? 'var(--success)' : 'var(--warning)';
+              const pct = co.ecartPct != null ? ' (' + (co.ecart >= 0 ? '+' : '') + (co.ecartPct * 100).toFixed(1) + '%)' : '';
+              panel += '<div style="padding:0.6rem;background:var(--bg-secondary);border-radius:6px;margin-bottom:0.6rem">';
+              panel += '<div style="font-weight:600;margin-bottom:0.3rem">Cohérence facture ' + co.invoice + ' (englobe ' + co.lines.length + ' ligne' + (co.lines.length > 1 ? 's' : '') + ')</div>';
+              panel += '<div style="display:flex;justify-content:space-between"><span>Σ lignes couvertes (TTC)</span><span style="font-family:monospace">' + formatEuro(co.sumLinesTTC) + '</span></div>';
+              panel += '<div style="display:flex;justify-content:space-between"><span>Montant facture (TTC)</span><span style="font-family:monospace">' + formatEuro(co.invoiceTTC) + '</span></div>';
+              panel += '<div style="display:flex;justify-content:space-between;font-weight:700;color:' + color + '"><span>Écart</span><span style="font-family:monospace">' + (co.ecart >= 0 ? '+' : '') + formatEuro(co.ecart) + pct + '</span></div>';
+              panel += '</div>';
             }
+            panel += '<div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:0.8rem">« Garder » : la facture reste aussi sur l\'autre ligne (facture englobante). « Déplacer » : elle est retirée de l\'autre ligne.</div>';
+            panel += '<div style="display:flex;gap:0.5rem;justify-content:flex-end">';
+            panel += '<button id="factConflictCancel" class="btn" style="font-size:0.78rem;padding:0.4rem 0.8rem">Annuler</button>';
+            panel += '<button id="factConflictMove" class="btn" style="font-size:0.78rem;padding:0.4rem 0.8rem">Déplacer ici</button>';
+            panel += '<button id="factConflictKeep" class="btn" style="font-size:0.8rem;padding:0.4rem 1rem;background:var(--primary);color:white;font-weight:700;border:none">Garder sur les 2 lignes</button>';
+            panel += '</div></div>';
+            body.innerHTML = panel;
+            document.getElementById('factConflictCancel').addEventListener('click', () => { body.innerHTML = prev; rebindFactMatchingModalEvents(); });
+            document.getElementById('factConflictMove').addEventListener('click', () => confirmFactMatchingMulti('move'));
+            document.getElementById('factConflictKeep').addEventListener('click', () => confirmFactMatchingMulti('keep'));
+            return;
           }
           if (json.code === 'NOTION_DRIFT') {
             alert('⚠️ Notion a été modifié depuis le chargement. Valeur actuelle : "' + (json.currentValue || '(vide)') + '". Ferme la popup, la page va recharger.');
