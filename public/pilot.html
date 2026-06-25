@@ -10236,7 +10236,13 @@
       document.getElementById('modalMissionsBody').innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem">Chargement...</p>';
       document.getElementById('modalMissions').classList.add('open');
       try {
-        const res = await fetch(`/api/charges?start=${start}&end=${end}`);
+        // Même source que le graphique : en mode prévisionnel, un mois futur n'a pas de charges
+        // réelles Qonto (l'endpoint /api/charges renverrait du vide) — il faut la version hybride
+        // qui inclut le prévisionnel GSheet, sinon la modale affiche "Aucune charge" à tort.
+        const endpoint = analyticsChargesPrev
+          ? `/api/charges-hybride?start=${start}&end=${end}`
+          : `/api/charges?start=${start}&end=${end}`;
+        const res = await fetch(endpoint);
         const data = await res.json();
         const charges = data.ventilationCharges || [];
         if (!charges.length) {

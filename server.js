@@ -6902,11 +6902,11 @@ app.get('/api/charges', async (req, res) => {
   }
 });
 
-app.get('/api/charges-hybride', async (req, res) => {
-  try {
-    const { start, end } = req.query;
-    if (!start || !end) return res.status(400).json({ error: 'Paramètres start et end requis' });
-
+// Calcul des charges hybrides (réel Qonto jusqu'au mois précédent + prévisionnel GSheet à partir
+// du mois en cours). Extrait en fonction pour être appelable directement côté serveur (ex. /api/ebe)
+// sans passer par un fetch HTTP self-référent — ce dernier serait bloqué par le dashboardGate (401)
+// en production, ce qui ramenait les charges à 0 dans le calcul de l'EBE.
+async function computeChargesHybride(start, end) {
     const now = new Date();
     const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const startKey = start.slice(0, 7);
@@ -7062,7 +7062,7 @@ app.get('/api/charges-hybride', async (req, res) => {
       cm++; if (cm > 12) { cm = 1; cy++; }
     }
 
-    res.json({
+    return {
       real: hasReal ? { total: Math.round(realTotal), start: startKey, end: realEndKey.slice(0, 7) } : null,
       prev: hasPrev ? { total: prevTotal, start: prevStartKey.slice(0, 7), end: endKey } : null,
       ventilationCharges,
@@ -7078,7 +7078,14 @@ app.get('/api/charges-hybride', async (req, res) => {
           return Math.round(chargesParMoisNm1[nm1Key] || chargesGSheetParMoisNm1[nm1Key] || 0);
         }),
       },
-    });
+    };
+}
+
+app.get('/api/charges-hybride', async (req, res) => {
+  try {
+    const { start, end } = req.query;
+    if (!start || !end) return res.status(400).json({ error: 'Paramètres start et end requis' });
+    res.json(await computeChargesHybride(start, end));
   } catch (err) {
     console.error('Erreur /api/charges-hybride:', err.message);
     res.status(500).json({ error: err.message });
@@ -7225,9 +7232,9 @@ app.get('/api/ebe', async (req, res) => {
     }
     caFacture = Math.round(caFacture);
 
-    // 2) Charges projetées sur l'année — réutilise la logique /api/charges-hybride via fetch interne
-    const chargesRes = await fetch(`http://localhost:${PORT}/api/charges-hybride?start=${start}&end=${end}`);
-    const chargesData = await chargesRes.json();
+    // 2) Charges projetées sur l'année — appel direct à la logique hybride (pas de fetch HTTP self-référent,
+    // qui serait bloqué par le dashboardGate en production et ramènerait les charges à 0)
+    const chargesData = await computeChargesHybride(start, end);
     const totalCharges = Math.round(chargesData.totalCharges || 0);
 
     // 3) Financements (Subv + Aide) de l'année depuis GSheet Plan_TRE_Prév
