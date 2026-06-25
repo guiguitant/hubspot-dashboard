@@ -152,9 +152,20 @@ function dashRecordFailure(ip) {
   dashFailures.set(ip, e);
 }
 
+// --- Bypass DEV : désactive l'auth dashboard (TOTP) pour les requêtes locales.
+// Jamais actif en production : la garde RENDER / NODE_ENV bloque tout contournement en prod,
+// même si une requête loopback y parvenait. Utile pour tester en localhost sans 2FA.
+function isLocalDashboardBypass(req) {
+  if (process.env.RENDER || process.env.NODE_ENV === 'production') return false;
+  const ip = req.ip || req.socket?.remoteAddress || '';
+  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+}
+
 // --- Gate global : exige une session dashboard pour la page et les API dashboard ---
 function dashboardGate(req, res, next) {
   const p = req.path;
+  // DEV uniquement : requêtes locales → on passe sans TOTP (voir isLocalDashboardBypass)
+  if (isLocalDashboardBypass(req)) return next();
   // Endpoints du flow de login dashboard (toujours accessibles)
   if (p === '/api/dashboard-login' || p === '/api/dashboard-logout' || p === '/api/dashboard-auth-status') return next();
   // Pont CRM Canopy : auth Bearer dédiée (gérée dans le routeur), pas la session dashboard
@@ -198,7 +209,7 @@ app.post('/api/dashboard-logout', (req, res) => {
 
 // GET /api/dashboard-auth-status — état de session (pour le front)
 app.get('/api/dashboard-auth-status', (req, res) => {
-  res.json({ authed: hasDashboardSession(req) });
+  res.json({ authed: hasDashboardSession(req) || isLocalDashboardBypass(req) });
 });
 
 // Route: / — Serve Releaf Pilot (main dashboard)
