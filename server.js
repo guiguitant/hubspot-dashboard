@@ -14,6 +14,7 @@ const { buildSalesNavUrl } = require('./utils/buildSalesNavUrl');
 const multer = require('multer');
 const { parse: parseCsv } = require('csv-parse/sync');
 const { cleanEmeliaRows } = require('./utils/emeliaCleaner');
+const { lineExpectedTTC, computeEcart } = require('./utils/facturationCoherence');
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
@@ -2768,7 +2769,7 @@ app.get('/api/facturation-matching/suggest', async (req, res) => {
 //   Sinon : refuse avec 409 INVALID_DUPLICATE en listant les conflits.
 app.post('/api/facturation-matching/link', async (req, res) => {
   try {
-    const { missionNom, type, invoiceNumbers, invoiceNumber, expectedCurrent, confirmDuplicates } = req.body || {};
+    const { missionNom, type, invoiceNumbers, invoiceNumber, expectedCurrent, confirmDuplicates, keepDuplicates } = req.body || {};
     if (!missionNom || !type) return res.status(400).json({ error: 'missionNom et type requis' });
     if (type !== 'acompte' && type !== 'solde') return res.status(400).json({ error: 'type doit être acompte ou solde' });
 
@@ -2792,9 +2793,35 @@ app.post('/api/facturation-matching/link', async (req, res) => {
     let conflicts = [];
     if (cleaned.length > 0) {
       conflicts = findDuplicateLinks(cleaned, missions, missionNom, type);
-      if (conflicts.length > 0 && !confirmDuplicates) {
+      if (conflicts.length > 0 && !confirmDuplicates && !keepDuplicates) {
+        // Cohérence englobante : pour chaque facture en conflit, Σ(TTC des lignes couvertes) vs TTC facture.
+        const invoices409 = await fetchCustomerInvoices();
+        const invByNum = new Map(
+          (invoices409 || []).filter(inv => inv && inv.invoiceNumber).map(inv => [inv.invoiceNumber.toLowerCase(), inv])
+        );
+        // Regroupe les conflits par facture pour lister toutes les lignes qu'elle couvrira.
+        const byInvoice = new Map();
+        for (const c of conflicts) {
+          const key = c.invoice.toLowerCase();
+          if (!byInvoice.has(key)) byInvoice.set(key, { invoice: c.invoice, others: [] });
+          byInvoice.get(key).others.push({ mission: c.otherMission, type: c.otherType });
+        }
+        const coherence = [];
+        for (const { invoice, others } of byInvoice.values()) {
+          // Lignes couvertes = ligne cible (mission courante) + lignes en conflit.
+          const lineDefs = [{ mission: missionNom, type }, ...others];
+          const lines = lineDefs.map(ld => {
+            const m = missions.find(mm => mm.nom === ld.mission) || {};
+            return { mission: ld.mission, type: ld.type, lineTTC: lineExpectedTTC(m, ld.type) };
+          });
+          const sumLinesTTC = lines.reduce((s, l) => s + l.lineTTC, 0);
+          const inv = invByNum.get(invoice.toLowerCase());
+          const invoiceTTC = inv ? (inv.amount || 0) : 0;
+          const e = computeEcart(sumLinesTTC, invoiceTTC);
+          coherence.push({ invoice, invoiceTTC, lines, sumLinesTTC, ecart: e.ecart, ecartPct: e.ecartPct });
+        }
         return res.status(409).json({
-          error: 'Factures déjà liées ailleurs — confirmation requise pour les retirer.',
+          error: 'Factures déjà liées ailleurs — choisis Garder ou Déplacer.',
           code: 'INVALID_DUPLICATE',
           conflicts: conflicts.map(c => ({
             invoice: c.invoice,
@@ -2802,6 +2829,7 @@ app.post('/api/facturation-matching/link', async (req, res) => {
             otherType: c.otherType,
             otherCurrentList: c.otherCurrentList,
           })),
+          coherence,
         });
       }
     }
@@ -2889,7 +2917,7 @@ app.post('/api/facturation-matching/link', async (req, res) => {
         ok: true,
         ...result,
         missionNom, type, propName, invoicesList: cleaned,
-        cleanedFromOthers: conflicts.length, // info utile côté UI
+        cleanedFromOthers: confirmDuplicates ? conflicts.length : 0, // 0 en mode Garder (keepDuplicates)
         suggestedStatus, // null ou { rowType, newStatus, expectedNotionStatus, currentStatus, oneShot, reason }
       });
     } catch (err) {
