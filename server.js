@@ -2681,11 +2681,27 @@ app.get('/api/facturation-matching/suggest', async (req, res) => {
       if (type !== 'acompte' && type !== 'solde') return res.status(400).json({ error: 'type doit être acompte ou solde' });
       const suggestions = suggestPennylaneMatches(mission, type, invoices, 5);
       const currentRaw = type === 'acompte' ? mission.factAcptPenny : mission.factSoldePenny;
+      const currentList = parseLinkedInvoiceList(currentRaw);
+      // Patch cohérence : montants TTC des factures déjà liées (lookup dans invoices en mémoire).
+      const invByNum = new Map(
+        (invoices || [])
+          .filter(inv => inv && inv.invoiceNumber)
+          .map(inv => [inv.invoiceNumber.toLowerCase(), inv])
+      );
+      const linkedDetails = currentList.map(num => {
+        const inv = invByNum.get(num.toLowerCase());
+        return {
+          invoiceNumber: num,
+          amount: inv ? inv.amount : null,
+          status: inv ? inv.status : null,
+        };
+      });
       return res.json({
-        mission: { nom: mission.nom, client: mission.client, ca: mission.ca, pageId: mission.id },
+        mission: { nom: mission.nom, client: mission.client, ca: mission.ca, montantAcompte: mission.montantAcompte, pageId: mission.id },
         type,
         currentlyLinked: currentRaw,
-        currentlyLinkedList: parseLinkedInvoiceList(currentRaw),
+        currentlyLinkedList: currentList,
+        linkedDetails,
         suggestions: suggestions.map(c => ({
           invoiceNumber: c.inv.invoiceNumber,
           customerName: c.inv.customerName,
