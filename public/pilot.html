@@ -10834,7 +10834,7 @@
                 datalabels: { display: false } },
               { label: 'Réalisé', data: realdata, backgroundColor: KPI_COL_REAL,
                 datalabels: {
-                  anchor: 'end', align: 'end', color: 'var(--text)', font: { weight: '700', size: 11 },
+                  anchor: 'end', align: 'end', color: getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#666', font: { weight: '700', size: 11 },
                   formatter: (val, ctx) => txLabels[ctx.dataIndex],
                 } },
             ],
