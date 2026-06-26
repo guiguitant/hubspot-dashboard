@@ -5763,6 +5763,54 @@ app.get('/api/kpi', async (req, res) => {
   }
 });
 
+// Upsert d'un objectif individuel (partner + année + type).
+app.post('/api/kpi/objectives', async (req, res) => {
+  try {
+    const { partner, year, type, montant } = req.body || {};
+    if (!partner || !year || !['newsale', 'upsale', 'opere'].includes(type)) {
+      return res.status(400).json({ error: 'partner, year et type (newsale|upsale|opere) requis' });
+    }
+    const { error } = await supabase
+      .from('kpi_objectives')
+      .upsert(
+        { partner, year: parseInt(year, 10), type, montant: Number(montant) || 0, updated_at: new Date().toISOString() },
+        { onConflict: 'partner,year,type' }
+      );
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('POST /api/kpi/objectives error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Remplace la répartition d'une mission sur un axe (commercial|operationnel).
+// `splits` vide → on supprime l'override (retour aux parts égales par défaut).
+app.post('/api/kpi/split', async (req, res) => {
+  try {
+    const { mission_id, axis, splits } = req.body || {};
+    if (!mission_id || !['commercial', 'operationnel'].includes(axis)) {
+      return res.status(400).json({ error: 'mission_id et axis (commercial|operationnel) requis' });
+    }
+    // 1) purge des lignes existantes pour (mission_id, axis)
+    const { error: delErr } = await supabase
+      .from('kpi_ca_split').delete().eq('mission_id', mission_id).eq('axis', axis);
+    if (delErr) throw delErr;
+    // 2) réinsertion si fourni
+    const rows = (splits || [])
+      .filter(s => s && s.partner)
+      .map(s => ({ mission_id, axis, partner: s.partner, pct: Number(s.pct) || 0, updated_at: new Date().toISOString() }));
+    if (rows.length > 0) {
+      const { error: insErr } = await supabase.from('kpi_ca_split').insert(rows);
+      if (insErr) throw insErr;
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('POST /api/kpi/split error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // --- Scenarios CRUD ---
 
 app.get('/api/scenarios', async (req, res) => {
