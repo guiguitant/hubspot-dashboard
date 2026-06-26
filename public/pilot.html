@@ -4109,6 +4109,62 @@
 
   <!-- PAGE: KPI -->
   <div class="app-page" id="page-kpi">
+    <style>
+      #kpiCharts { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
+      @media (max-width: 900px) { #kpiCharts { grid-template-columns: 1fr; } }
+      #page-kpi .kpi-card {
+        border: 1px solid var(--border); border-radius: 14px; background: var(--card);
+        padding: 1.1rem 1.2rem 0.7rem;
+        transition: box-shadow .18s ease, border-color .18s ease;
+      }
+      #page-kpi .kpi-card:hover {
+        box-shadow: 0 8px 28px -16px rgba(0,0,0,.28);
+        border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+      }
+      #page-kpi .kpi-card--all {
+        background: linear-gradient(180deg, color-mix(in srgb, var(--primary) 7%, var(--card)) 0%, var(--card) 55%);
+        border-color: color-mix(in srgb, var(--primary) 26%, var(--border));
+      }
+      #page-kpi .kpi-card-head { display: flex; align-items: center; gap: .65rem; margin-bottom: .9rem; }
+      #page-kpi .kpi-chip {
+        width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
+        font-weight: 700; font-size: .9rem; color: #fff; flex: 0 0 auto;
+        box-shadow: 0 2px 6px -2px rgba(0,0,0,.35);
+      }
+      #page-kpi .kpi-card--all .kpi-chip { border-radius: 50%; }
+      #page-kpi .kpi-card-name { font-weight: 650; font-size: 1.02rem; color: var(--text); line-height: 1.15; }
+      #page-kpi .kpi-card-sub { font-size: .72rem; color: var(--text-secondary); margin-top: 2px; letter-spacing: .01em; }
+      #page-kpi .kpi-canvas-wrap { height: 232px; }
+      #page-kpi .kpi-canvas-wrap canvas { cursor: pointer; }
+      /* Contenu des modales Réglages / Détail */
+      .kpi-modal.modal { max-width: 720px; }
+      .modal-close-x { cursor:pointer; border:none; background:none; font-size:1.4rem; line-height:1; color:var(--text-secondary); padding:0 .2rem; }
+      .modal-close-x:hover { color:var(--text); }
+      .kpi-rg-h { font-size:.92rem; font-weight:650; color:var(--text); margin:0 0 .8rem; display:flex; align-items:baseline; gap:.5rem; }
+      .kpi-rg-badge { font-size:.7rem; font-weight:500; color:var(--text-secondary); }
+      .kpi-obj-table { width:100%; border-collapse:separate; border-spacing:0; }
+      .kpi-obj-table th { text-align:right; padding:.3rem .5rem; font-size:.68rem; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); font-weight:600; }
+      .kpi-obj-table th:first-child { text-align:left; }
+      .kpi-obj-table td { padding:.4rem .5rem; border-top:1px solid var(--border); vertical-align:middle; }
+      .kpi-obj-name { display:flex; align-items:center; gap:.5rem; font-weight:600; font-size:.88rem; }
+      .kpi-mini-chip { width:24px; height:24px; border-radius:7px; display:grid; place-items:center; color:#fff; font-size:.72rem; font-weight:700; flex:0 0 auto; }
+      .kpi-num-input { width:120px; text-align:right; padding:.35rem .5rem; border:1px solid var(--border); border-radius:var(--radius); background:var(--card); color:var(--text); font-family:inherit; font-size:.85rem; }
+      .kpi-num-input:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 2px rgba(0,61,46,.15); }
+      .kpi-split-card { border:1px solid var(--border); border-radius:10px; padding:.75rem .85rem; margin-bottom:.7rem; }
+      .kpi-split-title { font-weight:600; font-size:.9rem; margin-bottom:.5rem; display:flex; justify-content:space-between; gap:1rem; }
+      .kpi-split-axis { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; margin:.4rem 0; }
+      .kpi-split-axis-label { font-size:.68rem; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); width:92px; }
+      .kpi-pct-input { width:58px; text-align:right; padding:.25rem .4rem; border:1px solid var(--border); border-radius:6px; background:var(--card); color:var(--text); font-family:inherit; }
+      .kpi-btn { padding:.32rem .75rem; border:1px solid var(--border); border-radius:var(--radius); background:var(--card); color:var(--text); cursor:pointer; font-size:.8rem; font-family:inherit; transition:border-color .12s; }
+      .kpi-btn:hover { border-color:var(--primary); }
+      .kpi-btn--primary { background:var(--primary); color:#fff; border-color:var(--primary); }
+      .kpi-detail-total { font-size:.85rem; color:var(--text-secondary); margin:0 0 .8rem; }
+      .kpi-detail-row { display:flex; justify-content:space-between; gap:1rem; align-items:baseline; padding:.55rem .15rem; border-top:1px solid var(--border); }
+      .kpi-detail-row:first-of-type { border-top:none; }
+      .kpi-detail-nom { font-weight:600; font-size:.9rem; color:var(--text); }
+      .kpi-detail-client { font-size:.75rem; color:var(--text-secondary); margin-top:1px; }
+      .kpi-detail-montant { font-weight:700; font-size:.9rem; color:var(--text); white-space:nowrap; }
+    </style>
     <div class="section">
       <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
         <h2 style="margin:0;">KPI — objectifs & avancement par partner</h2>
@@ -4122,9 +4178,32 @@
 
     <div id="kpiUnclassified" class="section" style="display:none; border-color:var(--warning); background:var(--warning-bg);"></div>
 
-    <div id="kpiReglages" class="section" style="display:none;"></div>
-
     <div id="kpiCharts"></div>
+
+    <!-- Modale Réglages -->
+    <div class="modal-overlay" id="kpiReglagesModal" onclick="if(event.target===this) closeKpiReglages()">
+      <div class="modal kpi-modal">
+        <div class="modal-header" style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+          <h2 style="margin:0;">Réglages KPI</h2>
+          <button class="modal-close-x" onclick="closeKpiReglages()" aria-label="Fermer">&times;</button>
+        </div>
+        <div class="modal-body" id="kpiReglagesBody"></div>
+        <div class="modal-footer">
+          <button class="kpi-btn kpi-btn--primary" onclick="closeKpiReglages()">Fermer</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modale Détail missions (clic sur une barre) -->
+    <div class="modal-overlay" id="kpiDetailModal" onclick="if(event.target===this) closeKpiDetail()">
+      <div class="modal kpi-modal">
+        <div class="modal-header" style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+          <h2 style="margin:0;" id="kpiDetailTitle">Détail</h2>
+          <button class="modal-close-x" onclick="closeKpiDetail()" aria-label="Fermer">&times;</button>
+        </div>
+        <div class="modal-body" id="kpiDetailBody"></div>
+      </div>
+    </div>
   </div>
 
   <!-- PAGE: Masse salariale -->
@@ -10770,23 +10849,39 @@
         kpiData = await res.json();
         renderKpiUnclassified();
         renderKpiCharts();
-        if (document.getElementById('kpiReglages').style.display !== 'none') renderKpiReglages();
+        if (document.getElementById('kpiReglagesModal').classList.contains('active')) renderKpiReglages();
       } catch (e) {
         container.innerHTML = '<p style="color:var(--warning);">Erreur : ' + e.message + '</p>';
       }
     }
 
-    // Couleurs : Objectif (gris) vs Réalisé (vert primaire).
-    const KPI_COL_OBJ = 'rgba(120,119,116,0.35)';
-    const KPI_COL_REAL = '#003D2E';
     const KPI_TYPES = [
       { key: 'newsale', label: 'Signé · Newsale' },
       { key: 'upsale',  label: 'Signé · Upsale' },
       { key: 'opere',   label: 'Opéré' },
     ];
+    // Palette des pastilles : une identité de couleur par partner.
+    const KPI_CHIP_COLORS = ['#0f7b6c', '#2f6f9f', '#d9730d', '#6940a5', '#1f9d8b', '#b5306b'];
 
     function kpiFmtEur(v) {
       return (Math.round(v) || 0).toLocaleString('fr-FR') + ' €';
+    }
+    function kpiCssVar(name, fallback) {
+      return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+    }
+    function kpiInitial(name) {
+      const clean = (name || '?').replace(/\(.*\)/, '').trim();
+      return (clean.charAt(0) || '?').toUpperCase();
+    }
+    // Dégradé vertical pour les barres "Réalisé" (du clair vers la couleur d'accent).
+    function kpiBarGradient(context, hex) {
+      const chart = context.chart;
+      const area = chart.chartArea;
+      if (!area) return hex;
+      const g = chart.ctx.createLinearGradient(0, area.bottom, 0, area.top);
+      g.addColorStop(0, hex + '88');
+      g.addColorStop(1, hex);
+      return g;
     }
 
     function renderKpiCharts() {
@@ -10795,24 +10890,43 @@
       kpiChartInstances = [];
 
       const container = document.getElementById('kpiCharts');
-      container.innerHTML = '';
-
-      // Un bloc "All" en premier, puis un bloc par partner.
-      const blocks = [{ partner: 'Tous (All)', data: kpiData.all }]
-        .concat(kpiData.partners.map(p => ({ partner: p.partner, data: { newsale: p.newsale, upsale: p.upsale, opere: p.opere } })));
 
       if (kpiData.partners.length === 0) {
-        container.innerHTML = '<div class="section"><p style="color:var(--text-secondary);">Aucune mission ni objectif pour cette année. Ajoute des objectifs via « Réglages ».</p></div>';
+        container.innerHTML = '<div class="kpi-card" style="grid-column:1/-1;"><p style="color:var(--text-secondary); margin:0;">Aucune mission ni objectif pour cette année. Ajoute des objectifs via « Réglages ».</p></div>';
         return;
       }
+      container.innerHTML = '';
+
+      const primary  = kpiCssVar('--primary', '#003D2E');
+      const trackCol = 'rgba(127,127,127,0.16)';
+      const gridCol  = 'rgba(127,127,127,0.12)';
+      const mutedCol = kpiCssVar('--text-secondary', '#787774');
+      const textCol  = kpiCssVar('--text', '#37352f');
+
+      // Blocs partners (avec accent + détail des missions), puis "All" inséré en 2e position
+      // → le 1er partner (alphabétique, ex. Guillaume) est à gauche de "All".
+      const partnerBlocks = kpiData.partners.map((p, i) => ({
+        partner: p.partner, sub: null,
+        data: { newsale: p.newsale, upsale: p.upsale, opere: p.opere },
+        details: p.details,
+        accent: KPI_CHIP_COLORS[i % KPI_CHIP_COLORS.length],
+      }));
+      const allBlock = { partner: 'Tous les partners', sub: null, data: kpiData.all, details: kpiData.allDetails, all: true };
+      const blocks = [allBlock].concat(partnerBlocks);
 
       blocks.forEach((block, idx) => {
+        const accent = block.all ? primary : block.accent;
         const card = document.createElement('div');
-        card.className = 'section';
+        card.className = 'kpi-card' + (block.all ? ' kpi-card--all' : '');
         const canvasId = 'kpiChart_' + idx;
         card.innerHTML =
-          '<h3 style="margin:0 0 0.8rem;">' + block.partner + '</h3>' +
-          '<div style="height:260px;"><canvas id="' + canvasId + '"></canvas></div>';
+          '<div class="kpi-card-head">' +
+            '<div class="kpi-chip" style="background:' + accent + ';">' + (block.all ? '∑' : kpiInitial(block.partner)) + '</div>' +
+            '<div><div class="kpi-card-name">' + block.partner + '</div>' +
+              (block.sub ? '<div class="kpi-card-sub">' + block.sub + '</div>' : '') +
+            '</div>' +
+          '</div>' +
+          '<div class="kpi-canvas-wrap"><canvas id="' + canvasId + '"></canvas></div>';
         container.appendChild(card);
 
         const labels = KPI_TYPES.map(t => t.label);
@@ -10830,21 +10944,38 @@
           data: {
             labels,
             datasets: [
-              { label: 'Objectif', data: objdata, backgroundColor: KPI_COL_OBJ,
+              { label: 'Objectif', data: objdata, backgroundColor: trackCol,
+                borderRadius: 6, borderSkipped: false, barPercentage: 0.72, categoryPercentage: 0.56,
                 datalabels: { display: false } },
-              { label: 'Réalisé', data: realdata, backgroundColor: KPI_COL_REAL,
+              { label: 'Réalisé', data: realdata,
+                backgroundColor: (c) => kpiBarGradient(c, accent),
+                borderRadius: 6, borderSkipped: false, barPercentage: 0.72, categoryPercentage: 0.56,
                 datalabels: {
-                  anchor: 'end', align: 'end', color: getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#666', font: { weight: '700', size: 11 },
+                  anchor: 'end', align: 'end', offset: 2, clamp: true,
+                  color: accent, font: { weight: '800', size: 12 },
                   formatter: (val, ctx) => txLabels[ctx.dataIndex],
                 } },
             ],
           },
           options: {
             responsive: true, maintainAspectRatio: false,
-            scales: { y: { beginAtZero: true, ticks: { callback: v => (v / 1000) + 'k' } } },
+            layout: { padding: { top: 20 } },
+            onClick: (evt, els) => { if (els && els.length) openKpiDetail(block, KPI_TYPES[els[0].index].key); },
+            onHover: (evt, els) => { if (evt.native) evt.native.target.style.cursor = (els && els.length) ? 'pointer' : 'default'; },
+            scales: {
+              y: { beginAtZero: true,
+                   grid: { color: gridCol, drawTicks: false },
+                   border: { display: false },
+                   ticks: { callback: v => (v / 1000) + 'k', color: mutedCol, font: { size: 11 }, padding: 8, maxTicksLimit: 5 } },
+              x: { grid: { display: false }, border: { display: false },
+                   ticks: { color: textCol, font: { size: 11, weight: '600' } } },
+            },
             plugins: {
-              legend: { position: 'top' },
-              tooltip: { callbacks: { label: ctx => ctx.dataset.label + ' : ' + kpiFmtEur(ctx.raw) } },
+              legend: { position: 'top', align: 'end',
+                        labels: { usePointStyle: true, pointStyle: 'rectRounded', boxWidth: 9, boxHeight: 9, padding: 14, color: mutedCol, font: { size: 11 } } },
+              tooltip: { backgroundColor: 'rgba(20,20,20,0.92)', padding: 10, cornerRadius: 8,
+                         titleFont: { size: 12 }, bodyFont: { size: 12 }, displayColors: false,
+                         callbacks: { label: ctx => ctx.dataset.label + ' : ' + kpiFmtEur(ctx.raw) } },
             },
           },
         });
@@ -10864,65 +10995,82 @@
         list.map(m => '<li>' + (m.nom || 'Sans nom') + ' — ' + (m.client || '') + ' (' + kpiFmtEur(m.ca) + ')</li>').join('') +
         '</ul>';
     }
+    // Réglages = pop-up (modale).
     function toggleKpiReglages() {
-      const box = document.getElementById('kpiReglages');
-      const show = box.style.display === 'none';
-      box.style.display = show ? '' : 'none';
-      if (show) renderKpiReglages();
+      document.getElementById('kpiReglagesModal').classList.add('active');
+      renderKpiReglages();
+    }
+    function closeKpiReglages() {
+      document.getElementById('kpiReglagesModal').classList.remove('active');
     }
 
     function renderKpiReglages() {
       if (!kpiData) return;
-      const box = document.getElementById('kpiReglages');
+      const body = document.getElementById('kpiReglagesBody');
       const year = document.getElementById('kpiYear').value;
 
-      // --- A. Objectifs : une ligne par partner connu, 3 champs ---
-      const partners = kpiData.partners.map(p => p.partner);
-      let objHtml = '<h3 style="margin:0 0 0.8rem;">Objectifs ' + year + ' (€)</h3>';
-      if (partners.length === 0) {
-        objHtml += '<p style="color:var(--text-secondary);">Aucun partner détecté. Les partners apparaissent dès qu\'ils sont sur une mission de l\'année, ou saisis ci-dessous.</p>';
+      // --- A. Objectifs : une ligne par partner, 3 champs ---
+      let html = '<div class="kpi-rg-h">Objectifs ' + year + ' <span class="kpi-rg-badge">€ par partner</span></div>';
+      if (kpiData.partners.length === 0) {
+        html += '<p style="color:var(--text-secondary);">Aucun partner détecté cette année.</p>';
+      } else {
+        html += '<table class="kpi-obj-table"><thead><tr><th>Partner</th><th>Newsale</th><th>Upsale</th><th>Opéré</th></tr></thead><tbody>';
+        kpiData.partners.forEach((p, i) => {
+          const accent = KPI_CHIP_COLORS[i % KPI_CHIP_COLORS.length];
+          html += '<tr><td><div class="kpi-obj-name"><span class="kpi-mini-chip" style="background:' + accent + ';">' + kpiInitial(p.partner) + '</span>' + p.partner + '</div></td>' +
+            ['newsale', 'upsale', 'opere'].map(t =>
+              '<td style="text-align:right;"><input class="kpi-num-input" type="number" value="' + p[t].objectif + '" ' +
+              'onchange="saveKpiObjective(\'' + p.partner + '\', ' + year + ', \'' + t + '\', this.value)"></td>'
+            ).join('') + '</tr>';
+        });
+        html += '</tbody></table>';
       }
-      objHtml += '<table style="width:100%; border-collapse:collapse; margin-bottom:1.5rem;"><thead><tr>' +
-        '<th style="text-align:left; padding:0.4rem;">Partner</th>' +
-        '<th style="padding:0.4rem;">Newsale</th><th style="padding:0.4rem;">Upsale</th><th style="padding:0.4rem;">Opéré</th></tr></thead><tbody>';
-      kpiData.partners.forEach(p => {
-        objHtml += '<tr>' +
-          '<td style="padding:0.4rem; font-weight:600;">' + p.partner + '</td>' +
-          ['newsale', 'upsale', 'opere'].map(t =>
-            '<td style="padding:0.4rem;"><input type="number" style="width:110px; padding:0.3rem; border:1px solid var(--border); border-radius:var(--radius);" ' +
-            'value="' + p[t].objectif + '" ' +
-            'onchange="saveKpiObjective(\'' + p.partner + '\', ' + year + ', \'' + t + '\', this.value)"></td>'
-          ).join('') +
-          '</tr>';
-      });
-      objHtml += '</tbody></table>';
 
-      // --- B. Répartition CA : missions de l'année à 2+ partners ---
-      let splitHtml = '<h3 style="margin:0 0 0.8rem;">Répartition du CA (missions à 2+ partners)</h3>';
+      // --- B. Répartition CA : missions à 2+ partners ---
+      html += '<div class="kpi-rg-h" style="margin-top:1.5rem;">Répartition du CA <span class="kpi-rg-badge">missions à 2+ partners</span></div>';
       if (kpiData.missionsForSplit.length === 0) {
-        splitHtml += '<p style="color:var(--text-secondary);">Aucune mission à plusieurs partners cette année.</p>';
+        html += '<p style="color:var(--text-secondary);">Aucune mission à plusieurs partners cette année.</p>';
       }
       kpiData.missionsForSplit.forEach((m, mi) => {
-        splitHtml += '<div style="border:1px solid var(--border); border-radius:var(--radius); padding:0.8rem; margin-bottom:0.8rem;">' +
-          '<div style="font-weight:600; margin-bottom:0.5rem;">' + m.nom + ' — ' + kpiFmtEur(m.ca) + '</div>';
+        html += '<div class="kpi-split-card"><div class="kpi-split-title"><span>' + m.nom + '</span><span style="color:var(--text-secondary);">' + kpiFmtEur(m.ca) + '</span></div>';
         [['commercial', m.commercial, m.splitCommercial], ['operationnel', m.operationnel, m.splitOperationnel]].forEach(([axis, plist, smap]) => {
           if (!plist || plist.length < 2) return;
           const inputId = 'split_' + mi + '_' + axis;
-          splitHtml += '<div style="margin:0.3rem 0;"><span style="display:inline-block; width:110px; color:var(--text-secondary);">' + axis + '</span>' +
+          html += '<div class="kpi-split-axis"><span class="kpi-split-axis-label">' + axis + '</span>' +
             plist.map(pn =>
-              '<span style="margin-right:0.8rem;">' + pn + ' <input type="number" data-partner="' + pn + '" ' +
-              'style="width:64px; padding:0.25rem; border:1px solid var(--border); border-radius:var(--radius);" value="' + (smap[pn] || 0) + '"> %</span>'
-            ).join('') +
-            '<button class="analytics-tab" style="padding:0.25rem 0.6rem;" onclick="saveKpiSplit(\'' + m.id + '\', \'' + axis + '\', \'' + inputId + '\')">OK</button>' +
-            '<span id="' + inputId + '" data-inputs="' + mi + '_' + axis + '"></span></div>';
-          // marqueur invisible pour retrouver les inputs : on relit via le parent
+              pn + ' <input class="kpi-pct-input" type="number" data-partner="' + pn + '" value="' + (smap[pn] || 0) + '">%'
+            ).join(' ') +
+            ' <button class="kpi-btn" onclick="saveKpiSplit(\'' + m.id + '\', \'' + axis + '\', \'' + inputId + '\')">OK</button>' +
+            '<span id="' + inputId + '"></span></div>';
         });
-        splitHtml += '</div>';
+        html += '</div>';
       });
 
-      box.innerHTML = objHtml + splitHtml;
-      // Stocke la structure pour relire les inputs à la sauvegarde.
-      box.dataset.year = year;
+      body.innerHTML = html;
+    }
+
+    // Détail = pop-up des missions composant une barre (partner/All + type).
+    function openKpiDetail(block, typeKey) {
+      const typeLabel = (KPI_TYPES.find(t => t.key === typeKey) || {}).label || typeKey;
+      const list = (block.details && block.details[typeKey]) || [];
+      const total = list.reduce((s, x) => s + (x.montant || 0), 0);
+      document.getElementById('kpiDetailTitle').textContent = block.partner + ' · ' + typeLabel;
+      let html = '<p class="kpi-detail-total">' + list.length + ' mission' + (list.length > 1 ? 's' : '') + ' · ' + kpiFmtEur(total) +
+        (block.all ? '' : ' attribué' + (list.length > 1 ? 's' : '')) + '</p>';
+      if (list.length === 0) {
+        html += '<p style="color:var(--text-secondary);">Aucune mission pour cet axe cette année.</p>';
+      } else {
+        html += list.map(m =>
+          '<div class="kpi-detail-row"><div><div class="kpi-detail-nom">' + (m.nom || 'Sans nom') + '</div>' +
+          '<div class="kpi-detail-client">' + (m.client || '') + '</div></div>' +
+          '<div class="kpi-detail-montant">' + kpiFmtEur(m.montant) + '</div></div>'
+        ).join('');
+      }
+      document.getElementById('kpiDetailBody').innerHTML = html;
+      document.getElementById('kpiDetailModal').classList.add('active');
+    }
+    function closeKpiDetail() {
+      document.getElementById('kpiDetailModal').classList.remove('active');
     }
 
     async function saveKpiObjective(partner, year, type, value) {
