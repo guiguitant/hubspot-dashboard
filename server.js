@@ -10,6 +10,7 @@ const { authenticator } = require('otplib');
 const { execFile } = require('child_process');
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
+const { computeKpi } = require('./utils/kpiCompute');
 const { buildSalesNavUrl } = require('./utils/buildSalesNavUrl');
 const multer = require('multer');
 const { parse: parseCsv } = require('csv-parse/sync');
@@ -1589,6 +1590,7 @@ async function fetchAllNotionMissions() {
     const props = page.properties;
     return {
       id: page.id,
+      dateCreation: page.created_time || null, // date de création de la ligne Notion ≈ date de signature (base d'année KPI)
       nom: props['Nom du projet'] && props['Nom du projet'].title
         ? props['Nom du projet'].title.map(t => t.plain_text).join('') : 'Sans nom',
       client: props['Nom du client'] && props['Nom du client'].rich_text
@@ -5737,6 +5739,75 @@ app.get('/api/tresorerie', async (req, res) => {
   } catch (err) {
     console.error('Erreur trésorerie:', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// --- KPI par partner (onglet KPI) ---
+// Lit les missions Notion + objectifs + overrides de répartition (Supabase),
+// délègue le calcul d'attribution à utils/kpiCompute.js.
+app.get('/api/kpi', async (req, res) => {
+  try {
+    const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+    const missions = await fetchAllNotionMissions();
+    const [{ data: objectives, error: objErr }, { data: splits, error: splErr }] = await Promise.all([
+      supabase.from('kpi_objectives').select('*').eq('year', year),
+      supabase.from('kpi_ca_split').select('*'),
+    ]);
+    if (objErr) throw objErr;
+    if (splErr) throw splErr;
+    const result = computeKpi({ missions, objectives: objectives || [], splits: splits || [], year });
+    res.json(result);
+  } catch (e) {
+    console.error('GET /api/kpi error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Upsert d'un objectif individuel (partner + année + type).
+app.post('/api/kpi/objectives', async (req, res) => {
+  try {
+    const { partner, year, type, montant } = req.body || {};
+    if (!partner || !year || !['newsale', 'upsale', 'opere'].includes(type)) {
+      return res.status(400).json({ error: 'partner, year et type (newsale|upsale|opere) requis' });
+    }
+    const { error } = await supabase
+      .from('kpi_objectives')
+      .upsert(
+        { partner, year: parseInt(year, 10), type, montant: Number(montant) || 0, updated_at: new Date().toISOString() },
+        { onConflict: 'partner,year,type' }
+      );
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('POST /api/kpi/objectives error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Remplace la répartition d'une mission sur un axe (commercial|operationnel).
+// `splits` vide → on supprime l'override (retour aux parts égales par défaut).
+app.post('/api/kpi/split', async (req, res) => {
+  try {
+    const { mission_id, axis, splits } = req.body || {};
+    if (!mission_id || !['commercial', 'operationnel'].includes(axis)) {
+      return res.status(400).json({ error: 'mission_id et axis (commercial|operationnel) requis' });
+    }
+    // 1) purge des lignes existantes pour (mission_id, axis)
+    const { error: delErr } = await supabase
+      .from('kpi_ca_split').delete().eq('mission_id', mission_id).eq('axis', axis);
+    if (delErr) throw delErr;
+    // 2) réinsertion si fourni
+    const rows = (splits || [])
+      .filter(s => s && s.partner)
+      .map(s => ({ mission_id, axis, partner: s.partner, pct: Number(s.pct) || 0, updated_at: new Date().toISOString() }));
+    if (rows.length > 0) {
+      const { error: insErr } = await supabase.from('kpi_ca_split').insert(rows);
+      if (insErr) throw insErr;
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('POST /api/kpi/split error:', e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 

@@ -3363,6 +3363,10 @@
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 12l4-4 3 3 4-5 3 2"/><path d="M1 15h14"/></svg>
         Analytics
       </button>
+        <button class="sidebar-link" onclick="navigateTo('kpi')" data-page="kpi">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="7"/><rect x="13" y="6" width="3" height="11"/></svg>
+          KPI
+        </button>
       <button class="sidebar-link" onclick="window.open('/prospector','_blank')" data-page="prospector">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>
         Prospector
@@ -4102,6 +4106,105 @@
   </div>
   </div>
   <!-- end page-analytics -->
+
+  <!-- PAGE: KPI -->
+  <div class="app-page" id="page-kpi">
+    <style>
+      #kpiCharts { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
+      @media (max-width: 900px) { #kpiCharts { grid-template-columns: 1fr; } }
+      #page-kpi .kpi-card {
+        border: 1px solid var(--border); border-radius: 14px; background: var(--card);
+        padding: 1.1rem 1.2rem 0.7rem;
+        transition: box-shadow .18s ease, border-color .18s ease;
+      }
+      #page-kpi .kpi-card:hover {
+        box-shadow: 0 8px 28px -16px rgba(0,0,0,.28);
+        border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+      }
+      #page-kpi .kpi-card--all {
+        background: linear-gradient(180deg, color-mix(in srgb, var(--primary) 7%, var(--card)) 0%, var(--card) 55%);
+        border-color: color-mix(in srgb, var(--primary) 26%, var(--border));
+      }
+      #page-kpi .kpi-card-head { display: flex; align-items: center; gap: .65rem; margin-bottom: .9rem; }
+      #page-kpi .kpi-chip {
+        width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
+        font-weight: 700; font-size: .9rem; color: #fff; flex: 0 0 auto;
+        box-shadow: 0 2px 6px -2px rgba(0,0,0,.35);
+      }
+      #page-kpi .kpi-card--all .kpi-chip { border-radius: 50%; }
+      #page-kpi .kpi-card-name { font-weight: 650; font-size: 1.02rem; color: var(--text); line-height: 1.15; }
+      #page-kpi .kpi-card-sub { font-size: .72rem; color: var(--text-secondary); margin-top: 2px; letter-spacing: .01em; }
+      #page-kpi .kpi-canvas-wrap { height: 232px; }
+      #page-kpi .kpi-canvas-wrap canvas { cursor: pointer; }
+      /* Contenu des modales Réglages / Détail */
+      .kpi-modal.modal { max-width: 720px; }
+      .modal-close-x { cursor:pointer; border:none; background:none; font-size:1.4rem; line-height:1; color:var(--text-secondary); padding:0 .2rem; }
+      .modal-close-x:hover { color:var(--text); }
+      .kpi-rg-h { font-size:.92rem; font-weight:650; color:var(--text); margin:0 0 .8rem; display:flex; align-items:baseline; gap:.5rem; }
+      .kpi-rg-badge { font-size:.7rem; font-weight:500; color:var(--text-secondary); }
+      .kpi-obj-table { width:100%; border-collapse:separate; border-spacing:0; }
+      .kpi-obj-table th { text-align:right; padding:.3rem .5rem; font-size:.68rem; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); font-weight:600; }
+      .kpi-obj-table th:first-child { text-align:left; }
+      .kpi-obj-table td { padding:.4rem .5rem; border-top:1px solid var(--border); vertical-align:middle; }
+      .kpi-obj-name { display:flex; align-items:center; gap:.5rem; font-weight:600; font-size:.88rem; }
+      .kpi-mini-chip { width:24px; height:24px; border-radius:7px; display:grid; place-items:center; color:#fff; font-size:.72rem; font-weight:700; flex:0 0 auto; }
+      .kpi-num-input { width:120px; text-align:right; padding:.35rem .5rem; border:1px solid var(--border); border-radius:var(--radius); background:var(--card); color:var(--text); font-family:inherit; font-size:.85rem; }
+      .kpi-num-input:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 2px rgba(0,61,46,.15); }
+      .kpi-split-card { border:1px solid var(--border); border-radius:10px; padding:.75rem .85rem; margin-bottom:.7rem; }
+      .kpi-split-title { font-weight:600; font-size:.9rem; margin-bottom:.5rem; display:flex; justify-content:space-between; gap:1rem; }
+      .kpi-split-axis { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; margin:.4rem 0; }
+      .kpi-split-axis-label { font-size:.68rem; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); width:92px; }
+      .kpi-pct-input { width:58px; text-align:right; padding:.25rem .4rem; border:1px solid var(--border); border-radius:6px; background:var(--card); color:var(--text); font-family:inherit; }
+      .kpi-btn { padding:.32rem .75rem; border:1px solid var(--border); border-radius:var(--radius); background:var(--card); color:var(--text); cursor:pointer; font-size:.8rem; font-family:inherit; transition:border-color .12s; }
+      .kpi-btn:hover { border-color:var(--primary); }
+      .kpi-btn--primary { background:var(--primary); color:#fff; border-color:var(--primary); }
+      .kpi-detail-total { font-size:.85rem; color:var(--text-secondary); margin:0 0 .8rem; }
+      .kpi-detail-row { display:flex; justify-content:space-between; gap:1rem; align-items:baseline; padding:.55rem .15rem; border-top:1px solid var(--border); }
+      .kpi-detail-row:first-of-type { border-top:none; }
+      .kpi-detail-nom { font-weight:600; font-size:.9rem; color:var(--text); }
+      .kpi-detail-client { font-size:.75rem; color:var(--text-secondary); margin-top:1px; }
+      .kpi-detail-montant { font-weight:700; font-size:.9rem; color:var(--text); white-space:nowrap; }
+    </style>
+    <div class="section">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
+        <h2 style="margin:0;">KPI — objectifs & avancement par partner</h2>
+        <div style="display:flex; align-items:center; gap:0.6rem;">
+          <label for="kpiYear" style="color:var(--text-secondary); font-size:0.9rem;">Année</label>
+          <select id="kpiYear" onchange="initKpi()" style="padding:0.4rem 0.6rem; border:1px solid var(--border); border-radius:var(--radius); background:var(--card); color:var(--text);"></select>
+          <button class="analytics-tab" onclick="toggleKpiReglages()" id="kpiReglagesBtn">Réglages</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="kpiUnclassified" class="section" style="display:none; border-color:var(--warning); background:var(--warning-bg);"></div>
+
+    <div id="kpiCharts"></div>
+
+    <!-- Modale Réglages -->
+    <div class="modal-overlay" id="kpiReglagesModal" onclick="if(event.target===this) closeKpiReglages()">
+      <div class="modal kpi-modal">
+        <div class="modal-header" style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+          <h2 style="margin:0;">Réglages KPI</h2>
+          <button class="modal-close-x" onclick="closeKpiReglages()" aria-label="Fermer">&times;</button>
+        </div>
+        <div class="modal-body" id="kpiReglagesBody"></div>
+        <div class="modal-footer">
+          <button class="kpi-btn kpi-btn--primary" onclick="closeKpiReglages()">Fermer</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modale Détail missions (clic sur une barre) -->
+    <div class="modal-overlay" id="kpiDetailModal" onclick="if(event.target===this) closeKpiDetail()">
+      <div class="modal kpi-modal">
+        <div class="modal-header" style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+          <h2 style="margin:0;" id="kpiDetailTitle">Détail</h2>
+          <button class="modal-close-x" onclick="closeKpiDetail()" aria-label="Fermer">&times;</button>
+        </div>
+        <div class="modal-body" id="kpiDetailBody"></div>
+      </div>
+    </div>
+  </div>
 
   <!-- PAGE: Masse salariale -->
   <div class="app-page" id="page-masse-salariale">
@@ -5476,7 +5579,7 @@
     // --- Navigation ---
     let currentPage = 'cockpit';
 
-    const PAGE_NAMES = { cockpit: 'Cockpit', dashboard: 'Commercial', 'analyse-clients': 'Analyse clients', facturation: 'Facturation', 'frais-km': 'Frais KM', tresorerie: 'Tresorerie', 'masse-salariale': 'Masse salariale', scenarios: 'Scenarios', analytics: 'Analytics', 'proposal-engine': 'Proposal Engine' };
+    const PAGE_NAMES = { cockpit: 'Cockpit', dashboard: 'Commercial', 'analyse-clients': 'Analyse clients', facturation: 'Facturation', 'frais-km': 'Frais KM', tresorerie: 'Tresorerie', 'masse-salariale': 'Masse salariale', scenarios: 'Scenarios', analytics: 'Analytics', 'proposal-engine': 'Proposal Engine', kpi: 'KPI' };
 
     function navigateTo(page) {
       currentPage = page;
@@ -5522,6 +5625,7 @@
       if (page === 'masse-salariale') refreshMasseSalarialePage();
       if (page === 'scenarios') refreshScenariosPage();
       if (page === 'analytics') initAnalytics();
+      if (page === 'kpi') initKpi();
       if (page === 'proposal-engine') loadProposalConfig();
       if (page === 'frais-km' && !fraisKmData) refreshFraisKmClients();
       if (page === 'analyse-clients' && !analyseClientsData) refreshAnalyseClients();
@@ -10718,6 +10822,287 @@
       if (mm) mm.addEventListener('click', function(e) { if (e.target === this) closeModalMissions(); });
 
     });
+
+    let kpiData = null;
+    let kpiChartInstances = [];
+
+    function kpiPopulateYears() {
+      const sel = document.getElementById('kpiYear');
+      if (sel.options.length > 0) return; // déjà rempli
+      const now = new Date().getFullYear();
+      for (let y = now + 1; y >= now - 3; y--) {
+        const opt = document.createElement('option');
+        opt.value = y; opt.textContent = y;
+        if (y === now) opt.selected = true;
+        sel.appendChild(opt);
+      }
+    }
+
+    async function initKpi() {
+      kpiPopulateYears();
+      const year = document.getElementById('kpiYear').value || new Date().getFullYear();
+      const container = document.getElementById('kpiCharts');
+      container.innerHTML = '<p style="color:var(--text-secondary);">Chargement…</p>';
+      try {
+        const res = await fetch('/api/kpi?year=' + year);
+        if (!res.ok) throw new Error('Erreur serveur (' + res.status + ')');
+        kpiData = await res.json();
+        renderKpiUnclassified();
+        renderKpiCharts();
+        if (document.getElementById('kpiReglagesModal').classList.contains('active')) renderKpiReglages();
+      } catch (e) {
+        container.innerHTML = '<p style="color:var(--warning);">Erreur : ' + e.message + '</p>';
+      }
+    }
+
+    const KPI_TYPES = [
+      { key: 'newsale', label: 'Signé · Newsale' },
+      { key: 'upsale',  label: 'Signé · Upsale' },
+      { key: 'opere',   label: 'Opéré' },
+    ];
+    // Palette des pastilles : une identité de couleur par partner.
+    const KPI_CHIP_COLORS = ['#0f7b6c', '#2f6f9f', '#d9730d', '#6940a5', '#1f9d8b', '#b5306b'];
+
+    function kpiFmtEur(v) {
+      return (Math.round(v) || 0).toLocaleString('fr-FR') + ' €';
+    }
+    function kpiCssVar(name, fallback) {
+      return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+    }
+    function kpiInitial(name) {
+      const clean = (name || '?').replace(/\(.*\)/, '').trim();
+      return (clean.charAt(0) || '?').toUpperCase();
+    }
+    // Dégradé vertical pour les barres "Réalisé" (du clair vers la couleur d'accent).
+    function kpiBarGradient(context, hex) {
+      const chart = context.chart;
+      const area = chart.chartArea;
+      if (!area) return hex;
+      const g = chart.ctx.createLinearGradient(0, area.bottom, 0, area.top);
+      g.addColorStop(0, hex + '88');
+      g.addColorStop(1, hex);
+      return g;
+    }
+
+    function renderKpiCharts() {
+      // Détruit les anciens charts pour éviter les fuites mémoire.
+      kpiChartInstances.forEach(c => c.destroy());
+      kpiChartInstances = [];
+
+      const container = document.getElementById('kpiCharts');
+
+      if (kpiData.partners.length === 0) {
+        container.innerHTML = '<div class="kpi-card" style="grid-column:1/-1;"><p style="color:var(--text-secondary); margin:0;">Aucune mission ni objectif pour cette année. Ajoute des objectifs via « Réglages ».</p></div>';
+        return;
+      }
+      container.innerHTML = '';
+
+      const primary  = kpiCssVar('--primary', '#003D2E');
+      const trackCol = 'rgba(127,127,127,0.16)';
+      const gridCol  = 'rgba(127,127,127,0.12)';
+      const mutedCol = kpiCssVar('--text-secondary', '#787774');
+      const textCol  = kpiCssVar('--text', '#37352f');
+
+      // Blocs partners (avec accent + détail des missions), puis "All" inséré en 2e position
+      // → le 1er partner (alphabétique, ex. Guillaume) est à gauche de "All".
+      const partnerBlocks = kpiData.partners.map((p, i) => ({
+        partner: p.partner, sub: null,
+        data: { newsale: p.newsale, upsale: p.upsale, opere: p.opere },
+        details: p.details,
+        accent: KPI_CHIP_COLORS[i % KPI_CHIP_COLORS.length],
+      }));
+      const allBlock = { partner: 'Tous les partners', sub: null, data: kpiData.all, details: kpiData.allDetails, all: true };
+      const blocks = [allBlock].concat(partnerBlocks);
+
+      blocks.forEach((block, idx) => {
+        const accent = block.all ? primary : block.accent;
+        const card = document.createElement('div');
+        card.className = 'kpi-card' + (block.all ? ' kpi-card--all' : '');
+        const canvasId = 'kpiChart_' + idx;
+        card.innerHTML =
+          '<div class="kpi-card-head">' +
+            '<div class="kpi-chip" style="background:' + accent + ';">' + (block.all ? '∑' : kpiInitial(block.partner)) + '</div>' +
+            '<div><div class="kpi-card-name">' + block.partner + '</div>' +
+              (block.sub ? '<div class="kpi-card-sub">' + block.sub + '</div>' : '') +
+            '</div>' +
+          '</div>' +
+          '<div class="kpi-canvas-wrap"><canvas id="' + canvasId + '"></canvas></div>';
+        container.appendChild(card);
+
+        const labels = KPI_TYPES.map(t => t.label);
+        const objdata = KPI_TYPES.map(t => block.data[t.key].objectif);
+        const realdata = KPI_TYPES.map(t => block.data[t.key].realise);
+        // % d'avancement par type (affiché au-dessus de la barre Réalisé).
+        const txLabels = KPI_TYPES.map(t => {
+          const tx = block.data[t.key].tx;
+          return tx === null ? '—' : Math.round(tx * 100) + '%';
+        });
+
+        const chart = new Chart(document.getElementById(canvasId), {
+          type: 'bar',
+          plugins: [ChartDataLabels],
+          data: {
+            labels,
+            datasets: [
+              { label: 'Objectif', data: objdata, backgroundColor: trackCol,
+                borderRadius: 6, borderSkipped: false, barPercentage: 0.72, categoryPercentage: 0.56,
+                datalabels: { display: false } },
+              { label: 'Réalisé', data: realdata,
+                backgroundColor: (c) => kpiBarGradient(c, accent),
+                borderRadius: 6, borderSkipped: false, barPercentage: 0.72, categoryPercentage: 0.56,
+                datalabels: {
+                  anchor: 'end', align: 'end', offset: 2, clamp: true,
+                  color: accent, font: { weight: '800', size: 12 },
+                  formatter: (val, ctx) => txLabels[ctx.dataIndex],
+                } },
+            ],
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            layout: { padding: { top: 20 } },
+            onClick: (evt, els) => { if (els && els.length) openKpiDetail(block, KPI_TYPES[els[0].index].key); },
+            onHover: (evt, els) => { if (evt.native) evt.native.target.style.cursor = (els && els.length) ? 'pointer' : 'default'; },
+            scales: {
+              y: { beginAtZero: true,
+                   grid: { color: gridCol, drawTicks: false },
+                   border: { display: false },
+                   ticks: { callback: v => (v / 1000) + 'k', color: mutedCol, font: { size: 11 }, padding: 8, maxTicksLimit: 5 } },
+              x: { grid: { display: false }, border: { display: false },
+                   ticks: { color: textCol, font: { size: 11, weight: '600' } } },
+            },
+            plugins: {
+              legend: { position: 'top', align: 'end',
+                        labels: { usePointStyle: true, pointStyle: 'rectRounded', boxWidth: 9, boxHeight: 9, padding: 14, color: mutedCol, font: { size: 11 } } },
+              tooltip: { backgroundColor: 'rgba(20,20,20,0.92)', padding: 10, cornerRadius: 8,
+                         titleFont: { size: 12 }, bodyFont: { size: 12 }, displayColors: false,
+                         callbacks: { label: ctx => ctx.dataset.label + ' : ' + kpiFmtEur(ctx.raw) } },
+            },
+          },
+        });
+        kpiChartInstances.push(chart);
+      });
+    }
+
+    function renderKpiUnclassified() {
+      const box = document.getElementById('kpiUnclassified');
+      const list = (kpiData && kpiData.unclassified) || [];
+      if (list.length === 0) { box.style.display = 'none'; return; }
+      box.style.display = '';
+      box.innerHTML =
+        '<h3 style="margin:0 0 0.5rem; color:var(--warning);">⚠️ ' + list.length + ' mission(s) non classée(s) (type_ca vide)</h3>' +
+        '<p style="margin:0 0 0.5rem; color:var(--text-secondary); font-size:0.9rem;">Elles ne comptent ni en Newsale ni en Upsale. Corrige leur <code>type_ca</code> dans Notion.</p>' +
+        '<ul style="margin:0; padding-left:1.2rem;">' +
+        list.map(m => '<li>' + (m.nom || 'Sans nom') + ' — ' + (m.client || '') + ' (' + kpiFmtEur(m.ca) + ')</li>').join('') +
+        '</ul>';
+    }
+    // Réglages = pop-up (modale).
+    function toggleKpiReglages() {
+      document.getElementById('kpiReglagesModal').classList.add('active');
+      renderKpiReglages();
+    }
+    function closeKpiReglages() {
+      document.getElementById('kpiReglagesModal').classList.remove('active');
+    }
+
+    function renderKpiReglages() {
+      if (!kpiData) return;
+      const body = document.getElementById('kpiReglagesBody');
+      const year = document.getElementById('kpiYear').value;
+
+      // --- A. Objectifs : une ligne par partner, 3 champs ---
+      let html = '<div class="kpi-rg-h">Objectifs ' + year + ' <span class="kpi-rg-badge">€ par partner</span></div>';
+      if (kpiData.partners.length === 0) {
+        html += '<p style="color:var(--text-secondary);">Aucun partner détecté cette année.</p>';
+      } else {
+        html += '<table class="kpi-obj-table"><thead><tr><th>Partner</th><th>Newsale</th><th>Upsale</th><th>Opéré</th></tr></thead><tbody>';
+        kpiData.partners.forEach((p, i) => {
+          const accent = KPI_CHIP_COLORS[i % KPI_CHIP_COLORS.length];
+          html += '<tr><td><div class="kpi-obj-name"><span class="kpi-mini-chip" style="background:' + accent + ';">' + kpiInitial(p.partner) + '</span>' + p.partner + '</div></td>' +
+            ['newsale', 'upsale', 'opere'].map(t =>
+              '<td style="text-align:right;"><input class="kpi-num-input" type="number" value="' + p[t].objectif + '" ' +
+              'onchange="saveKpiObjective(\'' + p.partner + '\', ' + year + ', \'' + t + '\', this.value)"></td>'
+            ).join('') + '</tr>';
+        });
+        html += '</tbody></table>';
+      }
+
+      // --- B. Répartition CA : missions à 2+ partners ---
+      html += '<div class="kpi-rg-h" style="margin-top:1.5rem;">Répartition du CA <span class="kpi-rg-badge">missions à 2+ partners</span></div>';
+      if (kpiData.missionsForSplit.length === 0) {
+        html += '<p style="color:var(--text-secondary);">Aucune mission à plusieurs partners cette année.</p>';
+      }
+      kpiData.missionsForSplit.forEach((m, mi) => {
+        html += '<div class="kpi-split-card"><div class="kpi-split-title"><span>' + m.nom + '</span><span style="color:var(--text-secondary);">' + kpiFmtEur(m.ca) + '</span></div>';
+        [['commercial', m.commercial, m.splitCommercial], ['operationnel', m.operationnel, m.splitOperationnel]].forEach(([axis, plist, smap]) => {
+          if (!plist || plist.length < 2) return;
+          const inputId = 'split_' + mi + '_' + axis;
+          html += '<div class="kpi-split-axis"><span class="kpi-split-axis-label">' + axis + '</span>' +
+            plist.map(pn =>
+              pn + ' <input class="kpi-pct-input" type="number" data-partner="' + pn + '" value="' + (smap[pn] || 0) + '">%'
+            ).join(' ') +
+            ' <button class="kpi-btn" onclick="saveKpiSplit(\'' + m.id + '\', \'' + axis + '\', \'' + inputId + '\')">OK</button>' +
+            '<span id="' + inputId + '"></span></div>';
+        });
+        html += '</div>';
+      });
+
+      body.innerHTML = html;
+    }
+
+    // Détail = pop-up des missions composant une barre (partner/All + type).
+    function openKpiDetail(block, typeKey) {
+      const typeLabel = (KPI_TYPES.find(t => t.key === typeKey) || {}).label || typeKey;
+      const list = (block.details && block.details[typeKey]) || [];
+      const total = list.reduce((s, x) => s + (x.montant || 0), 0);
+      document.getElementById('kpiDetailTitle').textContent = block.partner + ' · ' + typeLabel;
+      let html = '<p class="kpi-detail-total">' + list.length + ' mission' + (list.length > 1 ? 's' : '') + ' · ' + kpiFmtEur(total) +
+        (block.all ? '' : ' attribué' + (list.length > 1 ? 's' : '')) + '</p>';
+      if (list.length === 0) {
+        html += '<p style="color:var(--text-secondary);">Aucune mission pour cet axe cette année.</p>';
+      } else {
+        html += list.map(m =>
+          '<div class="kpi-detail-row"><div><div class="kpi-detail-nom">' + (m.nom || 'Sans nom') + '</div>' +
+          '<div class="kpi-detail-client">' + (m.client || '') + '</div></div>' +
+          '<div class="kpi-detail-montant">' + kpiFmtEur(m.montant) + '</div></div>'
+        ).join('');
+      }
+      document.getElementById('kpiDetailBody').innerHTML = html;
+      document.getElementById('kpiDetailModal').classList.add('active');
+    }
+    function closeKpiDetail() {
+      document.getElementById('kpiDetailModal').classList.remove('active');
+    }
+
+    async function saveKpiObjective(partner, year, type, value) {
+      try {
+        const res = await fetch('/api/kpi/objectives', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ partner, year: Number(year), type, montant: Number(value) || 0 }),
+        });
+        if (!res.ok) throw new Error('Erreur ' + res.status);
+        await initKpi(); // refetch → met à jour charts + All
+      } catch (e) { alert('Échec sauvegarde objectif : ' + e.message); }
+    }
+
+    async function saveKpiSplit(missionId, axis, markerId) {
+      try {
+        // Relit les inputs % du bloc axis : ils précèdent le <span id=markerId>.
+        const marker = document.getElementById(markerId);
+        const row = marker.parentElement; // le <div> de l'axe
+        const inputs = row.querySelectorAll('input[data-partner]');
+        const splits = Array.from(inputs).map(inp => ({ partner: inp.dataset.partner, pct: Number(inp.value) || 0 }));
+        const total = splits.reduce((s, x) => s + x.pct, 0);
+        if (Math.round(total) !== 100) {
+          if (!confirm('La somme fait ' + total + '% (pas 100%). Les montants seront normalisés. Continuer ?')) return;
+        }
+        const res = await fetch('/api/kpi/split', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mission_id: missionId, axis, splits }),
+        });
+        if (!res.ok) throw new Error('Erreur ' + res.status);
+        await initKpi();
+      } catch (e) { alert('Échec sauvegarde répartition : ' + e.message); }
+    }
 
     function initAnalytics() {
       refreshAnalytics();
