@@ -10,6 +10,7 @@ const { authenticator } = require('otplib');
 const { execFile } = require('child_process');
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
+const { computeKpi } = require('./utils/kpiCompute');
 const { buildSalesNavUrl } = require('./utils/buildSalesNavUrl');
 const multer = require('multer');
 const { parse: parseCsv } = require('csv-parse/sync');
@@ -1589,6 +1590,7 @@ async function fetchAllNotionMissions() {
     const props = page.properties;
     return {
       id: page.id,
+      dateCreation: page.created_time || null, // date de création de la ligne Notion ≈ date de signature (base d'année KPI)
       nom: props['Nom du projet'] && props['Nom du projet'].title
         ? props['Nom du projet'].title.map(t => t.plain_text).join('') : 'Sans nom',
       client: props['Nom du client'] && props['Nom du client'].rich_text
@@ -5737,6 +5739,27 @@ app.get('/api/tresorerie', async (req, res) => {
   } catch (err) {
     console.error('Erreur trésorerie:', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// --- KPI par partner (onglet KPI) ---
+// Lit les missions Notion + objectifs + overrides de répartition (Supabase),
+// délègue le calcul d'attribution à utils/kpiCompute.js.
+app.get('/api/kpi', async (req, res) => {
+  try {
+    const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+    const missions = await fetchAllNotionMissions();
+    const [{ data: objectives, error: objErr }, { data: splits, error: splErr }] = await Promise.all([
+      supabase.from('kpi_objectives').select('*').eq('year', year),
+      supabase.from('kpi_ca_split').select('*'),
+    ]);
+    if (objErr) throw objErr;
+    if (splErr) throw splErr;
+    const result = computeKpi({ missions, objectives: objectives || [], splits: splits || [], year });
+    res.json(result);
+  } catch (e) {
+    console.error('GET /api/kpi error:', e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 
