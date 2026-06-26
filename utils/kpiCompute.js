@@ -58,6 +58,13 @@ function computeKpi({ missions, objectives, splits, year }) {
     acc[partner] = acc[partner] || { newsale: 0, upsale: 0, opere: 0 };
     acc[partner][type] += amount;
   };
+  // Détail des missions contribuant à chaque (partner, type) — pour le pop-up au clic sur une barre.
+  const detailAcc = {}; // detailAcc[partner][type] = [{ id, nom, client, montant }]
+  const allDetail = { newsale: [], upsale: [], opere: [] }; // détail "All" (CA plein par mission)
+  const addDetail = (partner, type, m, montant) => {
+    detailAcc[partner] = detailAcc[partner] || { newsale: [], upsale: [], opere: [] };
+    detailAcc[partner][type].push({ id: m.id, nom: m.nom, client: m.client, montant: Math.round(montant) });
+  };
 
   const unclassified = [];
   const missionsForSplit = [];
@@ -74,7 +81,8 @@ function computeKpi({ missions, objectives, splits, year }) {
 
       if (type) {
         const shares = splitAmount(ca, m.partnerCommercial, (splitIndex[m.id] || {}).commercial);
-        for (const [p, amt] of Object.entries(shares)) add(p, type, amt);
+        for (const [p, amt] of Object.entries(shares)) { add(p, type, amt); addDetail(p, type, m, amt); }
+        allDetail[type].push({ id: m.id, nom: m.nom, client: m.client, montant: Math.round(ca) });
       } else {
         unclassified.push({ id: m.id, nom: m.nom, client: m.client, ca });
       }
@@ -83,7 +91,8 @@ function computeKpi({ missions, objectives, splits, year }) {
     // --- Opéré (opérationnel) : En cours / Terminé ---
     if (OPERE_STATES.includes(m.etat)) {
       const shares = splitAmount(ca, m.partnerOperationnel, (splitIndex[m.id] || {}).operationnel);
-      for (const [p, amt] of Object.entries(shares)) add(p, 'opere', amt);
+      for (const [p, amt] of Object.entries(shares)) { add(p, 'opere', amt); addDetail(p, 'opere', m, amt); }
+      allDetail.opere.push({ id: m.id, nom: m.nom, client: m.client, montant: Math.round(ca) });
     }
 
     // --- missionsForSplit : missions de l'année à 2+ partners sur un axe ---
@@ -116,7 +125,9 @@ function computeKpi({ missions, objectives, splits, year }) {
   for (const name of [...names].sort()) {
     const real = acc[name] || { newsale: 0, upsale: 0, opere: 0 };
     const obj = objIndex[name] || {};
-    const row = { partner: name };
+    const details = detailAcc[name] || { newsale: [], upsale: [], opere: [] };
+    for (const type of TYPES) details[type].sort((a, b) => b.montant - a.montant);
+    const row = { partner: name, details };
     for (const type of TYPES) {
       const realise = Math.round(real[type] || 0);
       const objectif = Math.round(obj[type] || 0);
@@ -135,7 +146,9 @@ function computeKpi({ missions, objectives, splits, year }) {
     };
   }
 
-  return { year, partners, all, unclassified, missionsForSplit };
+  for (const type of TYPES) allDetail[type].sort((a, b) => b.montant - a.montant);
+
+  return { year, partners, all, unclassified, missionsForSplit, allDetails: allDetail };
 }
 
 module.exports = { computeKpi, yearOf, splitAmount, displaySplit, OPERE_STATES, SIGNE_EXCLUDED_STATES };
