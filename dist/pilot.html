@@ -10864,7 +10864,97 @@
         list.map(m => '<li>' + (m.nom || 'Sans nom') + ' — ' + (m.client || '') + ' (' + kpiFmtEur(m.ca) + ')</li>').join('') +
         '</ul>';
     }
-    function toggleKpiReglages() { /* implémenté en Task 7 */ }
+    function toggleKpiReglages() {
+      const box = document.getElementById('kpiReglages');
+      const show = box.style.display === 'none';
+      box.style.display = show ? '' : 'none';
+      if (show) renderKpiReglages();
+    }
+
+    function renderKpiReglages() {
+      if (!kpiData) return;
+      const box = document.getElementById('kpiReglages');
+      const year = document.getElementById('kpiYear').value;
+
+      // --- A. Objectifs : une ligne par partner connu, 3 champs ---
+      const partners = kpiData.partners.map(p => p.partner);
+      let objHtml = '<h3 style="margin:0 0 0.8rem;">Objectifs ' + year + ' (€)</h3>';
+      if (partners.length === 0) {
+        objHtml += '<p style="color:var(--text-secondary);">Aucun partner détecté. Les partners apparaissent dès qu\'ils sont sur une mission de l\'année, ou saisis ci-dessous.</p>';
+      }
+      objHtml += '<table style="width:100%; border-collapse:collapse; margin-bottom:1.5rem;"><thead><tr>' +
+        '<th style="text-align:left; padding:0.4rem;">Partner</th>' +
+        '<th style="padding:0.4rem;">Newsale</th><th style="padding:0.4rem;">Upsale</th><th style="padding:0.4rem;">Opéré</th></tr></thead><tbody>';
+      kpiData.partners.forEach(p => {
+        objHtml += '<tr>' +
+          '<td style="padding:0.4rem; font-weight:600;">' + p.partner + '</td>' +
+          ['newsale', 'upsale', 'opere'].map(t =>
+            '<td style="padding:0.4rem;"><input type="number" style="width:110px; padding:0.3rem; border:1px solid var(--border); border-radius:var(--radius);" ' +
+            'value="' + p[t].objectif + '" ' +
+            'onchange="saveKpiObjective(\'' + p.partner + '\', ' + year + ', \'' + t + '\', this.value)"></td>'
+          ).join('') +
+          '</tr>';
+      });
+      objHtml += '</tbody></table>';
+
+      // --- B. Répartition CA : missions de l'année à 2+ partners ---
+      let splitHtml = '<h3 style="margin:0 0 0.8rem;">Répartition du CA (missions à 2+ partners)</h3>';
+      if (kpiData.missionsForSplit.length === 0) {
+        splitHtml += '<p style="color:var(--text-secondary);">Aucune mission à plusieurs partners cette année.</p>';
+      }
+      kpiData.missionsForSplit.forEach((m, mi) => {
+        splitHtml += '<div style="border:1px solid var(--border); border-radius:var(--radius); padding:0.8rem; margin-bottom:0.8rem;">' +
+          '<div style="font-weight:600; margin-bottom:0.5rem;">' + m.nom + ' — ' + kpiFmtEur(m.ca) + '</div>';
+        [['commercial', m.commercial, m.splitCommercial], ['operationnel', m.operationnel, m.splitOperationnel]].forEach(([axis, plist, smap]) => {
+          if (!plist || plist.length < 2) return;
+          const inputId = 'split_' + mi + '_' + axis;
+          splitHtml += '<div style="margin:0.3rem 0;"><span style="display:inline-block; width:110px; color:var(--text-secondary);">' + axis + '</span>' +
+            plist.map(pn =>
+              '<span style="margin-right:0.8rem;">' + pn + ' <input type="number" data-partner="' + pn + '" ' +
+              'style="width:64px; padding:0.25rem; border:1px solid var(--border); border-radius:var(--radius);" value="' + (smap[pn] || 0) + '"> %</span>'
+            ).join('') +
+            '<button class="analytics-tab" style="padding:0.25rem 0.6rem;" onclick="saveKpiSplit(\'' + m.id + '\', \'' + axis + '\', \'' + inputId + '\')">OK</button>' +
+            '<span id="' + inputId + '" data-inputs="' + mi + '_' + axis + '"></span></div>';
+          // marqueur invisible pour retrouver les inputs : on relit via le parent
+        });
+        splitHtml += '</div>';
+      });
+
+      box.innerHTML = objHtml + splitHtml;
+      // Stocke la structure pour relire les inputs à la sauvegarde.
+      box.dataset.year = year;
+    }
+
+    async function saveKpiObjective(partner, year, type, value) {
+      try {
+        const res = await fetch('/api/kpi/objectives', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ partner, year: Number(year), type, montant: Number(value) || 0 }),
+        });
+        if (!res.ok) throw new Error('Erreur ' + res.status);
+        await initKpi(); // refetch → met à jour charts + All
+      } catch (e) { alert('Échec sauvegarde objectif : ' + e.message); }
+    }
+
+    async function saveKpiSplit(missionId, axis, markerId) {
+      try {
+        // Relit les inputs % du bloc axis : ils précèdent le <span id=markerId>.
+        const marker = document.getElementById(markerId);
+        const row = marker.parentElement; // le <div> de l'axe
+        const inputs = row.querySelectorAll('input[data-partner]');
+        const splits = Array.from(inputs).map(inp => ({ partner: inp.dataset.partner, pct: Number(inp.value) || 0 }));
+        const total = splits.reduce((s, x) => s + x.pct, 0);
+        if (Math.round(total) !== 100) {
+          if (!confirm('La somme fait ' + total + '% (pas 100%). Les montants seront normalisés. Continuer ?')) return;
+        }
+        const res = await fetch('/api/kpi/split', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mission_id: missionId, axis, splits }),
+        });
+        if (!res.ok) throw new Error('Erreur ' + res.status);
+        await initKpi();
+      } catch (e) { alert('Échec sauvegarde répartition : ' + e.message); }
+    }
 
     function initAnalytics() {
       refreshAnalytics();
