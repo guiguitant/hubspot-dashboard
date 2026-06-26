@@ -10744,7 +10744,126 @@
 
     });
 
-    function initKpi() { /* implémenté en Task 6 */ }
+    let kpiData = null;
+    let kpiChartInstances = [];
+
+    function kpiPopulateYears() {
+      const sel = document.getElementById('kpiYear');
+      if (sel.options.length > 0) return; // déjà rempli
+      const now = new Date().getFullYear();
+      for (let y = now + 1; y >= now - 3; y--) {
+        const opt = document.createElement('option');
+        opt.value = y; opt.textContent = y;
+        if (y === now) opt.selected = true;
+        sel.appendChild(opt);
+      }
+    }
+
+    async function initKpi() {
+      kpiPopulateYears();
+      const year = document.getElementById('kpiYear').value || new Date().getFullYear();
+      const container = document.getElementById('kpiCharts');
+      container.innerHTML = '<p style="color:var(--text-secondary);">Chargement…</p>';
+      try {
+        const res = await fetch('/api/kpi?year=' + year);
+        if (!res.ok) throw new Error('Erreur serveur (' + res.status + ')');
+        kpiData = await res.json();
+        renderKpiUnclassified();
+        renderKpiCharts();
+        if (document.getElementById('kpiReglages').style.display !== 'none') renderKpiReglages();
+      } catch (e) {
+        container.innerHTML = '<p style="color:var(--warning);">Erreur : ' + e.message + '</p>';
+      }
+    }
+
+    // Couleurs : Objectif (gris) vs Réalisé (vert primaire).
+    const KPI_COL_OBJ = 'rgba(120,119,116,0.35)';
+    const KPI_COL_REAL = '#003D2E';
+    const KPI_TYPES = [
+      { key: 'newsale', label: 'Signé · Newsale' },
+      { key: 'upsale',  label: 'Signé · Upsale' },
+      { key: 'opere',   label: 'Opéré' },
+    ];
+
+    function kpiFmtEur(v) {
+      return (Math.round(v) || 0).toLocaleString('fr-FR') + ' €';
+    }
+
+    function renderKpiCharts() {
+      // Détruit les anciens charts pour éviter les fuites mémoire.
+      kpiChartInstances.forEach(c => c.destroy());
+      kpiChartInstances = [];
+
+      const container = document.getElementById('kpiCharts');
+      container.innerHTML = '';
+
+      // Un bloc "All" en premier, puis un bloc par partner.
+      const blocks = [{ partner: 'Tous (All)', data: kpiData.all }]
+        .concat(kpiData.partners.map(p => ({ partner: p.partner, data: { newsale: p.newsale, upsale: p.upsale, opere: p.opere } })));
+
+      if (kpiData.partners.length === 0) {
+        container.innerHTML = '<div class="section"><p style="color:var(--text-secondary);">Aucune mission ni objectif pour cette année. Ajoute des objectifs via « Réglages ».</p></div>';
+        return;
+      }
+
+      blocks.forEach((block, idx) => {
+        const card = document.createElement('div');
+        card.className = 'section';
+        const canvasId = 'kpiChart_' + idx;
+        card.innerHTML =
+          '<h3 style="margin:0 0 0.8rem;">' + block.partner + '</h3>' +
+          '<div style="height:260px;"><canvas id="' + canvasId + '"></canvas></div>';
+        container.appendChild(card);
+
+        const labels = KPI_TYPES.map(t => t.label);
+        const objdata = KPI_TYPES.map(t => block.data[t.key].objectif);
+        const realdata = KPI_TYPES.map(t => block.data[t.key].realise);
+        // % d'avancement par type (affiché au-dessus de la barre Réalisé).
+        const txLabels = KPI_TYPES.map(t => {
+          const tx = block.data[t.key].tx;
+          return tx === null ? '—' : Math.round(tx * 100) + '%';
+        });
+
+        const chart = new Chart(document.getElementById(canvasId), {
+          type: 'bar',
+          plugins: [ChartDataLabels],
+          data: {
+            labels,
+            datasets: [
+              { label: 'Objectif', data: objdata, backgroundColor: KPI_COL_OBJ,
+                datalabels: { display: false } },
+              { label: 'Réalisé', data: realdata, backgroundColor: KPI_COL_REAL,
+                datalabels: {
+                  anchor: 'end', align: 'end', color: 'var(--text)', font: { weight: '700', size: 11 },
+                  formatter: (val, ctx) => txLabels[ctx.dataIndex],
+                } },
+            ],
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            scales: { y: { beginAtZero: true, ticks: { callback: v => (v / 1000) + 'k' } } },
+            plugins: {
+              legend: { position: 'top' },
+              tooltip: { callbacks: { label: ctx => ctx.dataset.label + ' : ' + kpiFmtEur(ctx.raw) } },
+            },
+          },
+        });
+        kpiChartInstances.push(chart);
+      });
+    }
+
+    function renderKpiUnclassified() {
+      const box = document.getElementById('kpiUnclassified');
+      const list = (kpiData && kpiData.unclassified) || [];
+      if (list.length === 0) { box.style.display = 'none'; return; }
+      box.style.display = '';
+      box.innerHTML =
+        '<h3 style="margin:0 0 0.5rem; color:var(--warning);">⚠️ ' + list.length + ' mission(s) non classée(s) (type_ca vide)</h3>' +
+        '<p style="margin:0 0 0.5rem; color:var(--text-secondary); font-size:0.9rem;">Elles ne comptent ni en Newsale ni en Upsale. Corrige leur <code>type_ca</code> dans Notion.</p>' +
+        '<ul style="margin:0; padding-left:1.2rem;">' +
+        list.map(m => '<li>' + (m.nom || 'Sans nom') + ' — ' + (m.client || '') + ' (' + kpiFmtEur(m.ca) + ')</li>').join('') +
+        '</ul>';
+    }
     function toggleKpiReglages() { /* implémenté en Task 7 */ }
 
     function initAnalytics() {
