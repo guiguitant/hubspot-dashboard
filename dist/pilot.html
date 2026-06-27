@@ -10932,8 +10932,10 @@
         const labels = KPI_TYPES.map(t => t.label);
         const objdata = KPI_TYPES.map(t => block.data[t.key].objectif);
         const realdata = KPI_TYPES.map(t => block.data[t.key].realise);
-        // Max de l'axe Y = l'objectif le plus haut du graphe (0 → auto-échelle).
+        // Max de l'axe Y = l'objectif le plus haut, mais on étire si un réalisé le dépasse
+        // (0 objectif → auto-échelle).
         const maxObj = Math.max.apply(null, objdata);
+        const axisMax = maxObj > 0 ? Math.max(maxObj, Math.max.apply(null, realdata)) : undefined;
         // % d'avancement par type (affiché au-dessus de la barre Réalisé).
         const txLabels = KPI_TYPES.map(t => {
           const tx = block.data[t.key].tx;
@@ -10966,7 +10968,7 @@
             onHover: (evt, els) => { if (evt.native) evt.native.target.style.cursor = (els && els.length) ? 'pointer' : 'default'; },
             scales: {
               y: { beginAtZero: true,
-                   max: maxObj > 0 ? maxObj : undefined,
+                   max: axisMax,
                    grid: { color: gridCol, drawTicks: false },
                    border: { display: false },
                    ticks: { callback: v => (v / 1000) + 'k', color: mutedCol, font: { size: 11 }, padding: 8, maxTicksLimit: 5 } },
