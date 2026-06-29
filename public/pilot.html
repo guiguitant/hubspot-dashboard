@@ -4164,20 +4164,55 @@
       .kpi-detail-nom { font-weight:600; font-size:.9rem; color:var(--text); }
       .kpi-detail-client { font-size:.75rem; color:var(--text-secondary); margin-top:1px; }
       .kpi-detail-montant { font-weight:700; font-size:.9rem; color:var(--text); white-space:nowrap; }
+      /* --- Relook page KPI : en-tête, contrôles, overview, séparateurs --- */
+      #page-kpi .kpi-head-section { margin-bottom: 1rem; }
+      #page-kpi .kpi-page-head { display:flex; align-items:flex-end; justify-content:space-between; gap:1rem 1.5rem; flex-wrap:wrap; }
+      #page-kpi .kpi-eyebrow { font-size:.7rem; text-transform:uppercase; letter-spacing:.09em; color:var(--primary); font-weight:700; }
+      #page-kpi .kpi-page-title { margin:.25rem 0 0; font-size:1.5rem; line-height:1.1; }
+      #page-kpi .kpi-page-sub { margin:.35rem 0 0; color:var(--text-secondary); font-size:.9rem; max-width:66ch; line-height:1.5; }
+      #page-kpi .kpi-controls { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; }
+      #page-kpi .kpi-year-wrap { display:inline-flex; align-items:center; gap:.45rem; border:1px solid var(--border); border-radius:999px; padding:.3rem .5rem .3rem .85rem; background:var(--card); }
+      #page-kpi .kpi-year-wrap label { font-size:.76rem; color:var(--text-secondary); }
+      #page-kpi .kpi-year-wrap select { border:none; background:transparent; color:var(--text); font-family:inherit; font-weight:650; font-size:.92rem; padding:.1rem .2rem; cursor:pointer; outline:none; }
+      #page-kpi .kpi-section-label { display:flex; align-items:center; gap:.8rem; margin:1.8rem 0 1rem; }
+      #page-kpi .kpi-section-label h3 { margin:0; font-size:1.08rem; color:var(--text); white-space:nowrap; }
+      #page-kpi .kpi-section-label .line { flex:1; height:1px; background:var(--border); }
+      /* Overview tiles */
+      #kpiOverview { display:grid; grid-template-columns:repeat(4,1fr); gap:1rem; margin:0 0 .5rem; }
+      @media (max-width:980px){ #kpiOverview { grid-template-columns:1fr 1fr; } }
+      @media (max-width:560px){ #kpiOverview { grid-template-columns:1fr; } }
+      #kpiOverview .kpi-ov { border:1px solid var(--border); border-radius:14px; background:var(--card); padding:1rem 1.15rem 1.1rem; position:relative; overflow:hidden; transition:box-shadow .18s ease, transform .18s ease; }
+      #kpiOverview .kpi-ov:hover { box-shadow:0 8px 26px -16px rgba(0,0,0,.3); transform:translateY(-2px); }
+      #kpiOverview .kpi-ov::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; }
+      #kpiOverview .kpi-ov.signe::before { background:var(--primary); }
+      #kpiOverview .kpi-ov.opere::before { background:var(--success); }
+      #kpiOverview .kpi-ov.av::before    { background:var(--warning); }
+      #kpiOverview .kpi-ov.pool::before  { background:var(--purple); }
+      #kpiOverview .kpi-ov-lab { font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; color:var(--text-secondary); font-weight:650; }
+      #kpiOverview .kpi-ov-val { font-size:1.5rem; font-weight:750; color:var(--text); line-height:1.05; margin-top:.4rem; }
+      #kpiOverview .kpi-ov-sub { font-size:.76rem; color:var(--text-secondary); margin-top:.35rem; }
+      #kpiOverview .kpi-ov-bar { height:6px; border-radius:999px; background:var(--hover); margin-top:.6rem; overflow:hidden; }
+      #kpiOverview .kpi-ov-bar > span { display:block; height:100%; border-radius:999px; background:var(--warning); transition:width .3s ease; }
     </style>
-    <div class="section">
-      <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
-        <h2 style="margin:0;">KPI — objectifs & avancement par partner</h2>
-        <div style="display:flex; align-items:center; gap:0.6rem;">
-          <label for="kpiYear" style="color:var(--text-secondary); font-size:0.9rem;">Année</label>
-          <select id="kpiYear" onchange="initKpi()" style="padding:0.4rem 0.6rem; border:1px solid var(--border); border-radius:var(--radius); background:var(--card); color:var(--text);"></select>
+    <div class="section kpi-head-section">
+      <div class="kpi-page-head">
+        <div>
+          <div class="kpi-eyebrow">Pilotage</div>
+          <h2 class="kpi-page-title">Objectifs &amp; avancement</h2>
+          <p class="kpi-page-sub">CA signé et opéré par partner, avancement sur objectifs, et estimation des primes commerciales — sur l'année sélectionnée.</p>
+        </div>
+        <div class="kpi-controls">
+          <span class="kpi-year-wrap"><label for="kpiYear">Année</label><select id="kpiYear" onchange="initKpi()"></select></span>
           <button class="analytics-tab" onclick="toggleKpiReglages()" id="kpiReglagesBtn">Réglages</button>
         </div>
       </div>
     </div>
 
+    <div id="kpiOverview"></div>
+
     <div id="kpiUnclassified" class="section" style="display:none; border-color:var(--warning); background:var(--warning-bg);"></div>
 
+    <div class="kpi-section-label" id="kpiChartsLabel"><h3>Avancement par partner</h3><span class="line"></span></div>
     <div id="kpiCharts"></div>
 
     <!-- ESTIMATEUR DE PRIMES -->
@@ -10971,6 +11006,7 @@
         renderKpiCharts();
         await ensurePrimeConfig();
         renderKpiPrime();
+        renderKpiOverview();
         if (document.getElementById('kpiReglagesModal').classList.contains('active')) renderKpiReglages();
         if (document.getElementById('primeReglagesModal').classList.contains('active')) renderPrimeReglages();
       } catch (e) {
@@ -11109,6 +11145,44 @@
         });
         kpiChartInstances.push(chart);
       });
+    }
+
+    // Bandeau de synthèse en haut de page : CA signé, opéré, avancement, pool de primes estimé.
+    function renderKpiOverview() {
+      const box = document.getElementById('kpiOverview');
+      const label = document.getElementById('kpiChartsLabel');
+      if (!box) return;
+      const empty = !kpiData || !kpiData.all || (kpiData.partners || []).length === 0;
+      if (label) label.style.display = empty ? 'none' : '';
+      if (empty) { box.style.display = 'none'; return; }
+      box.style.display = '';
+      const a = kpiData.all;
+      const signeReal = (a.newsale.realise || 0) + (a.upsale.realise || 0);
+      const signeObj  = (a.newsale.objectif || 0) + (a.upsale.objectif || 0);
+      const opReal = a.opere.realise || 0;
+      const opObj  = a.opere.objectif || 0;
+      const avPct = signeObj > 0 ? Math.round(signeReal / signeObj * 100) : null;
+
+      let poolVal = '—', poolSub = 'Réglez via « Réglages primes »';
+      try {
+        if (primeState && primeParticipants.length) {
+          const R = primeCompute();
+          poolVal = kpiFmtEur(R.pool);
+          poolSub = Math.round(R.ratio) + ' % du résultat · ' + primeParticipants.length + ' pers.';
+        }
+      } catch (e) { /* estimateur indispo : on laisse le tiret */ }
+
+      const tile = (cls, lab, val, sub) =>
+        '<div class="kpi-ov ' + cls + '"><div class="kpi-ov-lab">' + lab + '</div><div class="kpi-ov-val">' + val + '</div><div class="kpi-ov-sub">' + sub + '</div></div>';
+      const tileBar = (cls, lab, val, pct) =>
+        '<div class="kpi-ov ' + cls + '"><div class="kpi-ov-lab">' + lab + '</div><div class="kpi-ov-val">' + val + '</div>'
+        + '<div class="kpi-ov-bar"><span style="width:' + Math.max(0, Math.min(pct == null ? 0 : pct, 100)) + '%;"></span></div></div>';
+
+      box.innerHTML =
+        tile('signe', 'CA signé', kpiFmtEur(signeReal), signeObj > 0 ? ('Objectif ' + kpiFmtEur(signeObj)) : 'Pas d\'objectif défini') +
+        tile('opere', 'CA opéré', kpiFmtEur(opReal), opObj > 0 ? ('Objectif ' + kpiFmtEur(opObj)) : 'Missions en cours / terminées') +
+        tileBar('av', 'Avancement signé', (avPct === null ? '—' : avPct + ' %'), avPct) +
+        tile('pool', 'Prime pool estimée', poolVal, poolSub);
     }
 
     function renderKpiUnclassified() {
