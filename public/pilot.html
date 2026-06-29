@@ -11157,9 +11157,12 @@
       if (empty) { box.style.display = 'none'; return; }
       box.style.display = '';
       const a = kpiData.all;
-      const signeReal = (a.newsale.realise || 0) + (a.upsale.realise || 0);
+      const com = kpiData.commercial || null;
+      // CA signé = deals gagnés HubSpot (repli sur le réalisé Notion si indispo).
+      const signeReal = com ? com.total : ((a.newsale.realise || 0) + (a.upsale.realise || 0));
       const signeObj  = (a.newsale.objectif || 0) + (a.upsale.objectif || 0);
       const avPct = signeObj > 0 ? Math.round(signeReal / signeObj * 100) : null;
+      const signeSub = signeObj > 0 ? ('Objectif ' + kpiFmtEur(signeObj)) : (com ? 'Deals gagnés HubSpot' : 'Pas d\'objectif défini');
       const fac = kpiData.facturation || { facture: 0, aFacturer: 0, total: 0 };
 
       let poolVal = '—', poolSub = 'Réglez via « Réglages primes »';
@@ -11178,7 +11181,7 @@
         + '<div class="kpi-ov-bar"><span style="width:' + Math.max(0, Math.min(pct == null ? 0 : pct, 100)) + '%;"></span></div></div>';
 
       box.innerHTML =
-        tile('signe', 'CA signé', kpiFmtEur(signeReal), signeObj > 0 ? ('Objectif ' + kpiFmtEur(signeObj)) : 'Pas d\'objectif défini') +
+        tile('signe', 'CA signé', kpiFmtEur(signeReal), signeSub) +
         tile('opere', 'Facturation ' + (kpiData.year || ''), kpiFmtEur(fac.total), 'facturé ' + kpiFmtEur(fac.facture) + ' · à facturer ' + kpiFmtEur(fac.aFacturer)) +
         tileBar('av', 'Avancement signé', (avPct === null ? '—' : avPct + ' %'), avPct) +
         tile('pool', 'Prime pool estimée', poolVal, poolSub);
@@ -11325,6 +11328,10 @@
     function primeEsc(s) {
       return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
+    // Clé de rapprochement par prénom normalisé (minuscule, sans accent, 1er token).
+    function primeNameKey(s) {
+      return String(s == null ? '' : s).trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').split(/\s+/)[0];
+    }
     // Système Releaf : l'objectif de Guillaume est le double → son taux est la moitié.
     function primeDefaultRates(name) {
       if (/guillaume/i.test(name || '')) return { txNew: 2.25, txRepeat: 1.25 };
@@ -11375,7 +11382,22 @@
       const factu = kpiData.facturation || null;
       const caFactDefault = factu ? (factu.total || 0) : (kpiData.all && kpiData.all.opere ? kpiData.all.opere.realise : 0);
       primeState = { realises: {}, caFacture: caFactDefault };
-      parts.forEach(p => { primeState.realises[p.partner] = { new: (p.newsale.realise || 0), repeat: (p.upsale.realise || 0) }; });
+      // CA signé = deals gagnés HubSpot par assignee ; new/repeat réparti via le ratio Notion
+      // de chaque personne. Repli sur le réalisé Notion si HubSpot indisponible.
+      const com = kpiData.commercial || null;
+      // Rattachement tolérant : prénom normalisé (ex. "Guillaume Tant" ↔ "Guillaume").
+      const byAssigneeNorm = {};
+      if (com && com.byAssignee) for (const k of Object.keys(com.byAssignee)) byAssigneeNorm[primeNameKey(k)] = com.byAssignee[k];
+      parts.forEach(p => {
+        const notionNew = p.newsale.realise || 0, notionRep = p.upsale.realise || 0, notionSum = notionNew + notionRep;
+        if (com && com.byAssignee) {
+          const hub = byAssigneeNorm[primeNameKey(p.partner)] || 0;
+          const ratioNew = notionSum > 0 ? notionNew / notionSum : 1; // pas d'historique → tout en new
+          primeState.realises[p.partner] = { new: Math.round(hub * ratioNew), repeat: Math.round(hub * (1 - ratioNew)) };
+        } else {
+          primeState.realises[p.partner] = { new: notionNew, repeat: notionRep };
+        }
+      });
 
       const rowsHtml = parts.map((p, i) => {
         const color = KPI_CHIP_COLORS[i % KPI_CHIP_COLORS.length];
@@ -11397,7 +11419,8 @@
         + '</div>'
         + '<div class="prime-panel">'
           + '<p class="prime-panel-h">Hypothèses</p>'
-          + '<p class="prime-panel-sub">Réalisé pré-rempli depuis le KPI (new = Newsale, repeat = Upsale). Éditable pour simuler — « ↺ Données réelles » restaure. Taux, paliers et résultat se règlent via « Réglages primes ».</p>'
+          + '<p class="prime-panel-sub">CA signé = deals gagnés HubSpot par assignee' + (com ? '' : ' (HubSpot indispo : repli sur le réalisé Notion)') + ', réparti new/repeat selon le ratio Notion de chacun. Éditable pour simuler — « ↺ Données réelles » restaure. Taux, paliers et résultat se règlent via « Réglages primes ».</p>'
+          + ((com && com.unassigned > 0) ? '<p class="prime-panel-sub" style="color:var(--warning);">⚠️ ' + primeFmtEur(com.unassigned) + ' de deals gagnés non assignés (exclus des commissions). Assigne-les dans l\'onglet Commercial pour les inclure.</p>' : '')
           + '<table class="prime-inputs"><thead><tr><th>Personne</th><th>New signé</th><th>Repeat signé</th><th>Taux new / repeat</th></tr></thead><tbody>' + rowsHtml + '</tbody></table>'
           + '<p class="prime-caopere">CA facturé ' + (kpiData.year || '') + ' (base paliers, étage 2) : <span class="prime-cellin"><input id="prime-cafacture-in" type="text" inputmode="numeric" value="' + primeIntFr(primeState.caFacture) + '"><span class="u">€</span></span>'
             + (factu ? '<span style="color:var(--text-secondary);">facturé ' + primeFmtEur(factu.facture) + ' · à facturer ' + primeFmtEur(factu.aFacturer) + '</span>' : '')
