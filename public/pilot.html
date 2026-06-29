@@ -4308,10 +4308,10 @@
       <div class="prime-head">
         <div>
           <h2>Estimateur de primes</h2>
-          <p class="prime-sub">Deux étages : commission individuelle sur le CA signé (new / repeat) + prime collective annuelle à paliers sur le CA opéré. Pré-rempli avec le réalisé KPI, éditable pour simuler.</p>
+          <p class="prime-sub">Deux étages : commission individuelle sur le CA signé (new / repeat) + prime collective annuelle à paliers sur la facturation de l'année (facturé + à facturer). Pré-rempli avec les données KPI, éditable pour simuler.</p>
         </div>
         <div class="prime-actions">
-          <button class="analytics-tab" onclick="resetPrimeRealises()" title="Réinitialiser new/repeat et CA opéré au réalisé KPI">↺ Données réelles</button>
+          <button class="analytics-tab" onclick="resetPrimeRealises()" title="Réinitialiser new/repeat et CA facturé aux données KPI">↺ Données réelles</button>
           <button class="analytics-tab" onclick="togglePrimeReglages()">Réglages primes</button>
         </div>
       </div>
@@ -11159,9 +11159,8 @@
       const a = kpiData.all;
       const signeReal = (a.newsale.realise || 0) + (a.upsale.realise || 0);
       const signeObj  = (a.newsale.objectif || 0) + (a.upsale.objectif || 0);
-      const opReal = a.opere.realise || 0;
-      const opObj  = a.opere.objectif || 0;
       const avPct = signeObj > 0 ? Math.round(signeReal / signeObj * 100) : null;
+      const fac = kpiData.facturation || { facture: 0, aFacturer: 0, total: 0 };
 
       let poolVal = '—', poolSub = 'Réglez via « Réglages primes »';
       try {
@@ -11180,7 +11179,7 @@
 
       box.innerHTML =
         tile('signe', 'CA signé', kpiFmtEur(signeReal), signeObj > 0 ? ('Objectif ' + kpiFmtEur(signeObj)) : 'Pas d\'objectif défini') +
-        tile('opere', 'CA opéré', kpiFmtEur(opReal), opObj > 0 ? ('Objectif ' + kpiFmtEur(opObj)) : 'Missions en cours / terminées') +
+        tile('opere', 'Facturation ' + (kpiData.year || ''), kpiFmtEur(fac.total), 'facturé ' + kpiFmtEur(fac.facture) + ' · à facturer ' + kpiFmtEur(fac.aFacturer)) +
         tileBar('av', 'Avancement signé', (avPct === null ? '—' : avPct + ' %'), avPct) +
         tile('pool', 'Prime pool estimée', poolVal, poolSub);
     }
@@ -11308,9 +11307,9 @@
 
     // ===== Estimateur de primes (onglet KPI) =====
     // Étage 1 : commission perso sur CA signé (new=Newsale, repeat=Upsale).
-    // Étage 2 : prime collective annuelle à paliers sur le CA opéré réel.
+    // Étage 2 : prime collective annuelle à paliers sur la facturation de l'année (facturé + à facturer).
     let primeConfig = null;              // { rates:{[p]:{txNew,txRepeat}}, tiers:[{seuil,taux}], resultatAnnuel, gateTrimestriel }
-    let primeState = null;               // { realises:{[p]:{new,repeat}}, caOpere } — copie de travail (simulation)
+    let primeState = null;               // { realises:{[p]:{new,repeat}}, caFacture } — copie de travail (simulation)
     let primeParticipants = [];          // noms des partners commerciaux pris en compte
     let _primeSaveTimer = null;
 
@@ -11373,7 +11372,9 @@
 
       // Copie de travail depuis le réalisé KPI.
       primeParticipants = parts.map(p => p.partner);
-      primeState = { realises: {}, caOpere: (kpiData.all && kpiData.all.opere ? kpiData.all.opere.realise : 0) };
+      const factu = kpiData.facturation || null;
+      const caFactDefault = factu ? (factu.total || 0) : (kpiData.all && kpiData.all.opere ? kpiData.all.opere.realise : 0);
+      primeState = { realises: {}, caFacture: caFactDefault };
       parts.forEach(p => { primeState.realises[p.partner] = { new: (p.newsale.realise || 0), repeat: (p.upsale.realise || 0) }; });
 
       const rowsHtml = parts.map((p, i) => {
@@ -11392,18 +11393,20 @@
       body.innerHTML =
         '<div class="prime-layers">'
           + '<div class="prime-layer perso"><p class="prime-ltag">Étage 1 · trimestriel</p><h4>Commission par portefeuille</h4><p>Chacun touche sur le CA qu\'il signe (new &amp; repeat), à son taux.</p></div>'
-          + '<div class="prime-layer coll"><p class="prime-ltag">Étage 2 · annuel</p><h4>Part du résultat, par paliers</h4><p>Selon le CA opéré de la boîte, on partage une part du résultat, à parts égales.</p></div>'
+          + '<div class="prime-layer coll"><p class="prime-ltag">Étage 2 · annuel</p><h4>Part du résultat, par paliers</h4><p>Selon le CA facturé de l\'année (facturé + à facturer), on partage une part du résultat, à parts égales.</p></div>'
         + '</div>'
         + '<div class="prime-panel">'
           + '<p class="prime-panel-h">Hypothèses</p>'
           + '<p class="prime-panel-sub">Réalisé pré-rempli depuis le KPI (new = Newsale, repeat = Upsale). Éditable pour simuler — « ↺ Données réelles » restaure. Taux, paliers et résultat se règlent via « Réglages primes ».</p>'
           + '<table class="prime-inputs"><thead><tr><th>Personne</th><th>New signé</th><th>Repeat signé</th><th>Taux new / repeat</th></tr></thead><tbody>' + rowsHtml + '</tbody></table>'
-          + '<p class="prime-caopere">CA opéré (base paliers étage 2) : <span class="prime-cellin"><input id="prime-caopere-in" type="text" inputmode="numeric" value="' + primeIntFr(primeState.caOpere) + '"><span class="u">€</span></span><b id="prime-casigne-lbl"></b></p>'
+          + '<p class="prime-caopere">CA facturé ' + (kpiData.year || '') + ' (base paliers, étage 2) : <span class="prime-cellin"><input id="prime-cafacture-in" type="text" inputmode="numeric" value="' + primeIntFr(primeState.caFacture) + '"><span class="u">€</span></span>'
+            + (factu ? '<span style="color:var(--text-secondary);">facturé ' + primeFmtEur(factu.facture) + ' · à facturer ' + primeFmtEur(factu.aFacturer) + '</span>' : '')
+            + '<b id="prime-casigne-lbl"></b></p>'
         + '</div>'
         + '<div class="prime-results" id="kpiPrimeResults"></div>';
 
       body.querySelectorAll('input[data-prime-new], input[data-prime-repeat]').forEach(inp => inp.addEventListener('input', onPrimeInput));
-      const caIn = document.getElementById('prime-caopere-in');
+      const caIn = document.getElementById('prime-cafacture-in');
       if (caIn) caIn.addEventListener('input', onPrimeInput);
 
       primeRecompute();
@@ -11419,8 +11422,8 @@
         const name = decodeURIComponent(inp.dataset.primeRepeat);
         (primeState.realises[name] = primeState.realises[name] || { new: 0, repeat: 0 }).repeat = primeParseNum(inp.value);
       });
-      const caIn = document.getElementById('prime-caopere-in');
-      if (caIn) primeState.caOpere = primeParseNum(caIn.value);
+      const caIn = document.getElementById('prime-cafacture-in');
+      if (caIn) primeState.caFacture = primeParseNum(caIn.value);
       primeRecompute();
     }
 
@@ -11433,7 +11436,7 @@
         perso[name] = st.new * (r.txNew / 100) + st.repeat * (r.txRepeat / 100);
         caSigne += st.new + st.repeat; persoSum += perso[name];
       });
-      const caFacture = Math.max(0, primeState.caOpere || 0);
+      const caFacture = Math.max(0, primeState.caFacture || 0);
       const tiersAsc = (cfg.tiers || []).slice().sort((a, b) => a.seuil - b.seuil);
       let tauxColl = 0, activeSeuil = null;
       tiersAsc.forEach(t => { if (caFacture >= t.seuil) { tauxColl = t.taux; activeSeuil = t.seuil; } });
@@ -11459,19 +11462,19 @@
       const firstSeuil = R.tiersAsc.length ? R.tiersAsc[0].seuil : 0;
       let stairs = '<div class="prime-step' + (R.activeSeuil === null ? ' active' : '') + '">'
         + '<span class="prime-pc">0 %</span>'
-        + '<div class="prime-bar" style="height:28px;">' + (R.activeSeuil === null ? '<span class="prime-badge">CA op. ' + primeKE(R.caFacture) + '</span>' : '') + '</div>'
+        + '<div class="prime-bar" style="height:28px;">' + (R.activeSeuil === null ? '<span class="prime-badge">CA fact. ' + primeKE(R.caFacture) + '</span>' : '') + '</div>'
         + '<div class="prime-sl">&lt; ' + primeKE(firstSeuil) + '</div></div>';
       stairs += R.tiersAsc.map(t => {
         const act = (t.seuil === R.activeSeuil);
         const h = Math.round(34 + (Number(t.taux) || 0) * 9);
         return '<div class="prime-step' + (act ? ' active' : '') + '">'
           + '<span class="prime-pc">' + primeFmtPct(t.taux) + '</span>'
-          + '<div class="prime-bar" style="height:' + h + 'px;">' + (act ? '<span class="prime-badge">CA op. ' + primeKE(R.caFacture) + '</span>' : '') + '</div>'
+          + '<div class="prime-bar" style="height:' + h + 'px;">' + (act ? '<span class="prime-badge">CA fact. ' + primeKE(R.caFacture) + '</span>' : '') + '</div>'
           + '<div class="prime-sl">≥ ' + primeKE(t.seuil) + '</div></div>';
       }).join('');
       const stairsCard = '<div class="prime-card"><p class="prime-card-h">Étage 2 — palier collectif atteint</p>'
         + '<div class="prime-stairs">' + stairs + '</div>'
-        + '<p class="prime-stairs-foot">CA signé : <b>' + primeFmtEur(R.caSigne) + '</b> → CA opéré : <b>' + primeFmtEur(R.caFacture) + '</b> → palier <b>' + primeFmtPct(R.tauxColl) + '</b> → prime collective <b>' + primeFmtEur(R.collTotal) + '</b> (<b>' + primeFmtEur(R.collPart) + '</b>/personne).</p></div>';
+        + '<p class="prime-stairs-foot">CA signé : <b>' + primeFmtEur(R.caSigne) + '</b> → CA facturé : <b>' + primeFmtEur(R.caFacture) + '</b> → palier <b>' + primeFmtPct(R.tauxColl) + '</b> → prime collective <b>' + primeFmtEur(R.collTotal) + '</b> (<b>' + primeFmtEur(R.collPart) + '</b>/personne).</p></div>';
 
       // --- 3 KPIs ---
       const kpis = '<div class="prime-kpis">'
@@ -11552,7 +11555,7 @@
       }
 
       // B. Paliers
-      html += '<div class="kpi-rg-h">Paliers de l\'objectif collectif <span class="kpi-rg-badge">CA opéré → % du résultat</span></div>';
+      html += '<div class="kpi-rg-h">Paliers de l\'objectif collectif <span class="kpi-rg-badge">CA facturé → % du résultat</span></div>';
       const tiersAsc = (primeConfig.tiers || []).slice().sort((a, b) => a.seuil - b.seuil);
       html += '<table class="kpi-obj-table"><thead><tr><th>Palier</th><th>CA ≥</th><th>Part résultat</th></tr></thead><tbody>';
       tiersAsc.forEach((t, idx) => {
