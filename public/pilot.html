@@ -4180,6 +4180,123 @@
 
     <div id="kpiCharts"></div>
 
+    <!-- ESTIMATEUR DE PRIMES -->
+    <style>
+      #kpiPrime { margin-top: 1.6rem; }
+      #kpiPrime .prime-head { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin-bottom:1rem; }
+      #kpiPrime .prime-head h2 { margin:0; }
+      #kpiPrime .prime-sub { margin:.25rem 0 0; color:var(--text-secondary); font-size:.9rem; max-width:64ch; }
+      #kpiPrime .prime-actions { display:flex; gap:.5rem; flex-wrap:wrap; }
+      /* Mécanisme : 2 étages */
+      #kpiPrime .prime-layers { display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1.1rem; }
+      @media (max-width:900px){ #kpiPrime .prime-layers { grid-template-columns:1fr; } }
+      #kpiPrime .prime-layer { border:1px solid var(--border); border-radius:14px; padding:1rem 1.1rem; background:var(--card); }
+      #kpiPrime .prime-layer.perso { border-left:3px solid var(--primary); }
+      #kpiPrime .prime-layer.coll  { border-left:3px solid var(--success); }
+      #kpiPrime .prime-ltag { font-size:.68rem; text-transform:uppercase; letter-spacing:.05em; color:var(--text-secondary); font-weight:600; margin:0 0 .3rem; }
+      #kpiPrime .prime-layer h4 { margin:0 0 .35rem; font-size:1rem; color:var(--text); }
+      #kpiPrime .prime-layer p { margin:.25rem 0 0; font-size:.85rem; color:var(--text-secondary); line-height:1.45; }
+      /* Panneau hypothèses */
+      #kpiPrime .prime-panel { border:1px solid var(--border); border-radius:14px; background:var(--card); padding:1.1rem 1.2rem; margin-bottom:1.1rem; }
+      #kpiPrime .prime-panel-h { font-weight:650; margin:0 0 .2rem; }
+      #kpiPrime .prime-panel-sub { margin:0 0 .9rem; color:var(--text-secondary); font-size:.82rem; line-height:1.45; }
+      #kpiPrime table.prime-inputs { width:100%; border-collapse:separate; border-spacing:0; }
+      #kpiPrime table.prime-inputs th { text-align:right; font-size:.68rem; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); font-weight:600; padding:.3rem .5rem; }
+      #kpiPrime table.prime-inputs th:first-child { text-align:left; }
+      #kpiPrime table.prime-inputs td { padding:.4rem .5rem; border-top:1px solid var(--border); vertical-align:middle; text-align:right; }
+      #kpiPrime table.prime-inputs td:first-child { text-align:left; }
+      #kpiPrime .prime-pname { display:flex; align-items:center; gap:.5rem; font-weight:600; font-size:.9rem; color:var(--text); }
+      #kpiPrime .prime-chip { width:26px; height:26px; border-radius:7px; display:grid; place-items:center; color:#fff; font-size:.72rem; font-weight:700; flex:0 0 auto; }
+      #kpiPrime .prime-cellin { display:inline-flex; align-items:center; gap:.25rem; }
+      #kpiPrime .prime-cellin input { width:110px; text-align:right; padding:.32rem .5rem; border:1px solid var(--border); border-radius:var(--radius); background:var(--card); color:var(--text); font-family:inherit; font-size:.85rem; }
+      #kpiPrime .prime-cellin input:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 2px var(--primary-bg); }
+      #kpiPrime .prime-cellin .u { color:var(--text-secondary); font-size:.8rem; }
+      #kpiPrime .prime-ro { color:var(--text-secondary); font-size:.82rem; white-space:nowrap; }
+      #kpiPrime .prime-caopere { margin:.9rem 0 0; font-size:.85rem; color:var(--text-secondary); display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; }
+      #kpiPrime .prime-caopere b { color:var(--text); }
+      /* Résultats */
+      #kpiPrime .prime-results { display:grid; gap:1rem; }
+      #kpiPrime .prime-card { border:1px solid var(--border); border-radius:14px; background:var(--card); padding:1.1rem 1.2rem; }
+      #kpiPrime .prime-card-h { font-weight:650; margin:0 0 1rem; font-size:.95rem; }
+      /* Escalier paliers */
+      #kpiPrime .prime-stairs { display:flex; align-items:flex-end; gap:.6rem; min-height:150px; }
+      #kpiPrime .prime-step { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:.4rem; }
+      #kpiPrime .prime-pc { font-weight:800; font-size:.85rem; color:var(--text-secondary); }
+      #kpiPrime .prime-step.active .prime-pc { color:var(--success); }
+      #kpiPrime .prime-bar { width:100%; max-width:120px; border-radius:8px 8px 0 0; background:var(--hover); position:relative; }
+      #kpiPrime .prime-step.active .prime-bar { background:linear-gradient(180deg, var(--success), color-mix(in srgb, var(--success) 55%, var(--card))); }
+      #kpiPrime .prime-sl { font-size:.72rem; color:var(--text-secondary); }
+      #kpiPrime .prime-step.active .prime-sl { color:var(--text); font-weight:600; }
+      #kpiPrime .prime-badge { position:absolute; top:-1.5rem; left:50%; transform:translateX(-50%); background:var(--primary); color:#fff; font-size:.64rem; font-weight:700; padding:.12rem .42rem; border-radius:6px; white-space:nowrap; }
+      #kpiPrime .prime-stairs-foot { margin:1.1rem 0 0; font-size:.82rem; color:var(--text-secondary); line-height:1.5; }
+      #kpiPrime .prime-stairs-foot b { color:var(--text); }
+      /* KPIs */
+      #kpiPrime .prime-kpis { display:grid; grid-template-columns:repeat(3,1fr); gap:1rem; }
+      @media (max-width:760px){ #kpiPrime .prime-kpis { grid-template-columns:1fr; } }
+      #kpiPrime .prime-kpi { border:1px solid var(--border); border-radius:14px; background:var(--card); padding:1.1rem 1.2rem; }
+      #kpiPrime .prime-kpi.coll { background:var(--success-bg); border-color:color-mix(in srgb, var(--success) 26%, var(--border)); }
+      #kpiPrime .prime-kpi.pool { background:var(--primary-bg); border-color:color-mix(in srgb, var(--primary) 26%, var(--border)); }
+      #kpiPrime .prime-kval { font-size:1.55rem; font-weight:750; color:var(--text); line-height:1; }
+      #kpiPrime .prime-klab { margin-top:.45rem; font-weight:600; font-size:.85rem; color:var(--text); }
+      #kpiPrime .prime-ksub { font-size:.75rem; color:var(--text-secondary); margin-top:2px; }
+      /* Recap */
+      #kpiPrime table.prime-recap { width:100%; border-collapse:separate; border-spacing:0; }
+      #kpiPrime table.prime-recap th { text-align:right; font-size:.68rem; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); font-weight:600; padding:.35rem .5rem; }
+      #kpiPrime table.prime-recap th:first-child { text-align:left; }
+      #kpiPrime table.prime-recap td { padding:.45rem .5rem; border-top:1px solid var(--border); text-align:right; font-size:.9rem; color:var(--text); }
+      #kpiPrime table.prime-recap td:first-child { text-align:left; font-weight:600; }
+      #kpiPrime table.prime-recap td.tot { font-weight:750; }
+      #kpiPrime table.prime-recap tr.grand td { border-top:2px solid var(--border); font-weight:750; }
+      /* Jauge */
+      #kpiPrime .prime-gauge-top { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:.7rem; }
+      #kpiPrime .prime-gauge-figure { font-size:1.5rem; font-weight:750; color:var(--text); }
+      #kpiPrime .prime-gauge-state { display:inline-flex; align-items:center; gap:.4rem; padding:.25rem .6rem; border-radius:999px; font-size:.78rem; font-weight:600; color:var(--text); }
+      #kpiPrime .prime-gauge-state .dot { width:8px; height:8px; border-radius:50%; }
+      #kpiPrime .prime-gauge-track { height:10px; border-radius:999px; background:var(--hover); overflow:hidden; }
+      #kpiPrime .prime-gauge-fill { height:100%; border-radius:999px; transition:width .25s ease; }
+      #kpiPrime .prime-gauge-foot { margin:.75rem 0 0; font-size:.8rem; color:var(--text-secondary); line-height:1.5; }
+      #kpiPrime .prime-gauge-foot b { color:var(--text); }
+      /* Gate */
+      #kpiPrime .prime-gatecard { display:flex; align-items:center; gap:.8rem; flex-wrap:wrap; }
+      #kpiPrime .prime-gatecard .gk-txt { flex:1; min-width:240px; font-size:.85rem; color:var(--text-secondary); }
+      #kpiPrime .prime-gatecard .gk-txt b { color:var(--text); }
+      #kpiPrime .prime-gk-state { font-size:.78rem; font-weight:600; padding:.25rem .6rem; border-radius:999px; color:var(--text); }
+      /* Réglages primes : réutilise .kpi-* (modale, inputs) */
+      #primeReglagesBody .kpi-rg-h { margin-top:1.4rem; }
+      #primeReglagesBody .kpi-rg-h:first-child { margin-top:0; }
+      #primeReglagesBody .prime-rg-grid { display:grid; grid-template-columns:1fr 1fr; gap:.8rem 1.2rem; }
+      @media (max-width:560px){ #primeReglagesBody .prime-rg-grid { grid-template-columns:1fr; } }
+      #primeReglagesBody .prime-rg-field { display:flex; flex-direction:column; gap:.25rem; }
+      #primeReglagesBody .prime-rg-field label { font-size:.78rem; color:var(--text-secondary); }
+    </style>
+    <section class="section" id="kpiPrime" style="display:none;">
+      <div class="prime-head">
+        <div>
+          <h2>Estimateur de primes</h2>
+          <p class="prime-sub">Deux étages : commission individuelle sur le CA signé (new / repeat) + prime collective annuelle à paliers sur le CA opéré. Pré-rempli avec le réalisé KPI, éditable pour simuler.</p>
+        </div>
+        <div class="prime-actions">
+          <button class="analytics-tab" onclick="resetPrimeRealises()" title="Réinitialiser new/repeat et CA opéré au réalisé KPI">↺ Données réelles</button>
+          <button class="analytics-tab" onclick="togglePrimeReglages()">Réglages primes</button>
+        </div>
+      </div>
+      <div id="kpiPrimeBody"></div>
+    </section>
+
+    <!-- Modale Réglages primes -->
+    <div class="modal-overlay" id="primeReglagesModal" onclick="if(event.target===this) closePrimeReglages()">
+      <div class="modal kpi-modal">
+        <div class="modal-header" style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+          <h2 style="margin:0;">Réglages primes</h2>
+          <button class="modal-close-x" onclick="closePrimeReglages()" aria-label="Fermer">&times;</button>
+        </div>
+        <div class="modal-body" id="primeReglagesBody"></div>
+        <div class="modal-footer">
+          <button class="kpi-btn kpi-btn--primary" onclick="closePrimeReglages()">Fermer</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Modale Réglages -->
     <div class="modal-overlay" id="kpiReglagesModal" onclick="if(event.target===this) closeKpiReglages()">
       <div class="modal kpi-modal">
@@ -10852,7 +10969,10 @@
         kpiData = await res.json();
         renderKpiUnclassified();
         renderKpiCharts();
+        await ensurePrimeConfig();
+        renderKpiPrime();
         if (document.getElementById('kpiReglagesModal').classList.contains('active')) renderKpiReglages();
+        if (document.getElementById('primeReglagesModal').classList.contains('active')) renderPrimeReglages();
       } catch (e) {
         container.innerHTML = '<p style="color:var(--warning);">Erreur : ' + e.message + '</p>';
       }
@@ -11111,6 +11231,321 @@
         await initKpi();
       } catch (e) { alert('Échec sauvegarde répartition : ' + e.message); }
     }
+
+    // ===== Estimateur de primes (onglet KPI) =====
+    // Étage 1 : commission perso sur CA signé (new=Newsale, repeat=Upsale).
+    // Étage 2 : prime collective annuelle à paliers sur le CA opéré réel.
+    let primeConfig = null;              // { rates:{[p]:{txNew,txRepeat}}, tiers:[{seuil,taux}], resultatAnnuel, gateTrimestriel }
+    let primeState = null;               // { realises:{[p]:{new,repeat}}, caOpere } — copie de travail (simulation)
+    let primeParticipants = [];          // noms des partners commerciaux pris en compte
+    let _primeSaveTimer = null;
+
+    function primeFmtEur(n) { return (Math.round(n) || 0).toLocaleString('fr-FR') + ' €'; }
+    function primeIntFr(n) { return (Math.round(n) || 0).toLocaleString('fr-FR'); }
+    function primeFmtPct(n) { return (Math.round((Number(n) || 0) * 100) / 100).toString().replace('.', ',') + ' %'; }
+    function primeKE(n) { return Math.round((Number(n) || 0) / 1000) + 'k'; }
+    function primeParseNum(s) {
+      if (typeof s !== 'string') s = String(s == null ? '' : s);
+      s = s.replace(/\s| /g, '').replace('€', '').replace('%', '').replace(',', '.');
+      const v = parseFloat(s); return isNaN(v) ? 0 : v;
+    }
+    function primeEsc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+    // Système Releaf : l'objectif de Guillaume est le double → son taux est la moitié.
+    function primeDefaultRates(name) {
+      if (/guillaume/i.test(name || '')) return { txNew: 2.25, txRepeat: 1.25 };
+      return { txNew: 4.5, txRepeat: 2.5 };
+    }
+
+    async function ensurePrimeConfig() {
+      if (primeConfig) return;
+      try {
+        const res = await fetch('/api/kpi/prime-config');
+        primeConfig = res.ok ? await res.json() : null;
+      } catch (e) { primeConfig = null; }
+      if (!primeConfig || typeof primeConfig !== 'object') primeConfig = {};
+      if (!Array.isArray(primeConfig.tiers) || primeConfig.tiers.length === 0) {
+        primeConfig.tiers = [{ seuil: 650000, taux: 7 }, { seuil: 600000, taux: 5 }, { seuil: 550000, taux: 3 }];
+      }
+      if (typeof primeConfig.resultatAnnuel !== 'number') primeConfig.resultatAnnuel = 150000;
+      if (typeof primeConfig.gateTrimestriel !== 'number') primeConfig.gateTrimestriel = 120000;
+      if (!primeConfig.rates || typeof primeConfig.rates !== 'object') primeConfig.rates = {};
+    }
+
+    // Partners "commerciaux" = ceux qui portent du signé (new/upsale), réalisé ou objectif.
+    function primeCommercialPartners() {
+      if (!kpiData || !kpiData.partners) return [];
+      const withSignal = kpiData.partners.filter(p =>
+        (p.newsale && (p.newsale.realise || p.newsale.objectif)) ||
+        (p.upsale && (p.upsale.realise || p.upsale.objectif)));
+      return withSignal.length ? withSignal : kpiData.partners;
+    }
+
+    function renderKpiPrime() {
+      const section = document.getElementById('kpiPrime');
+      const body = document.getElementById('kpiPrimeBody');
+      if (!section || !body) return;
+      if (!kpiData) { section.style.display = 'none'; return; }
+      const parts = primeCommercialPartners();
+      section.style.display = '';
+      if (parts.length === 0) {
+        body.innerHTML = '<div class="prime-card"><p style="margin:0;color:var(--text-secondary);">Aucun partner commercial pour cette année. Ajoute des objectifs ou des missions signées.</p></div>';
+        return;
+      }
+
+      // Défauts de taux par partner (en mémoire, non persistés tant que pas sauvegardés).
+      parts.forEach(p => { if (!primeConfig.rates[p.partner]) primeConfig.rates[p.partner] = primeDefaultRates(p.partner); });
+
+      // Copie de travail depuis le réalisé KPI.
+      primeParticipants = parts.map(p => p.partner);
+      primeState = { realises: {}, caOpere: (kpiData.all && kpiData.all.opere ? kpiData.all.opere.realise : 0) };
+      parts.forEach(p => { primeState.realises[p.partner] = { new: (p.newsale.realise || 0), repeat: (p.upsale.realise || 0) }; });
+
+      const rowsHtml = parts.map((p, i) => {
+        const color = KPI_CHIP_COLORS[i % KPI_CHIP_COLORS.length];
+        const r = primeConfig.rates[p.partner];
+        const st = primeState.realises[p.partner];
+        const key = encodeURIComponent(p.partner);
+        return '<tr>'
+          + '<td><span class="prime-pname"><span class="prime-chip" style="background:' + color + ';">' + primeEsc(kpiInitial(p.partner)) + '</span>' + primeEsc(p.partner) + '</span></td>'
+          + '<td><span class="prime-cellin"><input data-prime-new="' + key + '" type="text" inputmode="numeric" value="' + primeIntFr(st.new) + '"><span class="u">€</span></span></td>'
+          + '<td><span class="prime-cellin"><input data-prime-repeat="' + key + '" type="text" inputmode="numeric" value="' + primeIntFr(st.repeat) + '"><span class="u">€</span></span></td>'
+          + '<td class="prime-ro">' + primeFmtPct(r.txNew) + ' / ' + primeFmtPct(r.txRepeat) + '</td>'
+          + '</tr>';
+      }).join('');
+
+      body.innerHTML =
+        '<div class="prime-layers">'
+          + '<div class="prime-layer perso"><p class="prime-ltag">Étage 1 · trimestriel</p><h4>Commission par portefeuille</h4><p>Chacun touche sur le CA qu\'il signe (new &amp; repeat), à son taux.</p></div>'
+          + '<div class="prime-layer coll"><p class="prime-ltag">Étage 2 · annuel</p><h4>Part du résultat, par paliers</h4><p>Selon le CA opéré de la boîte, on partage une part du résultat, à parts égales.</p></div>'
+        + '</div>'
+        + '<div class="prime-panel">'
+          + '<p class="prime-panel-h">Hypothèses</p>'
+          + '<p class="prime-panel-sub">Réalisé pré-rempli depuis le KPI (new = Newsale, repeat = Upsale). Éditable pour simuler — « ↺ Données réelles » restaure. Taux, paliers et résultat se règlent via « Réglages primes ».</p>'
+          + '<table class="prime-inputs"><thead><tr><th>Personne</th><th>New signé</th><th>Repeat signé</th><th>Taux new / repeat</th></tr></thead><tbody>' + rowsHtml + '</tbody></table>'
+          + '<p class="prime-caopere">CA opéré (base paliers étage 2) : <span class="prime-cellin"><input id="prime-caopere-in" type="text" inputmode="numeric" value="' + primeIntFr(primeState.caOpere) + '"><span class="u">€</span></span><b id="prime-casigne-lbl"></b></p>'
+        + '</div>'
+        + '<div class="prime-results" id="kpiPrimeResults"></div>';
+
+      body.querySelectorAll('input[data-prime-new], input[data-prime-repeat]').forEach(inp => inp.addEventListener('input', onPrimeInput));
+      const caIn = document.getElementById('prime-caopere-in');
+      if (caIn) caIn.addEventListener('input', onPrimeInput);
+
+      primeRecompute();
+    }
+
+    function onPrimeInput() {
+      if (!primeState) return;
+      document.querySelectorAll('#kpiPrime input[data-prime-new]').forEach(inp => {
+        const name = decodeURIComponent(inp.dataset.primeNew);
+        (primeState.realises[name] = primeState.realises[name] || { new: 0, repeat: 0 }).new = primeParseNum(inp.value);
+      });
+      document.querySelectorAll('#kpiPrime input[data-prime-repeat]').forEach(inp => {
+        const name = decodeURIComponent(inp.dataset.primeRepeat);
+        (primeState.realises[name] = primeState.realises[name] || { new: 0, repeat: 0 }).repeat = primeParseNum(inp.value);
+      });
+      const caIn = document.getElementById('prime-caopere-in');
+      if (caIn) primeState.caOpere = primeParseNum(caIn.value);
+      primeRecompute();
+    }
+
+    function primeCompute() {
+      const cfg = primeConfig, parts = primeParticipants;
+      const perso = {}; let caSigne = 0, persoSum = 0;
+      parts.forEach(name => {
+        const r = cfg.rates[name] || primeDefaultRates(name);
+        const st = (primeState.realises[name]) || { new: 0, repeat: 0 };
+        perso[name] = st.new * (r.txNew / 100) + st.repeat * (r.txRepeat / 100);
+        caSigne += st.new + st.repeat; persoSum += perso[name];
+      });
+      const caFacture = Math.max(0, primeState.caOpere || 0);
+      const tiersAsc = (cfg.tiers || []).slice().sort((a, b) => a.seuil - b.seuil);
+      let tauxColl = 0, activeSeuil = null;
+      tiersAsc.forEach(t => { if (caFacture >= t.seuil) { tauxColl = t.taux; activeSeuil = t.seuil; } });
+      const collTotal = (tauxColl / 100) * (cfg.resultatAnnuel || 0);
+      const collPart = parts.length ? collTotal / parts.length : 0;
+      const total = {}; parts.forEach(n => total[n] = perso[n] + collPart);
+      const pool = persoSum + collTotal;
+      const ratio = (cfg.resultatAnnuel > 0) ? pool / cfg.resultatAnnuel * 100 : 0;
+      return { perso, caSigne, caFacture, tiersAsc, tauxColl, activeSeuil, collTotal, collPart, total, persoSum, pool, ratio };
+    }
+
+    function primeRecompute() {
+      if (!primeState) return;
+      const R = primeCompute();
+      const parts = primeParticipants;
+      const n = parts.length;
+
+      // CA signé total dans le panneau
+      const sigLbl = document.getElementById('prime-casigne-lbl');
+      if (sigLbl) sigLbl.textContent = ' · CA signé total : ' + primeFmtEur(R.caSigne);
+
+      // --- Escalier des paliers ---
+      const firstSeuil = R.tiersAsc.length ? R.tiersAsc[0].seuil : 0;
+      let stairs = '<div class="prime-step' + (R.activeSeuil === null ? ' active' : '') + '">'
+        + '<span class="prime-pc">0 %</span>'
+        + '<div class="prime-bar" style="height:28px;">' + (R.activeSeuil === null ? '<span class="prime-badge">CA op. ' + primeKE(R.caFacture) + '</span>' : '') + '</div>'
+        + '<div class="prime-sl">&lt; ' + primeKE(firstSeuil) + '</div></div>';
+      stairs += R.tiersAsc.map(t => {
+        const act = (t.seuil === R.activeSeuil);
+        const h = Math.round(34 + (Number(t.taux) || 0) * 9);
+        return '<div class="prime-step' + (act ? ' active' : '') + '">'
+          + '<span class="prime-pc">' + primeFmtPct(t.taux) + '</span>'
+          + '<div class="prime-bar" style="height:' + h + 'px;">' + (act ? '<span class="prime-badge">CA op. ' + primeKE(R.caFacture) + '</span>' : '') + '</div>'
+          + '<div class="prime-sl">≥ ' + primeKE(t.seuil) + '</div></div>';
+      }).join('');
+      const stairsCard = '<div class="prime-card"><p class="prime-card-h">Étage 2 — palier collectif atteint</p>'
+        + '<div class="prime-stairs">' + stairs + '</div>'
+        + '<p class="prime-stairs-foot">CA signé : <b>' + primeFmtEur(R.caSigne) + '</b> → CA opéré : <b>' + primeFmtEur(R.caFacture) + '</b> → palier <b>' + primeFmtPct(R.tauxColl) + '</b> → prime collective <b>' + primeFmtEur(R.collTotal) + '</b> (<b>' + primeFmtEur(R.collPart) + '</b>/personne).</p></div>';
+
+      // --- 3 KPIs ---
+      const kpis = '<div class="prime-kpis">'
+        + '<div class="prime-kpi"><div class="prime-kval">' + primeFmtEur(R.persoSum) + '</div><div class="prime-klab">Primes perso (total)</div><div class="prime-ksub">Commissions des ' + n + '</div></div>'
+        + '<div class="prime-kpi coll"><div class="prime-kval">' + primeFmtEur(R.collTotal) + '</div><div class="prime-klab">Prime collective</div><div class="prime-ksub">Palier ' + primeFmtPct(R.tauxColl) + ' · partagée en ' + n + '</div></div>'
+        + '<div class="prime-kpi pool"><div class="prime-kval">' + primeFmtEur(R.pool) + '</div><div class="prime-klab">Pool total</div><div class="prime-ksub">' + Math.round(R.ratio) + ' % du résultat</div></div>'
+        + '</div>';
+
+      // --- Tableau récap ---
+      let recapRows = parts.map(name => '<tr><td>' + primeEsc(name) + '</td><td>' + primeFmtEur(R.perso[name]) + '</td><td>' + primeFmtEur(R.collPart) + '</td><td class="tot">' + primeFmtEur(R.total[name]) + '</td></tr>').join('');
+      recapRows += '<tr class="grand"><td>Total</td><td>' + primeFmtEur(R.persoSum) + '</td><td>' + primeFmtEur(R.collTotal) + '</td><td class="tot">' + primeFmtEur(R.pool) + '</td></tr>';
+      const recap = '<div class="prime-card"><p class="prime-card-h">Qui touche quoi</p>'
+        + '<table class="prime-recap"><thead><tr><th>Personne</th><th>Prime perso</th><th>Part collective</th><th>Total</th></tr></thead><tbody>' + recapRows + '</tbody></table></div>';
+
+      // --- Jauge de soutenabilité (échelle 0 → 30 %) ---
+      const ratio = R.ratio;
+      let gColor, gBg, gState, gFoot;
+      if (ratio < 15) {
+        gColor = 'var(--success)'; gBg = 'var(--success-bg)'; gState = 'Maîtrisé';
+        gFoot = '<b>Pool à ' + Math.round(ratio) + ' % du résultat.</b> Confortable. Au palier le plus haut, collectif et commissions montent ensemble — sans plafond global, c\'est à surveiller.';
+      } else if (ratio < 20) {
+        gColor = 'var(--warning)'; gBg = 'var(--warning-bg)'; gState = 'Vigilance';
+        gFoot = '<b>Pool à ' + Math.round(ratio) + ' % du résultat.</b> Zone de vigilance : vérifie que la trésorerie suit, surtout avec un BFR qui monte quand vous signez plus.';
+      } else {
+        gColor = 'var(--danger)'; gBg = 'var(--purple-bg)'; gState = 'Tension tréso';
+        gFoot = '<b>Plus de 20 % du résultat en primes.</b> Tendu : tu ponctionnes le cash nécessaire à l\'IS, au BFR et aux dividendes. Revois les paliers ou les taux.';
+      }
+      const gaugeW = Math.max(0, Math.min(ratio / 30 * 100, 100));
+      const gauge = '<div class="prime-card"><p class="prime-card-h">Soutenabilité — total des primes vs résultat</p>'
+        + '<div class="prime-gauge-top"><div class="prime-gauge-figure">' + Math.round(ratio) + ' %</div>'
+        + '<div class="prime-gauge-state" style="background:' + gBg + ';"><span class="dot" style="background:' + gColor + ';"></span>' + gState + '</div></div>'
+        + '<div class="prime-gauge-track"><div class="prime-gauge-fill" style="width:' + gaugeW + '%;background:' + gColor + ';"></div></div>'
+        + '<p class="prime-gauge-foot">' + gFoot + ' <span style="opacity:.8;">Repères : 15 % vigilance · 20 % tension tréso.</span></p></div>';
+
+      // --- Gate trimestriel (indicateur) ---
+      const avgQ = R.caSigne / 4;
+      const gateOk = avgQ >= (primeConfig.gateTrimestriel || 0);
+      const gate = '<div class="prime-card"><div class="prime-gatecard">'
+        + '<div class="gk-txt">Étage 1 — seuil de rentabilité : <b>' + primeFmtEur(primeConfig.gateTrimestriel) + '</b> de CA / trimestre. CA signé annuel ÷ 4 (moyenne) : <b>' + primeFmtEur(avgQ) + '</b>.</div>'
+        + '<div class="prime-gk-state" style="background:' + (gateOk ? 'var(--success-bg)' : 'var(--warning-bg)') + ';">' + (gateOk ? 'Au-dessus en moyenne' : 'Sous le seuil en moyenne') + '</div>'
+        + '</div></div>';
+
+      const results = document.getElementById('kpiPrimeResults');
+      if (results) results.innerHTML = stairsCard + kpis + recap + gauge + gate;
+    }
+
+    function resetPrimeRealises() { renderKpiPrime(); }
+
+    // --- Réglages primes (modale) ---
+    function togglePrimeReglages() {
+      document.getElementById('primeReglagesModal').classList.add('active');
+      renderPrimeReglages();
+    }
+    function closePrimeReglages() {
+      document.getElementById('primeReglagesModal').classList.remove('active');
+    }
+
+    function renderPrimeReglages() {
+      if (!primeConfig) return;
+      const body = document.getElementById('primeReglagesBody');
+      const parts = primeParticipants.length ? primeParticipants : primeCommercialPartners().map(p => p.partner);
+
+      // A. Taux par personne
+      let html = '<div class="kpi-rg-h">Taux par personne <span class="kpi-rg-badge">% sur CA signé</span></div>';
+      if (parts.length === 0) {
+        html += '<p style="color:var(--text-secondary);">Aucun partner commercial cette année.</p>';
+      } else {
+        html += '<table class="kpi-obj-table"><thead><tr><th>Personne</th><th>Taux new</th><th>Taux repeat</th></tr></thead><tbody>';
+        parts.forEach((name, i) => {
+          const accent = KPI_CHIP_COLORS[i % KPI_CHIP_COLORS.length];
+          const r = primeConfig.rates[name] || primeDefaultRates(name);
+          const key = encodeURIComponent(name);
+          html += '<tr><td><div class="kpi-obj-name"><span class="kpi-mini-chip" style="background:' + accent + ';">' + primeEsc(kpiInitial(name)) + '</span>' + primeEsc(name) + '</div></td>'
+            + '<td style="text-align:right;"><input class="kpi-num-input" type="number" step="0.05" value="' + r.txNew + '" data-rate-new="' + key + '" onchange="onPrimeReglagesChange()"></td>'
+            + '<td style="text-align:right;"><input class="kpi-num-input" type="number" step="0.05" value="' + r.txRepeat + '" data-rate-repeat="' + key + '" onchange="onPrimeReglagesChange()"></td></tr>';
+        });
+        html += '</tbody></table>';
+      }
+
+      // B. Paliers
+      html += '<div class="kpi-rg-h">Paliers de l\'objectif collectif <span class="kpi-rg-badge">CA opéré → % du résultat</span></div>';
+      const tiersAsc = (primeConfig.tiers || []).slice().sort((a, b) => a.seuil - b.seuil);
+      html += '<table class="kpi-obj-table"><thead><tr><th>Palier</th><th>CA ≥</th><th>Part résultat</th></tr></thead><tbody>';
+      tiersAsc.forEach((t, idx) => {
+        html += '<tr><td>Palier ' + (idx + 1) + '</td>'
+          + '<td style="text-align:right;"><input class="kpi-num-input" type="number" step="10000" value="' + t.seuil + '" data-tier-seuil="' + idx + '" onchange="onPrimeReglagesChange()"></td>'
+          + '<td style="text-align:right;"><input class="kpi-num-input" type="number" step="0.5" value="' + t.taux + '" data-tier-taux="' + idx + '" onchange="onPrimeReglagesChange()"></td></tr>';
+      });
+      html += '</tbody></table>';
+
+      // C. Références
+      html += '<div class="kpi-rg-h">Références</div>'
+        + '<div class="prime-rg-grid">'
+        + '<div class="prime-rg-field"><label>Résultat annuel avant bonus (€)</label><input class="kpi-num-input" type="number" step="10000" value="' + (primeConfig.resultatAnnuel || 0) + '" data-ref-resultat onchange="onPrimeReglagesChange()"></div>'
+        + '<div class="prime-rg-field"><label>Seuil de rentabilité / trimestre (€)</label><input class="kpi-num-input" type="number" step="10000" value="' + (primeConfig.gateTrimestriel || 0) + '" data-ref-gate onchange="onPrimeReglagesChange()"></div>'
+        + '</div>';
+
+      body.innerHTML = html;
+    }
+
+    function onPrimeReglagesChange() {
+      const body = document.getElementById('primeReglagesBody');
+      if (!body || !primeConfig) return;
+      body.querySelectorAll('input[data-rate-new]').forEach(inp => {
+        const name = decodeURIComponent(inp.dataset.rateNew);
+        (primeConfig.rates[name] = primeConfig.rates[name] || {}).txNew = primeParseNum(inp.value);
+      });
+      body.querySelectorAll('input[data-rate-repeat]').forEach(inp => {
+        const name = decodeURIComponent(inp.dataset.rateRepeat);
+        (primeConfig.rates[name] = primeConfig.rates[name] || {}).txRepeat = primeParseNum(inp.value);
+      });
+      const tiers = [];
+      body.querySelectorAll('input[data-tier-seuil]').forEach(inp => {
+        const i = Number(inp.dataset.tierSeuil); (tiers[i] = tiers[i] || {}).seuil = primeParseNum(inp.value);
+      });
+      body.querySelectorAll('input[data-tier-taux]').forEach(inp => {
+        const i = Number(inp.dataset.tierTaux); (tiers[i] = tiers[i] || {}).taux = primeParseNum(inp.value);
+      });
+      primeConfig.tiers = tiers.filter(Boolean);
+      const ra = body.querySelector('input[data-ref-resultat]');
+      const gt = body.querySelector('input[data-ref-gate]');
+      if (ra) primeConfig.resultatAnnuel = primeParseNum(ra.value);
+      if (gt) primeConfig.gateTrimestriel = primeParseNum(gt.value);
+      // Recalcule l'estimateur (les taux affichés en lecture aussi) et sauvegarde (debounce).
+      renderPrimeReadonlyRates();
+      primeRecompute();
+      schedulePrimeSave();
+    }
+
+    // Met à jour les taux affichés en lecture dans le panneau hypothèses (sans rebuild des inputs).
+    function renderPrimeReadonlyRates() {
+      primeParticipants.forEach((name, i) => {
+        const r = primeConfig.rates[name] || primeDefaultRates(name);
+        const cell = document.querySelectorAll('#kpiPrime table.prime-inputs tbody tr')[i];
+        if (cell) { const ro = cell.querySelector('.prime-ro'); if (ro) ro.textContent = primeFmtPct(r.txNew) + ' / ' + primeFmtPct(r.txRepeat); }
+      });
+    }
+
+    async function savePrimeConfig() {
+      try {
+        const res = await fetch('/api/kpi/prime-config', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ config: primeConfig }),
+        });
+        if (!res.ok) throw new Error('Erreur ' + res.status);
+      } catch (e) { console.error('Échec sauvegarde config primes :', e.message); }
+    }
+    function schedulePrimeSave() { clearTimeout(_primeSaveTimer); _primeSaveTimer = setTimeout(savePrimeConfig, 600); }
 
     function initAnalytics() {
       refreshAnalytics();

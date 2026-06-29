@@ -5811,6 +5811,51 @@ app.post('/api/kpi/split', async (req, res) => {
   }
 });
 
+// Config de l'estimateur de primes (étage 1 commission + étage 2 collectif).
+// Stockée en une ligne JSONB (id='default'). Les réalisés viennent du KPI réel,
+// seuls les paramètres (taux, paliers, résultat, gate) sont persistés ici.
+const DEFAULT_PRIME_CONFIG = {
+  // rates par partner : rempli à la volée côté client selon les partners du KPI.
+  // Défaut historique (système de primes Releaf) : Guillaume 2,25 %/1,25 %, autres 4,5 %/2,5 %.
+  rates: {},
+  tiers: [
+    { seuil: 650000, taux: 7 },
+    { seuil: 600000, taux: 5 },
+    { seuil: 550000, taux: 3 },
+  ],
+  resultatAnnuel: 150000,
+  gateTrimestriel: 120000,
+};
+
+app.get('/api/kpi/prime-config', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('kpi_prime_config').select('config').eq('id', 'default').maybeSingle();
+    if (error) throw error;
+    res.json((data && data.config) || DEFAULT_PRIME_CONFIG);
+  } catch (e) {
+    console.error('GET /api/kpi/prime-config error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/kpi/prime-config', async (req, res) => {
+  try {
+    const config = req.body && req.body.config;
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      return res.status(400).json({ error: 'config (objet) requis' });
+    }
+    const { error } = await supabase
+      .from('kpi_prime_config')
+      .upsert({ id: 'default', config, updated_at: new Date().toISOString() }, { onConflict: 'id' });
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('POST /api/kpi/prime-config error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // --- Scenarios CRUD ---
 
 app.get('/api/scenarios', async (req, res) => {
