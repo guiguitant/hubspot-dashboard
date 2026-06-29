@@ -1500,9 +1500,9 @@
 
     /* --- Deals CRITIQUES (sans relance > 15j OU sans notes) --- */
     .kanban-card-critical {
-      border: 1px solid rgba(239,68,68,0.45) !important;
-      border-left: 3px solid #ef4444 !important;
-      background: rgba(239,68,68,0.035) !important;
+      border: 1px solid rgba(248,113,113,0.38) !important;
+      border-left: 3px solid #f87171 !important;
+      background: rgba(248,113,113,0.04) !important;
       position: relative;
     }
     .kanban-card-critical-badge {
@@ -1515,16 +1515,16 @@
       text-transform: uppercase;
       padding: 0.1rem 0.35rem;
       border-radius: 3px;
-      background: rgba(239,68,68,0.12);
-      color: #b91c1c;
-      border: 1px solid rgba(239,68,68,0.35);
+      background: rgba(248,113,113,0.12);
+      color: #c2554d;
+      border: 1px solid rgba(248,113,113,0.32);
       margin-left: 0.3rem;
       vertical-align: middle;
     }
     [data-theme="dark"] .kanban-card-critical-badge { color: #fca5a5; }
     .kanban-card-critical-reasons {
       font-size: 0.66rem;
-      color: #b91c1c;
+      color: #c2554d;
       font-weight: 600;
       margin-top: 0.2rem;
       display: flex;
@@ -1538,8 +1538,8 @@
       gap: 0.2rem;
       padding: 0.05rem 0.3rem;
       border-radius: 2px;
-      background: rgba(239,68,68,0.12);
-      border: 1px solid rgba(239,68,68,0.3);
+      background: rgba(248,113,113,0.1);
+      border: 1px solid rgba(248,113,113,0.28);
     }
 
     /* Compteur "deals critiques" au-dessus du Kanban */
@@ -1548,9 +1548,9 @@
       align-items: center;
       gap: 0.5rem;
       padding: 0.45rem 0.85rem;
-      background: rgba(239,68,68,0.1);
-      color: #b91c1c;
-      border: 1px solid rgba(239,68,68,0.3);
+      background: rgba(248,113,113,0.09);
+      color: #c2554d;
+      border: 1px solid rgba(248,113,113,0.28);
       font-size: 0.82rem;
       font-weight: 600;
       border-radius: var(--radius);
@@ -1559,7 +1559,7 @@
     }
     [data-theme="dark"] .critical-counter { color: #fca5a5; }
     .critical-counter.active { display: inline-flex; }
-    .critical-counter:hover { background: rgba(239,68,68,0.16); }
+    .critical-counter:hover { background: rgba(248,113,113,0.15); }
     .critical-counter-icon {
       font-size: 1.1rem;
     }
@@ -6595,15 +6595,16 @@
     let pipelineMovedDeals = [];
     let pipelineCriticalDeals = [];
 
-    // 🚨 Critère "deal critique" — deux signaux indépendants, un seul suffit :
-    //   (A) "aucune note"  = ni description, ni note figée, ni relance (jamais)
-    //   (B) "trop ancien"  = > 15j depuis le dernier "contact" (= max(dernière relance, dernière note),
-    //                        fallback createdate si rien)
-    // Note ≡ Relance : ajouter l'une OU l'autre suffit à éteindre les deux raisons.
+    // 🚨 Critère "deal critique" — un seul signal d'inactivité réelle :
+    //   "trop ancien" = > 21j depuis le dernier "contact" (= max(dernière relance, dernière note),
+    //                   fallback createdate si rien)
+    // Note ≡ Relance : ajouter l'une OU l'autre suffit à éteindre la criticité.
     // Échappatoires (court-circuitent tout) :
     //   - un prochain RDV futur (meta.next_meeting_at)
     //   - une tâche ouverte dont l'échéance n'est pas encore passée (meta.tasks)
-    const CRITICAL_RELANCE_DAYS = 15;
+    //   - un deal créé récemment (< CRITICAL_GRACE_DAYS) — délai de grâce pour l'instruire
+    const CRITICAL_RELANCE_DAYS = 21;
+    const CRITICAL_GRACE_DAYS = 7;
     function computeDealCriticality(deal, meta) {
       const nextMeetingTime = (meta && meta.next_meeting_at)
         ? new Date(meta.next_meeting_at).getTime() : 0;
@@ -6619,13 +6620,16 @@
         return { critical: false, reasons: [], daysSinceTouch: null };
       }
 
+      // Délai de grâce : un deal créé récemment n'est jamais critique (laisse le temps de l'instruire).
+      const createdTime = (deal && deal.createdate) ? new Date(deal.createdate).getTime() : 0;
+      if (createdTime > 0 && (Date.now() - createdTime) < CRITICAL_GRACE_DAYS * 24 * 3600 * 1000) {
+        return { critical: false, reasons: [], daysSinceTouch: null };
+      }
+
       const reasons = [];
 
-      const desc = ((deal && deal.description) || '').trim();
       const notesArr = (meta && Array.isArray(meta.notes)) ? meta.notes : [];
       const relances = (meta && Array.isArray(meta.relances)) ? meta.relances : [];
-      const hasAnyDoc = !!desc || notesArr.length > 0 || relances.length > 0;
-      if (!hasAnyDoc) reasons.push('❌ aucune note');
 
       // Last touch = max(dernière relance, dernière note)
       const touchDates = [
@@ -7272,7 +7276,7 @@
         // tri : plus de jours sans contact en premier
         deals = [...pipelineCriticalDeals].sort((a, b) => (b.daysSinceTouch || 0) - (a.daysSinceTouch || 0));
         title = '🚨 Deals critiques';
-        subtitle = `${deals.length} deal${deals.length > 1 ? 's' : ''} sans relance > ${CRITICAL_RELANCE_DAYS}j ou sans note — action urgente !`;
+        subtitle = `${deals.length} deal${deals.length > 1 ? 's' : ''} sans relance > ${CRITICAL_RELANCE_DAYS}j — à relancer.`;
       } else {
         deals = type === 'new' ? pipelineNewDeals : pipelineMovedDeals;
         title = type === 'new' ? 'Nouveaux leads' : 'Progressions';
@@ -7297,7 +7301,7 @@
         const sc = stageColors[d.stage] || { bg: 'var(--primary-bg)', color: 'var(--primary)' };
         let metaExtra = '';
         if (type === 'critical') {
-          metaExtra = (d.reasons || []).map(r => `<span class="pa-date" style="color:#b91c1c;font-weight:600">${r}</span>`).join(' ');
+          metaExtra = (d.reasons || []).map(r => `<span class="pa-date" style="color:#c2554d;font-weight:600">${r}</span>`).join(' ');
         } else {
           const dateStr = type === 'new'
             ? (d.createdate ? fmtDate(d.createdate) : '')
@@ -7388,9 +7392,8 @@
       if (type === 'critical') {
         rows = `<div class="pa-critical-rules">
           <div class="pa-critical-rules-title">🚨 Qu'est-ce qu'un deal « critique » ?</div>
-          Un deal devient critique s'il <strong>n'a aucun RDV futur planifié</strong> et qu'au moins une de ces conditions est vraie :
+          Un deal devient critique s'il <strong>n'a aucun RDV futur planifié</strong>, qu'il a été <strong>créé il y a plus de ${CRITICAL_GRACE_DAYS} jours</strong> (délai de grâce) et que :
           <ul>
-            <li><strong>Aucune note</strong> — ni description, ni note, ni relance enregistrée.</li>
             <li><strong>Plus de <code>${CRITICAL_RELANCE_DAYS} jours</code> sans relance</strong> — dernier contact (note ou relance, sinon date de création) trop ancien.</li>
           </ul>
           <div class="ok">✓ Pour le sortir de l'état critique : enregistre une note / relance (📝 📧 📞) ou planifie un RDV futur (📅) — un RDV à venir court-circuite tout.</div>
@@ -7643,7 +7646,7 @@
       const n = pipelineCriticalDeals.length;
       const sub = document.getElementById('paModalSubtitle');
       if (sub) sub.textContent = n
-        ? `${n} deal${n > 1 ? 's' : ''} sans relance > ${CRITICAL_RELANCE_DAYS}j ou sans note — action urgente !`
+        ? `${n} deal${n > 1 ? 's' : ''} sans relance > ${CRITICAL_RELANCE_DAYS}j — à relancer.`
         : 'Pipeline propre 🎉';
       // Total
       const total = pipelineCriticalDeals.reduce((s, d) => s + (d.amount || 0), 0);
