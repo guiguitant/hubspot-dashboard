@@ -11,6 +11,7 @@ const { execFile } = require('child_process');
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
 const { computeKpi } = require('./utils/kpiCompute');
+const { computeBillingForYear } = require('./utils/billing');
 const { buildSalesNavUrl } = require('./utils/buildSalesNavUrl');
 const multer = require('multer');
 const { parse: parseCsv } = require('csv-parse/sync');
@@ -5749,13 +5750,17 @@ app.get('/api/kpi', async (req, res) => {
   try {
     const year = parseInt(req.query.year, 10) || new Date().getFullYear();
     const missions = await fetchAllNotionMissions();
-    const [{ data: objectives, error: objErr }, { data: splits, error: splErr }] = await Promise.all([
+    const [{ data: objectives, error: objErr }, { data: splits, error: splErr }, { data: factOverrides, error: factErr }] = await Promise.all([
       supabase.from('kpi_objectives').select('*').eq('year', year),
       supabase.from('kpi_ca_split').select('*'),
+      supabase.from('facture_overrides').select('*'),
     ]);
     if (objErr) throw objErr;
     if (splErr) throw splErr;
+    if (factErr) throw factErr;
     const result = computeKpi({ missions, objectives: objectives || [], splits: splits || [], year });
+    // Base de l'objectif collectif (primes étage 2) : facturation de l'exercice.
+    result.facturation = computeBillingForYear(missions, factOverrides || [], year);
     res.json(result);
   } catch (e) {
     console.error('GET /api/kpi error:', e.message);
