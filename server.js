@@ -640,6 +640,54 @@ async function fetchWonDealsForMonth(year, month) {
     }));
 }
 
+// Deals gagnés (closed-won, pipeline default) dont la date de clôture tombe dans `year`.
+// Base du "CA signé" des primes (étage 1). Retourne [{ id, amount }].
+async function fetchWonDealsForYear(year) {
+  const from = new Date(Date.UTC(year, 0, 1)).toISOString();
+  const to = new Date(Date.UTC(year + 1, 0, 1)).toISOString();
+  const deals = [];
+  let after;
+  while (true) {
+    const body = {
+      filterGroups: [{ filters: [
+        { propertyName: 'hs_is_closed_won', operator: 'EQ', value: 'true' },
+        { propertyName: 'closedate', operator: 'GTE', value: from },
+        { propertyName: 'closedate', operator: 'LT', value: to },
+      ] }],
+      properties: ['amount', 'closedate', 'pipeline'],
+      sorts: [{ propertyName: 'closedate', direction: 'DESCENDING' }],
+      limit: 100,
+    };
+    if (after) body.after = after;
+    const result = await hubspotSearch(body);
+    if (result.results) deals.push(...result.results);
+    if (result.paging && result.paging.next && result.paging.next.after) after = result.paging.next.after;
+    else break;
+  }
+  return deals
+    .filter(d => !d.properties.pipeline || d.properties.pipeline === 'default')
+    .map(d => ({ id: d.id, amount: parseFloat(d.properties.amount) || 0 }));
+}
+
+// CA signé HubSpot d'une année réparti par assignee (deal_metadata.assignee).
+// { total, unassigned, byAssignee: { [name]: montant } }. Null-safe : renvoie null en cas d'échec.
+async function computeCommercialSigned(year) {
+  const wonDeals = await fetchWonDealsForYear(year);
+  const { data: metaRows } = await supabaseAdmin.from('deal_metadata').select('deal_id, assignee');
+  const assigneeByDeal = {};
+  for (const r of metaRows || []) assigneeByDeal[String(r.deal_id)] = r.assignee || null;
+  const byAssignee = {};
+  let total = 0, unassigned = 0;
+  for (const d of wonDeals) {
+    total += d.amount;
+    const a = assigneeByDeal[String(d.id)];
+    if (a) byAssignee[a] = (byAssignee[a] || 0) + d.amount;
+    else unassigned += d.amount;
+  }
+  for (const k of Object.keys(byAssignee)) byAssignee[k] = Math.round(byAssignee[k]);
+  return { year, total: Math.round(total), unassigned: Math.round(unassigned), byAssignee };
+}
+
 app.get('/api/won-deals', async (req, res) => {
   const year = parseInt(req.query.year, 10);
   const month = parseInt(req.query.month, 10);
@@ -5761,6 +5809,13 @@ app.get('/api/kpi', async (req, res) => {
     const result = computeKpi({ missions, objectives: objectives || [], splits: splits || [], year });
     // Base de l'objectif collectif (primes étage 2) : facturation de l'exercice.
     result.facturation = computeBillingForYear(missions, factOverrides || [], year);
+    // Base du CA signé (primes étage 1) : deals gagnés HubSpot, par assignee.
+    try {
+      result.commercial = await computeCommercialSigned(year);
+    } catch (e) {
+      console.error('KPI commercial (HubSpot) error:', e.message);
+      result.commercial = null;
+    }
     res.json(result);
   } catch (e) {
     console.error('GET /api/kpi error:', e.message);
