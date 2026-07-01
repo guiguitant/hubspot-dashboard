@@ -11,6 +11,7 @@ const { execFile } = require('child_process');
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
 const { computeKpi } = require('./utils/kpiCompute');
+const { computeBillingForYear } = require('./utils/billing');
 const { buildSalesNavUrl } = require('./utils/buildSalesNavUrl');
 const multer = require('multer');
 const { parse: parseCsv } = require('csv-parse/sync');
@@ -637,6 +638,54 @@ async function fetchWonDealsForMonth(year, month) {
       closedate: d.properties.closedate || null,
       createdate: d.properties.createdate || null,
     }));
+}
+
+// Deals gagnés (closed-won, pipeline default) dont la date de clôture tombe dans `year`.
+// Base du "CA signé" des primes (étage 1). Retourne [{ id, amount }].
+async function fetchWonDealsForYear(year) {
+  const from = new Date(Date.UTC(year, 0, 1)).toISOString();
+  const to = new Date(Date.UTC(year + 1, 0, 1)).toISOString();
+  const deals = [];
+  let after;
+  while (true) {
+    const body = {
+      filterGroups: [{ filters: [
+        { propertyName: 'hs_is_closed_won', operator: 'EQ', value: 'true' },
+        { propertyName: 'closedate', operator: 'GTE', value: from },
+        { propertyName: 'closedate', operator: 'LT', value: to },
+      ] }],
+      properties: ['amount', 'closedate', 'pipeline'],
+      sorts: [{ propertyName: 'closedate', direction: 'DESCENDING' }],
+      limit: 100,
+    };
+    if (after) body.after = after;
+    const result = await hubspotSearch(body);
+    if (result.results) deals.push(...result.results);
+    if (result.paging && result.paging.next && result.paging.next.after) after = result.paging.next.after;
+    else break;
+  }
+  return deals
+    .filter(d => !d.properties.pipeline || d.properties.pipeline === 'default')
+    .map(d => ({ id: d.id, amount: parseFloat(d.properties.amount) || 0 }));
+}
+
+// CA signé HubSpot d'une année réparti par assignee (deal_metadata.assignee).
+// { total, unassigned, byAssignee: { [name]: montant } }. Null-safe : renvoie null en cas d'échec.
+async function computeCommercialSigned(year) {
+  const wonDeals = await fetchWonDealsForYear(year);
+  const { data: metaRows } = await supabaseAdmin.from('deal_metadata').select('deal_id, assignee');
+  const assigneeByDeal = {};
+  for (const r of metaRows || []) assigneeByDeal[String(r.deal_id)] = r.assignee || null;
+  const byAssignee = {};
+  let total = 0, unassigned = 0;
+  for (const d of wonDeals) {
+    total += d.amount;
+    const a = assigneeByDeal[String(d.id)];
+    if (a) byAssignee[a] = (byAssignee[a] || 0) + d.amount;
+    else unassigned += d.amount;
+  }
+  for (const k of Object.keys(byAssignee)) byAssignee[k] = Math.round(byAssignee[k]);
+  return { year, total: Math.round(total), unassigned: Math.round(unassigned), byAssignee };
 }
 
 app.get('/api/won-deals', async (req, res) => {
@@ -5821,13 +5870,24 @@ app.get('/api/kpi', async (req, res) => {
   try {
     const year = parseInt(req.query.year, 10) || new Date().getFullYear();
     const missions = await fetchAllNotionMissions();
-    const [{ data: objectives, error: objErr }, { data: splits, error: splErr }] = await Promise.all([
+    const [{ data: objectives, error: objErr }, { data: splits, error: splErr }, { data: factOverrides, error: factErr }] = await Promise.all([
       supabase.from('kpi_objectives').select('*').eq('year', year),
       supabase.from('kpi_ca_split').select('*'),
+      supabase.from('facture_overrides').select('*'),
     ]);
     if (objErr) throw objErr;
     if (splErr) throw splErr;
+    if (factErr) throw factErr;
     const result = computeKpi({ missions, objectives: objectives || [], splits: splits || [], year });
+    // Base de l'objectif collectif (primes étage 2) : facturation de l'exercice.
+    result.facturation = computeBillingForYear(missions, factOverrides || [], year);
+    // Base du CA signé (primes étage 1) : deals gagnés HubSpot, par assignee.
+    try {
+      result.commercial = await computeCommercialSigned(year);
+    } catch (e) {
+      console.error('KPI commercial (HubSpot) error:', e.message);
+      result.commercial = null;
+    }
     res.json(result);
   } catch (e) {
     console.error('GET /api/kpi error:', e.message);
@@ -5879,6 +5939,51 @@ app.post('/api/kpi/split', async (req, res) => {
     res.json({ ok: true });
   } catch (e) {
     console.error('POST /api/kpi/split error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Config de l'estimateur de primes (étage 1 commission + étage 2 collectif).
+// Stockée en une ligne JSONB (id='default'). Les réalisés viennent du KPI réel,
+// seuls les paramètres (taux, paliers, résultat, gate) sont persistés ici.
+const DEFAULT_PRIME_CONFIG = {
+  // rates par partner : rempli à la volée côté client selon les partners du KPI.
+  // Défaut historique (système de primes Releaf) : Guillaume 2,25 %/1,25 %, autres 4,5 %/2,5 %.
+  rates: {},
+  tiers: [
+    { seuil: 650000, taux: 7 },
+    { seuil: 600000, taux: 5 },
+    { seuil: 550000, taux: 3 },
+  ],
+  resultatAnnuel: 150000,
+  gateTrimestriel: 120000,
+};
+
+app.get('/api/kpi/prime-config', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('kpi_prime_config').select('config').eq('id', 'default').maybeSingle();
+    if (error) throw error;
+    res.json((data && data.config) || DEFAULT_PRIME_CONFIG);
+  } catch (e) {
+    console.error('GET /api/kpi/prime-config error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/kpi/prime-config', async (req, res) => {
+  try {
+    const config = req.body && req.body.config;
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      return res.status(400).json({ error: 'config (objet) requis' });
+    }
+    const { error } = await supabase
+      .from('kpi_prime_config')
+      .upsert({ id: 'default', config, updated_at: new Date().toISOString() }, { onConflict: 'id' });
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('POST /api/kpi/prime-config error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
