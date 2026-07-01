@@ -1747,6 +1747,40 @@ async function updateNotionMissionStatusProperty(pageId, propName, statusName, e
   return { updated: true, previousValue: currentValue, newValue: statusName, pageId };
 }
 
+// Write Notion DATE property (write-back date d'émission facture depuis Pilot).
+// Payload API Notion : { date: { start: 'YYYY-MM-DD' } } — ou { date: null } pour effacer.
+// On normalise tout en 'YYYY-MM-DD' (les dates d'émission sont "date-only", pas d'heure)
+// pour comparer proprement current/attendu/écrit sans être piégé par un suffixe ISO.
+function normalizeDateOnly(v) {
+  return v ? String(v).slice(0, 10) : '';
+}
+async function updateNotionMissionDateProperty(pageId, propName, newDate, expectedCurrent) {
+  const target = normalizeDateOnly(newDate); // '' = effacer la date
+  const currentPage = await fetchNotionMissionById(pageId);
+  const prop = currentPage.properties && currentPage.properties[propName];
+  const currentValue = normalizeDateOnly(prop && prop.date && prop.date.start);
+  if (expectedCurrent !== undefined && currentValue !== normalizeDateOnly(expectedCurrent)) {
+    const err = new Error(`Notion drift: la date actuelle "${currentValue}" diffère de la date attendue "${normalizeDateOnly(expectedCurrent)}". Recharge la page.`);
+    err.code = 'NOTION_DRIFT';
+    err.currentValue = currentValue;
+    throw err;
+  }
+  if (currentValue === target) {
+    return { updated: false, previousValue: currentValue, newValue: target, pageId, reason: 'no_change' };
+  }
+  const body = { properties: { [propName]: { date: target ? { start: target } : null } } };
+  const patched = await notionRequest(`/v1/pages/${pageId}`, 'PATCH', body);
+  const writtenProp = patched.properties && patched.properties[propName];
+  const writtenValue = normalizeDateOnly(writtenProp && writtenProp.date && writtenProp.date.start);
+  if (writtenValue !== target) {
+    throw new Error(`Notion PATCH a échoué silencieusement : date écrite "${writtenValue}" ≠ "${target}". Vérifier le schéma de la propriété "${propName}".`);
+  }
+  notionMissionsCache = null; notionMissionsCacheTime = 0;
+  invalidateFactMatchingSummaryCache();
+  console.log(`[Notion PATCH OK] page=${pageId} prop="${propName}" date "${currentValue}" → "${target}"`);
+  return { updated: true, previousValue: currentValue, newValue: target, pageId };
+}
+
 // Progression officielle des statuts Notion "Facturation" (6 options, cf screenshot user G1).
 // L'ordre est utilisé pour détecter : reculs (curIdx > tgtIdx) et sauts (|tgtIdx - curIdx| > 1).
 const NOTION_FACTURATION_ORDER = [
@@ -1847,6 +1881,44 @@ app.post('/api/facturation-matching/set-status', async (req, res) => {
     }
   } catch (err) {
     console.error('Erreur set-status:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/facturation-matching/set-date
+// Body : { missionNom, rowType: 'acompte'|'solde', newDate: 'YYYY-MM-DD'|'', expectedCurrent }
+// Écrit la date d'émission de la facture (acompte/solde) directement dans Notion.
+// rowType 'acompte' → propriété "émission facture acompte" ; 'solde' → "émission facture finale".
+app.post('/api/facturation-matching/set-date', async (req, res) => {
+  try {
+    const { missionNom, rowType, newDate, expectedCurrent } = req.body || {};
+    if (!missionNom || !rowType) {
+      return res.status(400).json({ error: 'missionNom, rowType requis' });
+    }
+    if (rowType !== 'acompte' && rowType !== 'solde') {
+      return res.status(400).json({ error: 'rowType doit être "acompte" ou "solde"' });
+    }
+    // Validation format date (YYYY-MM-DD) ou vide (= effacer)
+    if (newDate && !/^\d{4}-\d{2}-\d{2}$/.test(newDate)) {
+      return res.status(400).json({ error: 'newDate doit être au format YYYY-MM-DD (ou vide pour effacer)' });
+    }
+    const propName = rowType === 'acompte' ? 'émission facture acompte' : 'émission facture finale';
+
+    const missions = await fetchAllNotionMissions();
+    const mission = missions.find(m => m.nom === missionNom);
+    if (!mission) return res.status(404).json({ error: 'Mission introuvable' });
+
+    try {
+      const result = await updateNotionMissionDateProperty(mission.id, propName, newDate || '', expectedCurrent);
+      res.json({ ok: true, ...result, missionNom, rowType });
+    } catch (err) {
+      if (err.code === 'NOTION_DRIFT') {
+        return res.status(409).json({ error: err.message, code: 'NOTION_DRIFT', currentValue: err.currentValue });
+      }
+      throw err;
+    }
+  } catch (err) {
+    console.error('Erreur set-date:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

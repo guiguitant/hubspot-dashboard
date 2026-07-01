@@ -11144,6 +11144,18 @@
       return new Date(dateStr).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
     }
 
+    // Vrai si la date d'émission est postérieure à aujourd'hui (comparaison au jour près,
+    // l'heure est ignorée). Sert à mettre "En attente" une facture "A envoyer" dont
+    // l'émission n'est prévue que plus tard : ce n'est pas encore le moment de l'émettre.
+    function isFutureDate(dateStr) {
+      if (!dateStr) return false; // pas de date = émettable dès maintenant
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const d = new Date(dateStr);
+      d.setHours(0, 0, 0, 0);
+      return d > today;
+    }
+
     // Transform missions into invoice lines
     // Redesign Patch 1 : skip les lignes à montant < 5€ pour éviter le bruit dans l'UI
     // (paiement en 1 fois : "Acompte forcé" ≈ 1€ côté Notion → pas de ligne acompte à 1€).
@@ -11160,6 +11172,9 @@
           if (nf.includes('acompte a envoyer')) acompteStatus = 'A envoyer';
           else if (nf.includes('acompte envoye')) acompteStatus = 'Envoye';
           else acompteStatus = 'Paye';
+
+          // "A envoyer" mais émission prévue dans le futur → pas encore actionnable → "En attente"
+          if (acompteStatus === 'A envoyer' && isFutureDate(m.dateFactureAcompte)) acompteStatus = 'En attente';
 
           const acompteOv = factOverrides[m.nom + '||Acompte'];
           lines.push({
@@ -11183,6 +11198,9 @@
           else if (nf.includes('acompte paye') || nf.includes('solde a envoyer')) soldeStatus = 'A envoyer';
           else if (nf.includes('solde envoye')) soldeStatus = 'Envoye';
           else soldeStatus = 'Paye';
+
+          // "A envoyer" mais émission prévue dans le futur → pas encore actionnable → "En attente"
+          if (soldeStatus === 'A envoyer' && isFutureDate(m.dateFactureFinale)) soldeStatus = 'En attente';
 
           const soldeOv = factOverrides[m.nom + '||Solde'];
           lines.push({
@@ -11482,17 +11500,22 @@
           : '<span class="recon-source-tag tag-notion">' + l.type + '</span>';
         const statusLabel = l.status === 'Envoye' ? 'Envoy\u00e9' : l.status === 'Paye' ? 'Pay\u00e9' : l.status === 'En attente' ? 'En attente' : '\u00c0 envoyer';
 
-        // Patch UX : pas de marquage spécial pour les factures 2025 — l'année est dans la date DD/MM/YYYY
-        const dateCell = isSansDate
-          ? '<span style="color:var(--danger);font-weight:600;font-size:0.7rem">Date manquante</span>'
-          : formatDateFR(l.date);
+        // Date d'émission éditable : input type=date écrivant directement dans Notion.
+        // data-current = date actuelle (sert d'expectedCurrent pour la détection de drift).
+        // Bordure rouge si vide pour garder le signal "Date manquante".
+        const dateVal = l.date ? String(l.date).slice(0, 10) : '';
+        const dateBorder = dateVal ? 'var(--border)' : 'var(--danger)';
+        const dateInput = '<input type="date" class="fact-date-input"'
+          + ' data-mission="' + l.mission.replace(/"/g, '&quot;') + '" data-type="' + l.type + '"'
+          + ' data-current="' + dateVal + '" value="' + dateVal + '"'
+          + ' style="font-size:0.72rem;padding:0.15rem 0.3rem;border:1px solid ' + dateBorder + ';border-radius:var(--radius);background:var(--bg);color:var(--text)">';
 
         html += '<tr>';
         html += '<td>' + l.mission + '</td>';
         html += '<td style="color:var(--text-secondary)">' + l.client + '</td>';
         html += '<td>' + typeTag + '</td>';
         html += '<td style="font-weight:600">' + formatEuro(l.montant) + '</td>';
-        html += '<td style="font-size:0.75rem">' + dateCell + '</td>';
+        html += '<td>' + dateInput + '</td>';
         const statuses = ['A envoyer', 'En attente', 'Envoye', 'Paye'];
         // Patch 3 : status overrides Supabase obsolètes (statut → Notion direct). On retire la bordure orange.
         let selectHtml = '<select class="notion-select fact-status-select ' + invoiceStatusClass(l.status) + '"';
@@ -11597,6 +11620,16 @@
           const mission = this.getAttribute('data-mission');
           const type = this.getAttribute('data-type');
           setFactOverride(mission, type, this.value, undefined);
+        });
+      });
+
+      // Bind change events on date inputs → write-back date d'émission dans Notion
+      document.querySelectorAll('.fact-date-input').forEach(input => {
+        input.addEventListener('change', function() {
+          const mission = this.getAttribute('data-mission');
+          const type = this.getAttribute('data-type');
+          const current = this.getAttribute('data-current') || '';
+          pushFactDateToNotion(mission, type, this.value, current);
         });
       });
 
@@ -12207,6 +12240,44 @@
       } catch (err) {
         showToast('error', 'Erreur réseau : ' + err.message);
         revertFactDropdown(missionNom, typeKey);
+      }
+    }
+
+    // Remet l'input date à sa valeur d'origine (en cas de refus / erreur backend).
+    function revertFactDateInput(missionNom, typeKey, previousValue) {
+      const sel = '.fact-date-input[data-mission="' + (window.CSS && CSS.escape ? CSS.escape(missionNom) : missionNom.replace(/"/g, '\\"')) + '"][data-type="' + typeKey + '"]';
+      document.querySelectorAll(sel).forEach(input => { input.value = previousValue || ''; });
+    }
+
+    // Push date d'émission Pilot → Notion. Si erreur / drift → toast + revert de l'input.
+    async function pushFactDateToNotion(missionNom, typeKey, newDate, currentDate) {
+      const rowType = typeKey === 'Acompte' ? 'acompte' : 'solde';
+      if (newDate === currentDate) return; // no-op
+      try {
+        const res = await fetch('/api/facturation-matching/set-date', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ missionNom, rowType, newDate, expectedCurrent: currentDate }),
+        });
+        const json = await res.json();
+        if (!res.ok) {
+          if (json.code === 'NOTION_DRIFT') {
+            showToast('error', 'Notion a été modifié depuis le dernier chargement (date actuelle : "' + (json.currentValue || '(vide)') + '"). La page va recharger.');
+            await refreshFactData();
+            return;
+          }
+          showToast('error', json.error || 'Échec mise à jour de la date dans Notion.');
+          revertFactDateInput(missionNom, typeKey, currentDate);
+          return;
+        }
+        showToast('success', newDate
+          ? 'Date d\'émission mise à jour dans Notion : ' + formatDateFR(newDate) + '.'
+          : 'Date d\'émission effacée dans Notion.');
+        // Refetch Notion : la date pilote aussi le statut "En attente", donc on resynchronise tout.
+        await refreshFactData();
+      } catch (err) {
+        showToast('error', 'Erreur réseau : ' + err.message);
+        revertFactDateInput(missionNom, typeKey, currentDate);
       }
     }
 
