@@ -4110,6 +4110,10 @@
   <!-- PAGE: KPI -->
   <div class="app-page" id="page-kpi">
     <style>
+      /* Padding de la page KPI : le contenu n'est pas dans le wrapper .page,
+         donc on aère nous-mêmes les bords gauche/droit (et le haut/bas). */
+      #page-kpi { padding: 2rem 2.5rem; }
+      @media (max-width: 768px) { #page-kpi { padding: 1.5rem 1.25rem; } }
       #kpiCharts { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
       @media (max-width: 900px) { #kpiCharts { grid-template-columns: 1fr; } }
       #page-kpi .kpi-card {
