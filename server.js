@@ -3298,7 +3298,7 @@ function orsMatrixRequest(body) {
 // GET /api/analyse-clients — données enrichies pour analyse
 app.get('/api/analyse-clients', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('clients_km').select('*');
+    const { data, error } = await supabaseAdmin.from('clients_km').select('*');
     if (error) throw new Error(error.message);
     res.json(data || []);
   } catch (err) {
@@ -3309,7 +3309,7 @@ app.get('/api/analyse-clients', async (req, res) => {
 // GET /api/frais-km/clients — lecture rapide depuis Supabase
 app.get('/api/frais-km/clients', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('clients_km').select('*').order('distance_km_ar', { ascending: false });
+    const { data, error } = await supabaseAdmin.from('clients_km').select('*').order('distance_km_ar', { ascending: false });
     if (error) throw new Error(error.message);
     const results = (data || []).map(c => ({
       id: c.pennylane_id,
@@ -3502,7 +3502,7 @@ app.post('/api/frais-km/sync', async (req, res) => {
     }
 
     // 6. Upsert dans Supabase
-    const { error } = await supabase.from('clients_km').upsert(results, { onConflict: 'pennylane_id' });
+    const { error } = await supabaseAdmin.from('clients_km').upsert(results, { onConflict: 'pennylane_id' });
     if (error) throw new Error(error.message);
 
     res.json({ synced: results.length, message: `${results.length} clients synchronisés` });
@@ -3524,7 +3524,7 @@ app.post('/api/frais-km/generate', async (req, res) => {
     }
 
     // Lire les clients depuis Supabase
-    const { data: dbClients, error } = await supabase.from('clients_km').select('*');
+    const { data: dbClients, error } = await supabaseAdmin.from('clients_km').select('*');
     if (error) throw new Error(error.message);
 
     const clients = (dbClients || []).filter(c => c.montant_ar > 0).map(c => ({
