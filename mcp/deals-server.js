@@ -198,6 +198,172 @@ function toEpochMs(dateStr, endOfDay = false) {
   return String(d.getTime());
 }
 
+// Normalise une valeur Supabase (JSON string ou array) en tableau.
+function asArray(v) {
+  if (v == null) return [];
+  if (typeof v === 'string') { try { v = JSON.parse(v); } catch { return [v]; } }
+  return Array.isArray(v) ? v : [v];
+}
+
+// Charge TOUTE la metadata deal (tags, tasks, relances, assignee, next_meeting_at)
+// en Map deal_id(string) -> row. Complète loadTagsByDeal (qui ne lit que les tags).
+async function loadMetaByDeal() {
+  const map = new Map();
+  if (!supabase) return map;
+  const { data, error } = await supabase
+    .from('deal_metadata')
+    .select('deal_id, tags, tasks, relances, assignee, next_meeting_at');
+  if (error) throw new Error(`Supabase deal_metadata: ${error.message}`);
+  for (const row of data || []) map.set(String(row.deal_id), row);
+  return map;
+}
+
+// Récupère nom/stage/montant/clôture d'une liste d'IDs deals via batch read HubSpot
+// (chunks de 100). Renvoie Map id(string) -> { name, amount, stage, closed }.
+async function fetchDealInfos(ids) {
+  const infos = new Map();
+  const uniq = [...new Set(ids.map(String))];
+  for (let i = 0; i < uniq.length; i += 100) {
+    const chunk = uniq.slice(i, i + 100);
+    if (!chunk.length) continue;
+    const res = await hubspotWrite('POST', '/crm/v3/objects/deals/batch/read', {
+      properties: ['dealname', 'amount', 'dealstage', 'hs_is_closed'],
+      inputs: chunk.map((id) => ({ id })),
+    });
+    for (const d of res.results || []) {
+      const stageInfo = KANBAN_STAGES.find((s) => s.id === d.properties?.dealstage);
+      infos.set(String(d.id), {
+        name: d.properties?.dealname || 'Sans nom',
+        amount: parseFloat(d.properties?.amount) || 0,
+        stage: stageInfo ? stageInfo.label : (d.properties?.dealstage || null),
+        closed: d.properties?.hs_is_closed === 'true',
+      });
+    }
+  }
+  return infos;
+}
+
+// --- Logique partagée (réutilisée par get_tasks / get_overdue_deals / get_daily_briefing) ---
+
+// Collecte les tâches de tous les deals, aplaties et enrichies du nom de deal.
+async function collectTasks({ status = 'todo', overdue_only = false, assignee, type, open_only = false } = {}) {
+  const meta = await loadMetaByDeal();
+  const now = Date.now();
+  const idsWithTasks = [];
+  for (const [dealId, m] of meta) if (asArray(m.tasks).length) idsWithTasks.push(dealId);
+  const infos = await fetchDealInfos(idsWithTasks);
+
+  const rows = [];
+  for (const [dealId, m] of meta) {
+    const dealAssignee = m.assignee || null;
+    if (assignee && (dealAssignee || '').toLowerCase() !== assignee.toLowerCase()) continue;
+    const info = infos.get(String(dealId)) || {};
+    if (open_only && info.closed === true) continue; // ignore les tâches sur deals clôturés
+    for (const t of asArray(m.tasks)) {
+      const isDone = t.status === 'done' || !!t.done_at;
+      if (status === 'todo' && isDone) continue;
+      if (status === 'done' && !isDone) continue;
+      if (type && t.type !== type) continue;
+      const dueMs = t.due_at ? new Date(t.due_at).getTime() : null;
+      const overdue = !isDone && dueMs != null && !isNaN(dueMs) && dueMs < now;
+      if (overdue_only && !overdue) continue;
+      rows.push({
+        deal_id: String(dealId),
+        deal_name: info.name || null,
+        deal_stage: info.stage || null,
+        deal_closed: info.closed ?? null,
+        assignee: dealAssignee,
+        type: t.type,
+        label: t.label || '',
+        due_at: t.due_at || null,
+        status: isDone ? 'done' : 'todo',
+        overdue,
+        days_overdue: overdue ? Math.floor((now - dueMs) / 86400000) : 0,
+      });
+    }
+  }
+  // retards d'abord, puis échéance croissante, sans échéance en dernier
+  rows.sort((a, b) => {
+    if (a.overdue !== b.overdue) return a.overdue ? -1 : 1;
+    const da = a.due_at ? new Date(a.due_at).getTime() : Infinity;
+    const db = b.due_at ? new Date(b.due_at).getTime() : Infinity;
+    return da - db;
+  });
+  return { rows, overdue_count: rows.filter((r) => r.overdue).length };
+}
+
+// Collecte les deals OUVERTS en retard : closedate dépassée et/ou next_meeting_at passé.
+async function collectOverdueDeals({ assignee, stage } = {}) {
+  const now = Date.now();
+  const filters = [
+    { propertyName: 'pipeline', operator: 'EQ', value: 'default' },
+    { propertyName: 'hs_is_closed', operator: 'EQ', value: 'false' },
+  ];
+  if (stage) {
+    const s = KANBAN_STAGES.find((x) => x.label.toLowerCase() === stage.toLowerCase());
+    if (s) filters.push({ propertyName: 'dealstage', operator: 'EQ', value: s.id });
+  }
+  const [deals, meta] = await Promise.all([
+    searchAll({
+      filterGroups: [{ filters }],
+      properties: ['dealname', 'amount', 'dealstage', 'closedate', 'createdate'],
+      limit: 100,
+    }),
+    loadMetaByDeal(),
+  ]);
+
+  const rows = [];
+  for (const d of deals) {
+    const m = meta.get(String(d.id)) || {};
+    const dealAssignee = m.assignee || null;
+    if (assignee && (dealAssignee || '').toLowerCase() !== assignee.toLowerCase()) continue;
+    const stageInfo = KANBAN_STAGES.find((s) => s.id === d.properties.dealstage);
+    const closeMs = d.properties.closedate ? new Date(d.properties.closedate).getTime() : null;
+    const meetingMs = m.next_meeting_at ? new Date(m.next_meeting_at).getTime() : null;
+    const reasons = [];
+    if (closeMs != null && !isNaN(closeMs) && closeMs < now) reasons.push('closedate_passée');
+    if (meetingMs != null && !isNaN(meetingMs) && meetingMs < now) reasons.push('rdv_passé');
+    if (!reasons.length) continue;
+    const relances = asArray(m.relances);
+    const lastRelance = relances.length ? relances[relances.length - 1] : null;
+    const overdueRef = Math.min(...[closeMs, meetingMs].filter((x) => x != null && !isNaN(x) && x < now));
+    rows.push({
+      id: String(d.id),
+      name: d.properties.dealname || 'Sans nom',
+      amount: parseFloat(d.properties.amount) || 0,
+      stage: stageInfo ? stageInfo.label : d.properties.dealstage,
+      assignee: dealAssignee,
+      closedate: d.properties.closedate || null,
+      next_meeting_at: m.next_meeting_at || null,
+      reasons,
+      days_overdue: Math.floor((now - overdueRef) / 86400000),
+      tags: asArray(m.tags).map(String),
+      last_relance: lastRelance ? { at: lastRelance.at, type: lastRelance.type, note: lastRelance.note } : null,
+    });
+  }
+  rows.sort((a, b) => b.days_overdue - a.days_overdue);
+  return { rows, total_amount: rows.reduce((s, r) => s + r.amount, 0) };
+}
+
+// Collecte les prochains RDV (next_meeting_at) dans une fenêtre de N jours.
+async function collectUpcomingMeetings({ assignee, days = 7 } = {}) {
+  const meta = await loadMetaByDeal();
+  const now = Date.now();
+  const horizon = now + days * 86400000;
+  const picked = [];
+  for (const [dealId, m] of meta) {
+    if (!m.next_meeting_at) continue;
+    const t = new Date(m.next_meeting_at).getTime();
+    if (isNaN(t) || t < now || t > horizon) continue;
+    if (assignee && (m.assignee || '').toLowerCase() !== assignee.toLowerCase()) continue;
+    picked.push({ deal_id: String(dealId), assignee: m.assignee || null, next_meeting_at: m.next_meeting_at });
+  }
+  const infos = await fetchDealInfos(picked.map((p) => p.deal_id));
+  return picked
+    .map((p) => ({ ...p, deal_name: (infos.get(p.deal_id) || {}).name || null, stage: (infos.get(p.deal_id) || {}).stage || null }))
+    .sort((a, b) => new Date(a.next_meeting_at).getTime() - new Date(b.next_meeting_at).getTime());
+}
+
 // =====================================================================
 //  Serveur MCP
 // =====================================================================
@@ -435,6 +601,108 @@ server.registerTool(
       .filter((r) => hasTag(r.tags, tag));
 
     return { content: [{ type: 'text', text: JSON.stringify({ count: rows.length, filter_tag: tag || null, deals: rows }, null, 2) }] };
+  }
+);
+
+// --- Outil 4 : tâches des deals (retard / à venir) ---
+server.registerTool(
+  'get_tasks',
+  {
+    title: 'Tâches des deals (retard, à venir)',
+    description:
+      "Liste les tâches attachées aux deals (stockées dans Supabase). Répond à « quelles tâches suis-je en retard ? ». " +
+      "Une tâche est EN RETARD (overdue=true) si elle n'est pas faite ET que son échéance (due_at) est passée. " +
+      "Les tâches sans échéance ne sont jamais overdue. Triées : retards d'abord, puis échéance croissante. " +
+      "Filtrer par statut (todo/done/all), retard seul, assigné du deal (Guillaume/Vincent/Nathan) et type.",
+    inputSchema: {
+      status: z.enum(['todo', 'done', 'all']).default('todo').describe('Statut des tâches (défaut: todo)'),
+      overdue_only: z.boolean().optional().describe('Ne garder que les tâches en retard'),
+      assignee: z.string().optional().describe('Filtrer par assigné du deal : Guillaume | Vincent | Nathan'),
+      type: z.string().optional().describe('Filtrer par type : call, email, proposal, meeting, contract, custom'),
+      open_only: z.boolean().optional().describe('Ignorer les tâches sur des deals déjà clôturés (défaut: false)'),
+    },
+  },
+  async ({ status = 'todo', overdue_only, assignee, type, open_only }) => {
+    const { rows, overdue_count } = await collectTasks({ status, overdue_only, assignee, type, open_only });
+    return { content: [{ type: 'text', text: JSON.stringify({
+      count: rows.length,
+      overdue_count,
+      filters: { status, overdue_only: !!overdue_only, assignee: assignee || null, type: type || null },
+      tasks: rows,
+    }, null, 2) }] };
+  }
+);
+
+// --- Outil 5 : deals ouverts en retard ---
+server.registerTool(
+  'get_overdue_deals',
+  {
+    title: 'Deals en retard (closedate / RDV passés)',
+    description:
+      "Deals OUVERTS du pipeline 'default' qui « traînent » : soit leur date de clôture prévue (closedate) est " +
+      "déjà passée, soit leur prochain RDV (next_meeting_at, Supabase) est passé. Répond à « quels deals suis-je " +
+      "en retard ? ». Chaque deal indique la/les raison(s), les jours de retard, l'assigné, les tags et la dernière " +
+      "relance connue. Trié par retard décroissant. Filtrable par assigné et stage.",
+    inputSchema: {
+      assignee: z.string().optional().describe('Filtrer par assigné : Guillaume | Vincent | Nathan'),
+      stage: z.string().optional().describe("Label de stage exact, ex 'Négociation'"),
+    },
+  },
+  async ({ assignee, stage }) => {
+    const { rows, total_amount } = await collectOverdueDeals({ assignee, stage });
+    return { content: [{ type: 'text', text: JSON.stringify({
+      count: rows.length,
+      total_amount,
+      total_amount_label: fmtEUR(total_amount),
+      filters: { assignee: assignee || null, stage: stage || null },
+      deals: rows,
+    }, null, 2) }] };
+  }
+);
+
+// --- Outil 6 : briefing commercial du jour (vue de pilotage en 1 appel) ---
+server.registerTool(
+  'get_daily_briefing',
+  {
+    title: 'Briefing commercial du jour',
+    description:
+      "Vue de pilotage quotidienne en UN appel, idéale pour démarrer la journée : tâches en retard, tâches dues " +
+      "aujourd'hui, deals en retard (closedate/RDV passés) et prochains RDV à venir (fenêtre paramétrable, défaut 7 j). " +
+      "Filtrable par assigné.",
+    inputSchema: {
+      assignee: z.string().optional().describe('Filtrer par assigné : Guillaume | Vincent | Nathan'),
+      upcoming_days: z.number().optional().describe('Fenêtre des RDV à venir, en jours (défaut 7)'),
+    },
+  },
+  async ({ assignee, upcoming_days = 7 }) => {
+    const [tasksRes, overdueRes, meetings] = await Promise.all([
+      collectTasks({ status: 'todo', assignee, open_only: true }),
+      collectOverdueDeals({ assignee }),
+      collectUpcomingMeetings({ assignee, days: upcoming_days }),
+    ]);
+    const endToday = new Date();
+    endToday.setHours(23, 59, 59, 999);
+    const endTodayMs = endToday.getTime();
+    const overdueTasks = tasksRes.rows.filter((t) => t.overdue);
+    const dueTodayTasks = tasksRes.rows.filter(
+      (t) => !t.overdue && t.due_at && new Date(t.due_at).getTime() <= endTodayMs
+    );
+
+    return { content: [{ type: 'text', text: JSON.stringify({
+      generated_at: new Date().toISOString(),
+      assignee: assignee || null,
+      headline: {
+        overdue_tasks: overdueTasks.length,
+        due_today_tasks: dueTodayTasks.length,
+        overdue_deals: overdueRes.rows.length,
+        overdue_deals_amount_label: fmtEUR(overdueRes.total_amount),
+        upcoming_meetings: meetings.length,
+      },
+      overdue_tasks: overdueTasks,
+      due_today_tasks: dueTodayTasks,
+      overdue_deals: overdueRes.rows,
+      upcoming_meetings: meetings,
+    }, null, 2) }] };
   }
 );
 
