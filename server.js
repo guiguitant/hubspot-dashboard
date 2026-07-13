@@ -17,6 +17,7 @@ const multer = require('multer');
 const { parse: parseCsv } = require('csv-parse/sync');
 const { cleanEmeliaRows } = require('./utils/emeliaCleaner');
 const { lineExpectedTTC, computeEcart } = require('./utils/facturationCoherence');
+const { computeDepenses } = require('./utils/depensesCompute');
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
@@ -1981,7 +1982,9 @@ app.post('/api/notion-missions/invalidate-cache', (req, res) => {
   customerInvoicesCache = null;
   customerInvoicesCacheTime = 0;
   invalidateFactMatchingSummaryCache();
-  res.json({ ok: true, invalidated: ['notionMissions', 'customerInvoices', 'factMatchingSummary'] });
+  depensesCache = null;
+  depensesCacheTime = 0;
+  res.json({ ok: true, invalidated: ['notionMissions', 'customerInvoices', 'factMatchingSummary', 'depenses'] });
 });
 
 // --- Repeat clients (grouping of finished Notion missions by client) ---
@@ -5859,6 +5862,65 @@ app.get('/api/tresorerie', async (req, res) => {
     });
   } catch (err) {
     console.error('Erreur trésorerie:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Depenses (onglet Depenses) ---
+// Transactions bancaires Pennylane des 13 derniers mois (categorisees par la comptable),
+// agregees par utils/depensesCompute.js : sorties par mois, categories, fournisseurs, abonnements.
+let depensesCache = null;
+let depensesCacheTime = 0;
+const DEPENSES_CACHE_TTL = 10 * 60 * 1000; // 10 min, comme customerInvoices
+
+// Singleton anti-concurrence : le fetch pagine prend plusieurs secondes, les appels
+// simultanes partagent la meme promesse (meme pattern que fetchCustomerInvoices).
+let _inFlightFetchDepensesTransactions = null;
+
+// Fetch dedie 13 mois (mois courant + 12 precedents) pour l'onglet Depenses.
+// limit=100 : pages par defaut a 20 items, donc 5x moins d'appels API.
+function fetchDepensesTransactions() {
+  if (_inFlightFetchDepensesTransactions) return _inFlightFetchDepensesTransactions;
+  _inFlightFetchDepensesTransactions = (async () => {
+    const from = new Date();
+    from.setDate(1);
+    from.setMonth(from.getMonth() - 12);
+    const fromDate = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}-01`;
+    const filter = JSON.stringify([{ field: 'date', operator: 'gteq', value: fromDate }]);
+    return pennylaneFetchAll('/transactions', { filter, limit: '100' });
+  })().finally(() => { _inFlightFetchDepensesTransactions = null; });
+  return _inFlightFetchDepensesTransactions;
+}
+
+app.get('/api/depenses', async (req, res) => {
+  try {
+    if (depensesCache && (Date.now() - depensesCacheTime) < DEPENSES_CACHE_TTL) {
+      return res.json(depensesCache);
+    }
+
+    // Meme pattern que /api/tresorerie : l'echec Pennylane ne fait pas tomber l'endpoint,
+    // il degrade en tableau vide + champ pennylaneError pour que le front affiche un bandeau
+    // (jamais de zeros silencieux).
+    let pennylaneError = null;
+    const transactions = await fetchDepensesTransactions()
+      .catch(err => { pennylaneError = err.message; return []; });
+
+    const computed = computeDepenses(transactions);
+    const responsePayload = {
+      ...computed,
+      pennylaneError,
+      fetchedAt: new Date().toISOString(),
+    };
+
+    // Un resultat en erreur n'est JAMAIS mis en cache (sinon 10 min de zeros).
+    if (!pennylaneError) {
+      depensesCache = responsePayload;
+      depensesCacheTime = Date.now();
+    }
+
+    res.json(responsePayload);
+  } catch (err) {
+    console.error('Erreur depenses:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

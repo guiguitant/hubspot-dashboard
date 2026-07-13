@@ -3358,6 +3358,10 @@
             </button>
           </div>
         </div>
+        <button class="sidebar-link" onclick="navigateTo('depenses')" data-page="depenses">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="4" width="14" height="9" rx="1"/><circle cx="8" cy="8.5" r="2.5"/><path d="M1 7h2M13 7h2"/></svg>
+          Depenses
+        </button>
       </div>
       <button class="sidebar-link" onclick="navigateTo('analytics')" data-page="analytics">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 12l4-4 3 3 4-5 3 2"/><path d="M1 15h14"/></svg>
@@ -3904,6 +3908,79 @@
   </div>
   </div>
   <!-- end page-tresorerie -->
+
+  <!-- PAGE: Depenses -->
+  <div class="app-page" id="page-depenses">
+  <div class="page">
+
+    <div class="page-icon">&#128184;</div>
+    <h1 class="page-title">Depenses</h1>
+    <p class="page-desc">Ou part l'argent, et qu'est-ce qui derive ? Transactions bancaires Pennylane des 12 derniers mois, hors virements internes. <span id="depensesFreshness" style="color:var(--text-secondary)"></span></p>
+
+    <div class="error-banner" id="depensesErrorBanner"></div>
+    <div id="depensesPennylaneWarning" style="display:none;padding:0.6rem 1rem;background:rgba(224,62,62,0.08);border-left:3px solid var(--danger);border-radius:4px;margin-bottom:1rem;font-size:0.85rem;color:var(--text)"></div>
+
+    <!-- KPIs -->
+    <div class="kpi-row" id="depensesKpis">
+      <div class="kpi-block">
+        <div class="kpi-label">Sorties ce mois <span class="kpi-unit">TTC</span></div>
+        <div class="kpi-value" id="depKpiSorties">--</div>
+        <div class="kpi-sub" id="depKpiSortiesSub"></div>
+      </div>
+      <div class="kpi-block">
+        <div class="kpi-label">Moyenne mensuelle <span class="kpi-unit">6 mois</span></div>
+        <div class="kpi-value" id="depKpiMoyenne">--</div>
+        <div class="kpi-sub" id="depKpiMoyenneSub"></div>
+      </div>
+      <div class="kpi-block">
+        <div class="kpi-label">Depenses recurrentes</div>
+        <div class="kpi-value" id="depKpiAbos">--</div>
+        <div class="kpi-sub" id="depKpiAbosSub"></div>
+      </div>
+      <div class="kpi-block">
+        <div class="kpi-label">Sans categorie</div>
+        <div class="kpi-value" id="depKpiSansCat">--</div>
+        <div class="kpi-sub" id="depKpiSansCatSub"></div>
+      </div>
+    </div>
+
+    <!-- Chart: sorties par mois -->
+    <div class="section">
+      <div class="section-title">Sorties par mois (13 mois)</div>
+      <div style="position:relative;height:350px;margin-bottom:1rem">
+        <canvas id="depensesChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Tableau par categorie -->
+    <div class="section">
+      <div class="section-title">Par categorie (12 mois)</div>
+      <div id="depensesTableCategories">
+        <p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p>
+      </div>
+    </div>
+
+    <!-- Top fournisseurs -->
+    <div class="section">
+      <div class="section-title">Top 15 fournisseurs (12 mois)</div>
+      <p style="color:var(--text-secondary);font-size:0.8rem;margin:-0.4rem 0 0.75rem">Hors salaires, TVA, impots et virements internes.</p>
+      <div id="depensesTableVendors">
+        <p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p>
+      </div>
+    </div>
+
+    <!-- Depenses recurrentes detectees -->
+    <div class="section">
+      <div class="section-title">Depenses recurrentes detectees (presentes 4 mois ou plus)</div>
+      <p style="color:var(--text-secondary);font-size:0.8rem;margin:-0.4rem 0 0.75rem">Fournisseurs presents sur au moins 4 mois distincts. Cout mensuel estime = total / nombre de mois de presence.</p>
+      <div id="depensesSubscriptions">
+        <p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p>
+      </div>
+    </div>
+
+  </div>
+  </div>
+  <!-- end page-depenses -->
 
   <!-- PAGE: Analytics -->
   <div class="app-page" id="page-analytics">
@@ -5735,7 +5812,7 @@
     // --- Navigation ---
     let currentPage = 'cockpit';
 
-    const PAGE_NAMES = { cockpit: 'Cockpit', dashboard: 'Commercial', 'analyse-clients': 'Analyse clients', facturation: 'Facturation', 'frais-km': 'Frais KM', tresorerie: 'Tresorerie', 'masse-salariale': 'Masse salariale', scenarios: 'Scenarios', analytics: 'Analytics', 'proposal-engine': 'Proposal Engine', kpi: 'KPI' };
+    const PAGE_NAMES = { cockpit: 'Cockpit', dashboard: 'Commercial', 'analyse-clients': 'Analyse clients', facturation: 'Facturation', 'frais-km': 'Frais KM', tresorerie: 'Tresorerie', 'masse-salariale': 'Masse salariale', scenarios: 'Scenarios', analytics: 'Analytics', 'proposal-engine': 'Proposal Engine', kpi: 'KPI', depenses: 'Depenses' };
 
     function navigateTo(page) {
       currentPage = page;
@@ -5785,6 +5862,7 @@
       if (page === 'proposal-engine') loadProposalConfig();
       if (page === 'frais-km' && !fraisKmData) refreshFraisKmClients();
       if (page === 'analyse-clients' && !analyseClientsData) refreshAnalyseClients();
+      if (page === 'depenses') { if (depensesData) { renderDepensesKpis(); renderDepensesChart(); renderDepensesCategories(); renderDepensesVendors(); renderDepensesSubscriptions(); } else refreshDepensesData(); }
     }
 
     // --- Auth masse salariale ---
@@ -5863,6 +5941,7 @@
       else if (currentPage === 'scenarios') refreshScenariosPage();
       else if (currentPage === 'frais-km') refreshFraisKmClients();
       else if (currentPage === 'analyse-clients') { analyseClientsData = null; refreshAnalyseClients(); }
+      else if (currentPage === 'depenses') refreshDepensesData();
     }
 
     const MONTHS_FR = [
@@ -13862,6 +13941,222 @@
       </tr></tbody></table>`;
 
       document.getElementById('tresoChargesDetail').innerHTML = html;
+    }
+
+
+    // =============================================
+    // --- DEPENSES ---
+    // =============================================
+
+    let depensesData = null;
+    let depensesChart = null;
+
+    const DEPENSES_UNAVAILABLE_HTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Donnees indisponibles (Pennylane en erreur). Reessayer avec le bouton Sync.</p>';
+
+    async function refreshDepensesData() {
+      const errorBanner = document.getElementById('depensesErrorBanner');
+      errorBanner.style.display = 'none';
+      try {
+        // Cache-bust ?t= pour eviter toute mise en cache navigateur/proxy (le serveur sert depuis son cache memoire 10 min)
+        const res = await fetch('/api/depenses?t=' + Date.now());
+        if (!res.ok) throw new Error('Erreur chargement depenses (' + res.status + ')');
+        depensesData = await res.json();
+
+        // Jamais de zeros silencieux : si Pennylane a echoue, bandeau visible + tableaux en "indisponible"
+        const warnEl = document.getElementById('depensesPennylaneWarning');
+        if (depensesData.pennylaneError) {
+          warnEl.textContent = 'Pennylane indisponible (' + depensesData.pennylaneError + ') : les depenses ne sont pas chargees, les montants affiches ne sont pas fiables.';
+          warnEl.style.display = 'block';
+        } else {
+          warnEl.style.display = 'none';
+        }
+
+        // Fraicheur des donnees (pas d'horodatage si les donnees n'ont pas ete chargees)
+        const freshEl = document.getElementById('depensesFreshness');
+        if (freshEl && depensesData.fetchedAt) {
+          const d = new Date(depensesData.fetchedAt);
+          const stamp = d.toLocaleDateString('fr-FR') + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+          freshEl.textContent = depensesData.pennylaneError ? 'Derniere tentative : ' + stamp + '.' : 'Donnees au ' + stamp + '.';
+        }
+
+        renderDepensesKpis();
+        renderDepensesChart();
+        renderDepensesCategories();
+        renderDepensesVendors();
+        renderDepensesSubscriptions();
+      } catch (err) {
+        errorBanner.textContent = err.message;
+        errorBanner.style.display = 'block';
+      }
+    }
+
+    function renderDepensesKpis() {
+      const k = (depensesData && depensesData.kpis) || {};
+      const hasError = !!(depensesData && depensesData.pennylaneError);
+      document.getElementById('depKpiSorties').textContent = hasError ? '--' : formatEuro(k.sortiesMoisCourant);
+      document.getElementById('depKpiSortiesSub').textContent = hasError ? '' : (k.pctVsMoyenne6m == null ? 'Pas assez d\'historique' : formatPercent(k.pctVsMoyenne6m) + ' vs moyenne 6 mois');
+      document.getElementById('depKpiMoyenne').textContent = hasError ? '--' : formatEuro(k.moyenne6m);
+      document.getElementById('depKpiMoyenneSub').textContent = hasError ? '' : 'Hors virements internes';
+      document.getElementById('depKpiAbos').textContent = hasError ? '--' : formatEuro(k.abonnementsMensuels) + '/mois';
+      document.getElementById('depKpiAbosSub').textContent = hasError ? '' : ((depensesData.subscriptions || []).length + ' fournisseurs recurrents');
+      document.getElementById('depKpiSansCat').textContent = hasError ? '--' : String(k.sansCategorieCount || 0);
+      document.getElementById('depKpiSansCatSub').textContent = hasError ? '' : formatEuro(k.sansCategorieTotal) + ' a categoriser';
+    }
+
+    function renderDepensesChart() {
+      // Pennylane en erreur : pas de graphe a zeros trompeurs (meme regle que les tableaux)
+      const chartCanvas = document.getElementById('depensesChart');
+      if (depensesData && depensesData.pennylaneError) {
+        if (depensesChart) { depensesChart.destroy(); depensesChart = null; }
+        chartCanvas.style.display = 'none';
+        const wrap = chartCanvas.parentElement;
+        if (wrap && !wrap.querySelector('.dep-chart-unavailable')) {
+          const msg = document.createElement('div');
+          msg.className = 'dep-chart-unavailable';
+          msg.innerHTML = DEPENSES_UNAVAILABLE_HTML;
+          wrap.appendChild(msg);
+        }
+        return;
+      }
+      chartCanvas.style.display = '';
+      const staleMsg = chartCanvas.parentElement.querySelector('.dep-chart-unavailable');
+      if (staleMsg) staleMsg.remove();
+      const byMonth = (depensesData && depensesData.byMonth) || [];
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const labels = byMonth.map(m => {
+        const parts = m.month.split('-');
+        return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1)
+          .toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
+      });
+
+      if (depensesChart) depensesChart.destroy();
+      depensesChart = new Chart(document.getElementById('depensesChart'), {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [
+            {
+              label: 'Salaires + impots',
+              data: byMonth.map(m => m.fixed),
+              backgroundColor: isDark ? 'rgba(105,64,165,0.7)' : 'rgba(105,64,165,0.55)',
+              hoverBackgroundColor: isDark ? 'rgba(105,64,165,0.9)' : 'rgba(105,64,165,0.75)',
+              stack: 'sorties',
+              barPercentage: 0.7,
+              categoryPercentage: 0.75,
+            },
+            {
+              label: 'Charges pilotables',
+              data: byMonth.map(m => m.pilotable),
+              backgroundColor: isDark ? 'rgba(35,131,226,0.7)' : 'rgba(35,131,226,0.55)',
+              hoverBackgroundColor: isDark ? 'rgba(35,131,226,0.9)' : 'rgba(35,131,226,0.75)',
+              stack: 'sorties',
+              borderRadius: { topLeft: 6, topRight: 6 },
+              borderSkipped: false,
+              barPercentage: 0.7,
+              categoryPercentage: 0.75,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { labels: { color: isDark ? '#999' : '#787774', boxWidth: 12 } },
+            tooltip: {
+              backgroundColor: isDark ? '#252525' : '#fff',
+              titleColor: isDark ? '#e9e9e7' : '#37352f',
+              bodyColor: isDark ? '#999' : '#787774',
+              borderColor: isDark ? '#2e2e2e' : '#e9e9e1',
+              borderWidth: 1,
+              callbacks: {
+                label: (ctx) => ctx.dataset.label + ' : ' + formatEuro(ctx.parsed.y),
+                footer: (items) => 'Total : ' + formatEuro(items.reduce((s, it) => s + it.parsed.y, 0)),
+              },
+            },
+          },
+          scales: {
+            x: {
+              stacked: true,
+              ticks: { color: isDark ? '#999' : '#787774' },
+              grid: { display: false },
+            },
+            y: {
+              stacked: true,
+              ticks: { color: isDark ? '#999' : '#787774', callback: v => Math.round(v / 1000) + 'k' },
+              grid: { color: isDark ? 'rgba(46,46,46,0.5)' : 'rgba(233,233,231,0.7)' },
+            },
+          },
+        },
+      });
+    }
+
+    function renderDepensesCategories() {
+      const el = document.getElementById('depensesTableCategories');
+      if (depensesData.pennylaneError) { el.innerHTML = DEPENSES_UNAVAILABLE_HTML; return; }
+      const rows = depensesData.byCategory || [];
+      if (!rows.length) {
+        el.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Aucune transaction sur les 12 derniers mois.</p>';
+        return;
+      }
+      let html = '<table><thead><tr><th>Categorie</th><th>Total 12 mois</th><th>Mois courant</th><th>Moyenne 6 mois</th><th>Derive</th></tr></thead><tbody>';
+      rows.forEach(c => {
+        html += '<tr>'
+          + '<td>' + escapeHtml(c.label) + '</td>'
+          + '<td style="font-weight:600">' + formatEuro(c.total12m) + '</td>'
+          + '<td>' + formatEuro(c.currentMonth) + '</td>'
+          + '<td>' + formatEuro(c.avg6m) + '</td>'
+          + '<td>' + (c.derive ? '<span class="tag tag-red">DERIVE +' + formatEuro(c.deriveAmount) + '</span>' : '') + '</td>'
+          + '</tr>';
+      });
+      html += '</tbody></table>';
+      el.innerHTML = html;
+    }
+
+    function renderDepensesVendors() {
+      const el = document.getElementById('depensesTableVendors');
+      if (depensesData.pennylaneError) { el.innerHTML = DEPENSES_UNAVAILABLE_HTML; return; }
+      const rows = depensesData.topVendors || [];
+      if (!rows.length) {
+        el.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Aucun fournisseur sur les 12 derniers mois.</p>';
+        return;
+      }
+      let html = '<table><thead><tr><th>Fournisseur</th><th style="text-align:left">Categorie</th><th>Total 12 mois</th><th>Transactions</th><th>Mois presents</th><th></th></tr></thead><tbody>';
+      rows.forEach(v => {
+        html += '<tr>'
+          + '<td>' + escapeHtml(v.vendor) + '</td>'
+          + '<td style="text-align:left;color:var(--text-secondary)">' + escapeHtml(v.category) + '</td>'
+          + '<td style="font-weight:600">' + formatEuro(v.total12m) + '</td>'
+          + '<td>' + v.txCount + '</td>'
+          + '<td>' + v.monthsPresent + '</td>'
+          + '<td>' + (v.recurrent ? '<span class="tag tag-green">RECURRENT</span>' : '') + '</td>'
+          + '</tr>';
+      });
+      html += '</tbody></table>';
+      el.innerHTML = html;
+    }
+
+    function renderDepensesSubscriptions() {
+      const el = document.getElementById('depensesSubscriptions');
+      if (depensesData.pennylaneError) { el.innerHTML = DEPENSES_UNAVAILABLE_HTML; return; }
+      const subs = depensesData.subscriptions || [];
+      if (!subs.length) {
+        el.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Aucune depense recurrente detectee sur les 12 derniers mois.</p>';
+        return;
+      }
+      const total = (depensesData.kpis && depensesData.kpis.abonnementsMensuels) || 0;
+      let html = '<div style="padding:0.5rem 1rem;border-radius:var(--radius);background:var(--warning-bg);color:var(--warning);font-size:0.85rem;font-weight:500;margin-bottom:0.75rem">Total recurrent estime : ' + formatEuro(total) + ' par mois (' + subs.length + ' fournisseurs)</div>';
+      html += '<table><thead><tr><th>Fournisseur</th><th style="text-align:left">Categorie</th><th>Cout mensuel estime</th><th>Mois presents</th><th>Total 12 mois</th></tr></thead><tbody>';
+      subs.forEach(s => {
+        html += '<tr>'
+          + '<td>' + escapeHtml(s.vendor) + '</td>'
+          + '<td style="text-align:left;color:var(--text-secondary)">' + escapeHtml(s.category) + '</td>'
+          + '<td style="font-weight:600">' + formatEuro(s.monthlyEstimate) + '</td>'
+          + '<td>' + s.monthsPresent + '/12</td>'
+          + '<td>' + formatEuro(s.total12m) + '</td>'
+          + '</tr>';
+      });
+      html += '</tbody></table>';
+      el.innerHTML = html;
     }
 
 
