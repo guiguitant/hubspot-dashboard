@@ -3836,15 +3836,6 @@
         <div class="kpi-label">Solde bancaire <span class="kpi-unit">TTC</span></div>
         <div class="kpi-value" id="tresoKpiTreso">--</div>
         <div class="kpi-sub" id="tresoKpiTresoSub"></div>
-        <!-- Trésorerie nette de l'avance remboursable (BPI) — affichée seulement si une avance reste à rembourser.
-             L'infobulle de détail s'ouvre au survol du point d'info ⓘ uniquement (pas de toute la carte). -->
-        <div class="kpi-sub" id="tresoKpiNetteRow" style="display:none;margin-top:0.35rem;padding-top:0.35rem;border-top:1px solid var(--border)">
-          Tréso nette : <strong id="tresoKpiNette" style="font-weight:600">--</strong>
-          <span class="info-tip">
-            <span class="info-tip-dot" aria-label="Détail du calcul" tabindex="0">&#9432;</span>
-            <span class="kpi-tooltip-content" id="tresoNetteTooltip"></span>
-          </span>
-        </div>
       </div>
       <!-- Trésorerie nette de dette (photo instant T) = solde Qonto tous comptes − engagements fermes (onglet Dettes).
            Carte cliquable → modale détaillant le calcul. Masquée si l'onglet Dettes est injoignable. -->
@@ -3892,18 +3883,6 @@
       <div id="tresoDettesTable"></div>
     </div>
 
-    <!-- Chart: Categories de depenses -->
-    <div class="section">
-      <div class="section-title">Repartition des depenses par categorie</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;align-items:start">
-        <div style="position:relative;height:320px">
-          <canvas id="chargesChart"></canvas>
-        </div>
-        <div id="tresoChargesDetail">
-          <p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p>
-        </div>
-      </div>
-    </div>
 
   </div>
   </div>
@@ -5432,7 +5411,7 @@
           refreshFactData();
         }
       }
-      if (page === 'tresorerie') { if (tresoData) { renderTresoKpis(); renderTresoDettes(); renderTresoChart(); renderChargesChart(); renderChargesDetail(); renderMasseSalariale(); } else refreshTresoData(); }
+      if (page === 'tresorerie') { if (tresoData) { renderTresoKpis(); renderTresoDettes(); renderTresoChart(); renderMasseSalariale(); } else refreshTresoData(); }
       if (page === 'masse-salariale') refreshMasseSalarialePage();
       if (page === 'scenarios') refreshScenariosPage();
       if (page === 'analytics') initAnalytics();
@@ -12597,7 +12576,6 @@
     // --- Tresorerie ---
     let tresoData = null;
     let tresoChart = null;
-    let chargesChart = null;
 
     async function refreshTresoData() {
       const errorBanner = document.getElementById('tresoErrorBanner');
@@ -12624,8 +12602,6 @@
         renderTresoKpis();
         renderTresoDettes();
         renderTresoChart();
-        renderChargesChart();
-        renderChargesDetail();
         renderMasseSalariale();
       } catch (err) {
         console.error('Erreur tresorerie:', err);
@@ -12647,35 +12623,7 @@
       soldeEl.style.color = (solde != null && solde < 0) ? 'var(--danger)' : '';
       document.getElementById('tresoKpiTresoSub').textContent = 'Compte Qonto';
 
-      // Trésorerie nette de l'avance remboursable (BPI) : solde bancaire − capital restant dû.
-      // Indicateur "net cash" : le cash réel une fois l'avance remboursable déduite.
-      // On n'affiche la ligne que s'il reste effectivement une avance à rembourser.
-      const avanceRestante = tresoData.avanceRemboursableRestante || 0;
-      const netteRow = document.getElementById('tresoKpiNetteRow');
-      if (solde != null && avanceRestante > 0) {
-        const tresoNette = solde - avanceRestante;
-        const netteEl = document.getElementById('tresoKpiNette');
-        netteEl.textContent = formatEuro(tresoNette);
-        netteEl.style.color = tresoNette < 0 ? 'var(--danger)' : '';
-        // Détail du calcul dans l'infobulle (au survol du point ⓘ)
-        const recue = tresoData.avanceTotaleRecue || 0;
-        const remb = tresoData.avanceDejaRemboursee || 0;
-        let tip = '<div class="tt-formula">Solde bancaire − avance remboursable restante</div>';
-        tip += '<div class="tt-row"><span>Solde bancaire (Qonto)</span><span>' + formatEuro(solde) + '</span></div>';
-        tip += '<div class="tt-row"><span>− Avance remboursable restante</span><span>' + formatEuro(avanceRestante) + '</span></div>';
-        tip += '<div class="tt-row"><strong>Trésorerie nette</strong><strong>' + formatEuro(tresoNette) + '</strong></div>';
-        tip += '<div class="tt-section">Détail de l\'avance (BPI)</div>';
-        tip += '<div class="tt-row"><span>Total encaissé</span><span>' + formatEuro(recue) + '</span></div>';
-        tip += '<div class="tt-row"><span>Déjà remboursé</span><span>' + formatEuro(remb) + '</span></div>';
-        tip += '<div class="tt-row"><strong>Reste à rembourser</strong><strong>' + formatEuro(avanceRestante) + '</strong></div>';
-        document.getElementById('tresoNetteTooltip').innerHTML = tip;
-        netteRow.style.display = 'block';
-      } else {
-        netteRow.style.display = 'none';
-      }
-
       // Trésorerie nette de dette (photo instant T) : solde Qonto tous comptes − engagements fermes (onglet Dettes).
-      // Distincte de la "tréso nette de l'avance BPI" ci-dessus (source différente : onglet Dettes vs calcul interne).
       const netteDetteBlock = document.getElementById('tresoNetteDetteBlock');
       if (tresoData.tresorerieNetteDeDette != null) {
         const nd = tresoData.tresorerieNetteDeDette;
@@ -13488,81 +13436,6 @@
       container.innerHTML = html;
     }
 
-    function renderChargesChart() {
-      if (!tresoData || !tresoData.ventilationCharges) return;
-      const charges = tresoData.ventilationCharges.slice(0, 10); // Top 10
-
-      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-      const colors = [
-        isDark ? 'rgba(74,159,238,0.8)' : 'rgba(35,131,226,0.7)',
-        isDark ? 'rgba(167,139,250,0.8)' : 'rgba(105,64,165,0.7)',
-        isDark ? 'rgba(251,191,36,0.8)' : 'rgba(217,115,13,0.7)',
-        isDark ? 'rgba(52,211,153,0.8)' : 'rgba(15,123,108,0.7)',
-        isDark ? 'rgba(248,113,113,0.7)' : 'rgba(224,62,62,0.6)',
-        isDark ? 'rgba(150,150,150,0.6)' : 'rgba(120,119,116,0.5)',
-        isDark ? 'rgba(236,72,153,0.7)' : 'rgba(193,28,97,0.7)',
-        isDark ? 'rgba(245,158,11,0.7)' : 'rgba(180,83,9,0.7)',
-        isDark ? 'rgba(99,102,241,0.7)' : 'rgba(67,56,202,0.7)',
-        isDark ? 'rgba(20,184,166,0.7)' : 'rgba(13,148,136,0.7)',
-      ];
-
-      if (chargesChart) chargesChart.destroy();
-      chargesChart = new Chart(document.getElementById('chargesChart'), {
-        type: 'doughnut',
-        data: {
-          labels: charges.map(c => c.categorie),
-          datasets: [{
-            data: charges.map(c => c.montant),
-            backgroundColor: colors.slice(0, charges.length),
-            borderWidth: 0,
-          }],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            datalabels: { display: false },
-            legend: {
-              position: 'right',
-              labels: { color: isDark ? '#ccc' : '#37352f', font: { size: 11 } },
-            },
-            tooltip: {
-              callbacks: { label: ctx => ctx.label + ': ' + formatEuro(ctx.raw) },
-            },
-          },
-        },
-      });
-    }
-
-    function renderChargesDetail() {
-      if (!tresoData || !tresoData.ventilationCharges) return;
-      const charges = tresoData.ventilationCharges;
-      const total = charges.reduce((s, c) => s + c.montant, 0);
-
-      let html = `<table style="width:100%;border-collapse:collapse;font-size:0.85rem">
-        <thead><tr style="border-bottom:1px solid var(--border)">
-          <th style="text-align:left;padding:0.6rem 1rem;color:var(--text-secondary)">Categorie</th>
-          <th style="text-align:right;padding:0.6rem 1rem;color:var(--text-secondary)">Montant</th>
-          <th style="text-align:right;padding:0.6rem 1rem;color:var(--text-secondary)">%</th>
-        </tr></thead><tbody>`;
-
-      for (const item of charges) {
-        const pct = total > 0 ? ((item.montant / total) * 100).toFixed(1) : '0.0';
-        html += `<tr style="border-bottom:1px solid var(--border)">
-          <td style="text-align:left;padding:0.5rem 1rem">${item.categorie}</td>
-          <td style="text-align:right;padding:0.5rem 1rem;font-weight:600">${formatEuro(item.montant)}</td>
-          <td style="text-align:right;padding:0.5rem 1rem;color:var(--text-secondary)">${pct}%</td>
-        </tr>`;
-      }
-
-      html += `<tr style="border-top:2px solid var(--text);font-weight:700">
-        <td style="text-align:left;padding:0.6rem 1rem">Total</td>
-        <td style="text-align:right;padding:0.6rem 1rem">${formatEuro(total)}</td>
-        <td style="text-align:right;padding:0.6rem 1rem">100%</td>
-      </tr></tbody></table>`;
-
-      document.getElementById('tresoChargesDetail').innerHTML = html;
-    }
 
 
     // =============================================
