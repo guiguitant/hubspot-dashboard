@@ -3348,6 +3348,10 @@
             </button>
           </div>
         </div>
+        <button class="sidebar-link" onclick="navigateTo('compte-resultat')" data-page="compte-resultat">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 1h7l3 3v11a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z"/><path d="M9 1v3h3"/><path d="M5 9h6M5 12h4"/></svg>
+          Compte de resultat
+        </button>
         <button class="sidebar-link" onclick="navigateTo('depenses')" data-page="depenses">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="4" width="14" height="9" rx="1"/><circle cx="8" cy="8.5" r="2.5"/><path d="M1 7h2M13 7h2"/></svg>
           Depenses
@@ -3887,6 +3891,44 @@
   </div>
   </div>
   <!-- end page-tresorerie -->
+
+  <!-- PAGE: Compte de resultat -->
+  <div class="app-page" id="page-compte-resultat">
+  <div class="page">
+    <style>
+      .cr-year-btn { padding:0.4rem 0.9rem; border:none; background:transparent; color:var(--text-secondary); font-size:0.82rem; border-radius:6px; cursor:pointer; }
+      .cr-year-btn.active { background:var(--bg); color:var(--text); font-weight:600; box-shadow:0 1px 2px rgba(0,0,0,0.08); }
+      .cr-row { display:flex; justify-content:space-between; align-items:baseline; padding:0.55rem 0.75rem; }
+      .cr-row.clickable { cursor:pointer; border-radius:6px; }
+      .cr-row.clickable:hover { background:var(--bg-secondary); }
+      .cr-sub { font-size:0.8rem; color:var(--text-secondary); padding:0.1rem 0.75rem 0.1rem 1.6rem; display:flex; justify-content:space-between; }
+      .cr-total { border-top:2px solid var(--border); font-weight:700; margin-top:0.2rem; }
+      .cr-sep { border-top:1px solid var(--border); margin-top:0.2rem; }
+    </style>
+    <div class="page-icon">&#128202;</div>
+    <h1 class="page-title">Compte de resultat</h1>
+    <p class="page-desc">Du chiffre d'affaires au resultat net (HT). CA depuis Notion, charges Qonto reel + previsionnel CR_Prev, IS au bareme PME. L'amortissement (a venir, Phase 5) n'impacte que cette vue.</p>
+
+    <div class="error-banner" id="crErrorBanner"></div>
+
+    <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.25rem">
+      <div style="display:inline-flex;gap:0.25rem;background:var(--bg-secondary);padding:0.25rem;border-radius:8px">
+        <button class="cr-year-btn active" data-cryear="current" onclick="setCrYear('current')">Exercice courant</button>
+        <button class="cr-year-btn" data-cryear="previous" onclick="setCrYear('previous')">Exercice precedent</button>
+      </div>
+      <label style="display:inline-flex;align-items:center;gap:0.4rem;font-size:0.85rem;color:var(--text-secondary);cursor:pointer;user-select:none">
+        <input type="checkbox" id="crProjete" checked onchange="renderCompteResultat()" style="cursor:pointer">
+        Projete (pipeline pondere + previsionnel)
+      </label>
+      <span id="crFreshness" style="margin-left:auto;font-size:0.78rem;color:var(--text-secondary)"></span>
+    </div>
+
+    <div class="section" style="max-width:720px">
+      <div id="crTable"><p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p></div>
+    </div>
+  </div>
+  </div>
+  <!-- end page-compte-resultat -->
 
   <!-- PAGE: Depenses -->
   <div class="app-page" id="page-depenses">
@@ -5369,7 +5411,7 @@
     // --- Navigation ---
     let currentPage = 'cockpit';
 
-    const PAGE_NAMES = { cockpit: 'Cockpit', dashboard: 'Commercial', 'analyse-clients': 'Analyse clients', facturation: 'Facturation', 'frais-km': 'Frais KM', tresorerie: 'Tresorerie', 'masse-salariale': 'Masse salariale', scenarios: 'Scenarios', analytics: 'Analytics', kpi: 'KPI', depenses: 'Depenses' };
+    const PAGE_NAMES = { cockpit: 'Cockpit', dashboard: 'Commercial', 'analyse-clients': 'Analyse clients', facturation: 'Facturation', 'frais-km': 'Frais KM', tresorerie: 'Tresorerie', 'masse-salariale': 'Masse salariale', scenarios: 'Scenarios', 'compte-resultat': 'Compte de resultat', analytics: 'Analytics', kpi: 'KPI', depenses: 'Depenses' };
 
     function navigateTo(page) {
       currentPage = page;
@@ -5414,6 +5456,7 @@
       if (page === 'tresorerie') { if (tresoData) { renderTresoKpis(); renderTresoDettes(); renderTresoChart(); renderMasseSalariale(); } else refreshTresoData(); }
       if (page === 'masse-salariale') refreshMasseSalarialePage();
       if (page === 'scenarios') refreshScenariosPage();
+      if (page === 'compte-resultat') refreshCompteResultat();
       if (page === 'analytics') initAnalytics();
       if (page === 'kpi') initKpi();
       if (page === 'frais-km' && !fraisKmData) refreshFraisKmClients();
@@ -12706,6 +12749,114 @@
       html += '</table>';
       document.getElementById('tresoDettesTable').innerHTML = html;
       section.style.display = '';
+    }
+
+    // ===== Compte de resultat (Phase 4) — cascade "Du CA au resultat net" =====
+    let crData = null;
+    let crYearMode = 'current'; // 'current' | 'previous'
+
+    function _crYear() {
+      const y = new Date().getFullYear();
+      return crYearMode === 'previous' ? y - 1 : y;
+    }
+
+    function setCrYear(mode) {
+      crYearMode = mode;
+      document.querySelectorAll('.cr-year-btn').forEach(b => b.classList.toggle('active', b.dataset.cryear === mode));
+      refreshCompteResultat();
+    }
+
+    async function refreshCompteResultat() {
+      const errEl = document.getElementById('crErrorBanner');
+      if (errEl) errEl.textContent = '';
+      document.querySelectorAll('.cr-year-btn').forEach(b => b.classList.toggle('active', b.dataset.cryear === crYearMode));
+      document.getElementById('crTable').innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p>';
+      try {
+        const res = await fetch('/api/ebe?year=' + _crYear());
+        if (!res.ok) throw new Error('Erreur chargement compte de resultat');
+        crData = await res.json();
+        renderCompteResultat();
+      } catch (err) {
+        console.error('Erreur compte de resultat:', err);
+        if (errEl) errEl.textContent = err.message;
+      }
+    }
+
+    function renderCompteResultat() {
+      if (!crData) return;
+      const projete = document.getElementById('crProjete').checked;
+      const d = crData;
+      const ca        = projete ? d.ca.projete : d.ca.facture;
+      const ebe       = projete ? d.ebe.projete : d.ebe.factuel;
+      const resExploit= projete ? d.resultatExploitation.projete : d.resultatExploitation.factuel;
+      const is        = projete ? d.is.projete : d.is.factuel;
+      const resNet    = projete ? d.resultatNet.projete : d.resultatNet.factuel;
+
+      // Fabrique une ligne. opts : {neg, plus, total, sep, onclick}
+      const row = (label, val, opts = {}) => {
+        const cls = 'cr-row' + (opts.total ? ' cr-total' : '') + (opts.sep ? ' cr-sep' : '') + (opts.onclick ? ' clickable' : '');
+        const sign = opts.neg ? '− ' : (opts.plus ? '+ ' : '');
+        const color = opts.neg ? 'color:var(--danger)' : '';
+        const size = opts.total ? ';font-size:1.05rem' : '';
+        const hint = opts.onclick ? ' <span style="font-size:0.68rem;color:var(--text-secondary)">detail</span>' : '';
+        const click = opts.onclick ? ' onclick="' + opts.onclick + '"' : '';
+        return '<div class="' + cls + '"' + click + '><span>' + label + hint + '</span>'
+          + '<span style="' + color + size + '">' + sign + formatEuro(Math.abs(val)) + '</span></div>';
+      };
+      const subRow = (label, val) =>
+        '<div class="cr-sub"><span>' + label + '</span><span>' + val + '</span></div>';
+
+      let html = '';
+      html += row("Chiffre d'affaires" + (projete ? ' (facture + pipeline)' : ' facture'), ca);
+      if (projete && d.ca.pipelinePondere) {
+        html += subRow('dont CA facture (Notion)', formatEuro(d.ca.facture));
+        html += subRow('dont pipeline pondere (HubSpot)', formatEuro(d.ca.pipelinePondere));
+      }
+      html += row("Charges d'exploitation", d.charges.total, { neg: true, onclick: "openCrDetailModal('charges')" });
+      if (d.masseSalarialeAnnuelle != null) {
+        html += subRow('dont masse salariale (deja dans les charges)', '(' + formatEuro(d.masseSalarialeAnnuelle) + ')');
+      }
+      if (d.financements.totalSubv) html += row('Subventions', d.financements.totalSubv, { plus: true, onclick: "openCrDetailModal('subventions')" });
+      if (d.financements.totalAide) html += row('Aides', d.financements.totalAide, { plus: true, onclick: "openCrDetailModal('aides')" });
+      html += row("= Excedent brut d'exploitation (EBE)", ebe, { total: true });
+      html += row('Dotations aux amortissements', d.amortissements, { neg: d.amortissements > 0, sep: true });
+      html += subRow('Module Immobilisations a venir (Phase 5)', formatEuro(0));
+      html += row("= Resultat d'exploitation", resExploit, { total: true });
+      html += row('Impot sur les societes (IS)', is, { neg: true, sep: true, onclick: "openCrDetailModal('is')" });
+      html += row('= Resultat net', resNet, { total: true });
+
+      document.getElementById('crTable').innerHTML = html;
+      const fresh = document.getElementById('crFreshness');
+      if (fresh) fresh.textContent = 'Exercice ' + d.year + (d.fetchedAt ? ' · maj ' + new Date(d.fetchedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '');
+    }
+
+    // Detail d'une ligne du compte de resultat — reutilise le chrome de la modale mois (globale).
+    function openCrDetailModal(kind) {
+      if (!crData) return;
+      const d = crData;
+      const projete = document.getElementById('crProjete').checked;
+      let title = '', body = '';
+      if (kind === 'charges') {
+        title = "Charges d'exploitation " + d.year;
+        body = '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.6rem">Reel Qonto (mois clos) + previsionnel CR_Prev (mois a venir). La masse salariale est comprise dans ce total.</div>';
+        body += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid var(--border)"><span>Total charges</span><strong>' + formatEuro(d.charges.total) + '</strong></div>';
+        if (d.masseSalarialeAnnuelle != null) body += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;color:var(--text-secondary)"><span>dont masse salariale</span><span>' + formatEuro(d.masseSalarialeAnnuelle) + '</span></div>';
+      } else if (kind === 'subventions' || kind === 'aides') {
+        const list = kind === 'subventions' ? d.financements.subventions : d.financements.aides;
+        title = (kind === 'subventions' ? 'Subventions' : 'Aides') + ' ' + d.year;
+        for (const f of list) body += '<div style="display:flex;justify-content:space-between;padding:0.35rem 0;border-bottom:1px solid var(--border)"><span>' + escapeHtml(f.label) + '</span><span>' + formatEuro(f.montant) + '</span></div>';
+        if (!list.length) body += '<div style="color:var(--text-secondary);padding:0.4rem 0">Aucune ligne.</div>';
+      } else if (kind === 'is') {
+        const base = projete ? d.resultatExploitation.projete : d.resultatExploitation.factuel;
+        const is = projete ? d.is.projete : d.is.factuel;
+        title = 'Impot sur les societes ' + d.year;
+        body = '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.6rem">Bareme PME : 15% jusqu\'a 42 500 EUR de resultat imposable, puis 25% au-dela.</div>';
+        body += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid var(--border)"><span>Resultat d\'exploitation (base)</span><strong>' + formatEuro(base) + '</strong></div>';
+        body += '<div style="display:flex;justify-content:space-between;padding:0.5rem 0"><span>IS calcule</span><strong style="color:var(--danger)">' + formatEuro(is) + '</strong></div>';
+      }
+      document.getElementById('tresoMoisDetailTitle').textContent = title;
+      document.getElementById('tresoMoisDetailBody').innerHTML = body;
+      document.getElementById('tresoMoisDetailModalOverlay').classList.add('active');
     }
 
     // Helpers partagés par les modales factures (à encaisser + en retard).

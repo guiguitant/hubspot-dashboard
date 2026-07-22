@@ -7605,10 +7605,34 @@ app.get('/api/ebe', async (req, res) => {
     const caProjete  = caFacture + pipelinePondere;
     const ebeProjete = caProjete - totalCharges + totalSubv + totalAide;
 
+    // 5b) Masse salariale de l'année — INFO uniquement (déjà comprise dans totalCharges via "Frais de personnel").
+    // Affichée en sous-ligne du Compte de résultat SANS être resoustraite (évite le double comptage).
+    let masseSalarialeAnnuelle = null;
+    try {
+      const masse = await fetchAndParseMasseSalarialeDetailed();
+      let sum = 0;
+      for (const [mKey, m] of Object.entries(masse.byMonth || {})) {
+        if (mKey.startsWith(String(yearParam) + '-')) sum += (m.total || 0);
+      }
+      masseSalarialeAnnuelle = Math.round(sum);
+    } catch (e) {
+      masseSalarialeAnnuelle = null; // info indisponible : ne bloque pas le résultat
+    }
+
+    // 6) Cascade jusqu'au résultat net.
+    // Amortissements = 0 tant que le module Immobilisations (Phase 5) n'est pas livré.
+    // (charge non décaissée : impacte le Compte de résultat, jamais l'EBE ni la trésorerie).
+    const amortissements = 0;
+    const resExploitFactuel = Math.round(ebeFactuel) - amortissements;
+    const resExploitProjete = Math.round(ebeProjete) - amortissements;
+    const isFactuel = computeIS(resExploitFactuel);
+    const isProjete = computeIS(resExploitProjete);
+
     res.json({
       year: yearParam,
       ca: { facture: caFacture, pipelinePondere, projete: caProjete },
       charges: { total: totalCharges },
+      masseSalarialeAnnuelle,
       financements: {
         subventions: financements.subventions,
         aides: financements.aides,
@@ -7616,6 +7640,10 @@ app.get('/api/ebe', async (req, res) => {
         totalAide,
       },
       ebe: { factuel: Math.round(ebeFactuel), projete: Math.round(ebeProjete) },
+      amortissements,
+      resultatExploitation: { factuel: resExploitFactuel, projete: resExploitProjete },
+      is: { factuel: isFactuel, projete: isProjete },
+      resultatNet: { factuel: resExploitFactuel - isFactuel, projete: resExploitProjete - isProjete },
       fetchedAt: new Date().toISOString(),
     });
   } catch (err) {
