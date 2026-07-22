@@ -488,6 +488,46 @@ const KANBAN_STAGES = [
   { id: '2077692138', label: 'À relancer plus tard', probability: 20, forecast: false },
 ];
 
+// --- Calcul UNIQUE du pipeline pondéré HubSpot ---
+// Un seul endroit applique le barème KANBAN_STAGES (les stages forecast:false sont exclus).
+// Retourne le détail pondéré par deal (weighted = amount * probability/100 * factor) pour que
+// l'appelant totalise (EBE) ou distribue par mois d'encaissement (prévisionnel trésorerie).
+function weightPipelineDeals(pipelineDeals, factor = 1) {
+  const entries = [];
+  for (const stage of KANBAN_STAGES) {
+    if (stage.forecast === false) continue;
+    const deals = pipelineDeals[stage.label] || [];
+    for (const deal of deals) {
+      entries.push({
+        name: deal.name,
+        amount: deal.amount,
+        probability: deal.probability,
+        weighted: deal.amount * (deal.probability / 100) * factor,
+        stage: stage.label,
+        closedate: deal.closedate,
+      });
+    }
+  }
+  return entries;
+}
+
+// --- Paramètres IS (impôt sur les sociétés) — configurables, jamais codés en dur ---
+// Taux réduit PME 15 % jusqu'à 42 500 € de bénéfice imposable, puis taux normal 25 %.
+// Surchargeables via .env (IS_TAUX_REDUIT / IS_SEUIL_REDUIT / IS_TAUX_NORMAL) pour ajustement
+// après validation avec l'expert-comptable, sans toucher au code.
+const IS_TAUX_REDUIT  = parseFloat(process.env.IS_TAUX_REDUIT  || '0.15');
+const IS_SEUIL_REDUIT = parseFloat(process.env.IS_SEUIL_REDUIT || '42500');
+const IS_TAUX_NORMAL  = parseFloat(process.env.IS_TAUX_NORMAL  || '0.25');
+
+// Calcule l'IS sur un résultat imposable (barème progressif PME). Utilisé par le Compte de résultat (Phase 4).
+// NB : les acomptes IS de la projection de trésorerie restent saisis manuellement dans l'onglet Plan_TRE (choix métier).
+function computeIS(resultatImposable) {
+  if (!resultatImposable || resultatImposable <= 0) return 0;
+  const partReduite = Math.min(resultatImposable, IS_SEUIL_REDUIT) * IS_TAUX_REDUIT;
+  const partNormale = Math.max(0, resultatImposable - IS_SEUIL_REDUIT) * IS_TAUX_NORMAL;
+  return Math.round(partReduite + partNormale);
+}
+
 // --- Fetch open deals for pipeline kanban ---
 let openDealsCache = null;
 let openDealsCacheTime = 0;
@@ -1446,57 +1486,8 @@ function notionRequest(endpoint, method = 'GET', body = null) {
   });
 }
 
-// --- Google Sheets CSV ---
-const GSHEET_PUBLISHED_ID = '2PACX-1vQVkfg9jVxUTYGkLCs5xgXRuowmXEMZ8h2TT0kDfhbpQQugS1lgB729gbXbWJ5uEBK6CZ3E0DWJ9ijM';
+// --- Google Sheets CSV : onglet CR_Prev (classeur principal, lu via gviz comme les autres onglets) ---
 const CRPREV_GID = '1891894048';
-
-function fetchCSV(url) {
-  return new Promise((resolve, reject) => {
-    const follow = (targetUrl) => {
-      const parsed = new URL(targetUrl);
-      const options = {
-        hostname: parsed.hostname,
-        path: parsed.pathname + parsed.search,
-        method: 'GET',
-        headers: { 'User-Agent': 'Mozilla/5.0' },
-      };
-      const req = https.request(options, (res) => {
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          return follow(res.headers.location);
-        }
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => res.statusCode < 400 ? resolve(data) : reject(new Error(`CSV ${res.statusCode}`)));
-      });
-      req.on('error', reject);
-      req.end();
-    };
-    follow(url);
-  });
-}
-
-function parseCsvCRPrev(text) {
-  const rows = [];
-  let current = [], field = '', inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (inQuotes) {
-      if (ch === '"' && text[i + 1] === '"') { field += '"'; i++; }
-      else if (ch === '"') inQuotes = false;
-      else field += ch;
-    } else {
-      if (ch === '"') inQuotes = true;
-      else if (ch === ',') { current.push(field); field = ''; }
-      else if (ch === '\n' || ch === '\r') {
-        if (ch === '\r' && text[i + 1] === '\n') i++;
-        current.push(field); field = '';
-        rows.push(current); current = [];
-      } else field += ch;
-    }
-  }
-  if (field || current.length) { current.push(field); rows.push(current); }
-  return rows;
-}
 
 let crPrevCache = null;
 let crPrevCacheTime = 0;
@@ -1505,9 +1496,9 @@ const CRPREV_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 async function fetchAndParseCRPrev() {
   if (crPrevCache && (Date.now() - crPrevCacheTime) < CRPREV_CACHE_TTL) return crPrevCache;
 
-  const url = `https://docs.google.com/spreadsheets/d/e/${GSHEET_PUBLISHED_ID}/pub?output=csv&gid=${CRPREV_GID}`;
-  const csvText = await fetchCSV(url);
-  const rows = parseCsvCRPrev(csvText);
+  // Lecture unifiee : onglet CR_Prev du classeur principal via le mecanisme gviz commun (parseCSV).
+  const csvText = await fetchGoogleSheetCSV(CRPREV_GID);
+  const rows = parseCSV(csvText);
 
   // Trouver la ligne contenant les mois (format MM/YYYY)
   let monthRowIdx = -1;
@@ -3904,6 +3895,7 @@ async function buildTresorerieFromQonto(horizonMonths = 12, { includePreviousMon
 
   // Fetch bank balance + transactions from Qonto
   let solde = null;
+  let soldeTousComptes = null;
   let transactions = [];
   try {
     const org = await qontoRequest('/v2/organization');
@@ -3911,6 +3903,9 @@ async function buildTresorerieFromQonto(horizonMonths = 12, { includePreviousMon
     if (bankAccounts.length > 0) {
       const mainAccount = bankAccounts.reduce((a, b) => (b.balance_cents > a.balance_cents ? b : a));
       solde = mainAccount.balance;
+      // Somme de TOUS les comptes Qonto : sert à la "trésorerie nette de dette" (photo instant T).
+      // Le solde du compte principal reste la base de la projection (aucune régression sur le prévisionnel).
+      soldeTousComptes = bankAccounts.reduce((s, a) => s + (a.balance || 0), 0);
       transactions = await fetchQontoTransactions(mainAccount.iban, 6);
     }
   } catch (err) {
@@ -4032,6 +4027,7 @@ async function buildTresorerieFromQonto(horizonMonths = 12, { includePreviousMon
 
   const result = {
     soldeActuel: solde,
+    soldeTousComptes: soldeTousComptes != null ? Math.round(soldeTousComptes) : null,
     soldeDebutFirstMonth: Math.round(soldeDebutFirstMonth),
     moisCourantKey,
     chargesMoisCourant: Math.round(chargesMoisCourant),
@@ -4064,6 +4060,7 @@ const GID_MASSE_SALARIALE = 798407110;
 const GID_SALARIES_META = 1450270387;
 const GID_PLAN_TRESORERIE = 2116491556;
 const GID_CATEGORIES_TVA = 771195553;
+const GID_DETTES = 1905721989;
 
 function fetchGoogleSheetCSV(gid) {
   return new Promise((resolve, reject) => {
@@ -4141,6 +4138,48 @@ function parseFrenchNumber(str) {
   const cleaned = str.replace(/[€\s\u00a0]/g, '').replace(',', '.').trim();
   const val = parseFloat(cleaned);
   return isNaN(val) ? 0 : val;
+}
+
+// --- Onglet Dettes & engagements fermes (GID 1905721989) ---
+// Source de vérité des engagements fermes (dette financière + engagements votés).
+// Colonnes : C(2)=libellé, D(3)=durée, E(4)=montant initial, F(5)=taux, G(6)=montant restant dû, H(7)=contrôle.
+// Données à partir de la ligne 4 (lignes 1-3 = en-têtes). Montants au format FR "58 800 €".
+// Cache court car ces montants bougent peu mais on veut une photo fraîche.
+let dettesCache = null;
+let dettesCacheTime = 0;
+const DETTES_CACHE_TTL = 5 * 60 * 1000;
+
+function parseDettes(csv) {
+  const rows = parseCSV(csv);
+  const dettes = [];
+  for (let i = 3; i < rows.length; i++) { // ligne 4 = index 3
+    const r = rows[i];
+    const label = (r[2] || '').trim();
+    if (!label) continue; // ignore les lignes vides / séparateurs
+    dettes.push({
+      label,
+      montantInitial: parseFrenchNumber(r[4]),
+      taux: (r[5] || '').trim(),
+      restant: parseFrenchNumber(r[6]),
+      controle: (r[7] || '').trim().toUpperCase() === 'TRUE',
+    });
+  }
+  // Total = somme des restants dûs des lignes validées (contrôle = TRUE)
+  const totalRestant = dettes
+    .filter(d => d.controle)
+    .reduce((sum, d) => sum + d.restant, 0);
+  return { dettes, totalRestant };
+}
+
+async function fetchAndParseDettes() {
+  if (dettesCache && (Date.now() - dettesCacheTime) < DETTES_CACHE_TTL) {
+    return dettesCache;
+  }
+  const csv = await fetchGoogleSheetCSV(GID_DETTES);
+  const data = parseDettes(csv);
+  dettesCache = data;
+  dettesCacheTime = Date.now();
+  return data;
 }
 
 // Find month columns: look for header row with "01/YYYY" pattern
@@ -5025,23 +5064,18 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
   const pipelinePondereEncaissements = {};
   if (includePipeline) {
     const fallbackDate = new Date(); fallbackDate.setMonth(fallbackDate.getMonth() + 1);
-    for (const stage of KANBAN_STAGES) {
-      if (stage.forecast === false) continue;
-      const deals = pipelineDeals[stage.label] || [];
-      for (const deal of deals) {
-        const weighted = deal.amount * (deal.probability / 100) * factor;
-        pipelinePondere += weighted;
-        pipelineDetail.push({
-          name: deal.name, amount: deal.amount,
-          probability: deal.probability, weighted: Math.round(weighted), stage: stage.label,
-          closedate: deal.closedate,
-        });
-        // Distribuer le poids dans le mois d'encaissement attendu (= closedate + 45j)
-        const closing = deal.closedate ? new Date(deal.closedate) : fallbackDate;
-        const cashDate = new Date(closing); cashDate.setDate(cashDate.getDate() + 45);
-        const mKey = `${cashDate.getFullYear()}-${String(cashDate.getMonth() + 1).padStart(2, '0')}`;
-        pipelinePondereEncaissements[mKey] = (pipelinePondereEncaissements[mKey] || 0) + weighted;
-      }
+    for (const entry of weightPipelineDeals(pipelineDeals, factor)) {
+      pipelinePondere += entry.weighted;
+      pipelineDetail.push({
+        name: entry.name, amount: entry.amount,
+        probability: entry.probability, weighted: Math.round(entry.weighted), stage: entry.stage,
+        closedate: entry.closedate,
+      });
+      // Distribuer le poids dans le mois d'encaissement attendu (= closedate + 45j)
+      const closing = entry.closedate ? new Date(entry.closedate) : fallbackDate;
+      const cashDate = new Date(closing); cashDate.setDate(cashDate.getDate() + 45);
+      const mKey = `${cashDate.getFullYear()}-${String(cashDate.getMonth() + 1).padStart(2, '0')}`;
+      pipelinePondereEncaissements[mKey] = (pipelinePondereEncaissements[mKey] || 0) + entry.weighted;
     }
   }
 
@@ -5811,12 +5845,15 @@ app.get('/api/tresorerie', async (req, res) => {
     let pennylaneError = null;
     let masseSalarialeData = null;
     let masseSalarialeError = null;
-    const [qontoData, pipelineDeals, notionMissions, pennylaneRes, masseRes] = await Promise.all([
+    let dettesError = null;
+    const [qontoData, pipelineDeals, notionMissions, pennylaneRes, masseRes, dettesRes] = await Promise.all([
       buildTresorerieFromQonto(12, { includePreviousMonth: true }),
       fetchOpenDeals(),
       fetchAllNotionMissions(),
       fetchCustomerInvoices().catch(err => { pennylaneError = err.message; return []; }),
       fetchAndParseMasseSalarialeDetailed().catch(err => { masseSalarialeError = err.message; return null; }),
+      // Onglet Dettes : tolère un échec (l'onglet injoignable ne doit pas planter toute la trésorerie).
+      fetchAndParseDettes().catch(err => { dettesError = err.message; console.error('Erreur lecture Dettes:', err.message); return null; }),
     ]);
     customerInvoices = pennylaneRes;
     masseSalarialeData = masseRes;
@@ -5834,9 +5871,22 @@ app.get('/api/tresorerie', async (req, res) => {
       includePipeline,
     });
 
+    // Trésorerie nette de dette (photo instant T) = solde Qonto tous comptes − Σ(engagements fermes, onglet Dettes).
+    // C'est ce qui appartient réellement à l'entreprise. Robuste : null si Dettes injoignable (pas de plantage).
+    const soldeQonto = qontoData.soldeTousComptes != null ? qontoData.soldeTousComptes : qontoData.soldeActuel;
+    const totalDettes = dettesRes ? dettesRes.totalRestant : 0;
+    const tresorerieNetteDeDette = (soldeQonto != null && dettesRes)
+      ? Math.round(soldeQonto - totalDettes)
+      : null;
+
     res.json({
       source: 'qonto',
       soldeActuel: qontoData.soldeActuel,
+      soldeQonto,
+      tresorerieNetteDeDette,
+      dettes: dettesRes ? dettesRes.dettes : [],
+      totalDettes: Math.round(totalDettes),
+      dettesError,
       avanceRemboursableRestante: result.avanceRemboursableRestante || 0,
       avanceTotaleRecue: result.avanceTotaleRecue || 0,
       avanceDejaRemboursee: result.avanceDejaRemboursee || 0,
@@ -7502,14 +7552,8 @@ async function fetchFinancementsForYear(year) {
 
 async function computePipelinePondere() {
   const pipelineDeals = await fetchOpenDeals();
-  let total = 0;
-  for (const stage of KANBAN_STAGES) {
-    if (stage.forecast === false) continue;
-    const deals = pipelineDeals[stage.label] || [];
-    for (const deal of deals) {
-      total += deal.amount * (deal.probability / 100);
-    }
-  }
+  // Réutilise le calcul unique (factor=1 : pipeline pondéré brut, sans override scénario)
+  const total = weightPipelineDeals(pipelineDeals).reduce((sum, e) => sum + e.weighted, 0);
   return Math.round(total);
 }
 

@@ -3846,6 +3846,13 @@
           </span>
         </div>
       </div>
+      <!-- Trésorerie nette de dette (photo instant T) = solde Qonto tous comptes − engagements fermes (onglet Dettes).
+           Carte cliquable → modale détaillant le calcul. Masquée si l'onglet Dettes est injoignable. -->
+      <div class="kpi-block" id="tresoNetteDetteBlock" onclick="openNetteDetteModal()" style="cursor:pointer;display:none">
+        <div class="kpi-label">Nette de dette <span class="kpi-unit">TTC</span></div>
+        <div class="kpi-value" id="tresoKpiNetteDette">--</div>
+        <div class="kpi-sub" id="tresoKpiNetteDetteSub"></div>
+      </div>
       <div class="kpi-block" onclick="openFacturesImpayeesModal()" style="cursor:pointer">
         <div class="kpi-label">A encaisser <span class="kpi-unit">TTC</span></div>
         <div class="kpi-value" id="tresoKpiAEncaisser">--</div>
@@ -3876,6 +3883,13 @@
       <div style="position:relative;height:350px;margin-bottom:1rem">
         <canvas id="tresoChart"></canvas>
       </div>
+    </div>
+
+    <!-- Carnet Dettes & engagements fermes : la "photo" (ce qu'on retranche à la nette de dette),
+         à distinguer de la projection 13 mois ci-dessus (le "film"). Source : onglet Dettes. -->
+    <div class="section" id="tresoDettesSection" style="display:none">
+      <div class="section-title">Dettes &amp; engagements fermes <span style="font-weight:400;color:var(--text-secondary);font-size:0.8rem">(photo instant T, onglet Dettes)</span></div>
+      <div id="tresoDettesTable"></div>
     </div>
 
     <!-- Chart: Categories de depenses -->
@@ -5418,7 +5432,7 @@
           refreshFactData();
         }
       }
-      if (page === 'tresorerie') { if (tresoData) { renderTresoKpis(); renderTresoChart(); renderChargesChart(); renderChargesDetail(); renderMasseSalariale(); } else refreshTresoData(); }
+      if (page === 'tresorerie') { if (tresoData) { renderTresoKpis(); renderTresoDettes(); renderTresoChart(); renderChargesChart(); renderChargesDetail(); renderMasseSalariale(); } else refreshTresoData(); }
       if (page === 'masse-salariale') refreshMasseSalarialePage();
       if (page === 'scenarios') refreshScenariosPage();
       if (page === 'analytics') initAnalytics();
@@ -12608,6 +12622,7 @@
           }
         }
         renderTresoKpis();
+        renderTresoDettes();
         renderTresoChart();
         renderChargesChart();
         renderChargesDetail();
@@ -12659,6 +12674,22 @@
         netteRow.style.display = 'none';
       }
 
+      // Trésorerie nette de dette (photo instant T) : solde Qonto tous comptes − engagements fermes (onglet Dettes).
+      // Distincte de la "tréso nette de l'avance BPI" ci-dessus (source différente : onglet Dettes vs calcul interne).
+      const netteDetteBlock = document.getElementById('tresoNetteDetteBlock');
+      if (tresoData.tresorerieNetteDeDette != null) {
+        const nd = tresoData.tresorerieNetteDeDette;
+        const ndEl = document.getElementById('tresoKpiNetteDette');
+        ndEl.textContent = formatEuro(nd);
+        ndEl.style.color = nd < 0 ? 'var(--danger)' : '';
+        const nbDettes = (tresoData.dettes || []).filter(d => d.controle && d.restant > 0).length;
+        document.getElementById('tresoKpiNetteDetteSub').textContent =
+          '− ' + formatEuro(tresoData.totalDettes || 0) + ' de dette' + (nbDettes > 1 ? 's' : '');
+        netteDetteBlock.style.display = '';
+      } else {
+        netteDetteBlock.style.display = 'none'; // onglet Dettes injoignable
+      }
+
       // A encaisser
       const aEncaisser = tresoData.totalAEncaisser || 0;
       const envoyeTotal = tresoData.totalEnvoye || 0;
@@ -12676,6 +12707,57 @@
       document.getElementById('tresoKpiPipeline').textContent = formatEuro(tresoData.pipelinePondere || 0);
       const nbDeals = tresoData.pipelineDetail ? tresoData.pipelineDetail.length : 0;
       document.getElementById('tresoKpiPipelineSub').textContent = nbDeals + ' deal' + (nbDeals > 1 ? 's' : '') + ' HubSpot';
+    }
+
+    // Modale détail "Trésorerie nette de dette" — réutilise le chrome de la modale mois (overlay/titre/corps).
+    function openNetteDetteModal() {
+      if (!tresoData || tresoData.tresorerieNetteDeDette == null) return;
+      const soldeQonto = tresoData.soldeQonto || 0;
+      const dettes = (tresoData.dettes || []).filter(d => d.controle && d.restant > 0);
+      const nette = tresoData.tresorerieNetteDeDette;
+
+      document.getElementById('tresoMoisDetailTitle').textContent = 'Trésorerie nette de dette';
+      let html = '<div style="padding:0.5rem 0">';
+      html += '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.75rem">Photo à l\'instant T : ce qui appartient réellement à l\'entreprise (solde Qonto tous comptes − engagements fermes de l\'onglet Dettes).</div>';
+      html += '<div style="display:flex;justify-content:space-between;padding:0.5rem 0;border-bottom:1px solid var(--border)"><span>Solde Qonto (tous comptes)</span><strong>' + formatEuro(soldeQonto) + '</strong></div>';
+      for (const d of dettes) {
+        const tauxTxt = (d.taux && d.taux !== '0%') ? ' <span style="color:var(--text-secondary);font-size:0.78rem">(' + escapeHtml(d.taux) + ')</span>' : '';
+        html += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;color:var(--danger)"><span>' + escapeHtml(d.label) + tauxTxt + '</span><span>− ' + formatEuro(d.restant) + '</span></div>';
+      }
+      if (dettes.length === 0) {
+        html += '<div style="padding:0.4rem 0;color:var(--text-secondary);font-size:0.85rem">Aucun engagement ferme en cours.</div>';
+      }
+      html += '<div style="display:flex;justify-content:space-between;padding:0.6rem 0;margin-top:0.4rem;border-top:2px solid var(--border);font-size:1.05rem"><strong>Trésorerie nette de dette</strong><strong style="color:' + (nette < 0 ? 'var(--danger)' : 'var(--text)') + '">' + formatEuro(nette) + '</strong></div>';
+      html += '</div>';
+      document.getElementById('tresoMoisDetailBody').innerHTML = html;
+      document.getElementById('tresoMoisDetailModalOverlay').classList.add('active');
+    }
+
+    // Carnet "Dettes & engagements" — photo instant T (onglet Dettes). À distinguer de la projection 13 mois (le "film").
+    function renderTresoDettes() {
+      const section = document.getElementById('tresoDettesSection');
+      const dettes = (tresoData && tresoData.dettes) ? tresoData.dettes : [];
+      if (!dettes.length) { section.style.display = 'none'; return; }
+      let html = '<table style="width:100%;border-collapse:collapse;font-size:0.85rem">';
+      html += '<thead><tr style="text-align:left;color:var(--text-secondary);border-bottom:1px solid var(--border)">'
+        + '<th style="padding:0.5rem 0.5rem 0.5rem 0">Engagement</th>'
+        + '<th style="padding:0.5rem;text-align:right">Montant initial</th>'
+        + '<th style="padding:0.5rem;text-align:right">Taux</th>'
+        + '<th style="padding:0.5rem 0 0.5rem 0.5rem;text-align:right">Restant du</th></tr></thead><tbody>';
+      for (const d of dettes) {
+        const compte = d.controle; // TRUE = retranché à la nette de dette (photo)
+        html += '<tr style="border-bottom:1px solid rgba(120,119,116,0.15)' + (compte ? '' : ';opacity:0.5') + '">'
+          + '<td style="padding:0.5rem 0.5rem 0.5rem 0">' + escapeHtml(d.label) + (compte ? '' : ' <span style="font-size:0.72rem;color:var(--text-secondary)">(hors photo)</span>') + '</td>'
+          + '<td style="padding:0.5rem;text-align:right;color:var(--text-secondary)">' + formatEuro(d.montantInitial) + '</td>'
+          + '<td style="padding:0.5rem;text-align:right;color:var(--text-secondary)">' + (escapeHtml(d.taux) || '·') + '</td>'
+          + '<td style="padding:0.5rem 0 0.5rem 0.5rem;text-align:right;font-weight:600">' + formatEuro(d.restant) + '</td></tr>';
+      }
+      html += '</tbody><tfoot><tr style="border-top:2px solid var(--border);font-weight:700">'
+        + '<td style="padding:0.6rem 0.5rem 0.6rem 0" colspan="3">Total retranche a la nette de dette</td>'
+        + '<td style="padding:0.6rem 0 0.6rem 0.5rem;text-align:right;color:var(--danger)">− ' + formatEuro(tresoData.totalDettes || 0) + '</td></tr></tfoot>';
+      html += '</table>';
+      document.getElementById('tresoDettesTable').innerHTML = html;
+      section.style.display = '';
     }
 
     // Helpers partagés par les modales factures (à encaisser + en retard).
