@@ -3352,6 +3352,10 @@
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 1h7l3 3v11a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z"/><path d="M9 1v3h3"/><path d="M5 9h6M5 12h4"/></svg>
           Compte de resultat
         </button>
+        <button class="sidebar-link" onclick="navigateTo('immobilisations')" data-page="immobilisations">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="6" width="12" height="8" rx="1"/><path d="M5 6V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/><path d="M8 9v2"/></svg>
+          Immobilisations
+        </button>
         <button class="sidebar-link" onclick="navigateTo('depenses')" data-page="depenses">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="4" width="14" height="9" rx="1"/><circle cx="8" cy="8.5" r="2.5"/><path d="M1 7h2M13 7h2"/></svg>
           Depenses
@@ -3929,6 +3933,26 @@
   </div>
   </div>
   <!-- end page-compte-resultat -->
+
+  <!-- PAGE: Immobilisations -->
+  <div class="app-page" id="page-immobilisations">
+  <div class="page">
+    <div class="page-icon">&#127970;</div>
+    <h1 class="page-title">Immobilisations</h1>
+    <p class="page-desc">Gestion des immobilisations et de leur amortissement (lineaire, prorata temporis). La dotation de l'annee alimente le Compte de resultat, sans impacter l'EBE ni la tresorerie.</p>
+
+    <div class="error-banner" id="immoErrorBanner"></div>
+    <div id="immoMigrationWarning" style="display:none;padding:0.7rem 1rem;background:rgba(217,115,13,0.08);border-left:3px solid rgba(217,115,13,0.7);border-radius:4px;margin-bottom:1rem;font-size:0.85rem;color:var(--text)"></div>
+
+    <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.25rem">
+      <button class="btn-filled btn" onclick="openImmoCreateModal()">+ Nouvelle immobilisation</button>
+      <span id="immoDotationAnnee" style="margin-left:auto;font-size:0.85rem;color:var(--text-secondary)"></span>
+    </div>
+
+    <div id="immoList"><p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p></div>
+  </div>
+  </div>
+  <!-- end page-immobilisations -->
 
   <!-- PAGE: Depenses -->
   <div class="app-page" id="page-depenses">
@@ -4743,6 +4767,51 @@
     </div>
   </div>
 
+  <!-- Modal : creation / edition d'une immobilisation -->
+  <div class="modal-overlay" id="immoModalOverlay">
+    <div class="modal" style="max-width:560px">
+      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
+        <h2 id="immoModalTitle">Nouvelle immobilisation</h2>
+        <button onclick="closeImmoModal()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--text)">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:1.25rem">
+        <input type="hidden" id="immoEditId">
+        <div style="display:flex;flex-direction:column;gap:0.9rem">
+          <label style="font-size:0.82rem;color:var(--text-secondary)">Libelle
+            <input type="text" id="immoLibelle" placeholder="Ex : Ordinateurs equipe R&amp;D" style="width:100%;margin-top:0.25rem;padding:0.5rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+          </label>
+          <div style="display:flex;gap:0.9rem">
+            <label style="font-size:0.82rem;color:var(--text-secondary);flex:1">Montant HT (EUR)
+              <input type="number" id="immoMontant" placeholder="10000" oninput="_immoPreviewPlan()" style="width:100%;margin-top:0.25rem;padding:0.5rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+            </label>
+            <label style="font-size:0.82rem;color:var(--text-secondary);flex:1">Duree (annees)
+              <input type="number" id="immoDuree" value="5" min="1" step="1" oninput="_immoPreviewPlan()" style="width:100%;margin-top:0.25rem;padding:0.5rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+            </label>
+          </div>
+          <div style="display:flex;gap:0.9rem">
+            <label style="font-size:0.82rem;color:var(--text-secondary);flex:1">Date de mise en service
+              <input type="date" id="immoDate" oninput="_immoPreviewPlan()" style="width:100%;margin-top:0.25rem;padding:0.5rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+            </label>
+            <label style="font-size:0.82rem;color:var(--text-secondary);flex:1">Traitement
+              <select id="immoTraitement" onchange="_immoToggleTraitement()" style="width:100%;margin-top:0.25rem;padding:0.5rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+                <option value="immobilise">Immobiliser (amortir)</option>
+                <option value="charge">Passer en charge</option>
+              </select>
+            </label>
+          </div>
+          <label style="font-size:0.82rem;color:var(--text-secondary)">Justification (obligatoire)
+            <textarea id="immoJustification" rows="2" placeholder="Pourquoi immobiliser ou passer en charge (regle comptable, seuil, usage...)" style="width:100%;margin-top:0.25rem;padding:0.5rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);resize:vertical"></textarea>
+          </label>
+          <div id="immoPlanPreview" style="font-size:0.8rem;color:var(--text-secondary)"></div>
+        </div>
+      </div>
+      <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:0.6rem;padding:1rem 1.25rem;border-top:1px solid var(--border)">
+        <button class="btn" onclick="closeImmoModal()">Annuler</button>
+        <button class="btn-filled btn" onclick="submitImmo()">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal : toutes les tâches (chronologique) -->
   <div class="modal-overlay" id="tasksModalOverlay">
     <div class="modal">
@@ -5411,7 +5480,7 @@
     // --- Navigation ---
     let currentPage = 'cockpit';
 
-    const PAGE_NAMES = { cockpit: 'Cockpit', dashboard: 'Commercial', 'analyse-clients': 'Analyse clients', facturation: 'Facturation', 'frais-km': 'Frais KM', tresorerie: 'Tresorerie', 'masse-salariale': 'Masse salariale', scenarios: 'Scenarios', 'compte-resultat': 'Compte de resultat', analytics: 'Analytics', kpi: 'KPI', depenses: 'Depenses' };
+    const PAGE_NAMES = { cockpit: 'Cockpit', dashboard: 'Commercial', 'analyse-clients': 'Analyse clients', facturation: 'Facturation', 'frais-km': 'Frais KM', tresorerie: 'Tresorerie', 'masse-salariale': 'Masse salariale', scenarios: 'Scenarios', 'compte-resultat': 'Compte de resultat', immobilisations: 'Immobilisations', analytics: 'Analytics', kpi: 'KPI', depenses: 'Depenses' };
 
     function navigateTo(page) {
       currentPage = page;
@@ -5457,6 +5526,7 @@
       if (page === 'masse-salariale') refreshMasseSalarialePage();
       if (page === 'scenarios') refreshScenariosPage();
       if (page === 'compte-resultat') refreshCompteResultat();
+      if (page === 'immobilisations') refreshImmobilisations();
       if (page === 'analytics') initAnalytics();
       if (page === 'kpi') initKpi();
       if (page === 'frais-km' && !fraisKmData) refreshFraisKmClients();
@@ -12857,6 +12927,168 @@
       document.getElementById('tresoMoisDetailTitle').textContent = title;
       document.getElementById('tresoMoisDetailBody').innerHTML = body;
       document.getElementById('tresoMoisDetailModalOverlay').classList.add('active');
+    }
+
+    // ===== Immobilisations (Phase 5) — CRUD + plan d'amortissement =====
+    let immoData = [];
+
+    function _immoFmtDate(iso) {
+      if (!iso) return '';
+      try { return new Date(iso).toLocaleDateString('fr-FR'); } catch (e) { return iso; }
+    }
+
+    async function refreshImmobilisations() {
+      const errEl = document.getElementById('immoErrorBanner');
+      const warnEl = document.getElementById('immoMigrationWarning');
+      errEl.textContent = ''; warnEl.style.display = 'none';
+      document.getElementById('immoList').innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p>';
+      try {
+        const res = await fetch('/api/immobilisations');
+        const body = await res.json();
+        if (!res.ok) {
+          // Table pas encore creee : message d'aide plutot qu'une erreur brute
+          if (body.error && /immobilisation|schema cache|does not exist|relation/i.test(body.error)) {
+            warnEl.innerHTML = "<strong>Table absente.</strong> Applique la migration <code>migrations/32_immobilisations.sql</code> dans le SQL Editor Supabase, puis recharge cette page.";
+            warnEl.style.display = 'block';
+            document.getElementById('immoList').innerHTML = '';
+            return;
+          }
+          throw new Error(body.error || 'Erreur chargement');
+        }
+        immoData = body.immobilisations || [];
+        renderImmobilisations();
+      } catch (err) {
+        console.error('Erreur immobilisations:', err);
+        errEl.textContent = err.message;
+      }
+    }
+
+    function renderImmobilisations() {
+      const list = document.getElementById('immoList');
+      const year = new Date().getFullYear();
+      let dotAnnee = 0;
+      for (const im of immoData) {
+        const p = (im.planAmortissement && im.planAmortissement.plan) || [];
+        const row = p.find(r => r.annee === year);
+        if (row) dotAnnee += row.dotation;
+      }
+      document.getElementById('immoDotationAnnee').textContent =
+        immoData.length ? 'Dotation ' + year + ' (vers Compte de resultat) : ' + formatEuro(dotAnnee) : '';
+
+      if (!immoData.length) {
+        list.innerHTML = '<p style="color:var(--text-secondary);font-size:0.9rem;padding:1.5rem;text-align:center">Aucune immobilisation. Cliquez sur "+ Nouvelle immobilisation".</p>';
+        return;
+      }
+      let html = '';
+      for (const im of immoData) {
+        const isImmo = im.traitement === 'immobilise';
+        const badge = isImmo
+          ? '<span style="font-size:0.68rem;font-weight:600;padding:0.1rem 0.45rem;border-radius:4px;background:rgba(15,123,108,0.12);color:var(--primary)">Immobilise</span>'
+          : '<span style="font-size:0.68rem;font-weight:600;padding:0.1rem 0.45rem;border-radius:4px;background:rgba(120,119,116,0.15);color:var(--text-secondary)">Charge</span>';
+        html += '<div class="section" style="margin-bottom:1rem">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem">';
+        html += '<div><div style="font-weight:600;font-size:1rem">' + escapeHtml(im.libelle) + ' ' + badge + '</div>';
+        html += '<div style="font-size:0.82rem;color:var(--text-secondary);margin-top:0.25rem">' + formatEuro(im.montant) + ' · mise en service ' + _immoFmtDate(im.date_mise_en_service) + (isImmo ? ' · ' + im.duree_annees + ' ans lineaire' : '') + '</div>';
+        if (im.justification) html += '<div style="font-size:0.78rem;color:var(--text-secondary);margin-top:0.35rem;font-style:italic">' + escapeHtml(im.justification) + '</div>';
+        html += '</div>';
+        html += '<div style="display:flex;gap:0.4rem;flex-shrink:0">'
+          + '<button class="btn" onclick="editImmo(\'' + im.id + '\')" style="padding:0.3rem 0.6rem;font-size:0.8rem">Editer</button>'
+          + '<button class="btn" onclick="deleteImmo(\'' + im.id + '\')" style="padding:0.3rem 0.6rem;font-size:0.8rem;color:var(--danger)">Supprimer</button>'
+          + '</div></div>';
+        const plan = (im.planAmortissement && im.planAmortissement.plan) || [];
+        if (isImmo && plan.length) {
+          html += '<table style="width:100%;border-collapse:collapse;font-size:0.82rem;margin-top:0.75rem">';
+          html += '<thead><tr style="color:var(--text-secondary);border-bottom:1px solid var(--border)"><th style="text-align:left;padding:0.35rem 0">Annee</th><th style="text-align:right;padding:0.35rem">Dotation</th><th style="text-align:right;padding:0.35rem">Cumul</th><th style="text-align:right;padding:0.35rem 0 0.35rem 0.5rem">VNC</th></tr></thead><tbody>';
+          for (const r of plan) {
+            const cur = r.annee === year ? ' style="font-weight:600;background:var(--bg-secondary)"' : '';
+            html += '<tr' + cur + '><td style="text-align:left;padding:0.3rem 0">' + r.annee + '</td>'
+              + '<td style="text-align:right;padding:0.3rem">' + formatEuro(r.dotation) + '</td>'
+              + '<td style="text-align:right;padding:0.3rem;color:var(--text-secondary)">' + formatEuro(r.cumul) + '</td>'
+              + '<td style="text-align:right;padding:0.3rem 0 0.3rem 0.5rem">' + formatEuro(r.vnc) + '</td></tr>';
+          }
+          html += '</tbody></table>';
+        } else if (!isImmo) {
+          html += '<div style="font-size:0.8rem;color:var(--text-secondary);margin-top:0.5rem">Passe directement en charge : pas d\'amortissement.</div>';
+        }
+        html += '</div>';
+      }
+      list.innerHTML = html;
+    }
+
+    function _immoPreviewPlan() {
+      const prev = document.getElementById('immoPlanPreview');
+      const montant = Number(document.getElementById('immoMontant').value) || 0;
+      const duree = Number(document.getElementById('immoDuree').value) || 0;
+      const date = document.getElementById('immoDate').value;
+      const trait = document.getElementById('immoTraitement').value;
+      if (trait !== 'immobilise' || !montant || !duree || !date) { prev.textContent = ''; return; }
+      prev.innerHTML = 'Annuite pleine : <strong>' + formatEuro(Math.round(montant / duree)) + '</strong>/an sur ' + duree + ' ans (prorata la 1re annee).';
+    }
+    function _immoToggleTraitement() { _immoPreviewPlan(); }
+
+    function openImmoCreateModal() {
+      document.getElementById('immoModalTitle').textContent = 'Nouvelle immobilisation';
+      document.getElementById('immoEditId').value = '';
+      document.getElementById('immoLibelle').value = '';
+      document.getElementById('immoMontant').value = '';
+      document.getElementById('immoDuree').value = '5';
+      document.getElementById('immoDate').value = '';
+      document.getElementById('immoTraitement').value = 'immobilise';
+      document.getElementById('immoJustification').value = '';
+      document.getElementById('immoPlanPreview').textContent = '';
+      document.getElementById('immoModalOverlay').classList.add('active');
+    }
+
+    function editImmo(id) {
+      const im = immoData.find(x => x.id === id);
+      if (!im) return;
+      document.getElementById('immoModalTitle').textContent = "Editer l'immobilisation";
+      document.getElementById('immoEditId').value = im.id;
+      document.getElementById('immoLibelle').value = im.libelle || '';
+      document.getElementById('immoMontant').value = im.montant || '';
+      document.getElementById('immoDuree').value = im.duree_annees || 5;
+      document.getElementById('immoDate').value = (im.date_mise_en_service || '').slice(0, 10);
+      document.getElementById('immoTraitement').value = im.traitement || 'immobilise';
+      document.getElementById('immoJustification').value = im.justification || '';
+      _immoPreviewPlan();
+      document.getElementById('immoModalOverlay').classList.add('active');
+    }
+
+    async function submitImmo() {
+      const id = document.getElementById('immoEditId').value;
+      const payload = {
+        libelle: document.getElementById('immoLibelle').value.trim(),
+        montant: Number(document.getElementById('immoMontant').value) || 0,
+        date_mise_en_service: document.getElementById('immoDate').value,
+        duree_annees: Number(document.getElementById('immoDuree').value) || 5,
+        traitement: document.getElementById('immoTraitement').value,
+        justification: document.getElementById('immoJustification').value.trim(),
+      };
+      if (!payload.libelle) return alert('Libelle requis');
+      if (!payload.date_mise_en_service) return alert('Date de mise en service requise');
+      if (!payload.justification) return alert('Justification requise');
+      try {
+        const url = id ? '/api/immobilisations/' + id : '/api/immobilisations';
+        const res = await fetch(url, { method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error || 'Erreur');
+        closeImmoModal();
+        refreshImmobilisations();
+      } catch (err) { alert('Erreur : ' + err.message); }
+    }
+
+    async function deleteImmo(id) {
+      const im = immoData.find(x => x.id === id);
+      if (!confirm('Supprimer l\'immobilisation "' + (im ? im.libelle : '') + '" ?')) return;
+      try {
+        const res = await fetch('/api/immobilisations/' + id, { method: 'DELETE' });
+        if (!res.ok) { const b = await res.json(); throw new Error(b.error || 'Erreur'); }
+        refreshImmobilisations();
+      } catch (err) { alert('Erreur : ' + err.message); }
+    }
+
+    function closeImmoModal() {
+      document.getElementById('immoModalOverlay').classList.remove('active');
     }
 
     // Helpers partagés par les modales factures (à encaisser + en retard).

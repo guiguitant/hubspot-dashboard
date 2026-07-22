@@ -528,6 +528,62 @@ function computeIS(resultatImposable) {
   return Math.round(partReduite + partNormale);
 }
 
+// --- Amortissement linéaire prorata temporis (module Immobilisations, Phase 5) ---
+// Charge non décaissée : impacte le Compte de résultat, jamais l'EBE ni la trésorerie.
+function _daysBetween(a, b) { return Math.round((b - a) / 86400000); }
+
+// Dotation d'une immo pour une année civile. Annuité pleine = montant / durée ;
+// 1re et dernière année proratisées (base jours) => somme des dotations = montant sur toute la durée.
+function computeDotationForYear(immo, year) {
+  if (!immo || immo.traitement !== 'immobilise') return 0;
+  const M = Number(immo.montant) || 0;
+  const N = Number(immo.duree_annees) || 0;
+  if (M <= 0 || N <= 0 || !immo.date_mise_en_service) return 0;
+  const dms = new Date(immo.date_mise_en_service);
+  if (isNaN(dms.getTime())) return 0;
+  const fin = new Date(dms); fin.setFullYear(fin.getFullYear() + N); // fin d'amortissement (exclue)
+  const debutAnnee = new Date(year, 0, 1);
+  const finAnnee   = new Date(year + 1, 0, 1); // exclue
+  const start = dms > debutAnnee ? dms : debutAnnee;
+  const end   = fin < finAnnee ? fin : finAnnee;
+  if (end <= start) return 0; // hors période d'amortissement
+  const joursAnnee = _daysBetween(debutAnnee, finAnnee); // 365 ou 366
+  const fraction = _daysBetween(start, end) / joursAnnee;
+  return Math.round((M / N) * fraction);
+}
+
+// Plan d'amortissement complet d'une immo : { plan: [{ annee, dotation, cumul, vnc }], montant }.
+function computePlanAmortissement(immo) {
+  const M = Number(immo.montant) || 0;
+  const N = Number(immo.duree_annees) || 0;
+  const plan = [];
+  if (immo.traitement !== 'immobilise' || M <= 0 || N <= 0 || !immo.date_mise_en_service) {
+    return { plan, montant: M };
+  }
+  const y0 = new Date(immo.date_mise_en_service).getFullYear();
+  let cumul = 0;
+  // prorata temporis : l'amortissement peut s'étaler sur N+1 années civiles (1re et dernière partielles)
+  for (let y = y0; y <= y0 + N; y++) {
+    const dotation = computeDotationForYear(immo, y);
+    if (dotation === 0 && y > y0) break;
+    cumul += dotation;
+    plan.push({ annee: y, dotation, cumul, vnc: Math.max(0, Math.round(M - cumul)) });
+  }
+  return { plan, montant: M };
+}
+
+// Somme des dotations de toutes les immobilisations pour une année (alimente le Compte de résultat).
+// TOLÉRANT : si la table n'existe pas encore (migration non appliquée) ou erreur Supabase, renvoie 0.
+async function sumDotationsForYear(year) {
+  try {
+    const { data, error } = await supabaseAdmin.from('immobilisations').select('*');
+    if (error || !data) return 0;
+    return data.reduce((sum, immo) => sum + computeDotationForYear(immo, year), 0);
+  } catch (e) {
+    return 0;
+  }
+}
+
 // --- Fetch open deals for pipeline kanban ---
 let openDealsCache = null;
 let openDealsCacheTime = 0;
@@ -7620,9 +7676,10 @@ app.get('/api/ebe', async (req, res) => {
     }
 
     // 6) Cascade jusqu'au résultat net.
-    // Amortissements = 0 tant que le module Immobilisations (Phase 5) n'est pas livré.
-    // (charge non décaissée : impacte le Compte de résultat, jamais l'EBE ni la trésorerie).
-    const amortissements = 0;
+    // Dotations aux amortissements de l'année (module Immobilisations, Phase 5).
+    // Charge non décaissée : impacte le Compte de résultat, jamais l'EBE ni la trésorerie.
+    // Tolérant : 0 si la table immobilisations n'existe pas encore (migration non appliquée).
+    const amortissements = await sumDotationsForYear(yearParam);
     const resExploitFactuel = Math.round(ebeFactuel) - amortissements;
     const resExploitProjete = Math.round(ebeProjete) - amortissements;
     const isFactuel = computeIS(resExploitFactuel);
@@ -7648,6 +7705,84 @@ app.get('/api/ebe', async (req, res) => {
     });
   } catch (err) {
     console.error('Erreur /api/ebe:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// IMMOBILISATIONS (module Phase 5) — CRUD + plan d'amortissement
+// Table mono-locataire (dashboardGate protège déjà toutes les /api/*). Client supabaseAdmin.
+// ============================================================
+
+// GET /api/immobilisations — liste, enrichie du plan d'amortissement de chaque immo
+app.get('/api/immobilisations', async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('immobilisations')
+      .select('*')
+      .order('date_mise_en_service', { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    const immobilisations = (data || []).map(immo => ({
+      ...immo,
+      planAmortissement: computePlanAmortissement(immo),
+    }));
+    res.json({ immobilisations });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/immobilisations — création (justification obligatoire : choix immobiliser / charge)
+app.post('/api/immobilisations', async (req, res) => {
+  try {
+    const { libelle, montant, date_mise_en_service, duree_annees, traitement, justification } = req.body || {};
+    if (!libelle || !libelle.trim()) return res.status(400).json({ error: 'Libellé requis' });
+    if (!date_mise_en_service) return res.status(400).json({ error: 'Date de mise en service requise' });
+    if (!justification || !justification.trim()) return res.status(400).json({ error: 'Justification requise (choix immobiliser / charge)' });
+    const row = {
+      libelle: libelle.trim(),
+      montant: Number(montant) || 0,
+      date_mise_en_service,
+      duree_annees: Number(duree_annees) || 5,
+      methode: 'lineaire',
+      traitement: traitement === 'charge' ? 'charge' : 'immobilise',
+      justification: justification.trim(),
+    };
+    const { data, error } = await supabaseAdmin.from('immobilisations').insert(row).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/immobilisations/:id — mise à jour partielle (ne modifie que les champs fournis)
+app.put('/api/immobilisations/:id', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const update = { updated_at: new Date().toISOString() };
+    if (typeof b.libelle === 'string' && b.libelle.trim()) update.libelle = b.libelle.trim();
+    if (b.montant != null) update.montant = Number(b.montant) || 0;
+    if (b.date_mise_en_service) update.date_mise_en_service = b.date_mise_en_service;
+    if (b.duree_annees != null) update.duree_annees = Number(b.duree_annees) || 5;
+    if (b.traitement === 'charge' || b.traitement === 'immobilise') update.traitement = b.traitement;
+    if (typeof b.justification === 'string') update.justification = b.justification.trim();
+    const { data, error } = await supabaseAdmin.from('immobilisations').update(update).eq('id', req.params.id).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/immobilisations/:id
+app.delete('/api/immobilisations/:id', async (req, res) => {
+  try {
+    const { count, error } = await supabaseAdmin.from('immobilisations').delete({ count: 'exact' }).eq('id', req.params.id);
+    if (error) return res.status(500).json({ error: error.message });
+    if (!count) return res.status(404).json({ error: 'Immobilisation introuvable' });
+    res.json({ ok: true });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
