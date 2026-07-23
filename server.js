@@ -605,6 +605,88 @@ async function fetchPostesByImmo() {
   return byImmo;
 }
 
+// --- Aides publiques (Phase 5.3) : lissage sur le projet + réintégration des avances ---
+// Récupère toutes les aides groupées par immobilisation. TOLÉRANT si la table n'existe pas encore.
+async function fetchAidesByImmo() {
+  const byImmo = {};
+  try {
+    const { data, error } = await supabaseAdmin.from('immobilisation_aides').select('*');
+    if (error || !data) return byImmo;
+    for (const a of data) (byImmo[a.immobilisation_id] = byImmo[a.immobilisation_id] || []).push(a);
+  } catch (e) { /* table absente */ }
+  return byImmo;
+}
+
+// Quote-part d'une aide imputée à une année civile (lissage prorata temporis sur la durée du projet).
+function lisserAideAnnee(aide, annee, debutProjet, finProjet) {
+  const M = Number(aide.montant) || 0;
+  if (M <= 0 || !debutProjet || !finProjet) return 0;
+  const debut = new Date(debutProjet), fin = new Date(finProjet);
+  if (isNaN(debut.getTime()) || isNaN(fin.getTime()) || fin <= debut) return 0;
+  const debutAnnee = new Date(annee, 0, 1), finAnnee = new Date(annee + 1, 0, 1);
+  const start = debut > debutAnnee ? debut : debutAnnee;
+  const end   = fin < finAnnee ? fin : finAnnee;
+  if (end <= start) return 0;
+  return M * (_daysBetween(start, end) / _daysBetween(debut, fin));
+}
+
+// Montant d'une avance remboursé (donc réintégré à la base) une année donnée.
+// Profil : remboursement_montant_annuel par an dès remboursement_debut, jusqu'à rembourser le montant total.
+function reintegrationAvanceAnnee(aide, annee) {
+  if (aide.type !== 'avance') return 0;
+  const M = Number(aide.montant) || 0;
+  const annuel = Number(aide.remboursement_montant_annuel) || 0;
+  if (M <= 0 || annuel <= 0 || !aide.remboursement_debut) return 0;
+  const y0 = new Date(aide.remboursement_debut).getFullYear();
+  if (isNaN(y0) || annee < y0) return 0;
+  const dejaRembourse = (annee - y0) * annuel; // 0 la 1re année
+  if (dejaRembourse >= M) return 0;            // déjà tout remboursé
+  return Math.min(annuel, M - dejaRembourse);  // dernière année : reliquat
+}
+
+// Base CIR/CII nette par année d'une immo : brute (postes) − aides lissées + réintégrations d'avance.
+// Retour : [{ annee, cir:{brute,deduction,reintegration,nette}, cii:{...} }].
+function computeBasesParAnnee(immo, postes, aides) {
+  postes = postes || []; aides = aides || [];
+  const annees = new Set();
+  for (const p of postes) if (p.annee != null) annees.add(Number(p.annee));
+  if (immo.date_debut_projet && immo.date_fin_projet) {
+    const y1 = new Date(immo.date_debut_projet).getFullYear();
+    const y2 = new Date(immo.date_fin_projet).getFullYear();
+    for (let y = y1; y <= y2; y++) annees.add(y);
+  }
+  for (const a of aides) {
+    if (a.type === 'avance' && a.remboursement_debut && Number(a.remboursement_montant_annuel) > 0) {
+      const y0 = new Date(a.remboursement_debut).getFullYear();
+      const n = Math.ceil((Number(a.montant) || 0) / Number(a.remboursement_montant_annuel));
+      for (let k = 0; k < n; k++) annees.add(y0 + k);
+    }
+  }
+  const result = [];
+  for (const annee of [...annees].sort((x, y) => x - y)) {
+    const bloc = { annee };
+    for (const type of ['cir', 'cii']) {
+      const brute = postes
+        .filter(p => Number(p.annee) === annee && p.credit_type === type && _posteEligibleCredit(p))
+        .reduce((s, p) => s + (Number(p.montant) || 0) - (Number(p.subvention) || 0), 0);
+      const deduction = aides
+        .filter(a => a.credit_cible === type)
+        .reduce((s, a) => s + lisserAideAnnee(a, annee, immo.date_debut_projet, immo.date_fin_projet), 0);
+      const reintegration = aides
+        .filter(a => a.credit_cible === type && a.type === 'avance')
+        .reduce((s, a) => s + reintegrationAvanceAnnee(a, annee), 0);
+      bloc[type] = {
+        brute: Math.round(brute),
+        deduction: Math.round(deduction),
+        reintegration: Math.round(reintegration),
+        nette: Math.round(Math.max(0, brute - deduction + reintegration)),
+      };
+    }
+    result.push(bloc);
+  }
+  return result;
+}
+
 // Somme des dotations de toutes les immobilisations pour une année (alimente le Compte de résultat).
 // TOLÉRANT : si la table n'existe pas encore (migration non appliquée) ou erreur Supabase, renvoie 0.
 async function sumDotationsForYear(year) {
@@ -7759,14 +7841,19 @@ app.get('/api/immobilisations', async (req, res) => {
       .select('*')
       .order('date_mise_en_service', { ascending: false });
     if (error) return res.status(500).json({ error: error.message });
-    const byImmo = await fetchPostesByImmo();
+    const [postesParImmo, aidesParImmo] = await Promise.all([fetchPostesByImmo(), fetchAidesByImmo()]);
     let totalBaseCir = 0, totalBaseCii = 0;
     const immobilisations = (data || []).map(immo => {
-      const postes = byImmo[immo.id] || [];
+      const postes = postesParImmo[immo.id] || [];
+      const aides = aidesParImmo[immo.id] || [];
       const montantSaisi = Number(immo.montant) || 0;
       const montantEffectif = montantAmortissable(immo, postes);
-      const baseCir = Math.round(_baseCredit(postes, 'cir'));
-      const baseCii = Math.round(_baseCredit(postes, 'cii'));
+      // Repli d'année pour les postes sans année (Phase 5.2) : année de mise en service.
+      const fallbackYear = immo.date_mise_en_service ? new Date(immo.date_mise_en_service).getFullYear() : new Date().getFullYear();
+      const postesN = postes.map(p => ({ ...p, annee: p.annee != null ? p.annee : fallbackYear }));
+      const basesParAnnee = computeBasesParAnnee(immo, postesN, aides);
+      const baseCir = basesParAnnee.reduce((s, b) => s + b.cir.nette, 0);
+      const baseCii = basesParAnnee.reduce((s, b) => s + b.cii.nette, 0);
       totalBaseCir += baseCir;
       totalBaseCii += baseCii;
       return {
@@ -7774,8 +7861,10 @@ app.get('/api/immobilisations', async (req, res) => {
         montantSaisi,                 // montant manuel d'origine (si pas de postes)
         montant: montantEffectif,     // assiette amortissable réellement utilisée
         postes,
+        aides,
         baseCir,
         baseCii,
+        basesParAnnee,
         planAmortissement: computePlanAmortissement({ ...immo, montant: montantEffectif }),
       };
     });
@@ -7822,7 +7911,7 @@ app.get('/api/immobilisations/postes-disponibles', async (req, res) => {
 // POST /api/immobilisations/:id/postes
 app.post('/api/immobilisations/:id/postes', async (req, res) => {
   try {
-    const { libelle, source, source_ref, montant, credit_type, prestataire_agree, subvention } = req.body || {};
+    const { libelle, source, source_ref, montant, credit_type, prestataire_agree, subvention, annee } = req.body || {};
     if (!libelle || !libelle.trim()) return res.status(400).json({ error: 'Libellé du poste requis' });
     const row = {
       immobilisation_id: req.params.id,
@@ -7834,6 +7923,8 @@ app.post('/api/immobilisations/:id/postes', async (req, res) => {
       prestataire_agree: !!prestataire_agree,
       subvention: Number(subvention) || 0,
     };
+    // Année ajoutée seulement si renseignée (tolérance migration 35 non appliquée)
+    if (annee != null && annee !== '') row.annee = parseInt(annee, 10);
     const { data, error } = await supabaseAdmin.from('immobilisation_postes').insert(row).select().single();
     if (error) return res.status(500).json({ error: error.message });
     res.json(data);
@@ -7854,6 +7945,7 @@ app.put('/api/immobilisations/:id/postes/:pid', async (req, res) => {
     if (['none', 'cir', 'cii'].includes(b.credit_type)) update.credit_type = b.credit_type;
     if (typeof b.prestataire_agree === 'boolean') update.prestataire_agree = b.prestataire_agree;
     if (b.subvention != null) update.subvention = Number(b.subvention) || 0;
+    if (b.annee !== undefined) update.annee = (b.annee != null && b.annee !== '') ? parseInt(b.annee, 10) : null;
     const { data, error } = await supabaseAdmin.from('immobilisation_postes').update(update).eq('id', req.params.pid).select().single();
     if (error) return res.status(500).json({ error: error.message });
     res.json(data);
@@ -7874,10 +7966,65 @@ app.delete('/api/immobilisations/:id/postes/:pid', async (req, res) => {
   }
 });
 
+// --- Sous-CRUD aides d'une immobilisation (subvention / avance récupérable) ---
+// POST /api/immobilisations/:id/aides
+app.post('/api/immobilisations/:id/aides', async (req, res) => {
+  try {
+    const { type, financeur, credit_cible, montant, remboursement_debut, remboursement_montant_annuel, notes } = req.body || {};
+    const row = {
+      immobilisation_id: req.params.id,
+      type: type === 'avance' ? 'avance' : 'subvention',
+      financeur: financeur || null,
+      credit_cible: credit_cible === 'cir' ? 'cir' : 'cii',
+      montant: Number(montant) || 0,
+      remboursement_debut: remboursement_debut || null,
+      remboursement_montant_annuel: (remboursement_montant_annuel != null && remboursement_montant_annuel !== '') ? Number(remboursement_montant_annuel) : null,
+      notes: notes || null,
+    };
+    const { data, error } = await supabaseAdmin.from('immobilisation_aides').insert(row).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/immobilisations/:id/aides/:aid
+app.put('/api/immobilisations/:id/aides/:aid', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const update = { updated_at: new Date().toISOString() };
+    if (b.type === 'avance' || b.type === 'subvention') update.type = b.type;
+    if (b.financeur !== undefined) update.financeur = b.financeur || null;
+    if (b.credit_cible === 'cir' || b.credit_cible === 'cii') update.credit_cible = b.credit_cible;
+    if (b.montant != null) update.montant = Number(b.montant) || 0;
+    if (b.remboursement_debut !== undefined) update.remboursement_debut = b.remboursement_debut || null;
+    if (b.remboursement_montant_annuel !== undefined) update.remboursement_montant_annuel = (b.remboursement_montant_annuel != null && b.remboursement_montant_annuel !== '') ? Number(b.remboursement_montant_annuel) : null;
+    if (b.notes !== undefined) update.notes = b.notes || null;
+    const { data, error } = await supabaseAdmin.from('immobilisation_aides').update(update).eq('id', req.params.aid).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/immobilisations/:id/aides/:aid
+app.delete('/api/immobilisations/:id/aides/:aid', async (req, res) => {
+  try {
+    const { count, error } = await supabaseAdmin.from('immobilisation_aides').delete({ count: 'exact' }).eq('id', req.params.aid);
+    if (error) return res.status(500).json({ error: error.message });
+    if (!count) return res.status(404).json({ error: 'Aide introuvable' });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/immobilisations — création (justification obligatoire : choix immobiliser / charge)
 app.post('/api/immobilisations', async (req, res) => {
   try {
-    const { libelle, montant, date_mise_en_service, duree_annees, traitement, justification } = req.body || {};
+    const { libelle, montant, date_mise_en_service, duree_annees, traitement, justification, date_debut_projet, date_fin_projet } = req.body || {};
     if (!libelle || !libelle.trim()) return res.status(400).json({ error: 'Libellé requis' });
     if (!date_mise_en_service) return res.status(400).json({ error: 'Date de mise en service requise' });
     if (!justification || !justification.trim()) return res.status(400).json({ error: 'Justification requise (choix immobiliser / charge)' });
@@ -7890,6 +8037,9 @@ app.post('/api/immobilisations', async (req, res) => {
       traitement: traitement === 'charge' ? 'charge' : 'immobilise',
       justification: justification.trim(),
     };
+    // Champs Phase 5.3 ajoutés seulement si renseignés (tolérance migration 35 non appliquée)
+    if (date_debut_projet) row.date_debut_projet = date_debut_projet;
+    if (date_fin_projet) row.date_fin_projet = date_fin_projet;
     const { data, error } = await supabaseAdmin.from('immobilisations').insert(row).select().single();
     if (error) return res.status(500).json({ error: error.message });
     res.json(data);
@@ -7909,6 +8059,8 @@ app.put('/api/immobilisations/:id', async (req, res) => {
     if (b.duree_annees != null) update.duree_annees = Number(b.duree_annees) || 5;
     if (b.traitement === 'charge' || b.traitement === 'immobilise') update.traitement = b.traitement;
     if (typeof b.justification === 'string') update.justification = b.justification.trim();
+    if (b.date_debut_projet !== undefined) update.date_debut_projet = b.date_debut_projet || null;
+    if (b.date_fin_projet !== undefined) update.date_fin_projet = b.date_fin_projet || null;
     const { data, error } = await supabaseAdmin.from('immobilisations').update(update).eq('id', req.params.id).select().single();
     if (error) return res.status(500).json({ error: error.message });
     res.json(data);

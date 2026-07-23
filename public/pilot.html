@@ -4806,6 +4806,48 @@
 
           <!-- Assiette composee de postes connus (5.2) : visible seulement en edition (immo deja creee) -->
           <div id="immoPostesCreateNote" style="display:none;font-size:0.8rem;color:var(--text-secondary);border-top:1px solid var(--border);padding-top:0.8rem">Le montant se composera des <strong>depenses (postes)</strong> que vous affecterez a cette immobilisation. Enregistrez d'abord, puis ajoutez les postes.</div>
+          <!-- Projet CIR/CII : periode (lissage des aides) + aides publiques -->
+          <div id="immoProjetSection" style="display:none;border-top:1px solid var(--border);padding-top:0.8rem">
+            <div style="font-weight:600;font-size:0.85rem;margin-bottom:0.4rem">Projet CIR/CII : periode &amp; aides</div>
+            <div style="display:flex;gap:0.9rem;flex-wrap:wrap">
+              <label style="font-size:0.75rem;color:var(--text-secondary);flex:1;min-width:130px">Debut projet
+                <input type="date" id="immoDebutProjet" onchange="_immoSaveProjetDates()" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+              </label>
+              <label style="font-size:0.75rem;color:var(--text-secondary);flex:1;min-width:130px">Fin projet
+                <input type="date" id="immoFinProjet" onchange="_immoSaveProjetDates()" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+              </label>
+            </div>
+            <div style="font-size:0.78rem;color:var(--text-secondary);margin:0.6rem 0 0.3rem">Aides publiques (subvention / avance) : deduites de la base CIR/CII, lissees sur la periode.</div>
+            <div id="immoAidesList"></div>
+            <div style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:flex-end;margin-top:0.5rem;padding:0.6rem;background:var(--bg-secondary);border-radius:6px">
+              <label style="font-size:0.72rem;color:var(--text-secondary);width:100px">Type
+                <select id="aideType" onchange="_aideToggleRemb()" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+                  <option value="subvention">Subvention</option>
+                  <option value="avance">Avance</option>
+                </select>
+              </label>
+              <label style="font-size:0.72rem;color:var(--text-secondary);flex:1;min-width:110px">Financeur
+                <input type="text" id="aideFinanceur" placeholder="Etat, Region..." style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+              </label>
+              <label style="font-size:0.72rem;color:var(--text-secondary);width:70px">Credit
+                <select id="aideCredit" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+                  <option value="cii">CII</option>
+                  <option value="cir">CIR</option>
+                </select>
+              </label>
+              <label style="font-size:0.72rem;color:var(--text-secondary);width:100px">Montant
+                <input type="number" id="aideMontant" placeholder="0" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+              </label>
+              <label id="aideRembWrap" style="font-size:0.72rem;color:var(--text-secondary);width:130px;display:none">Remb. debut
+                <input type="date" id="aideRembDebut" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+              </label>
+              <label id="aideRembAnWrap" style="font-size:0.72rem;color:var(--text-secondary);width:90px;display:none">Remb./an
+                <input type="number" id="aideRembAnnuel" placeholder="0" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+              </label>
+              <button class="btn-filled btn" onclick="addAide()" style="padding:0.4rem 0.7rem;font-size:0.78rem">+ Ajouter</button>
+            </div>
+          </div>
+
           <div id="immoPostesSection" style="display:none;border-top:1px solid var(--border);padding-top:0.8rem">
             <div style="font-weight:600;font-size:0.85rem;margin-bottom:0.4rem">Assiette composee de postes connus</div>
             <div id="immoPostesList"></div>
@@ -4841,6 +4883,9 @@
               </label>
               <label style="font-size:0.72rem;color:var(--text-secondary);width:80px">Subv.
                 <input type="number" id="posteSubvention" value="0" placeholder="0" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+              </label>
+              <label style="font-size:0.72rem;color:var(--text-secondary);width:70px">Annee
+                <input type="number" id="posteAnnee" placeholder="2026" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
               </label>
               <button class="btn-filled btn" onclick="addPoste()" style="padding:0.4rem 0.7rem;font-size:0.78rem">+ Ajouter</button>
             </div>
@@ -13095,6 +13140,24 @@
         } else if (!isImmo) {
           html += '<div style="font-size:0.8rem;color:var(--text-secondary);margin-top:0.5rem">Passe directement en charge : pas d\'amortissement.</div>';
         }
+        // Tableau base CIR/CII par annee (si aides ou base non nulle sur plusieurs annees)
+        const bpa = (im.basesParAnnee || []).filter(b => b.cir.brute || b.cii.brute || b.cir.deduction || b.cii.deduction || b.cir.reintegration || b.cii.reintegration);
+        if (bpa.length) {
+          const hasCir = bpa.some(b => b.cir.brute || b.cir.deduction || b.cir.reintegration);
+          const hasCii = bpa.some(b => b.cii.brute || b.cii.deduction || b.cii.reintegration);
+          html += '<div style="font-size:0.8rem;font-weight:600;margin-top:0.9rem;margin-bottom:0.3rem">Base CIR/CII nette par annee</div>';
+          html += '<table style="width:100%;border-collapse:collapse;font-size:0.8rem"><thead><tr style="color:var(--text-secondary);border-bottom:1px solid var(--border)"><th style="text-align:left;padding:0.3rem 0">Annee</th>';
+          if (hasCir) html += '<th style="text-align:right;padding:0.3rem">Base CIR</th>';
+          if (hasCii) html += '<th style="text-align:right;padding:0.3rem">Base CII</th>';
+          html += '</tr></thead><tbody>';
+          for (const b of bpa) {
+            html += '<tr style="border-bottom:1px solid rgba(120,119,116,0.12)"><td style="padding:0.28rem 0">' + b.annee + '</td>';
+            if (hasCir) html += '<td style="text-align:right;padding:0.28rem;color:var(--primary)">' + formatEuro(b.cir.nette) + '</td>';
+            if (hasCii) html += '<td style="text-align:right;padding:0.28rem;color:var(--primary)">' + formatEuro(b.cii.nette) + '</td>';
+            html += '</tr>';
+          }
+          html += '</tbody></table>';
+        }
         html += '</div>';
       }
       list.innerHTML = html;
@@ -13126,6 +13189,7 @@
       // A la creation : pas de montant demande (il se composera des postes affectes ensuite)
       document.getElementById('immoMontantWrap').style.display = 'none';
       document.getElementById('immoPostesSection').style.display = 'none';
+      document.getElementById('immoProjetSection').style.display = 'none';
       document.getElementById('immoPostesCreateNote').style.display = 'block';
       document.getElementById('immoModalOverlay').classList.add('active');
     }
@@ -13157,11 +13221,15 @@
       document.getElementById('immoJustification').value = im.justification || '';
       _immoSetMontantField(im);
       _immoPreviewPlan();
-      // Section postes (édition uniquement)
+      // Sections édition (projet + aides + postes)
       document.getElementById('immoPostesCreateNote').style.display = 'none';
+      document.getElementById('immoProjetSection').style.display = 'block';
       document.getElementById('immoPostesSection').style.display = 'block';
+      document.getElementById('immoDebutProjet').value = (im.date_debut_projet || '').slice(0, 10);
+      document.getElementById('immoFinProjet').value = (im.date_fin_projet || '').slice(0, 10);
       loadPostesDisponibles();
       renderPostesInModal(im);
+      renderAidesInModal(im);
       document.getElementById('immoModalOverlay').classList.add('active');
     }
 
@@ -13229,6 +13297,7 @@
         credit_type: document.getElementById('posteCredit').value,
         prestataire_agree: document.getElementById('posteAgree').checked,
         subvention: Number(document.getElementById('posteSubvention').value) || 0,
+        annee: document.getElementById('posteAnnee').value || null,
       };
       try {
         const res = await fetch('/api/immobilisations/' + id + '/postes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -13265,6 +13334,83 @@
       _immoSetMontantField(im);
       _immoPreviewPlan();
       renderPostesInModal(im);
+      renderAidesInModal(im);
+    }
+
+    // Sauvegarde des dates de projet (auto, sur changement) puis recalcul
+    async function _immoSaveProjetDates() {
+      const id = document.getElementById('immoEditId').value;
+      if (!id) return;
+      const payload = {
+        date_debut_projet: document.getElementById('immoDebutProjet').value || null,
+        date_fin_projet: document.getElementById('immoFinProjet').value || null,
+      };
+      try {
+        const res = await fetch('/api/immobilisations/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        if (!res.ok) { const b = await res.json(); throw new Error(b.error || 'Erreur'); }
+        await _reloadImmoInModal(id);
+      } catch (e) { alert('Erreur : ' + e.message); }
+    }
+
+    // Le remboursement (date + montant/an) ne concerne que les avances récupérables
+    function _aideToggleRemb() {
+      const show = document.getElementById('aideType').value === 'avance';
+      document.getElementById('aideRembWrap').style.display = show ? 'block' : 'none';
+      document.getElementById('aideRembAnWrap').style.display = show ? 'block' : 'none';
+    }
+
+    function renderAidesInModal(im) {
+      const aides = im.aides || [];
+      const list = document.getElementById('immoAidesList');
+      if (!aides.length) { list.innerHTML = '<div style="font-size:0.8rem;color:var(--text-secondary)">Aucune aide.</div>'; return; }
+      let h = '<table style="width:100%;border-collapse:collapse;font-size:0.78rem"><tbody>';
+      for (const a of aides) {
+        const rembTxt = a.type === 'avance' && a.remboursement_debut
+          ? ' · remb. ' + formatEuro(a.remboursement_montant_annuel || 0) + '/an des ' + _immoFmtDate(a.remboursement_debut)
+          : '';
+        h += '<tr style="border-bottom:1px solid var(--border)">'
+          + '<td style="padding:0.3rem 0">' + (a.type === 'avance' ? 'Avance' : 'Subvention') + ' ' + a.credit_cible.toUpperCase()
+            + (a.financeur ? ' <span style="color:var(--text-secondary)">(' + escapeHtml(a.financeur) + ')</span>' : '')
+            + '<span style="color:var(--text-secondary);font-size:0.72rem">' + rembTxt + '</span></td>'
+          + '<td style="padding:0.3rem;text-align:right">' + formatEuro(a.montant) + '</td>'
+          + '<td style="padding:0.3rem 0 0.3rem 0.5rem;text-align:right"><button class="btn" onclick="deleteAide(\'' + im.id + '\',\'' + a.id + '\')" style="padding:0.05rem 0.4rem;font-size:0.72rem;color:var(--danger)">&times;</button></td>'
+          + '</tr>';
+      }
+      h += '</tbody></table>';
+      list.innerHTML = h;
+    }
+
+    async function addAide() {
+      const id = document.getElementById('immoEditId').value;
+      if (!id) return;
+      const type = document.getElementById('aideType').value;
+      const payload = {
+        type,
+        financeur: document.getElementById('aideFinanceur').value.trim() || null,
+        credit_cible: document.getElementById('aideCredit').value,
+        montant: Number(document.getElementById('aideMontant').value) || 0,
+        remboursement_debut: type === 'avance' ? (document.getElementById('aideRembDebut').value || null) : null,
+        remboursement_montant_annuel: type === 'avance' ? (Number(document.getElementById('aideRembAnnuel').value) || null) : null,
+      };
+      if (!payload.montant) return alert('Montant de l\'aide requis');
+      try {
+        const res = await fetch('/api/immobilisations/' + id + '/aides', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const b = await res.json();
+        if (!res.ok) throw new Error(b.error || 'Erreur');
+        document.getElementById('aideFinanceur').value = '';
+        document.getElementById('aideMontant').value = '';
+        document.getElementById('aideRembDebut').value = '';
+        document.getElementById('aideRembAnnuel').value = '';
+        await _reloadImmoInModal(id);
+      } catch (e) { alert('Erreur : ' + e.message); }
+    }
+
+    async function deleteAide(id, aid) {
+      try {
+        const res = await fetch('/api/immobilisations/' + id + '/aides/' + aid, { method: 'DELETE' });
+        if (!res.ok) { const b = await res.json(); throw new Error(b.error || 'Erreur'); }
+        await _reloadImmoInModal(id);
+      } catch (e) { alert('Erreur : ' + e.message); }
     }
 
     function renderPostesInModal(im) {
