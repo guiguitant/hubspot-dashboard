@@ -4803,6 +4803,35 @@
             <textarea id="immoJustification" rows="2" placeholder="Pourquoi immobiliser ou passer en charge (regle comptable, seuil, usage...)" style="width:100%;margin-top:0.25rem;padding:0.5rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);resize:vertical"></textarea>
           </label>
           <div id="immoPlanPreview" style="font-size:0.8rem;color:var(--text-secondary)"></div>
+
+          <!-- Assiette composee de postes connus (5.2) : visible seulement en edition (immo deja creee) -->
+          <div id="immoPostesCreateNote" style="display:none;font-size:0.8rem;color:var(--text-secondary);border-top:1px solid var(--border);padding-top:0.8rem">Enregistrez d'abord l'immobilisation pour composer son assiette a partir de postes connus (salaires, prestations).</div>
+          <div id="immoPostesSection" style="display:none;border-top:1px solid var(--border);padding-top:0.8rem">
+            <div style="font-weight:600;font-size:0.85rem;margin-bottom:0.4rem">Assiette composee de postes connus</div>
+            <div id="immoPostesList"></div>
+            <div style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:flex-end;margin-top:0.6rem;padding:0.6rem;background:var(--bg-secondary);border-radius:6px">
+              <label style="font-size:0.72rem;color:var(--text-secondary);flex:2;min-width:150px">Importer un poste connu
+                <select id="posteImport" onchange="_posteOnPick()" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)"></select>
+              </label>
+              <label style="font-size:0.72rem;color:var(--text-secondary);flex:1;min-width:120px">Libelle
+                <input type="text" id="posteLibelle" placeholder="Libelle du poste" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+              </label>
+              <label style="font-size:0.72rem;color:var(--text-secondary);width:60px">%
+                <input type="number" id="postePct" value="100" oninput="_posteRecalc()" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+              </label>
+              <label style="font-size:0.72rem;color:var(--text-secondary);width:100px">Montant
+                <input type="number" id="posteMontant" placeholder="0" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+              </label>
+              <label style="font-size:0.72rem;color:var(--text-secondary);display:flex;align-items:center;gap:0.25rem;padding-bottom:0.4rem" title="Entre dans l'assiette du CIR">
+                <input type="checkbox" id="posteCir"> CIR
+              </label>
+              <label style="font-size:0.72rem;color:var(--text-secondary);width:90px">Subv.
+                <input type="number" id="posteSubvention" value="0" placeholder="0" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+              </label>
+              <button class="btn-filled btn" onclick="addPoste()" style="padding:0.4rem 0.7rem;font-size:0.78rem">+ Ajouter</button>
+            </div>
+            <div id="immoAssietteInfo" style="font-size:0.82rem;margin-top:0.6rem"></div>
+          </div>
         </div>
       </div>
       <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:0.6rem;padding:1rem 1.25rem;border-top:1px solid var(--border)">
@@ -12929,8 +12958,11 @@
       document.getElementById('tresoMoisDetailModalOverlay').classList.add('active');
     }
 
-    // ===== Immobilisations (Phase 5) — CRUD + plan d'amortissement =====
+    // ===== Immobilisations (Phase 5) — CRUD + plan d'amortissement + assiette CIR =====
     let immoData = [];
+    let immoTotalBaseCir = 0;
+    let immoPostesDispo = null; // { employes, categories } chargé une fois
+    let _posteBase = 0;         // montant de base du poste importé (avant application du %)
 
     function _immoFmtDate(iso) {
       if (!iso) return '';
@@ -12956,6 +12988,7 @@
           throw new Error(body.error || 'Erreur chargement');
         }
         immoData = body.immobilisations || [];
+        immoTotalBaseCir = body.totalBaseCir || 0;
         renderImmobilisations();
       } catch (err) {
         console.error('Erreur immobilisations:', err);
@@ -12972,8 +13005,11 @@
         const row = p.find(r => r.annee === year);
         if (row) dotAnnee += row.dotation;
       }
-      document.getElementById('immoDotationAnnee').textContent =
-        immoData.length ? 'Dotation ' + year + ' (vers Compte de resultat) : ' + formatEuro(dotAnnee) : '';
+      document.getElementById('immoDotationAnnee').innerHTML =
+        immoData.length
+          ? 'Dotation ' + year + ' (vers Compte de resultat) : <strong>' + formatEuro(dotAnnee) + '</strong>'
+            + (immoTotalBaseCir ? ' &nbsp;·&nbsp; Base CIR nette totale : <strong>' + formatEuro(immoTotalBaseCir) + '</strong>' : '')
+          : '';
 
       if (!immoData.length) {
         list.innerHTML = '<p style="color:var(--text-secondary);font-size:0.9rem;padding:1.5rem;text-align:center">Aucune immobilisation. Cliquez sur "+ Nouvelle immobilisation".</p>';
@@ -12988,7 +13024,9 @@
         html += '<div class="section" style="margin-bottom:1rem">';
         html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem">';
         html += '<div><div style="font-weight:600;font-size:1rem">' + escapeHtml(im.libelle) + ' ' + badge + '</div>';
-        html += '<div style="font-size:0.82rem;color:var(--text-secondary);margin-top:0.25rem">' + formatEuro(im.montant) + ' · mise en service ' + _immoFmtDate(im.date_mise_en_service) + (isImmo ? ' · ' + im.duree_annees + ' ans lineaire' : '') + '</div>';
+        const nbPostes = (im.postes || []).length;
+        html += '<div style="font-size:0.82rem;color:var(--text-secondary);margin-top:0.25rem">' + formatEuro(im.montant) + (nbPostes ? ' <span style="font-size:0.72rem">(assiette : ' + nbPostes + ' poste' + (nbPostes > 1 ? 's' : '') + ')</span>' : '') + ' · mise en service ' + _immoFmtDate(im.date_mise_en_service) + (isImmo ? ' · ' + im.duree_annees + ' ans lineaire' : '') + '</div>';
+        if (im.baseCir) html += '<div style="font-size:0.78rem;color:var(--primary);margin-top:0.2rem">Base CIR nette : ' + formatEuro(im.baseCir) + '</div>';
         if (im.justification) html += '<div style="font-size:0.78rem;color:var(--text-secondary);margin-top:0.35rem;font-style:italic">' + escapeHtml(im.justification) + '</div>';
         html += '</div>';
         html += '<div style="display:flex;gap:0.4rem;flex-shrink:0">'
@@ -13036,6 +13074,10 @@
       document.getElementById('immoTraitement').value = 'immobilise';
       document.getElementById('immoJustification').value = '';
       document.getElementById('immoPlanPreview').textContent = '';
+      const mEl = document.getElementById('immoMontant');
+      mEl.readOnly = false; mEl.style.opacity = '1';
+      document.getElementById('immoPostesSection').style.display = 'none';
+      document.getElementById('immoPostesCreateNote').style.display = 'block';
       document.getElementById('immoModalOverlay').classList.add('active');
     }
 
@@ -13045,13 +13087,141 @@
       document.getElementById('immoModalTitle').textContent = "Editer l'immobilisation";
       document.getElementById('immoEditId').value = im.id;
       document.getElementById('immoLibelle').value = im.libelle || '';
-      document.getElementById('immoMontant').value = im.montant || '';
       document.getElementById('immoDuree').value = im.duree_annees || 5;
       document.getElementById('immoDate').value = (im.date_mise_en_service || '').slice(0, 10);
       document.getElementById('immoTraitement').value = im.traitement || 'immobilise';
       document.getElementById('immoJustification').value = im.justification || '';
+      // Montant : si l'immo a des postes, l'assiette = somme des postes (lecture seule) ; sinon montant saisi
+      const hasPostes = (im.postes || []).length > 0;
+      const mEl = document.getElementById('immoMontant');
+      mEl.value = hasPostes ? im.montant : (im.montantSaisi != null ? im.montantSaisi : im.montant);
+      mEl.readOnly = hasPostes; mEl.style.opacity = hasPostes ? '0.6' : '1';
       _immoPreviewPlan();
+      // Section postes (édition uniquement)
+      document.getElementById('immoPostesCreateNote').style.display = 'none';
+      document.getElementById('immoPostesSection').style.display = 'block';
+      loadPostesDisponibles();
+      renderPostesInModal(im);
       document.getElementById('immoModalOverlay').classList.add('active');
+    }
+
+    // Charge une fois la liste des "postes connus" (employés + catégories CR_Prev) dans le select d'import
+    async function loadPostesDisponibles() {
+      if (immoPostesDispo) return;
+      try {
+        const res = await fetch('/api/immobilisations/postes-disponibles?year=' + new Date().getFullYear());
+        immoPostesDispo = await res.json();
+      } catch (e) { immoPostesDispo = { employes: [], categories: [] }; }
+      let opts = '<option value="">Saisie libre...</option>';
+      if ((immoPostesDispo.employes || []).length) {
+        opts += '<optgroup label="Salaires (cout annuel)">';
+        immoPostesDispo.employes.forEach((e, i) => { opts += '<option value="emp:' + i + '">' + escapeHtml(e.nom) + ' — ' + formatEuro(e.coutAnnuel) + '</option>'; });
+        opts += '</optgroup>';
+      }
+      if ((immoPostesDispo.categories || []).length) {
+        opts += '<optgroup label="Charges CR_Prev (annuel)">';
+        immoPostesDispo.categories.forEach((c, i) => { opts += '<option value="cat:' + i + '">' + escapeHtml(c.label) + ' — ' + formatEuro(c.montantAnnuel) + '</option>'; });
+        opts += '</optgroup>';
+      }
+      document.getElementById('posteImport').innerHTML = opts;
+    }
+
+    function _posteOnPick() {
+      const sel = document.getElementById('posteImport');
+      const val = sel.value;
+      if (!val || !immoPostesDispo) { _posteBase = 0; sel.dataset.source = 'autre'; return; }
+      const [type, idx] = val.split(':');
+      let src = 'autre', base = 0, lib = '';
+      if (type === 'emp') { const e = immoPostesDispo.employes[+idx]; if (e) { src = 'salaire'; base = e.coutAnnuel; lib = e.nom; } }
+      else if (type === 'cat') { const c = immoPostesDispo.categories[+idx]; if (c) { src = 'prestation'; base = c.montantAnnuel; lib = c.label; } }
+      _posteBase = base;
+      sel.dataset.source = src;
+      document.getElementById('posteLibelle').value = lib;
+      _posteRecalc();
+    }
+
+    function _posteRecalc() {
+      if (!_posteBase) return; // saisie libre : on laisse le montant tel quel
+      const pct = Number(document.getElementById('postePct').value) || 0;
+      document.getElementById('posteMontant').value = Math.round(_posteBase * pct / 100);
+    }
+
+    async function addPoste() {
+      const id = document.getElementById('immoEditId').value;
+      if (!id) return;
+      const libelle = document.getElementById('posteLibelle').value.trim();
+      if (!libelle) return alert('Libelle du poste requis');
+      const payload = {
+        libelle,
+        source: document.getElementById('posteImport').dataset.source || 'autre',
+        source_ref: libelle,
+        montant: Number(document.getElementById('posteMontant').value) || 0,
+        cir: document.getElementById('posteCir').checked,
+        subvention: Number(document.getElementById('posteSubvention').value) || 0,
+      };
+      try {
+        const res = await fetch('/api/immobilisations/' + id + '/postes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const b = await res.json();
+        if (!res.ok) throw new Error(b.error || 'Erreur');
+        // reset du mini-formulaire
+        document.getElementById('posteImport').value = '';
+        document.getElementById('posteImport').dataset.source = 'autre';
+        document.getElementById('posteLibelle').value = '';
+        document.getElementById('postePct').value = '100';
+        document.getElementById('posteMontant').value = '';
+        document.getElementById('posteCir').checked = false;
+        document.getElementById('posteSubvention').value = '0';
+        _posteBase = 0;
+        await _reloadImmoInModal(id);
+      } catch (e) { alert('Erreur : ' + e.message); }
+    }
+
+    async function deletePoste(id, pid) {
+      try {
+        const res = await fetch('/api/immobilisations/' + id + '/postes/' + pid, { method: 'DELETE' });
+        if (!res.ok) { const b = await res.json(); throw new Error(b.error || 'Erreur'); }
+        await _reloadImmoInModal(id);
+      } catch (e) { alert('Erreur : ' + e.message); }
+    }
+
+    // Recharge la liste des immos et re-rend la section postes de l'immo en cours d'edition
+    async function _reloadImmoInModal(id) {
+      await refreshImmobilisations();
+      const im = immoData.find(x => x.id === id);
+      if (!im) return;
+      const hasPostes = (im.postes || []).length > 0;
+      const mEl = document.getElementById('immoMontant');
+      mEl.value = hasPostes ? im.montant : (im.montantSaisi != null ? im.montantSaisi : im.montant);
+      mEl.readOnly = hasPostes; mEl.style.opacity = hasPostes ? '0.6' : '1';
+      _immoPreviewPlan();
+      renderPostesInModal(im);
+    }
+
+    function renderPostesInModal(im) {
+      const postes = im.postes || [];
+      const list = document.getElementById('immoPostesList');
+      if (!postes.length) {
+        list.innerHTML = '<div style="font-size:0.8rem;color:var(--text-secondary)">Aucun poste. Sans poste, le montant saisi ci-dessus est utilise comme assiette.</div>';
+      } else {
+        let h = '<table style="width:100%;border-collapse:collapse;font-size:0.78rem"><tbody>';
+        for (const p of postes) {
+          h += '<tr style="border-bottom:1px solid var(--border)">'
+            + '<td style="padding:0.3rem 0">' + escapeHtml(p.libelle)
+              + (p.cir ? ' <span style="font-size:0.62rem;color:var(--primary);font-weight:600;border:1px solid var(--primary);border-radius:3px;padding:0 0.2rem">CIR</span>' : '')
+              + (p.subvention > 0 ? ' <span style="font-size:0.68rem;color:var(--text-secondary)">(subv. ' + formatEuro(p.subvention) + ')</span>' : '')
+              + '</td>'
+            + '<td style="padding:0.3rem;text-align:right">' + formatEuro(p.montant) + '</td>'
+            + '<td style="padding:0.3rem 0 0.3rem 0.5rem;text-align:right"><button class="btn" onclick="deletePoste(\'' + im.id + '\',\'' + p.id + '\')" style="padding:0.05rem 0.4rem;font-size:0.72rem;color:var(--danger)">&times;</button></td>'
+            + '</tr>';
+        }
+        h += '</tbody></table>';
+        list.innerHTML = h;
+      }
+      const assiette = postes.reduce((s, p) => s + (Number(p.montant) || 0), 0);
+      const info = document.getElementById('immoAssietteInfo');
+      info.innerHTML = postes.length
+        ? 'Assiette amortissable = <strong>' + formatEuro(assiette) + '</strong> &nbsp;·&nbsp; Base CIR nette = <strong style="color:var(--primary)">' + formatEuro(im.baseCir || 0) + '</strong>'
+        : '';
     }
 
     async function submitImmo() {
@@ -13072,8 +13242,14 @@
         const res = await fetch(url, { method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         const body = await res.json();
         if (!res.ok) throw new Error(body.error || 'Erreur');
-        closeImmoModal();
-        refreshImmobilisations();
+        if (id) {
+          closeImmoModal();
+          refreshImmobilisations();
+        } else {
+          // Création : recharger puis rouvrir en édition pour composer l'assiette (postes)
+          await refreshImmobilisations();
+          if (body && body.id) editImmo(body.id);
+        }
       } catch (err) { alert('Erreur : ' + err.message); }
     }
 

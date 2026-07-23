@@ -572,13 +572,42 @@ function computePlanAmortissement(immo) {
   return { plan, montant: M };
 }
 
+// --- Postes d'assiette (Phase 5.2) : composent le montant amortissable + la base CIR ---
+function _sumPostes(postes) {
+  return (postes || []).reduce((s, p) => s + (Number(p.montant) || 0), 0);
+}
+// Base CIR nette de subvention = Σ(postes CIR : montant − subvention).
+function _baseCirPostes(postes) {
+  return (postes || []).filter(p => p.cir)
+    .reduce((s, p) => s + (Number(p.montant) || 0) - (Number(p.subvention) || 0), 0);
+}
+// Montant amortissable effectif : somme des postes si l'immo en a, sinon le montant saisi manuellement.
+function montantAmortissable(immo, postes) {
+  return (postes && postes.length) ? _sumPostes(postes) : (Number(immo.montant) || 0);
+}
+
+// Récupère tous les postes groupés par immobilisation. TOLÉRANT si la table postes n'existe pas encore.
+async function fetchPostesByImmo() {
+  const byImmo = {};
+  try {
+    const { data, error } = await supabaseAdmin.from('immobilisation_postes').select('*');
+    if (error || !data) return byImmo;
+    for (const p of data) (byImmo[p.immobilisation_id] = byImmo[p.immobilisation_id] || []).push(p);
+  } catch (e) { /* table absente : postes vides */ }
+  return byImmo;
+}
+
 // Somme des dotations de toutes les immobilisations pour une année (alimente le Compte de résultat).
 // TOLÉRANT : si la table n'existe pas encore (migration non appliquée) ou erreur Supabase, renvoie 0.
 async function sumDotationsForYear(year) {
   try {
     const { data, error } = await supabaseAdmin.from('immobilisations').select('*');
     if (error || !data) return 0;
-    return data.reduce((sum, immo) => sum + computeDotationForYear(immo, year), 0);
+    const byImmo = await fetchPostesByImmo();
+    return data.reduce((sum, immo) => {
+      const eff = montantAmortissable(immo, byImmo[immo.id]);
+      return sum + computeDotationForYear({ ...immo, montant: eff }, year);
+    }, 0);
   } catch (e) {
     return 0;
   }
@@ -7714,7 +7743,7 @@ app.get('/api/ebe', async (req, res) => {
 // Table mono-locataire (dashboardGate protège déjà toutes les /api/*). Client supabaseAdmin.
 // ============================================================
 
-// GET /api/immobilisations — liste, enrichie du plan d'amortissement de chaque immo
+// GET /api/immobilisations — liste enrichie (postes, montant effectif, plan d'amortissement, base CIR)
 app.get('/api/immobilisations', async (req, res) => {
   try {
     const { data, error } = await supabaseAdmin
@@ -7722,11 +7751,111 @@ app.get('/api/immobilisations', async (req, res) => {
       .select('*')
       .order('date_mise_en_service', { ascending: false });
     if (error) return res.status(500).json({ error: error.message });
-    const immobilisations = (data || []).map(immo => ({
-      ...immo,
-      planAmortissement: computePlanAmortissement(immo),
-    }));
-    res.json({ immobilisations });
+    const byImmo = await fetchPostesByImmo();
+    let totalBaseCir = 0;
+    const immobilisations = (data || []).map(immo => {
+      const postes = byImmo[immo.id] || [];
+      const montantSaisi = Number(immo.montant) || 0;
+      const montantEffectif = montantAmortissable(immo, postes);
+      const baseCir = Math.round(_baseCirPostes(postes));
+      totalBaseCir += baseCir;
+      return {
+        ...immo,
+        montantSaisi,                 // montant manuel d'origine (si pas de postes)
+        montant: montantEffectif,     // assiette amortissable réellement utilisée
+        postes,
+        baseCir,
+        planAmortissement: computePlanAmortissement({ ...immo, montant: montantEffectif }),
+      };
+    });
+    res.json({ immobilisations, totalBaseCir: Math.round(totalBaseCir) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/immobilisations/postes-disponibles?year=YYYY — "postes connus" pour composer une assiette
+// (employés avec coût annuel depuis la masse salariale + catégories de charges CR_Prév).
+app.get('/api/immobilisations/postes-disponibles', async (req, res) => {
+  try {
+    const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+    const yStr = String(year) + '-';
+    const employes = [];
+    try {
+      const masse = await fetchAndParseMasseSalarialeDetailed();
+      const acc = {};
+      for (const [mKey, m] of Object.entries(masse.byMonth || {})) {
+        if (!mKey.startsWith(yStr)) continue;
+        for (const d of (m.detail || [])) acc[d.nom] = (acc[d.nom] || 0) + (Number(d.cout) || 0);
+      }
+      for (const [nom, cout] of Object.entries(acc)) employes.push({ nom, coutAnnuel: Math.round(cout) });
+      employes.sort((a, b) => b.coutAnnuel - a.coutAnnuel);
+    } catch (e) { /* masse salariale indisponible */ }
+    const categories = [];
+    try {
+      const cr = await fetchAndParseCRPrev();
+      for (const [cat, byMonth] of Object.entries(cr.categories || {})) {
+        let tot = 0;
+        for (const [mKey, val] of Object.entries(byMonth)) if (mKey.startsWith(yStr)) tot += val;
+        if (tot > 0) categories.push({ label: cat, montantAnnuel: Math.round(tot) });
+      }
+      categories.sort((a, b) => b.montantAnnuel - a.montantAnnuel);
+    } catch (e) { /* CR_Prév indisponible */ }
+    res.json({ year, employes, categories });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Sous-CRUD postes d'une immobilisation ---
+// POST /api/immobilisations/:id/postes
+app.post('/api/immobilisations/:id/postes', async (req, res) => {
+  try {
+    const { libelle, source, source_ref, montant, cir, subvention } = req.body || {};
+    if (!libelle || !libelle.trim()) return res.status(400).json({ error: 'Libellé du poste requis' });
+    const row = {
+      immobilisation_id: req.params.id,
+      libelle: libelle.trim(),
+      source: ['salaire', 'prestation', 'autre'].includes(source) ? source : 'autre',
+      source_ref: source_ref || null,
+      montant: Number(montant) || 0,
+      cir: !!cir,
+      subvention: Number(subvention) || 0,
+    };
+    const { data, error } = await supabaseAdmin.from('immobilisation_postes').insert(row).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/immobilisations/:id/postes/:pid
+app.put('/api/immobilisations/:id/postes/:pid', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const update = { updated_at: new Date().toISOString() };
+    if (typeof b.libelle === 'string' && b.libelle.trim()) update.libelle = b.libelle.trim();
+    if (['salaire', 'prestation', 'autre'].includes(b.source)) update.source = b.source;
+    if (b.source_ref !== undefined) update.source_ref = b.source_ref || null;
+    if (b.montant != null) update.montant = Number(b.montant) || 0;
+    if (typeof b.cir === 'boolean') update.cir = b.cir;
+    if (b.subvention != null) update.subvention = Number(b.subvention) || 0;
+    const { data, error } = await supabaseAdmin.from('immobilisation_postes').update(update).eq('id', req.params.pid).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/immobilisations/:id/postes/:pid
+app.delete('/api/immobilisations/:id/postes/:pid', async (req, res) => {
+  try {
+    const { count, error } = await supabaseAdmin.from('immobilisation_postes').delete({ count: 'exact' }).eq('id', req.params.pid);
+    if (error) return res.status(500).json({ error: error.message });
+    if (!count) return res.status(404).json({ error: 'Poste introuvable' });
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
