@@ -3862,7 +3862,7 @@
         <div class="kpi-value" id="tresoKpiCharges">--</div>
         <div class="kpi-sub" id="tresoKpiChargesSub"></div>
       </div>
-      <div class="kpi-block">
+      <div class="kpi-block" onclick="openPipelineDetailModal()" style="cursor:pointer">
         <div class="kpi-label">Pipeline pondere <span class="kpi-unit">HT</span></div>
         <div class="kpi-value" id="tresoKpiPipeline">--</div>
         <div class="kpi-sub" id="tresoKpiPipelineSub"></div>
@@ -12823,6 +12823,25 @@
       document.getElementById('tresoMoisDetailModalOverlay').classList.add('active');
     }
 
+    // Detail du pipeline pondere (deals HubSpot) — reutilise le chrome de la modale mois (globale).
+    function openPipelineDetailModal() {
+      if (!tresoData || !tresoData.pipelineDetail || !tresoData.pipelineDetail.length) return;
+      const deals = tresoData.pipelineDetail.slice().sort((a, b) => b.weighted - a.weighted);
+      document.getElementById('tresoMoisDetailTitle').textContent = 'Pipeline pondere HubSpot';
+      let html = '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.6rem">Chaque deal est pondere par la probabilite de son etape (bareme du kanban commercial).</div>';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:0.82rem"><thead><tr style="color:var(--text-secondary);border-bottom:1px solid var(--border)"><th style="text-align:left;padding:0.35rem 0">Deal</th><th style="text-align:left;padding:0.35rem">Etape</th><th style="text-align:right;padding:0.35rem">Montant</th><th style="text-align:right;padding:0.35rem">Proba</th><th style="text-align:right;padding:0.35rem 0 0.35rem 0.5rem">Pondere</th></tr></thead><tbody>';
+      for (const dl of deals) {
+        html += '<tr style="border-bottom:1px solid var(--border)"><td style="padding:0.3rem 0">' + escapeHtml(dl.name || '') + '</td>'
+          + '<td style="padding:0.3rem;color:var(--text-secondary)">' + escapeHtml(dl.stage || '') + '</td>'
+          + '<td style="text-align:right;padding:0.3rem">' + formatEuro(dl.amount) + '</td>'
+          + '<td style="text-align:right;padding:0.3rem;color:var(--text-secondary)">' + (dl.probability || 0) + '%</td>'
+          + '<td style="text-align:right;padding:0.3rem 0 0.3rem 0.5rem;font-weight:600">' + formatEuro(dl.weighted) + '</td></tr>';
+      }
+      html += '</tbody><tfoot><tr style="border-top:2px solid var(--border);font-weight:700"><td colspan="4" style="padding:0.5rem 0">Total pipeline pondere</td><td style="text-align:right;padding:0.5rem 0 0.5rem 0.5rem">' + formatEuro(tresoData.pipelinePondere || 0) + '</td></tr></tfoot></table>';
+      document.getElementById('tresoMoisDetailBody').innerHTML = html;
+      document.getElementById('tresoMoisDetailModalOverlay').classList.add('active');
+    }
+
     // Carnet "Dettes & engagements" — photo instant T (onglet Dettes). À distinguer de la projection 13 mois (le "film").
     function renderTresoDettes() {
       const section = document.getElementById('tresoDettesSection');
@@ -12906,7 +12925,7 @@
         '<div class="cr-sub"><span>' + label + '</span><span>' + val + '</span></div>';
 
       let html = '';
-      html += row("Chiffre d'affaires" + (projete ? ' (facture + pipeline)' : ' facture'), ca);
+      html += row("Chiffre d'affaires" + (projete ? ' (facture + pipeline)' : ' facture'), ca, { onclick: "openCrDetailModal('ca')" });
       if (projete && d.ca.pipelinePondere) {
         html += subRow('dont CA facture (Notion)', formatEuro(d.ca.facture));
         html += subRow('dont pipeline pondere (HubSpot)', formatEuro(d.ca.pipelinePondere));
@@ -12918,8 +12937,8 @@
       if (d.financements.totalSubv) html += row('Subventions', d.financements.totalSubv, { plus: true, onclick: "openCrDetailModal('subventions')" });
       if (d.financements.totalAide) html += row('Aides', d.financements.totalAide, { plus: true, onclick: "openCrDetailModal('aides')" });
       html += row("= Excedent brut d'exploitation (EBE)", ebe, { total: true });
-      html += row('Dotations aux amortissements', d.amortissements, { neg: d.amortissements > 0, sep: true });
-      html += subRow('Module Immobilisations a venir (Phase 5)', formatEuro(0));
+      html += row('Dotations aux amortissements', d.amortissements, { neg: d.amortissements > 0, sep: true, onclick: "navigateTo('immobilisations')" });
+      if (!d.amortissements) html += subRow('Aucune immobilisation active cette annee (module Immobilisations)', formatEuro(0));
       html += row("= Resultat d'exploitation", resExploit, { total: true });
       html += row('Impot sur les societes (IS)', is, { neg: true, sep: true, onclick: "openCrDetailModal('is')" });
       html += row('= Resultat net', resNet, { total: true });
@@ -12935,7 +12954,15 @@
       const d = crData;
       const projete = document.getElementById('crProjete').checked;
       let title = '', body = '';
-      if (kind === 'charges') {
+      if (kind === 'ca') {
+        title = "Chiffre d'affaires " + d.year;
+        body = '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.6rem">CA facture depuis Notion' + (projete ? ', + pipeline pondere HubSpot (barème par etape) si projete.' : '.') + '</div>';
+        body += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid var(--border)"><span>CA facture (Notion)</span><strong>' + formatEuro(d.ca.facture) + '</strong></div>';
+        if (projete) {
+          body += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid var(--border)"><span>+ Pipeline pondere (HubSpot)</span><span>' + formatEuro(d.ca.pipelinePondere) + '</span></div>';
+          body += '<div style="display:flex;justify-content:space-between;padding:0.5rem 0"><strong>CA projete</strong><strong>' + formatEuro(d.ca.projete) + '</strong></div>';
+        }
+      } else if (kind === 'charges') {
         title = "Charges d'exploitation " + d.year;
         body = '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.6rem">Reel Qonto (mois clos) + previsionnel CR_Prev (mois a venir). La masse salariale est comprise dans ce total.</div>';
         body += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid var(--border)"><span>Total charges</span><strong>' + formatEuro(d.charges.total) + '</strong></div>';
