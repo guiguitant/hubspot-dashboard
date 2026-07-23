@@ -12871,7 +12871,10 @@
       html += '<div style="display:flex;justify-content:space-between;padding:0.5rem 0;border-bottom:1px solid var(--border)"><span>Solde Qonto (tous comptes)</span><strong>' + formatEuro(soldeQonto) + '</strong></div>';
       for (const d of dettes) {
         const tauxTxt = (d.taux && d.taux !== '0%') ? ' <span style="color:var(--text-secondary);font-size:0.78rem">(' + escapeHtml(d.taux) + ')</span>' : '';
-        html += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;color:var(--danger)"><span>' + escapeHtml(d.label) + tauxTxt + '</span><span>− ' + formatEuro(d.restant) + '</span></div>';
+        // Avance : on retranche le reel percu ; on rappelle le montant engage pour transparence
+        const reelTxt = (d.reel && d.montantEngage && d.montantEngage !== d.restant)
+          ? ' <span style="color:var(--text-secondary);font-size:0.75rem">(percu reel ; engage ' + formatEuro(d.montantEngage) + ')</span>' : '';
+        html += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;color:var(--danger)"><span>' + escapeHtml(d.label) + tauxTxt + reelTxt + '</span><span>− ' + formatEuro(d.restant) + '</span></div>';
       }
       if (dettes.length === 0) {
         html += '<div style="padding:0.4rem 0;color:var(--text-secondary);font-size:0.85rem">Aucun engagement ferme en cours.</div>';
@@ -12914,8 +12917,11 @@
         + '<th style="padding:0.5rem 0 0.5rem 0.5rem;text-align:right">Restant du</th></tr></thead><tbody>';
       for (const d of dettes) {
         const compte = d.controle; // TRUE = retranché à la nette de dette (photo)
+        // Avance : le restant retranché = réel perçu (les autres engagements = valeur gsheet)
+        const reelTxt = (d.reel && d.montantEngage && d.montantEngage !== d.restant)
+          ? ' <span style="font-size:0.7rem;color:var(--text-secondary)">(percu reel ; engage ' + formatEuro(d.montantEngage) + ')</span>' : '';
         html += '<tr style="border-bottom:1px solid rgba(120,119,116,0.15)' + (compte ? '' : ';opacity:0.5') + '">'
-          + '<td style="padding:0.5rem 0.5rem 0.5rem 0">' + escapeHtml(d.label) + (compte ? '' : ' <span style="font-size:0.72rem;color:var(--text-secondary)">(hors photo)</span>') + '</td>'
+          + '<td style="padding:0.5rem 0.5rem 0.5rem 0">' + escapeHtml(d.label) + reelTxt + (compte ? '' : ' <span style="font-size:0.72rem;color:var(--text-secondary)">(hors photo)</span>') + '</td>'
           + '<td style="padding:0.5rem;text-align:right;color:var(--text-secondary)">' + formatEuro(d.montantInitial) + '</td>'
           + '<td style="padding:0.5rem;text-align:right;color:var(--text-secondary)">' + (escapeHtml(d.taux) || '·') + '</td>'
           + '<td style="padding:0.5rem 0 0.5rem 0.5rem;text-align:right;font-weight:600">' + formatEuro(d.restant) + '</td></tr>';

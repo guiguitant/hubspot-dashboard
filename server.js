@@ -6046,10 +6046,32 @@ app.get('/api/tresorerie', async (req, res) => {
       includePipeline,
     });
 
-    // Trésorerie nette de dette (photo instant T) = solde Qonto tous comptes − Σ(engagements fermes, onglet Dettes).
-    // C'est ce qui appartient réellement à l'entreprise. Robuste : null si Dettes injoignable (pas de plantage).
+    // Trésorerie nette de dette (photo instant T) = solde Qonto tous comptes − Σ(engagements fermes).
+    // Cas particulier des AVANCES REMBOURSABLES : on retranche le RÉEL perçu et pas encore remboursé
+    // (avanceRemboursableRestante, dérivé de l'onglet Plan_TRE_Prév filtré à la date du jour) et non le
+    // montant conventionné de l'onglet Dettes (qui inclut souvent des tranches pas encore encaissées).
+    // Les autres engagements (emprunts, primes...) restent lus tels quels de l'onglet Dettes.
+    // Convention : une ligne Dettes est une avance si son libellé contient "avance".
     const soldeQonto = qontoData.soldeTousComptes != null ? qontoData.soldeTousComptes : qontoData.soldeActuel;
-    const totalDettes = dettesRes ? dettesRes.totalRestant : 0;
+    const avanceReelle = Math.round(result.avanceRemboursableRestante || 0);
+    const estAvance = (label) => /avance/i.test(label || '');
+    let dettesList = dettesRes ? dettesRes.dettes.slice() : [];
+    let totalDettes = 0;
+    if (dettesRes) {
+      const totalNonAvance = dettesList
+        .filter(d => d.controle && !estAvance(d.label))
+        .reduce((s, d) => s + d.restant, 0);
+      totalDettes = totalNonAvance + avanceReelle;
+      // Remplace le montant engagé des lignes d'avance par le réel perçu (global) ; les avances
+      // supplémentaires éventuelles passent à 0 pour ne pas compter le réel plusieurs fois.
+      let avanceAffectee = false;
+      dettesList = dettesList.map(d => {
+        if (!estAvance(d.label)) return d;
+        const restant = avanceAffectee ? 0 : avanceReelle;
+        avanceAffectee = true;
+        return { ...d, restant, montantEngage: d.restant, reel: true };
+      });
+    }
     const tresorerieNetteDeDette = (soldeQonto != null && dettesRes)
       ? Math.round(soldeQonto - totalDettes)
       : null;
@@ -6059,7 +6081,7 @@ app.get('/api/tresorerie', async (req, res) => {
       soldeActuel: qontoData.soldeActuel,
       soldeQonto,
       tresorerieNetteDeDette,
-      dettes: dettesRes ? dettesRes.dettes : [],
+      dettes: dettesList,
       totalDettes: Math.round(totalDettes),
       dettesError,
       avanceRemboursableRestante: result.avanceRemboursableRestante || 0,
