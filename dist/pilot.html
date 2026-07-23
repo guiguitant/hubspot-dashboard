@@ -3337,11 +3337,6 @@
             <span id="tresoChevron" style="margin-left:auto;font-size:0.6rem;transition:transform 0.2s;color:var(--sidebar-text-secondary)">&#9654;</span>
           </button>
           <div id="tresoSubnav" class="sidebar-subnav">
-            <button class="sidebar-link" onclick="navigateToMasseSalariale()" data-page="masse-salariale">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="5" r="3"/><path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6"/></svg>
-              Masse salariale
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-left:auto;opacity:0.5"><rect x="3" y="7" width="10" height="8" rx="1"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/></svg>
-            </button>
             <button class="sidebar-link" onclick="navigateTo('scenarios')" data-page="scenarios">
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12M2 8h8M2 13h10"/><path d="M12 6l3 3-3 3"/></svg>
               Scenarios
@@ -4485,32 +4480,7 @@
   </div>
 
   <!-- PAGE: Masse salariale -->
-  <div class="app-page" id="page-masse-salariale">
-  <div class="page">
-    <div class="page-icon">&#128101;</div>
-    <h1 class="page-title">Masse salariale</h1>
-    <p class="page-desc">Gestion des salaries et projection du cout salarial.</p>
 
-    <div class="section">
-      <div class="section-title" style="display:flex;align-items:center;gap:0.5rem">
-        Equipe
-        <span style="font-size:0.75rem;color:var(--text-secondary);font-weight:400">— lecture seule, source : GSheet <em>Masse_salariale</em> + <em>Salaires</em></span>
-      </div>
-      <div id="salariesTableSection">
-        <p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p>
-      </div>
-    </div>
-
-    <div class="section">
-      <div class="section-title">Projection mensuelle (12 mois)</div>
-      <div id="masseSalarialeSection">
-        <p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p>
-      </div>
-    </div>
-
-  </div>
-  </div>
-  <!-- end page-masse-salariale -->
 
   <!-- PAGE: Scenarios -->
   <div class="app-page" id="page-scenarios">
@@ -4989,27 +4959,6 @@
   </div>
 
   <!-- Modal Salaries : retirée en Phase F (source GSheet, lecture seule). -->
-
-  <!-- Modal Mot de passe Masse salariale -->
-  <div class="modal-overlay" id="masseSalarialeAuthOverlay">
-    <div class="modal" style="max-width:360px">
-      <div class="modal-header">
-        <h2 style="display:flex;align-items:center;gap:0.5rem">
-          <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="7" width="10" height="8" rx="1"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/></svg>
-          Acces protege
-        </h2>
-      </div>
-      <div class="modal-body" style="padding:1rem">
-        <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:0.75rem">Entrez le mot de passe pour acceder a la masse salariale.</p>
-        <input type="password" id="masseSalarialePassword" placeholder="Mot de passe" style="width:100%;padding:0.5rem 0.75rem;border:1px solid var(--border);border-radius:var(--radius);font-size:0.9rem;font-family:inherit;background:var(--bg);color:var(--text)" onkeydown="if(event.key==='Enter')submitMasseSalarialeAuth()">
-        <p id="masseSalarialeAuthError" style="color:var(--danger);font-size:0.8rem;margin-top:0.4rem;display:none"></p>
-      </div>
-      <div class="modal-footer">
-        <button class="btn" onclick="closeMasseSalarialeAuth()">Annuler</button>
-        <button class="btn btn-filled" onclick="submitMasseSalarialeAuth()">Deverrouiller</button>
-      </div>
-    </div>
-  </div>
 
   <!-- Modal Creer/Editer Scenario -->
   <div class="modal-overlay" id="scenarioModalOverlay">
@@ -5568,7 +5517,7 @@
     // --- Navigation ---
     let currentPage = 'cockpit';
 
-    const PAGE_NAMES = { cockpit: 'Cockpit', dashboard: 'Commercial', 'analyse-clients': 'Analyse clients', facturation: 'Facturation', 'frais-km': 'Frais KM', tresorerie: 'Tresorerie', 'masse-salariale': 'Masse salariale', scenarios: 'Scenarios', 'compte-resultat': 'Compte de resultat', immobilisations: 'Immobilisations', analytics: 'Analytics', kpi: 'KPI', depenses: 'Depenses' };
+    const PAGE_NAMES = { cockpit: 'Cockpit', dashboard: 'Commercial', 'analyse-clients': 'Analyse clients', facturation: 'Facturation', 'frais-km': 'Frais KM', tresorerie: 'Tresorerie', scenarios: 'Scenarios', 'compte-resultat': 'Compte de resultat', immobilisations: 'Immobilisations', analytics: 'Analytics', kpi: 'KPI', depenses: 'Depenses' };
 
     function navigateTo(page) {
       currentPage = page;
@@ -5580,7 +5529,7 @@
 
       // Gestion des groupes : ouvrir/fermer + fond englobant
       const isComPage = (page === 'dashboard' || page === 'analyse-clients');
-      const isTresoPage = (page === 'tresorerie' || page === 'masse-salariale' || page === 'scenarios');
+      const isTresoPage = (page === 'tresorerie' || page === 'scenarios');
 
       // Commercial
       toggleComSubnav(isComPage);
@@ -5592,7 +5541,7 @@
       // Trésorerie
       toggleTresoSubnav(isTresoPage);
       document.getElementById('tresoGroup').classList.toggle('group-active', isTresoPage);
-      if (page === 'masse-salariale' || page === 'scenarios') {
+      if (page === 'scenarios') {
         document.querySelector('[data-page="tresorerie"]').classList.add('active');
       }
 
@@ -5610,8 +5559,7 @@
           refreshFactData();
         }
       }
-      if (page === 'tresorerie') { if (tresoData) { renderTresoKpis(); renderTresoDettes(); renderTresoChart(); renderMasseSalariale(); } else refreshTresoData(); }
-      if (page === 'masse-salariale') refreshMasseSalarialePage();
+      if (page === 'tresorerie') { if (tresoData) { renderTresoKpis(); renderTresoDettes(); renderTresoChart(); } else refreshTresoData(); }
       if (page === 'scenarios') refreshScenariosPage();
       if (page === 'compte-resultat') refreshCompteResultat();
       if (page === 'immobilisations') refreshImmobilisations();
@@ -5620,55 +5568,6 @@
       if (page === 'frais-km' && !fraisKmData) refreshFraisKmClients();
       if (page === 'analyse-clients' && !analyseClientsData) refreshAnalyseClients();
       if (page === 'depenses') { if (depensesData) { renderDepensesKpis(); renderDepensesChart(); renderDepensesCategories(); renderDepensesVendors(); renderDepensesSubscriptions(); } else refreshDepensesData(); }
-    }
-
-    // --- Auth masse salariale ---
-    function navigateToMasseSalariale() {
-      if (sessionStorage.getItem('masseSalarialeAuth') === 'ok') {
-        navigateTo('masse-salariale');
-        return;
-      }
-      // Ouvrir le sous-menu trésorerie pour le contexte visuel
-      toggleTresoSubnav(true);
-      openMasseSalarialeAuth();
-    }
-
-    function openMasseSalarialeAuth() {
-      document.getElementById('masseSalarialePassword').value = '';
-      document.getElementById('masseSalarialeAuthError').style.display = 'none';
-      document.getElementById('masseSalarialeAuthOverlay').classList.add('active');
-      setTimeout(() => document.getElementById('masseSalarialePassword').focus(), 100);
-    }
-
-    function closeMasseSalarialeAuth() {
-      document.getElementById('masseSalarialeAuthOverlay').classList.remove('active');
-    }
-
-    document.getElementById('masseSalarialeAuthOverlay').addEventListener('click', function(e) {
-      if (e.target === this) closeMasseSalarialeAuth();
-    });
-
-    async function submitMasseSalarialeAuth() {
-      const password = document.getElementById('masseSalarialePassword').value;
-      const errorEl = document.getElementById('masseSalarialeAuthError');
-      try {
-        const res = await fetch('/api/auth-masse-salariale', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password }),
-        });
-        if (!res.ok) {
-          errorEl.textContent = 'Mot de passe incorrect';
-          errorEl.style.display = 'block';
-          return;
-        }
-        sessionStorage.setItem('masseSalarialeAuth', 'ok');
-        closeMasseSalarialeAuth();
-        navigateTo('masse-salariale');
-      } catch {
-        errorEl.textContent = 'Erreur de connexion';
-        errorEl.style.display = 'block';
-      }
     }
 
     function toggleComSubnav(forceOpen) {
@@ -5694,7 +5593,6 @@
       else if (currentPage === 'dashboard') refreshData();
       else if (currentPage === 'facturation') forceSyncFactData(); // Sync button → invalide cache Notion + Pennylane puis re-fetch
       else if (currentPage === 'tresorerie') refreshTresoData();
-      else if (currentPage === 'masse-salariale') refreshMasseSalarialePage();
       else if (currentPage === 'scenarios') refreshScenariosPage();
       else if (currentPage === 'frais-km') refreshFraisKmClients();
       else if (currentPage === 'analyse-clients') { analyseClientsData = null; refreshAnalyseClients(); }
@@ -12803,7 +12701,6 @@
         renderTresoKpis();
         renderTresoDettes();
         renderTresoChart();
-        renderMasseSalariale();
       } catch (err) {
         console.error('Erreur tresorerie:', err);
         errorBanner.textContent = err.message;
@@ -14134,110 +14031,6 @@
     // --- Salaries : lecture seule depuis GSheet (Phase F). CRUD Supabase retiré. ---
     // Les anciens helpers openSalariesModal/editSalarie/deleteSalarie/submitSalarie/resetSalForm/refreshSalariesListe
     // sont supprimés ; la source de vérité est désormais le GSheet Masse_salariale + Salaires.
-
-    async function refreshMasseSalarialePage() {
-      await renderSalariesTable();
-      if (!tresoData) await refreshTresoData();
-      renderMasseSalariale();
-    }
-
-    async function renderSalariesTable() {
-      const container = document.getElementById('salariesTableSection');
-      if (!container) return;
-      try {
-        const res = await fetch('/api/scenarios/baseline/salaries');
-        const salaries = await res.json();
-        if (!Array.isArray(salaries) || salaries.length === 0) {
-          container.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:0.5rem">Aucun employe remonte depuis le GSheet "Salaires".</p>';
-          return;
-        }
-        const typeColors = { salarie: 'var(--primary)', dirigeant: 'var(--purple)', alternant: 'var(--warning)', stagiaire: 'var(--text-secondary)' };
-        const typeBgs = { salarie: 'var(--primary-bg)', dirigeant: 'var(--purple-bg)', alternant: 'var(--warning-bg)', stagiaire: 'var(--hover)' };
-        let html = '<table style="width:100%;border-collapse:collapse;font-size:0.85rem">';
-        html += '<thead><tr style="border-bottom:2px solid var(--border)">';
-        html += '<th style="text-align:left;padding:0.6rem 0.8rem">Nom</th>';
-        html += '<th style="text-align:center;padding:0.6rem 0.5rem">Type</th>';
-        html += '<th style="text-align:right;padding:0.6rem 0.5rem">Net mensuel</th>';
-        html += '<th style="text-align:right;padding:0.6rem 0.5rem">Charges</th>';
-        html += '<th style="text-align:right;padding:0.6rem 0.5rem">Cout moyen</th>';
-        html += '<th style="text-align:center;padding:0.6rem 0.5rem">Entree</th>';
-        html += '<th style="text-align:center;padding:0.6rem 0.5rem">Sortie</th>';
-        html += '</tr></thead><tbody>';
-        let totalNet = 0, totalCharges = 0, totalCout = 0;
-        for (const s of salaries) {
-          const cout = Math.round(s.cout_moyen_mensuel || (s.net_mensuel + s.charges_mensuelles));
-          const entree = s.date_entree ? new Date(s.date_entree).toLocaleDateString('fr-FR') : '-';
-          const sortie = s.date_sortie ? new Date(s.date_sortie).toLocaleDateString('fr-FR') : '-';
-          const isActif = !s.date_sortie || new Date(s.date_sortie) >= new Date();
-          totalNet += isActif ? (s.net_mensuel || 0) : 0;
-          totalCharges += isActif ? (s.charges_mensuelles || 0) : 0;
-          totalCout += isActif ? cout : 0;
-          const typeKey = (s.type || '').toLowerCase();
-          const typeLabel = s.isDirigeant ? 'Dirigeant' : (s.type || 'Salarie');
-          html += '<tr style="border-bottom:1px solid var(--border);' + (isActif ? '' : 'opacity:0.5;') + '">';
-          html += '<td style="padding:0.5rem 0.8rem;font-weight:600">' + (s.nom || '-') + '</td>';
-          html += '<td style="text-align:center;padding:0.5rem"><span style="font-size:0.75rem;padding:0.2rem 0.5rem;border-radius:3px;background:' + (typeBgs[typeKey] || typeBgs.salarie) + ';color:' + (typeColors[typeKey] || typeColors.salarie) + ';font-weight:500">' + typeLabel + '</span></td>';
-          html += '<td style="text-align:right;padding:0.5rem">' + formatEuro(s.net_mensuel || 0) + '</td>';
-          html += '<td style="text-align:right;padding:0.5rem">' + formatEuro(s.charges_mensuelles || 0) + '</td>';
-          html += '<td style="text-align:right;padding:0.5rem;font-weight:600;color:var(--warning)">' + formatEuro(cout) + '</td>';
-          html += '<td style="text-align:center;padding:0.5rem">' + entree + '</td>';
-          html += '<td style="text-align:center;padding:0.5rem">' + sortie + '</td>';
-          html += '</tr>';
-        }
-        html += '<tr style="border-top:2px solid var(--text)">';
-        html += '<td colspan="2" style="padding:0.6rem 0.8rem;font-weight:700">Total (actifs)</td>';
-        html += '<td style="text-align:right;padding:0.6rem 0.5rem;font-weight:700">' + formatEuro(totalNet) + '</td>';
-        html += '<td style="text-align:right;padding:0.6rem 0.5rem;font-weight:700">' + formatEuro(totalCharges) + '</td>';
-        html += '<td style="text-align:right;padding:0.6rem 0.5rem;font-weight:700;color:var(--warning)">' + formatEuro(totalCout) + '</td>';
-        html += '<td colspan="2"></td>';
-        html += '</tr>';
-        html += '</tbody></table>';
-        container.innerHTML = html;
-      } catch {
-        container.innerHTML = '<p style="color:var(--danger);font-size:0.85rem">Erreur chargement</p>';
-      }
-    }
-
-    function renderMasseSalariale() {
-      if (!tresoData || !tresoData.previsionnel) return;
-      const container = document.getElementById('masseSalarialeSection');
-      if (!container) return;
-      const prev = tresoData.previsionnel;
-      const hasMasse = prev.some(m => m.masseSalariale > 0);
-      if (!hasMasse) {
-        container.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:0.5rem">Aucun salarie enregistre. Cliquez sur "+ Ajouter" pour commencer.</p>';
-        return;
-      }
-      let html = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:0.85rem">';
-      html += '<thead><tr style="border-bottom:2px solid var(--border)">';
-      for (const m of prev) {
-        const label = new Date(m.annee, m.mois - 1).toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
-        html += '<th style="text-align:center;padding:0.5rem;font-weight:600;white-space:nowrap">' + label + '</th>';
-      }
-      html += '</tr></thead><tbody><tr>';
-      for (const m of prev) {
-        const val = m.masseSalariale || 0;
-        html += '<td style="text-align:center;padding:0.5rem;font-weight:600;color:var(--warning)">' + (val > 0 ? formatEuro(val) : '-') + '</td>';
-      }
-      html += '</tr></tbody></table></div>';
-
-      // Total sur l'horizon affiché
-      const totalAnnuel = prev.reduce((s, m) => s + (m.masseSalariale || 0), 0);
-      html += '<div style="text-align:right;padding:0.5rem 0.8rem;font-weight:700;font-size:0.9rem;color:var(--text-secondary)">Total ' + prev.length + ' mois : <span style="color:var(--warning)">' + formatEuro(totalAnnuel) + '</span></div>';
-
-      container.innerHTML = html;
-    }
-
-
-
-    // =============================================
-    // --- DEPENSES ---
-    // =============================================
-
-    let depensesData = null;
-    let depensesChart = null;
-
-    const DEPENSES_UNAVAILABLE_HTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Donnees indisponibles (Pennylane en erreur). Reessayer avec le bouton Sync.</p>';
 
     async function refreshDepensesData() {
       const errorBanner = document.getElementById('depensesErrorBanner');
