@@ -645,9 +645,18 @@ function reintegrationAvanceAnnee(aide, annee) {
 }
 
 // Base CIR/CII nette par année d'une immo : brute (postes) − aides lissées + réintégrations d'avance.
+// Les aides ne portent plus de tag CIR/CII : leur déduction (et la réintégration des avances) est
+// répartie au PRORATA de la proportion CIR/CII du projet (calculée sur tous les postes éligibles,
+// toutes années). Cela gère les projets mixtes ET les années sans poste (réintégrations post-projet).
 // Retour : [{ annee, cir:{brute,deduction,reintegration,nette}, cii:{...} }].
 function computeBasesParAnnee(immo, postes, aides) {
   postes = postes || []; aides = aides || [];
+  const eligible = p => _posteEligibleCredit(p);
+  const totalCir = postes.filter(p => p.credit_type === 'cir' && eligible(p)).reduce((s, p) => s + (Number(p.montant) || 0), 0);
+  const totalCii = postes.filter(p => p.credit_type === 'cii' && eligible(p)).reduce((s, p) => s + (Number(p.montant) || 0), 0);
+  const totalCredit = totalCir + totalCii;
+  const part = { cir: totalCredit > 0 ? totalCir / totalCredit : 0, cii: totalCredit > 0 ? totalCii / totalCredit : 0 };
+
   const annees = new Set();
   for (const p of postes) if (p.annee != null) annees.add(Number(p.annee));
   if (immo.date_debut_projet && immo.date_fin_projet) {
@@ -664,17 +673,16 @@ function computeBasesParAnnee(immo, postes, aides) {
   }
   const result = [];
   for (const annee of [...annees].sort((x, y) => x - y)) {
+    // Aide lissée et réintégration TOTALES de l'année (tous crédits confondus), réparties ensuite au prorata.
+    const aideLisseeTotale = aides.reduce((s, a) => s + lisserAideAnnee(a, annee, immo.date_debut_projet, immo.date_fin_projet), 0);
+    const reintTotale = aides.filter(a => a.type === 'avance').reduce((s, a) => s + reintegrationAvanceAnnee(a, annee), 0);
     const bloc = { annee };
     for (const type of ['cir', 'cii']) {
       const brute = postes
-        .filter(p => Number(p.annee) === annee && p.credit_type === type && _posteEligibleCredit(p))
+        .filter(p => Number(p.annee) === annee && p.credit_type === type && eligible(p))
         .reduce((s, p) => s + (Number(p.montant) || 0) - (Number(p.subvention) || 0), 0);
-      const deduction = aides
-        .filter(a => a.credit_cible === type)
-        .reduce((s, a) => s + lisserAideAnnee(a, annee, immo.date_debut_projet, immo.date_fin_projet), 0);
-      const reintegration = aides
-        .filter(a => a.credit_cible === type && a.type === 'avance')
-        .reduce((s, a) => s + reintegrationAvanceAnnee(a, annee), 0);
+      const deduction = aideLisseeTotale * part[type];
+      const reintegration = reintTotale * part[type];
       bloc[type] = {
         brute: Math.round(brute),
         deduction: Math.round(deduction),
@@ -7992,12 +8000,11 @@ app.delete('/api/immobilisations/:id/postes/:pid', async (req, res) => {
 // POST /api/immobilisations/:id/aides
 app.post('/api/immobilisations/:id/aides', async (req, res) => {
   try {
-    const { type, financeur, credit_cible, montant, remboursement_debut, remboursement_montant_annuel, notes } = req.body || {};
+    const { type, financeur, montant, remboursement_debut, remboursement_montant_annuel, notes } = req.body || {};
     const row = {
       immobilisation_id: req.params.id,
       type: type === 'avance' ? 'avance' : 'subvention',
       financeur: financeur || null,
-      credit_cible: credit_cible === 'cir' ? 'cir' : 'cii',
       montant: Number(montant) || 0,
       remboursement_debut: remboursement_debut || null,
       remboursement_montant_annuel: (remboursement_montant_annuel != null && remboursement_montant_annuel !== '') ? Number(remboursement_montant_annuel) : null,
@@ -8018,7 +8025,6 @@ app.put('/api/immobilisations/:id/aides/:aid', async (req, res) => {
     const update = { updated_at: new Date().toISOString() };
     if (b.type === 'avance' || b.type === 'subvention') update.type = b.type;
     if (b.financeur !== undefined) update.financeur = b.financeur || null;
-    if (b.credit_cible === 'cir' || b.credit_cible === 'cii') update.credit_cible = b.credit_cible;
     if (b.montant != null) update.montant = Number(b.montant) || 0;
     if (b.remboursement_debut !== undefined) update.remboursement_debut = b.remboursement_debut || null;
     if (b.remboursement_montant_annuel !== undefined) update.remboursement_montant_annuel = (b.remboursement_montant_annuel != null && b.remboursement_montant_annuel !== '') ? Number(b.remboursement_montant_annuel) : null;

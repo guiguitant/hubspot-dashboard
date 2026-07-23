@@ -4799,12 +4799,6 @@
               <label style="font-size:0.72rem;color:var(--text-secondary);flex:1;min-width:110px">Financeur
                 <input type="text" id="aideFinanceur" placeholder="Etat, Region..." style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
               </label>
-              <label style="font-size:0.72rem;color:var(--text-secondary);width:70px">Credit
-                <select id="aideCredit" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
-                  <option value="cii">CII</option>
-                  <option value="cir">CIR</option>
-                </select>
-              </label>
               <label style="font-size:0.72rem;color:var(--text-secondary);width:100px">Montant
                 <input type="number" id="aideMontant" placeholder="0" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
               </label>
@@ -13272,7 +13266,7 @@
           ? ' · remb. ' + formatEuro(a.remboursement_montant_annuel || 0) + '/an des ' + _immoFmtDate(a.remboursement_debut)
           : '';
         h += '<tr style="border-bottom:1px solid var(--border)">'
-          + '<td style="padding:0.3rem 0">' + (a.type === 'avance' ? 'Avance' : 'Subvention') + ' ' + a.credit_cible.toUpperCase()
+          + '<td style="padding:0.3rem 0">' + (a.type === 'avance' ? 'Avance' : 'Subvention')
             + (a.financeur ? ' <span style="color:var(--text-secondary)">(' + escapeHtml(a.financeur) + ')</span>' : '')
             + '<span style="color:var(--text-secondary);font-size:0.72rem">' + rembTxt + '</span></td>'
           + '<td style="padding:0.3rem;text-align:right">' + formatEuro(a.montant) + '</td>'
@@ -13290,7 +13284,6 @@
       const payload = {
         type,
         financeur: document.getElementById('aideFinanceur').value.trim() || null,
-        credit_cible: document.getElementById('aideCredit').value,
         montant: Number(document.getElementById('aideMontant').value) || 0,
         remboursement_debut: type === 'avance' ? (document.getElementById('aideRembDebut').value || null) : null,
         remboursement_montant_annuel: type === 'avance' ? (Number(document.getElementById('aideRembAnnuel').value) || null) : null,
