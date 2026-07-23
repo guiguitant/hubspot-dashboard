@@ -576,9 +576,17 @@ function computePlanAmortissement(immo) {
 function _sumPostes(postes) {
   return (postes || []).reduce((s, p) => s + (Number(p.montant) || 0), 0);
 }
-// Base CIR nette de subvention = Σ(postes CIR : montant − subvention).
-function _baseCirPostes(postes) {
-  return (postes || []).filter(p => p.cir)
+// Éligibilité d'un poste à un crédit d'impôt (CIR ou CII).
+// Règle : la sous-traitance (source 'prestation') n'est éligible que si le prestataire est agréé.
+// Les dépenses internes (salaire) / autres ne sont pas soumises à l'agrément.
+function _posteEligibleCredit(p) {
+  if (p.source === 'prestation') return !!p.prestataire_agree;
+  return true;
+}
+// Base nette de subvention pour un type de crédit ('cir' | 'cii') = Σ(postes éligibles de ce type : montant − subvention).
+function _baseCredit(postes, type) {
+  return (postes || [])
+    .filter(p => p.credit_type === type && _posteEligibleCredit(p))
     .reduce((s, p) => s + (Number(p.montant) || 0) - (Number(p.subvention) || 0), 0);
 }
 // Montant amortissable effectif : somme des postes si l'immo en a, sinon le montant saisi manuellement.
@@ -7752,23 +7760,26 @@ app.get('/api/immobilisations', async (req, res) => {
       .order('date_mise_en_service', { ascending: false });
     if (error) return res.status(500).json({ error: error.message });
     const byImmo = await fetchPostesByImmo();
-    let totalBaseCir = 0;
+    let totalBaseCir = 0, totalBaseCii = 0;
     const immobilisations = (data || []).map(immo => {
       const postes = byImmo[immo.id] || [];
       const montantSaisi = Number(immo.montant) || 0;
       const montantEffectif = montantAmortissable(immo, postes);
-      const baseCir = Math.round(_baseCirPostes(postes));
+      const baseCir = Math.round(_baseCredit(postes, 'cir'));
+      const baseCii = Math.round(_baseCredit(postes, 'cii'));
       totalBaseCir += baseCir;
+      totalBaseCii += baseCii;
       return {
         ...immo,
         montantSaisi,                 // montant manuel d'origine (si pas de postes)
         montant: montantEffectif,     // assiette amortissable réellement utilisée
         postes,
         baseCir,
+        baseCii,
         planAmortissement: computePlanAmortissement({ ...immo, montant: montantEffectif }),
       };
     });
-    res.json({ immobilisations, totalBaseCir: Math.round(totalBaseCir) });
+    res.json({ immobilisations, totalBaseCir: Math.round(totalBaseCir), totalBaseCii: Math.round(totalBaseCii) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -7811,7 +7822,7 @@ app.get('/api/immobilisations/postes-disponibles', async (req, res) => {
 // POST /api/immobilisations/:id/postes
 app.post('/api/immobilisations/:id/postes', async (req, res) => {
   try {
-    const { libelle, source, source_ref, montant, cir, subvention } = req.body || {};
+    const { libelle, source, source_ref, montant, credit_type, prestataire_agree, subvention } = req.body || {};
     if (!libelle || !libelle.trim()) return res.status(400).json({ error: 'Libellé du poste requis' });
     const row = {
       immobilisation_id: req.params.id,
@@ -7819,7 +7830,8 @@ app.post('/api/immobilisations/:id/postes', async (req, res) => {
       source: ['salaire', 'prestation', 'autre'].includes(source) ? source : 'autre',
       source_ref: source_ref || null,
       montant: Number(montant) || 0,
-      cir: !!cir,
+      credit_type: ['none', 'cir', 'cii'].includes(credit_type) ? credit_type : 'none',
+      prestataire_agree: !!prestataire_agree,
       subvention: Number(subvention) || 0,
     };
     const { data, error } = await supabaseAdmin.from('immobilisation_postes').insert(row).select().single();
@@ -7839,7 +7851,8 @@ app.put('/api/immobilisations/:id/postes/:pid', async (req, res) => {
     if (['salaire', 'prestation', 'autre'].includes(b.source)) update.source = b.source;
     if (b.source_ref !== undefined) update.source_ref = b.source_ref || null;
     if (b.montant != null) update.montant = Number(b.montant) || 0;
-    if (typeof b.cir === 'boolean') update.cir = b.cir;
+    if (['none', 'cir', 'cii'].includes(b.credit_type)) update.credit_type = b.credit_type;
+    if (typeof b.prestataire_agree === 'boolean') update.prestataire_agree = b.prestataire_agree;
     if (b.subvention != null) update.subvention = Number(b.subvention) || 0;
     const { data, error } = await supabaseAdmin.from('immobilisation_postes').update(update).eq('id', req.params.pid).select().single();
     if (error) return res.status(500).json({ error: error.message });

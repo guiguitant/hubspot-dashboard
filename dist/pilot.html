@@ -4819,13 +4819,27 @@
               <label style="font-size:0.72rem;color:var(--text-secondary);width:60px">%
                 <input type="number" id="postePct" value="100" oninput="_posteRecalc()" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
               </label>
-              <label style="font-size:0.72rem;color:var(--text-secondary);width:100px">Montant
+              <label style="font-size:0.72rem;color:var(--text-secondary);width:90px">Montant
                 <input type="number" id="posteMontant" placeholder="0" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
               </label>
-              <label style="font-size:0.72rem;color:var(--text-secondary);display:flex;align-items:center;gap:0.25rem;padding-bottom:0.4rem" title="Entre dans l'assiette du CIR">
-                <input type="checkbox" id="posteCir"> CIR
+              <label style="font-size:0.72rem;color:var(--text-secondary);width:100px">Source
+                <select id="posteSource" onchange="_posteToggleAgree()" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+                  <option value="autre">Autre</option>
+                  <option value="salaire">Salaire</option>
+                  <option value="prestation">Prestation</option>
+                </select>
               </label>
-              <label style="font-size:0.72rem;color:var(--text-secondary);width:90px">Subv.
+              <label style="font-size:0.72rem;color:var(--text-secondary);width:80px">Credit
+                <select id="posteCredit" onchange="_posteToggleAgree()" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+                  <option value="none">Aucun</option>
+                  <option value="cir">CIR</option>
+                  <option value="cii">CII</option>
+                </select>
+              </label>
+              <label id="posteAgreeWrap" style="font-size:0.72rem;color:var(--text-secondary);display:none;align-items:center;gap:0.25rem;padding-bottom:0.4rem" title="Prestataire agree (eligibilite de la sous-traitance CIR/CII)">
+                <input type="checkbox" id="posteAgree"> Agree
+              </label>
+              <label style="font-size:0.72rem;color:var(--text-secondary);width:80px">Subv.
                 <input type="number" id="posteSubvention" value="0" placeholder="0" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
               </label>
               <button class="btn-filled btn" onclick="addPoste()" style="padding:0.4rem 0.7rem;font-size:0.78rem">+ Ajouter</button>
@@ -12988,6 +13002,7 @@
     // ===== Immobilisations (Phase 5) — CRUD + plan d'amortissement + assiette CIR =====
     let immoData = [];
     let immoTotalBaseCir = 0;
+    let immoTotalBaseCii = 0;
     let immoPostesDispo = null; // { employes, categories } chargé une fois
     let _posteBase = 0;         // montant de base du poste importé (avant application du %)
 
@@ -13016,6 +13031,7 @@
         }
         immoData = body.immobilisations || [];
         immoTotalBaseCir = body.totalBaseCir || 0;
+        immoTotalBaseCii = body.totalBaseCii || 0;
         renderImmobilisations();
       } catch (err) {
         console.error('Erreur immobilisations:', err);
@@ -13035,7 +13051,8 @@
       document.getElementById('immoDotationAnnee').innerHTML =
         immoData.length
           ? 'Dotation ' + year + ' (vers Compte de resultat) : <strong>' + formatEuro(dotAnnee) + '</strong>'
-            + (immoTotalBaseCir ? ' &nbsp;·&nbsp; Base CIR nette totale : <strong>' + formatEuro(immoTotalBaseCir) + '</strong>' : '')
+            + (immoTotalBaseCir ? ' &nbsp;·&nbsp; Base CIR nette : <strong>' + formatEuro(immoTotalBaseCir) + '</strong>' : '')
+            + (immoTotalBaseCii ? ' &nbsp;·&nbsp; Base CII nette : <strong>' + formatEuro(immoTotalBaseCii) + '</strong>' : '')
           : '';
 
       if (!immoData.length) {
@@ -13053,7 +13070,10 @@
         html += '<div><div style="font-weight:600;font-size:1rem">' + escapeHtml(im.libelle) + ' ' + badge + '</div>';
         const nbPostes = (im.postes || []).length;
         html += '<div style="font-size:0.82rem;color:var(--text-secondary);margin-top:0.25rem">' + formatEuro(im.montant) + (nbPostes ? ' <span style="font-size:0.72rem">(assiette : ' + nbPostes + ' poste' + (nbPostes > 1 ? 's' : '') + ')</span>' : '') + ' · mise en service ' + _immoFmtDate(im.date_mise_en_service) + (isImmo ? ' · ' + im.duree_annees + ' ans lineaire' : '') + '</div>';
-        if (im.baseCir) html += '<div style="font-size:0.78rem;color:var(--primary);margin-top:0.2rem">Base CIR nette : ' + formatEuro(im.baseCir) + '</div>';
+        if (im.baseCir || im.baseCii) html += '<div style="font-size:0.78rem;color:var(--primary);margin-top:0.2rem">'
+          + (im.baseCir ? 'Base CIR nette : ' + formatEuro(im.baseCir) : '')
+          + (im.baseCir && im.baseCii ? ' · ' : '')
+          + (im.baseCii ? 'Base CII nette : ' + formatEuro(im.baseCii) : '') + '</div>';
         if (im.justification) html += '<div style="font-size:0.78rem;color:var(--text-secondary);margin-top:0.35rem;font-style:italic">' + escapeHtml(im.justification) + '</div>';
         html += '</div>';
         html += '<div style="display:flex;gap:0.4rem;flex-shrink:0">'
@@ -13156,15 +13176,25 @@
     function _posteOnPick() {
       const sel = document.getElementById('posteImport');
       const val = sel.value;
-      if (!val || !immoPostesDispo) { _posteBase = 0; sel.dataset.source = 'autre'; return; }
+      if (!val || !immoPostesDispo) { _posteBase = 0; return; }
       const [type, idx] = val.split(':');
       let src = 'autre', base = 0, lib = '';
       if (type === 'emp') { const e = immoPostesDispo.employes[+idx]; if (e) { src = 'salaire'; base = e.coutAnnuel; lib = e.nom; } }
       else if (type === 'cat') { const c = immoPostesDispo.categories[+idx]; if (c) { src = 'prestation'; base = c.montantAnnuel; lib = c.label; } }
       _posteBase = base;
-      sel.dataset.source = src;
+      document.getElementById('posteSource').value = src;
       document.getElementById('posteLibelle').value = lib;
+      _posteToggleAgree();
       _posteRecalc();
+    }
+
+    // La case "prestataire agree" n'a de sens que pour une PRESTATION eligible CIR/CII (sous-traitance).
+    function _posteToggleAgree() {
+      const src = document.getElementById('posteSource').value;
+      const credit = document.getElementById('posteCredit').value;
+      const show = src === 'prestation' && credit !== 'none';
+      document.getElementById('posteAgreeWrap').style.display = show ? 'flex' : 'none';
+      if (!show) document.getElementById('posteAgree').checked = false;
     }
 
     function _posteRecalc() {
@@ -13180,10 +13210,11 @@
       if (!libelle) return alert('Libelle du poste requis');
       const payload = {
         libelle,
-        source: document.getElementById('posteImport').dataset.source || 'autre',
+        source: document.getElementById('posteSource').value,
         source_ref: libelle,
         montant: Number(document.getElementById('posteMontant').value) || 0,
-        cir: document.getElementById('posteCir').checked,
+        credit_type: document.getElementById('posteCredit').value,
+        prestataire_agree: document.getElementById('posteAgree').checked,
         subvention: Number(document.getElementById('posteSubvention').value) || 0,
       };
       try {
@@ -13192,11 +13223,13 @@
         if (!res.ok) throw new Error(b.error || 'Erreur');
         // reset du mini-formulaire
         document.getElementById('posteImport').value = '';
-        document.getElementById('posteImport').dataset.source = 'autre';
         document.getElementById('posteLibelle').value = '';
         document.getElementById('postePct').value = '100';
         document.getElementById('posteMontant').value = '';
-        document.getElementById('posteCir').checked = false;
+        document.getElementById('posteSource').value = 'autre';
+        document.getElementById('posteCredit').value = 'none';
+        document.getElementById('posteAgree').checked = false;
+        _posteToggleAgree();
         document.getElementById('posteSubvention').value = '0';
         _posteBase = 0;
         await _reloadImmoInModal(id);
@@ -13232,9 +13265,18 @@
       } else {
         let h = '<table style="width:100%;border-collapse:collapse;font-size:0.78rem"><tbody>';
         for (const p of postes) {
+          const eligible = (p.source !== 'prestation') || p.prestataire_agree; // regle B (filtrant)
+          let tag = '';
+          if (p.credit_type === 'cir' || p.credit_type === 'cii') {
+            const label = p.credit_type.toUpperCase();
+            const col = eligible ? 'var(--primary)' : 'var(--text-secondary)';
+            tag = ' <span style="font-size:0.62rem;color:' + col + ';font-weight:600;border:1px solid ' + col + ';border-radius:3px;padding:0 0.2rem">' + label + '</span>';
+            if (p.source === 'prestation') tag += p.prestataire_agree
+              ? ' <span style="font-size:0.62rem;color:var(--primary)">agree</span>'
+              : ' <span style="font-size:0.62rem;color:var(--danger)">non agree (hors base)</span>';
+          }
           h += '<tr style="border-bottom:1px solid var(--border)">'
-            + '<td style="padding:0.3rem 0">' + escapeHtml(p.libelle)
-              + (p.cir ? ' <span style="font-size:0.62rem;color:var(--primary);font-weight:600;border:1px solid var(--primary);border-radius:3px;padding:0 0.2rem">CIR</span>' : '')
+            + '<td style="padding:0.3rem 0">' + escapeHtml(p.libelle) + tag
               + (p.subvention > 0 ? ' <span style="font-size:0.68rem;color:var(--text-secondary)">(subv. ' + formatEuro(p.subvention) + ')</span>' : '')
               + '</td>'
             + '<td style="padding:0.3rem;text-align:right">' + formatEuro(p.montant) + '</td>'
@@ -13247,7 +13289,9 @@
       const assiette = postes.reduce((s, p) => s + (Number(p.montant) || 0), 0);
       const info = document.getElementById('immoAssietteInfo');
       info.innerHTML = postes.length
-        ? 'Assiette amortissable = <strong>' + formatEuro(assiette) + '</strong> &nbsp;·&nbsp; Base CIR nette = <strong style="color:var(--primary)">' + formatEuro(im.baseCir || 0) + '</strong>'
+        ? 'Assiette amortissable = <strong>' + formatEuro(assiette) + '</strong>'
+          + ' &nbsp;·&nbsp; Base CIR nette = <strong style="color:var(--primary)">' + formatEuro(im.baseCir || 0) + '</strong>'
+          + ' &nbsp;·&nbsp; Base CII nette = <strong style="color:var(--primary)">' + formatEuro(im.baseCii || 0) + '</strong>'
         : '';
     }
 
