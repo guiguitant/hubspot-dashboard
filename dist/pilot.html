@@ -4781,8 +4781,8 @@
             <input type="text" id="immoLibelle" placeholder="Ex : Ordinateurs equipe R&amp;D" style="width:100%;margin-top:0.25rem;padding:0.5rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
           </label>
           <div style="display:flex;gap:0.9rem">
-            <label style="font-size:0.82rem;color:var(--text-secondary);flex:1">Montant HT (EUR)
-              <input type="number" id="immoMontant" placeholder="10000" oninput="_immoPreviewPlan()" style="width:100%;margin-top:0.25rem;padding:0.5rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+            <label id="immoMontantWrap" style="font-size:0.82rem;color:var(--text-secondary);flex:1">Montant HT (EUR) <span style="font-size:0.72rem">- si pas de postes</span>
+              <input type="number" id="immoMontant" placeholder="0" oninput="_immoPreviewPlan()" style="width:100%;margin-top:0.25rem;padding:0.5rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
             </label>
             <label style="font-size:0.82rem;color:var(--text-secondary);flex:1">Duree (annees)
               <input type="number" id="immoDuree" value="5" min="1" step="1" oninput="_immoPreviewPlan()" style="width:100%;margin-top:0.25rem;padding:0.5rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
@@ -4805,7 +4805,7 @@
           <div id="immoPlanPreview" style="font-size:0.8rem;color:var(--text-secondary)"></div>
 
           <!-- Assiette composee de postes connus (5.2) : visible seulement en edition (immo deja creee) -->
-          <div id="immoPostesCreateNote" style="display:none;font-size:0.8rem;color:var(--text-secondary);border-top:1px solid var(--border);padding-top:0.8rem">Enregistrez d'abord l'immobilisation pour composer son assiette a partir de postes connus (salaires, prestations).</div>
+          <div id="immoPostesCreateNote" style="display:none;font-size:0.8rem;color:var(--text-secondary);border-top:1px solid var(--border);padding-top:0.8rem">Le montant se composera des <strong>depenses (postes)</strong> que vous affecterez a cette immobilisation. Enregistrez d'abord, puis ajoutez les postes.</div>
           <div id="immoPostesSection" style="display:none;border-top:1px solid var(--border);padding-top:0.8rem">
             <div style="font-weight:600;font-size:0.85rem;margin-bottom:0.4rem">Assiette composee de postes connus</div>
             <div id="immoPostesList"></div>
@@ -13123,9 +13123,26 @@
       document.getElementById('immoPlanPreview').textContent = '';
       const mEl = document.getElementById('immoMontant');
       mEl.readOnly = false; mEl.style.opacity = '1';
+      // A la creation : pas de montant demande (il se composera des postes affectes ensuite)
+      document.getElementById('immoMontantWrap').style.display = 'none';
       document.getElementById('immoPostesSection').style.display = 'none';
       document.getElementById('immoPostesCreateNote').style.display = 'block';
       document.getElementById('immoModalOverlay').classList.add('active');
+    }
+
+    // Affiche le champ Montant seulement si l'immo n'a pas de postes (sinon l'assiette = somme des postes)
+    function _immoSetMontantField(im) {
+      const hasPostes = (im.postes || []).length > 0;
+      const wrap = document.getElementById('immoMontantWrap');
+      const mEl = document.getElementById('immoMontant');
+      if (hasPostes) {
+        wrap.style.display = 'none';
+        mEl.value = im.montant; // pour l'apercu du plan
+      } else {
+        wrap.style.display = 'block';
+        mEl.readOnly = false; mEl.style.opacity = '1';
+        mEl.value = im.montantSaisi != null ? im.montantSaisi : im.montant;
+      }
     }
 
     function editImmo(id) {
@@ -13138,11 +13155,7 @@
       document.getElementById('immoDate').value = (im.date_mise_en_service || '').slice(0, 10);
       document.getElementById('immoTraitement').value = im.traitement || 'immobilise';
       document.getElementById('immoJustification').value = im.justification || '';
-      // Montant : si l'immo a des postes, l'assiette = somme des postes (lecture seule) ; sinon montant saisi
-      const hasPostes = (im.postes || []).length > 0;
-      const mEl = document.getElementById('immoMontant');
-      mEl.value = hasPostes ? im.montant : (im.montantSaisi != null ? im.montantSaisi : im.montant);
-      mEl.readOnly = hasPostes; mEl.style.opacity = hasPostes ? '0.6' : '1';
+      _immoSetMontantField(im);
       _immoPreviewPlan();
       // Section postes (édition uniquement)
       document.getElementById('immoPostesCreateNote').style.display = 'none';
@@ -13249,10 +13262,7 @@
       await refreshImmobilisations();
       const im = immoData.find(x => x.id === id);
       if (!im) return;
-      const hasPostes = (im.postes || []).length > 0;
-      const mEl = document.getElementById('immoMontant');
-      mEl.value = hasPostes ? im.montant : (im.montantSaisi != null ? im.montantSaisi : im.montant);
-      mEl.readOnly = hasPostes; mEl.style.opacity = hasPostes ? '0.6' : '1';
+      _immoSetMontantField(im);
       _immoPreviewPlan();
       renderPostesInModal(im);
     }
