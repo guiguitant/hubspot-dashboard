@@ -572,9 +572,27 @@ function computePlanAmortissement(immo) {
   return { plan, montant: M };
 }
 
-// --- Postes d'assiette (Phase 5.2) : composent le montant amortissable + la base CIR ---
+// --- Postes d'assiette (Phase 5.2/5.3) : composent le montant amortissable + la base CIR/CII ---
+// Prorata temporis d'un poste : fraction de son année couverte par [date_debut, date_fin].
+// 1 si pas de dates (année pleine). date_fin est inclusive.
+function _prorataPoste(p) {
+  if (!p.date_debut && !p.date_fin) return 1;
+  const annee = Number(p.annee);
+  if (!annee) return 1;
+  const debutAnnee = new Date(annee, 0, 1), finAnnee = new Date(annee + 1, 0, 1);
+  const d = p.date_debut ? new Date(p.date_debut) : debutAnnee;
+  const fEnd = p.date_fin ? new Date(new Date(p.date_fin).getTime() + 86400000) : finAnnee; // fin incluse
+  const start = d > debutAnnee ? d : debutAnnee;
+  const end = fEnd < finAnnee ? fEnd : finAnnee;
+  if (end <= start) return 0;
+  return _daysBetween(start, end) / _daysBetween(debutAnnee, finAnnee);
+}
+// Montant réellement retenu pour un poste (proraté si période renseignée).
+function montantPosteRetenu(p) {
+  return (Number(p.montant) || 0) * _prorataPoste(p);
+}
 function _sumPostes(postes) {
-  return (postes || []).reduce((s, p) => s + (Number(p.montant) || 0), 0);
+  return (postes || []).reduce((s, p) => s + montantPosteRetenu(p), 0);
 }
 // Éligibilité d'un poste à un crédit d'impôt (CIR ou CII).
 // Règle : la sous-traitance (source 'prestation') n'est éligible que si le prestataire est agréé.
@@ -652,8 +670,8 @@ function reintegrationAvanceAnnee(aide, annee) {
 function computeBasesParAnnee(immo, postes, aides) {
   postes = postes || []; aides = aides || [];
   const eligible = p => _posteEligibleCredit(p);
-  const totalCir = postes.filter(p => p.credit_type === 'cir' && eligible(p)).reduce((s, p) => s + (Number(p.montant) || 0), 0);
-  const totalCii = postes.filter(p => p.credit_type === 'cii' && eligible(p)).reduce((s, p) => s + (Number(p.montant) || 0), 0);
+  const totalCir = postes.filter(p => p.credit_type === 'cir' && eligible(p)).reduce((s, p) => s + montantPosteRetenu(p), 0);
+  const totalCii = postes.filter(p => p.credit_type === 'cii' && eligible(p)).reduce((s, p) => s + montantPosteRetenu(p), 0);
   const totalCredit = totalCir + totalCii;
   const part = { cir: totalCredit > 0 ? totalCir / totalCredit : 0, cii: totalCredit > 0 ? totalCii / totalCredit : 0 };
 
@@ -680,7 +698,7 @@ function computeBasesParAnnee(immo, postes, aides) {
     for (const type of ['cir', 'cii']) {
       const brute = postes
         .filter(p => Number(p.annee) === annee && p.credit_type === type && eligible(p))
-        .reduce((s, p) => s + (Number(p.montant) || 0) - (Number(p.subvention) || 0), 0);
+        .reduce((s, p) => s + montantPosteRetenu(p) - (Number(p.subvention) || 0), 0);
       const deduction = aideLisseeTotale * part[type];
       const reintegration = reintTotale * part[type];
       bloc[type] = {
@@ -7877,7 +7895,7 @@ app.get('/api/immobilisations', async (req, res) => {
       const postes = postesParImmo[immo.id] || [];
       const aides = aidesParImmo[immo.id] || [];
       const montantSaisi = Number(immo.montant) || 0;
-      const montantEffectif = montantAmortissable(immo, postes);
+      const montantEffectif = Math.round(montantAmortissable(immo, postes));
       // Repli d'année pour les postes sans année (Phase 5.2) : année de mise en service.
       const fallbackYear = immo.date_mise_en_service ? new Date(immo.date_mise_en_service).getFullYear() : new Date().getFullYear();
       const postesN = postes.map(p => ({ ...p, annee: p.annee != null ? p.annee : fallbackYear }));
@@ -7904,34 +7922,79 @@ app.get('/api/immobilisations', async (req, res) => {
   }
 });
 
-// GET /api/immobilisations/postes-disponibles?year=YYYY — "postes connus" pour composer une assiette
-// (employés avec coût annuel depuis la masse salariale + catégories de charges CR_Prév).
+// GET /api/immobilisations/postes-disponibles — "postes connus" détaillés par ANNÉE :
+// - employés : coût réel par employé et par année (masse salariale)
+// - lignes de charges : sous-catégories détaillées de chaque famille CR_Prév, par année
+// Retour : { annees:[...], employes:[{nom, parAnnee:{year:cout}, total}], lignesCharges:[{famille, label, parAnnee, total}] }
 app.get('/api/immobilisations/postes-disponibles', async (req, res) => {
   try {
-    const year = parseInt(req.query.year, 10) || new Date().getFullYear();
-    const yStr = String(year) + '-';
-    const employes = [];
+    const anneesSet = new Set();
+    const addYearsFrom = (byMonth, acc) => {
+      for (const [mKey, val] of Object.entries(byMonth || {})) {
+        const y = parseInt(String(mKey).slice(0, 4), 10);
+        if (!y) continue;
+        anneesSet.add(y);
+        acc[y] = (acc[y] || 0) + (Number(val) || 0);
+      }
+    };
+    const finalize = (acc) => {
+      const pa = {}; let tot = 0;
+      for (const [y, v] of Object.entries(acc)) { pa[y] = Math.round(v); tot += v; }
+      return { parAnnee: pa, total: Math.round(tot) };
+    };
+
+    // Employés : coût par employé et par année
+    const empAcc = {};
     try {
       const masse = await fetchAndParseMasseSalarialeDetailed();
-      const acc = {};
       for (const [mKey, m] of Object.entries(masse.byMonth || {})) {
-        if (!mKey.startsWith(yStr)) continue;
-        for (const d of (m.detail || [])) acc[d.nom] = (acc[d.nom] || 0) + (Number(d.cout) || 0);
+        const y = parseInt(String(mKey).slice(0, 4), 10);
+        if (!y) continue;
+        anneesSet.add(y);
+        for (const d of (m.detail || [])) {
+          const nom = d.nom || '?';
+          empAcc[nom] = empAcc[nom] || {};
+          empAcc[nom][y] = (empAcc[nom][y] || 0) + (Number(d.cout) || 0);
+        }
       }
-      for (const [nom, cout] of Object.entries(acc)) employes.push({ nom, coutAnnuel: Math.round(cout) });
-      employes.sort((a, b) => b.coutAnnuel - a.coutAnnuel);
     } catch (e) { /* masse salariale indisponible */ }
-    const categories = [];
+    const employes = Object.entries(empAcc)
+      .map(([nom, acc]) => ({ nom, ...finalize(acc) }))
+      .filter(e => e.total > 0)
+      .sort((a, b) => b.total - a.total);
+
+    // Charges CR_Prév : lignes détaillées (sous-catégories) par famille et par année
+    const lignesCharges = [];
     try {
       const cr = await fetchAndParseCRPrev();
-      for (const [cat, byMonth] of Object.entries(cr.categories || {})) {
-        let tot = 0;
-        for (const [mKey, val] of Object.entries(byMonth)) if (mKey.startsWith(yStr)) tot += val;
-        if (tot > 0) categories.push({ label: cat, montantAnnuel: Math.round(tot) });
+      const subCats = cr.subCategories || {};
+      const cats = cr.categories || {};
+      for (const [famille, lignes] of Object.entries(subCats)) {
+        const keys = Object.keys(lignes || {});
+        if (keys.length) {
+          for (const [ligne, byMonth] of Object.entries(lignes)) {
+            const acc = {}; addYearsFrom(byMonth, acc);
+            const f = finalize(acc);
+            if (f.total > 0) lignesCharges.push({ famille, label: ligne, ...f });
+          }
+        } else {
+          const acc = {}; addYearsFrom(cats[famille] || {}, acc);
+          const f = finalize(acc);
+          if (f.total > 0) lignesCharges.push({ famille, label: famille, ...f });
+        }
       }
-      categories.sort((a, b) => b.montantAnnuel - a.montantAnnuel);
+      // Familles présentes dans categories mais sans détail de lignes
+      for (const [famille, byMonth] of Object.entries(cats)) {
+        if (subCats[famille]) continue;
+        const acc = {}; addYearsFrom(byMonth, acc);
+        const f = finalize(acc);
+        if (f.total > 0) lignesCharges.push({ famille, label: famille, ...f });
+      }
+      lignesCharges.sort((a, b) => (a.famille === b.famille ? b.total - a.total : a.famille.localeCompare(b.famille)));
     } catch (e) { /* CR_Prév indisponible */ }
-    res.json({ year, employes, categories });
+
+    const annees = [...anneesSet].sort((a, b) => a - b);
+    res.json({ annees, employes, lignesCharges });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -7941,7 +8004,7 @@ app.get('/api/immobilisations/postes-disponibles', async (req, res) => {
 // POST /api/immobilisations/:id/postes
 app.post('/api/immobilisations/:id/postes', async (req, res) => {
   try {
-    const { libelle, source, source_ref, montant, credit_type, prestataire_agree, subvention, annee } = req.body || {};
+    const { libelle, source, source_ref, montant, credit_type, prestataire_agree, subvention, annee, date_debut, date_fin } = req.body || {};
     if (!libelle || !libelle.trim()) return res.status(400).json({ error: 'Libellé du poste requis' });
     const row = {
       immobilisation_id: req.params.id,
@@ -7953,8 +8016,10 @@ app.post('/api/immobilisations/:id/postes', async (req, res) => {
       prestataire_agree: !!prestataire_agree,
       subvention: Number(subvention) || 0,
     };
-    // Année ajoutée seulement si renseignée (tolérance migration 35 non appliquée)
+    // Champs ajoutés seulement si renseignés (tolérance migrations 35/37 non appliquées)
     if (annee != null && annee !== '') row.annee = parseInt(annee, 10);
+    if (date_debut) row.date_debut = date_debut;
+    if (date_fin) row.date_fin = date_fin;
     const { data, error } = await supabaseAdmin.from('immobilisation_postes').insert(row).select().single();
     if (error) return res.status(500).json({ error: error.message });
     res.json(data);
@@ -7976,6 +8041,8 @@ app.put('/api/immobilisations/:id/postes/:pid', async (req, res) => {
     if (typeof b.prestataire_agree === 'boolean') update.prestataire_agree = b.prestataire_agree;
     if (b.subvention != null) update.subvention = Number(b.subvention) || 0;
     if (b.annee !== undefined) update.annee = (b.annee != null && b.annee !== '') ? parseInt(b.annee, 10) : null;
+    if (b.date_debut !== undefined) update.date_debut = b.date_debut || null;
+    if (b.date_fin !== undefined) update.date_fin = b.date_fin || null;
     const { data, error } = await supabaseAdmin.from('immobilisation_postes').update(update).eq('id', req.params.pid).select().single();
     if (error) return res.status(500).json({ error: error.message });
     res.json(data);
