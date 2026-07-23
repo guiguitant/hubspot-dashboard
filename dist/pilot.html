@@ -4826,6 +4826,9 @@
               <label style="font-size:0.72rem;color:var(--text-secondary);width:90px">Montant
                 <input type="number" id="posteMontant" placeholder="0" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
               </label>
+              <label style="font-size:0.72rem;color:var(--text-secondary);width:55px" title="Quote-part d'affectation (%)">%
+                <input type="number" id="posteQuotePart" value="100" min="0" max="100" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+              </label>
               <label style="font-size:0.72rem;color:var(--text-secondary);width:100px">Source
                 <select id="posteSource" onchange="_posteToggleAgree()" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
                   <option value="autre">Autre</option>
@@ -4876,7 +4879,7 @@
         <button onclick="closePostePicker()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--text)">&times;</button>
       </div>
       <div class="modal-body" style="padding:1rem;max-height:58vh;overflow:auto">
-        <p style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.6rem">Cochez les cellules (poste x annee) a ajouter a l'assiette. Montants reels par annee. La periode (bas) prorate les montants.</p>
+        <p style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.6rem">Renseignez une <strong>quote-part (%)</strong> dans les cellules (poste x annee) a ajouter : ex. 20 = 20% du montant. La periode (bas) prorate en plus selon les jours d'annee couverts.</p>
         <div id="postePickerTable"><p style="color:var(--text-secondary);padding:1rem">Chargement...</p></div>
       </div>
       <div class="modal-footer" style="display:flex;flex-wrap:wrap;gap:0.6rem;align-items:flex-end;padding:0.9rem 1.25rem;border-top:1px solid var(--border)">
@@ -4896,6 +4899,7 @@
         <label style="font-size:0.72rem;color:var(--text-secondary);width:120px">Fin (opt)
           <input type="date" id="pickerFin" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
         </label>
+        <button class="btn" onclick="_pickerAll100()" style="font-size:0.78rem">Tout a 100%</button>
         <span style="flex:1"></span>
         <button class="btn" onclick="closePostePicker()">Annuler</button>
         <button class="btn-filled btn" onclick="addSelectedPostes()">Ajouter (<span id="pickerCount">0</span>)</button>
@@ -13018,6 +13022,46 @@
       }
     }
 
+    // Detail du calcul d'une base CIR/CII d'une annee (au clic) — reutilise la modale globale.
+    function openBaseDetailModal(immoId, annee, type) {
+      const im = (immoData || []).find(x => x.id === immoId);
+      if (!im) return;
+      const bloc = (im.basesParAnnee || []).find(b => b.annee === annee);
+      if (!bloc) return;
+      const c = bloc[type];
+      const T = type.toUpperCase();
+      const postes = (im.postes || []).filter(p => Number(p.annee) === annee && p.credit_type === type && ((p.source !== 'prestation') || p.prestataire_agree));
+      document.getElementById('tresoMoisDetailTitle').textContent = 'Base ' + T + ' ' + annee;
+      let html = '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.6rem">Depenses eligibles ' + T + ' de l\'annee, moins l\'aide publique lissee, plus la reintegration des avances.</div>';
+      if (postes.length) {
+        html += '<div style="font-weight:600;font-size:0.82rem;margin-bottom:0.2rem">Depenses eligibles</div>';
+        html += '<table style="width:100%;border-collapse:collapse;font-size:0.8rem"><tbody>';
+        for (const p of postes) {
+          const prorata = _posteProrataFront(p);
+          const quote = (p.quote_part != null ? Number(p.quote_part) : 100) / 100;
+          const retenu = Math.round((Number(p.montant) || 0) * quote * prorata);
+          let calc = formatEuro(p.montant);
+          if (quote !== 1) calc += ' x ' + Math.round(quote * 100) + '%';
+          if (prorata < 1) calc += ' x ' + Math.round(prorata * 100) + '% (jours)';
+          if (p.subvention > 0) calc += ' - ' + formatEuro(p.subvention) + ' subv.';
+          html += '<tr style="border-bottom:1px solid var(--border)"><td style="padding:0.3rem 0">' + escapeHtml(p.libelle)
+            + ' <span style="font-size:0.7rem;color:var(--text-secondary)">' + calc + '</span></td>'
+            + '<td style="text-align:right;padding:0.3rem 0">' + formatEuro(retenu - (Number(p.subvention) || 0)) + '</td></tr>';
+        }
+        html += '</tbody></table>';
+      } else {
+        html += '<div style="color:var(--text-secondary);font-size:0.82rem">Aucune depense eligible ' + T + ' cette annee.</div>';
+      }
+      html += '<div style="margin-top:0.6rem;border-top:1px solid var(--border);padding-top:0.4rem">';
+      html += '<div style="display:flex;justify-content:space-between;padding:0.25rem 0"><span>Base brute (depenses eligibles)</span><strong>' + formatEuro(c.brute) + '</strong></div>';
+      if (c.deduction) html += '<div style="display:flex;justify-content:space-between;padding:0.25rem 0;color:var(--danger)"><span>- Aide publique lissee (quote-part ' + T + ')</span><span>- ' + formatEuro(c.deduction) + '</span></div>';
+      if (c.reintegration) html += '<div style="display:flex;justify-content:space-between;padding:0.25rem 0;color:var(--primary)"><span>+ Reintegration avance remboursee</span><span>+ ' + formatEuro(c.reintegration) + '</span></div>';
+      html += '<div style="display:flex;justify-content:space-between;padding:0.45rem 0;border-top:2px solid var(--border);font-weight:700"><span>Base ' + T + ' nette</span><strong style="color:var(--primary)">' + formatEuro(c.nette) + '</strong></div>';
+      html += '</div>';
+      document.getElementById('tresoMoisDetailBody').innerHTML = html;
+      document.getElementById('tresoMoisDetailModalOverlay').classList.add('active');
+    }
+
     function renderImmobilisations() {
       const list = document.getElementById('immoList');
       const year = new Date().getFullYear();
@@ -13086,8 +13130,8 @@
           html += '</tr></thead><tbody>';
           for (const b of bpa) {
             html += '<tr style="border-bottom:1px solid rgba(120,119,116,0.12)"><td style="padding:0.28rem 0">' + b.annee + '</td>';
-            if (hasCir) html += '<td style="text-align:right;padding:0.28rem;color:var(--primary)">' + formatEuro(b.cir.nette) + '</td>';
-            if (hasCii) html += '<td style="text-align:right;padding:0.28rem;color:var(--primary)">' + formatEuro(b.cii.nette) + '</td>';
+            if (hasCir) html += '<td style="text-align:right;padding:0.28rem;color:var(--primary);cursor:pointer;text-decoration:underline dotted" title="Voir le detail du calcul" onclick="openBaseDetailModal(\'' + im.id + '\',' + b.annee + ',\'cir\')">' + formatEuro(b.cir.nette) + '</td>';
+            if (hasCii) html += '<td style="text-align:right;padding:0.28rem;color:var(--primary);cursor:pointer;text-decoration:underline dotted" title="Voir le detail du calcul" onclick="openBaseDetailModal(\'' + im.id + '\',' + b.annee + ',\'cii\')">' + formatEuro(b.cii.nette) + '</td>';
             html += '</tr>';
           }
           html += '</tbody></table>';
@@ -13202,9 +13246,11 @@
     function closePostePicker() { document.getElementById('postePickerOverlay').classList.remove('active'); }
 
     function _pickerCellCb(kind, libelle, annee, montant) {
-      return '<td style="text-align:right;padding:0.2rem 0.5rem"><label style="display:inline-flex;align-items:center;gap:0.25rem;cursor:pointer">'
-        + '<input type="checkbox" class="picker-cb" data-kind="' + kind + '" data-libelle="' + encodeURIComponent(libelle) + '" data-annee="' + annee + '" data-montant="' + montant + '" onchange="_pickerUpdateCount()">'
-        + '<span>' + formatEuro(montant) + '</span></label></td>';
+      return '<td style="text-align:right;padding:0.2rem 0.5rem;white-space:nowrap">'
+        + '<input type="number" class="picker-pct" placeholder="%" min="0" max="100"'
+        + ' data-kind="' + kind + '" data-libelle="' + encodeURIComponent(libelle) + '" data-annee="' + annee + '" data-montant="' + montant + '"'
+        + ' oninput="_pickerUpdateCount()" style="width:42px;padding:0.15rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);text-align:right">'
+        + ' <span style="font-size:0.7rem;color:var(--text-secondary)">' + formatEuro(montant) + '</span></td>';
     }
 
     function renderPostePickerTable() {
@@ -13239,31 +13285,41 @@
     }
 
     function _pickerUpdateCount() {
-      document.getElementById('pickerCount').textContent = document.querySelectorAll('.picker-cb:checked').length;
+      const n = Array.prototype.slice.call(document.querySelectorAll('.picker-pct')).filter(i => Number(i.value) > 0).length;
+      document.getElementById('pickerCount').textContent = n;
+    }
+
+    // Remplit toutes les cellules disponibles a 100% (selection rapide, on ajuste ensuite les quote-parts)
+    function _pickerAll100() {
+      document.querySelectorAll('.picker-pct').forEach(i => { i.value = 100; });
+      _pickerUpdateCount();
     }
 
     async function addSelectedPostes() {
       const id = document.getElementById('immoEditId').value;
       if (!id) return;
-      const cbs = Array.prototype.slice.call(document.querySelectorAll('.picker-cb:checked'));
-      if (!cbs.length) return alert('Aucun poste selectionne');
+      const inputs = Array.prototype.slice.call(document.querySelectorAll('.picker-pct')).filter(i => Number(i.value) > 0);
+      if (!inputs.length) return alert('Aucun poste selectionne (renseignez une quote-part %)');
       const credit = document.getElementById('pickerCredit').value;
       const agree = document.getElementById('pickerAgree').checked;
       const debut = document.getElementById('pickerDebut').value || null;
       const fin = document.getElementById('pickerFin').value || null;
-      const posts = cbs.map(cb => {
-        const kind = cb.dataset.kind;
-        const libelle = decodeURIComponent(cb.dataset.libelle);
+      const posts = inputs.map(inp => {
+        const kind = inp.dataset.kind;
+        const libelle = decodeURIComponent(inp.dataset.libelle);
         // Salaire : source salaire (agrement non applicable). Charge : prestation agreee si coche, sinon autre.
         const source = kind === 'salaire' ? 'salaire' : (agree ? 'prestation' : 'autre');
-        return {
+        const q = Number(inp.value);
+        const poste = {
           libelle, source, source_ref: libelle,
-          montant: Number(cb.dataset.montant) || 0,
+          montant: Number(inp.dataset.montant) || 0,
           credit_type: credit,
           prestataire_agree: kind === 'charge' && agree,
-          annee: cb.dataset.annee,
+          annee: inp.dataset.annee,
           date_debut: debut, date_fin: fin,
         };
+        if (q && q !== 100) poste.quote_part = q; // envoyee seulement si != 100 (tolerance migration 38)
+        return poste;
       });
       try {
         for (const p of posts) {
@@ -13292,6 +13348,9 @@
         date_debut: document.getElementById('posteDateDebut').value || null,
         date_fin: document.getElementById('posteDateFin').value || null,
       };
+      // quote_part envoyee seulement si != 100 (tolerance migration 38 non appliquee)
+      const _qp = Number(document.getElementById('posteQuotePart').value);
+      if (_qp && _qp !== 100) payload.quote_part = _qp;
       try {
         const res = await fetch('/api/immobilisations/' + id + '/postes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         const b = await res.json();
@@ -13306,6 +13365,7 @@
         document.getElementById('posteSubvention').value = '0';
         document.getElementById('posteDateDebut').value = '';
         document.getElementById('posteDateFin').value = '';
+        document.getElementById('posteQuotePart').value = '100';
         await _reloadImmoInModal(id);
       } catch (e) { alert('Erreur : ' + e.message); }
     }
@@ -13441,15 +13501,18 @@
                 : ' <span style="font-size:0.62rem;color:var(--danger)">non agree (hors base)</span>';
             }
             const prorata = _posteProrataFront(p);
-            const retenu = Math.round((Number(p.montant) || 0) * prorata);
+            const quote = (p.quote_part != null ? Number(p.quote_part) : 100) / 100;
+            const retenu = Math.round((Number(p.montant) || 0) * quote * prorata);
+            const reduit = quote !== 1 || prorata < 1;
+            const quoteTxt = quote !== 1 ? ' <span style="font-size:0.66rem;color:var(--text-secondary)">quote-part ' + Math.round(quote * 100) + '%</span>' : '';
             const periodeTxt = (p.date_debut || p.date_fin)
               ? ' <span style="font-size:0.65rem;color:var(--text-secondary)">(' + (p.date_debut ? _immoFmtDate(p.date_debut) : '...') + ' → ' + (p.date_fin ? _immoFmtDate(p.date_fin) : '...') + ', ' + Math.round(prorata * 100) + '%)</span>'
               : '';
-            const montantTxt = prorata < 1
+            const montantTxt = reduit
               ? '<strong>' + formatEuro(retenu) + '</strong> <span style="font-size:0.66rem;color:var(--text-secondary)">/ ' + formatEuro(p.montant) + '</span>'
               : formatEuro(p.montant);
             h += '<tr style="border-bottom:1px solid var(--border)">'
-              + '<td style="padding:0.3rem 0 0.3rem 0.6rem">' + escapeHtml(p.libelle) + tag + periodeTxt
+              + '<td style="padding:0.3rem 0 0.3rem 0.6rem">' + escapeHtml(p.libelle) + tag + quoteTxt + periodeTxt
                 + (p.subvention > 0 ? ' <span style="font-size:0.68rem;color:var(--text-secondary)">(subv. ' + formatEuro(p.subvention) + ')</span>' : '')
                 + '</td>'
               + '<td style="padding:0.3rem;text-align:right;white-space:nowrap">' + montantTxt + '</td>'

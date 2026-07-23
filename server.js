@@ -587,9 +587,10 @@ function _prorataPoste(p) {
   if (end <= start) return 0;
   return _daysBetween(start, end) / _daysBetween(debutAnnee, finAnnee);
 }
-// Montant réellement retenu pour un poste (proraté si période renseignée).
+// Montant réellement retenu pour un poste : montant × quote-part d'affectation × prorata temporel.
 function montantPosteRetenu(p) {
-  return (Number(p.montant) || 0) * _prorataPoste(p);
+  const quote = (p.quote_part != null ? Number(p.quote_part) : 100) / 100;
+  return (Number(p.montant) || 0) * quote * _prorataPoste(p);
 }
 function _sumPostes(postes) {
   return (postes || []).reduce((s, p) => s + montantPosteRetenu(p), 0);
@@ -8004,7 +8005,7 @@ app.get('/api/immobilisations/postes-disponibles', async (req, res) => {
 // POST /api/immobilisations/:id/postes
 app.post('/api/immobilisations/:id/postes', async (req, res) => {
   try {
-    const { libelle, source, source_ref, montant, credit_type, prestataire_agree, subvention, annee, date_debut, date_fin } = req.body || {};
+    const { libelle, source, source_ref, montant, credit_type, prestataire_agree, subvention, annee, date_debut, date_fin, quote_part } = req.body || {};
     if (!libelle || !libelle.trim()) return res.status(400).json({ error: 'Libellé du poste requis' });
     const row = {
       immobilisation_id: req.params.id,
@@ -8016,10 +8017,11 @@ app.post('/api/immobilisations/:id/postes', async (req, res) => {
       prestataire_agree: !!prestataire_agree,
       subvention: Number(subvention) || 0,
     };
-    // Champs ajoutés seulement si renseignés (tolérance migrations 35/37 non appliquées)
+    // Champs ajoutés seulement si renseignés (tolérance migrations 35/37/38 non appliquées)
     if (annee != null && annee !== '') row.annee = parseInt(annee, 10);
     if (date_debut) row.date_debut = date_debut;
     if (date_fin) row.date_fin = date_fin;
+    if (quote_part != null && quote_part !== '') row.quote_part = Number(quote_part);
     const { data, error } = await supabaseAdmin.from('immobilisation_postes').insert(row).select().single();
     if (error) return res.status(500).json({ error: error.message });
     res.json(data);
@@ -8043,6 +8045,7 @@ app.put('/api/immobilisations/:id/postes/:pid', async (req, res) => {
     if (b.annee !== undefined) update.annee = (b.annee != null && b.annee !== '') ? parseInt(b.annee, 10) : null;
     if (b.date_debut !== undefined) update.date_debut = b.date_debut || null;
     if (b.date_fin !== undefined) update.date_fin = b.date_fin || null;
+    if (b.quote_part !== undefined && b.quote_part !== '') update.quote_part = Number(b.quote_part);
     const { data, error } = await supabaseAdmin.from('immobilisation_postes').update(update).eq('id', req.params.pid).select().single();
     if (error) return res.status(500).json({ error: error.message });
     res.json(data);
