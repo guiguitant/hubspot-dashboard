@@ -7335,6 +7335,7 @@ app.get('/api/analytics', async (req, res) => {
     const endNm1 = new Date(endDate); endNm1.setFullYear(endNm1.getFullYear() - 1);
 
     let ca = 0;
+    let caSigne = 0, nbSigne = 0; // CA signe = missions dont la date de signature (creation Notion) tombe dans la periode
     const bySubventionne = {};
     const byAcquisition = {};
     const byNatureMission = {};
@@ -7350,6 +7351,12 @@ app.get('/api/analytics', async (req, res) => {
     }
 
     for (const m of missions) {
+      // CA signe : datage par la date de creation de la ligne Notion (proxy de la date de signature)
+      if (m.dateCreation && m.ca > 0) {
+        const dSign = new Date(m.dateCreation);
+        if (dSign >= startDate && dSign <= endDate) { caSigne += m.ca; nbSigne += 1; }
+      }
+
       let montantPeriode = 0;
 
       // Acompte N
@@ -7400,6 +7407,8 @@ app.get('/api/analytics', async (req, res) => {
     res.json({
       start, end,
       ca: Math.round(ca),
+      caSigne: Math.round(caSigne),
+      nbSigne,
       bySubventionne: toArray(bySubventionne),
       byAcquisition: toArray(byAcquisition),
       byNatureMission: toArray(byNatureMission),
