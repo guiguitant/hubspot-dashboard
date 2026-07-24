@@ -13102,6 +13102,7 @@
       const parAnnee = {};
       for (const p of postes) { const a = p.annee || '—'; (parAnnee[a] = parAnnee[a] || []).push(p); }
       let h = '<table style="width:100%;border-collapse:collapse;font-size:0.8rem"><thead><tr style="color:var(--text-secondary);border-bottom:1px solid var(--border)"><th style="text-align:left;padding:0.3rem 0">Poste</th><th style="text-align:right;padding:0.3rem">Montant</th><th style="text-align:center;padding:0.3rem">%</th><th style="text-align:right;padding:0.3rem">Retenu</th><th></th></tr></thead><tbody>';
+      let grandTotal = 0;
       for (const annee of Object.keys(parAnnee).sort()) {
         let sumRetenu = 0; const rows = [];
         for (const p of parAnnee[annee]) {
@@ -13125,9 +13126,14 @@
             + '<td style="text-align:right;padding:0.3rem 0 0.3rem 0.4rem"><button class="btn" onclick="deletePosteCard(\'' + im.id + '\',\'' + p.id + '\')" style="padding:0.05rem 0.35rem;font-size:0.72rem;color:var(--danger)" title="Supprimer">&times;</button></td>'
             + '</tr>');
         }
-        h += '<tr style="background:var(--bg-secondary)"><td colspan="5" style="padding:0.3rem 0.5rem;font-weight:600;font-size:0.74rem">Annee ' + annee + ' <span style="color:var(--text-secondary);font-weight:400">&nbsp;·&nbsp; retenu ' + formatEuro(sumRetenu) + '</span></td></tr>';
+        grandTotal += sumRetenu;
+        h += '<tr style="background:var(--bg-secondary)"><td colspan="5" style="padding:0.3rem 0.5rem;font-weight:600;font-size:0.74rem">Annee ' + annee + '</td></tr>';
         h += rows.join('');
+        // Sous-total de l'annee (montants retenus uniquement)
+        h += '<tr><td colspan="3" style="padding:0.3rem 0.5rem 0.3rem 0.6rem;text-align:right;font-size:0.76rem;color:var(--text-secondary)">Sous-total ' + annee + '</td><td style="text-align:right;padding:0.3rem;font-weight:700">' + formatEuro(sumRetenu) + '</td><td></td></tr>';
       }
+      // Total general de l'immo (depenses retenues uniquement = assiette avant deduction des aides)
+      h += '<tr style="border-top:2px solid var(--border)"><td colspan="3" style="padding:0.45rem 0.5rem 0.45rem 0.6rem;text-align:right;font-weight:700">Total depenses retenues</td><td style="text-align:right;padding:0.45rem;font-weight:700;color:var(--primary)">' + formatEuro(grandTotal) + '</td><td></td></tr>';
       h += '</tbody></table>';
       return h;
     }
