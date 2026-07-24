@@ -12607,10 +12607,11 @@
       const resNetApresIS = resExploit - isBrut;
       html += row('= Resultat net' + (credit ? ' (apres IS)' : ''), resNetApresIS, { total: true });
       if (credit) {
-        // Bloc ESTIMATIF (italique) : le credit CII/CIR est une estimation (methode a valider avec
-        // l'expert-comptable). On l'affiche a part, avec le resultat net estimatif qui en decoule.
+        // Bloc ESTIMATIF (italique) : le credit CII/CIR reste une estimation (chiffres calcules en
+        // interne) mais la methode a ete validee par l'expert-comptable. On l'affiche a part, avec le
+        // resultat net estimatif qui en decoule.
         html += '<div style="margin-top:0.7rem;padding-top:0.5rem;border-top:1px dashed var(--border);font-style:italic;color:var(--text-secondary)">';
-        html += '<div style="font-size:0.74rem;margin-bottom:0.4rem">Estimatif, a valider avec l\'expert-comptable. Le credit d\'impot CII/CIR reduit l\'IS ; l\'exces est restitue (PME).</div>';
+        html += '<div style="font-size:0.74rem;margin-bottom:0.4rem">Estimatif (chiffres calcules en interne, methode validee par l\'expert-comptable). Le credit d\'impot CII/CIR reduit l\'IS ; l\'exces est restitue (PME).</div>';
         html += '<div class="cr-row clickable" onclick="openCrDetailModal(\'credit\')" style="font-style:italic"><span>+ Credit d\'impot estime (CII / CIR) <span style="font-size:0.68rem">detail</span></span><span style="color:var(--primary)">+ ' + formatEuro(credit) + '</span></div>';
         html += '<div class="cr-row" style="font-style:italic;font-weight:700"><span>= Resultat net estimatif (apres credit)</span><span>' + formatEuro(resNet) + '</span></div>';
         html += '</div>';
@@ -13045,7 +13046,7 @@
         if (hasCir) h += '<td style="text-align:right;padding:0.35rem">' + formatEuro(totCir) + '</td><td style="text-align:right;padding:0.35rem;color:var(--primary)">' + formatEuro(totCirCr) + '</td>';
         if (hasCii) h += '<td style="text-align:right;padding:0.35rem">' + formatEuro(totCii) + '</td><td style="text-align:right;padding:0.35rem;color:var(--primary)">' + formatEuro(totCiiCr) + '</td>';
         h += '</tr></tbody></table>';
-        h += '<div style="font-size:0.7rem;color:var(--text-secondary);margin-top:0.3rem">Credit estime = base nette x taux (CIR 30%, CII 20%), a valider avec le comptable ; plafonds non appliques.</div>';
+        h += '<div style="font-size:0.7rem;color:var(--text-secondary);margin-top:0.3rem">Credit estime = base nette x taux (CIR 30%, CII 20%). Methode validee par l\'expert-comptable ; plafonds non appliques.</div>';
       }
       return h;
     }
