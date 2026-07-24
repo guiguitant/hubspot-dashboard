@@ -6226,24 +6226,41 @@ const DEPENSES_CACHE_TTL = 10 * 60 * 1000; // 10 min, comme customerInvoices
 // simultanes partagent la meme promesse (meme pattern que fetchCustomerInvoices).
 let _inFlightFetchDepensesTransactions = null;
 
-// Fetch dedie 13 mois (mois courant + 12 precedents) pour l'onglet Depenses.
+// Borne basse par defaut : 13 mois (mois courant + 12 precedents).
+function _defaultDepensesFromDate() {
+  const from = new Date();
+  from.setDate(1);
+  from.setMonth(from.getMonth() - 12);
+  return `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}-01`;
+}
+
+// Fetch Pennylane pour l'onglet Charges/Depenses.
+// - sans argument : fenetre par defaut 13 mois + singleton anti-concurrence (appels simultanes partages).
+// - avec fromDate ('YYYY-MM-DD') : borne basse = min(fromDate, defaut) pour couvrir a la fois la periode
+//   demandee ET la fenetre glissante du snapshot ; fetch direct (cle variable, pas de singleton).
 // limit=100 : pages par defaut a 20 items, donc 5x moins d'appels API.
-function fetchDepensesTransactions() {
-  if (_inFlightFetchDepensesTransactions) return _inFlightFetchDepensesTransactions;
-  _inFlightFetchDepensesTransactions = (async () => {
-    const from = new Date();
-    from.setDate(1);
-    from.setMonth(from.getMonth() - 12);
-    const fromDate = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}-01`;
-    const filter = JSON.stringify([{ field: 'date', operator: 'gteq', value: fromDate }]);
-    return pennylaneFetchAll('/transactions', { filter, limit: '100' });
-  })().finally(() => { _inFlightFetchDepensesTransactions = null; });
-  return _inFlightFetchDepensesTransactions;
+function fetchDepensesTransactions(fromDate) {
+  if (!fromDate) {
+    if (_inFlightFetchDepensesTransactions) return _inFlightFetchDepensesTransactions;
+    _inFlightFetchDepensesTransactions = (async () => {
+      const filter = JSON.stringify([{ field: 'date', operator: 'gteq', value: _defaultDepensesFromDate() }]);
+      return pennylaneFetchAll('/transactions', { filter, limit: '100' });
+    })().finally(() => { _inFlightFetchDepensesTransactions = null; });
+    return _inFlightFetchDepensesTransactions;
+  }
+  const def = _defaultDepensesFromDate();
+  const from = String(fromDate) < def ? String(fromDate) : def;
+  const filter = JSON.stringify([{ field: 'date', operator: 'gteq', value: from }]);
+  return pennylaneFetchAll('/transactions', { filter, limit: '100' });
 }
 
 app.get('/api/depenses', async (req, res) => {
   try {
-    if (depensesCache && (Date.now() - depensesCacheTime) < DEPENSES_CACHE_TTL) {
+    const { start, end } = req.query;
+    const hasPeriod = !!(start && end);
+
+    // Sans periode : reponse cachee 10 min (comportement historique).
+    if (!hasPeriod && depensesCache && (Date.now() - depensesCacheTime) < DEPENSES_CACHE_TTL) {
       return res.json(depensesCache);
     }
 
@@ -6251,18 +6268,35 @@ app.get('/api/depenses', async (req, res) => {
     // il degrade en tableau vide + champ pennylaneError pour que le front affiche un bandeau
     // (jamais de zeros silencieux).
     let pennylaneError = null;
-    const transactions = await fetchDepensesTransactions()
+    const transactions = await fetchDepensesTransactions(hasPeriod ? String(start) : null)
       .catch(err => { pennylaneError = err.message; return []; });
 
-    const computed = computeDepenses(transactions);
+    // Detail : periode explicite si fournie (mode periode), sinon fenetre glissante 13 mois.
+    const computed = hasPeriod
+      ? computeDepenses(transactions, { start, end })
+      : computeDepenses(transactions);
+
+    // Snapshot (3 cards "instantanees" : sorties ce mois, moyenne 6 mois, recurrentes) : TOUJOURS
+    // la fenetre glissante, independant de la periode selectionnee. computeDepenses en mode glissant
+    // ignore les transactions hors des 13 derniers mois, donc le fetch elargi n'a pas d'impact ici.
+    const snapshotSource = hasPeriod ? computeDepenses(transactions) : computed;
+    const snapshot = {
+      sortiesMoisCourant: snapshotSource.kpis.sortiesMoisCourant,
+      pctVsMoyenne6m: snapshotSource.kpis.pctVsMoyenne6m,
+      moyenne6m: snapshotSource.kpis.moyenne6m,
+      abonnementsMensuels: snapshotSource.kpis.abonnementsMensuels,
+      currentMonth: snapshotSource.kpis.currentMonth,
+    };
+
     const responsePayload = {
       ...computed,
+      snapshot,
       pennylaneError,
       fetchedAt: new Date().toISOString(),
     };
 
-    // Un resultat en erreur n'est JAMAIS mis en cache (sinon 10 min de zeros).
-    if (!pennylaneError) {
+    // Cache uniquement la reponse par defaut sans erreur (les periodes ne sont pas cachees).
+    if (!hasPeriod && !pennylaneError) {
       depensesCache = responsePayload;
       depensesCacheTime = Date.now();
     }

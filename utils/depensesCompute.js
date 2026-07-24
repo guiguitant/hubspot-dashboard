@@ -82,20 +82,49 @@ function monthKeyFromOffset(now, offset) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
 }
 
+// Liste ordonnee des cles 'YYYY-MM' de startKey a endKey inclus (garde-fou 240 mois = 20 ans).
+function monthRange(startKey, endKey) {
+  const [sy, sm] = String(startKey).split('-').map(Number);
+  const [ey, em] = String(endKey).split('-').map(Number);
+  const out = [];
+  let y = sy, m = sm, guard = 0;
+  while ((y < ey || (y === ey && m <= em)) && guard < 240) {
+    out.push(y + '-' + String(m).padStart(2, '0'));
+    m++; if (m > 12) { m = 1; y++; }
+    guard++;
+  }
+  return out;
+}
+
 const UNCATEGORIZED_LABEL = 'Sans categorie';
 
 function computeDepenses(transactions, options = {}) {
-  const now = options.now ? new Date(options.now) : new Date();
   const txs = Array.isArray(transactions) ? transactions : [];
 
-  // Echelles de temps (cles 'YYYY-MM')
-  const months13 = [];
-  for (let off = 12; off >= 0; off--) months13.push(monthKeyFromOffset(now, off));
-  const currentMonthKey = months13[months13.length - 1];
-  const months12 = months13.slice(1);                 // 12 derniers mois, mois courant inclus
-  const prev6 = months13.slice(6, 12);                // 6 mois pleins precedant le mois courant
-  const months13Set = new Set(months13);
-  const months12Set = new Set(months12);
+  // Echelles de temps (cles 'YYYY-MM'). Deux modes :
+  // - periode explicite (options.start/end 'YYYY-MM-DD') : toutes les fenetres = les mois de [start, end],
+  //   pas de derive (le concept "mois courant" n'a pas de sens sur une periode passee) ;
+  // - glissant (defaut, options.now facultatif) : graphe 13 mois, tableaux 12 mois, moyenne 6 mois pleins.
+  const hasRange = !!(options.start && options.end);
+  let graphMonths, tableMonths, prev6, currentMonthKey, deriveEnabled;
+  if (hasRange) {
+    graphMonths = monthRange(String(options.start).slice(0, 7), String(options.end).slice(0, 7));
+    tableMonths = graphMonths;
+    prev6 = [];
+    currentMonthKey = graphMonths[graphMonths.length - 1] || String(options.end).slice(0, 7);
+    deriveEnabled = false;
+  } else {
+    const now = options.now ? new Date(options.now) : new Date();
+    const months13 = [];
+    for (let off = 12; off >= 0; off--) months13.push(monthKeyFromOffset(now, off));
+    graphMonths = months13;
+    tableMonths = months13.slice(1);                  // 12 derniers mois, mois courant inclus
+    prev6 = months13.slice(6, 12);                    // 6 mois pleins precedant le mois courant
+    currentMonthKey = months13[months13.length - 1];
+    deriveEnabled = true;
+  }
+  const graphMonthsSet = new Set(graphMonths);
+  const tableMonthsSet = new Set(tableMonths);
 
   // Accumulateurs
   const byMonthMap = new Map();      // month -> { total, fixed, pilotable }
@@ -111,13 +140,13 @@ function computeDepenses(transactions, options = {}) {
     const spend = -amount;
 
     const monthKey = String((tx && tx.date) || '').slice(0, 7);
-    if (!months13Set.has(monthKey)) continue;
+    if (!graphMonthsSet.has(monthKey)) continue;
 
     const cats = Array.isArray(tx.categories) ? tx.categories.filter(Boolean) : [];
 
     // Virements internes : pas une vraie sortie, exclus de tout (comptes a part)
     if (cats.some(isInternalTransferCategory)) {
-      if (months12Set.has(monthKey)) {
+      if (tableMonthsSet.has(monthKey)) {
         internalCount++;
         internalTotal += spend;
       }
@@ -132,8 +161,8 @@ function computeDepenses(transactions, options = {}) {
     m.total += spend;
     if (isFixed) m.fixed += spend; else m.pilotable += spend;
 
-    // Le reste (tableaux, KPIs) travaille sur les 12 derniers mois
-    if (!months12Set.has(monthKey)) continue;
+    // Le reste (tableaux, KPIs) travaille sur la fenetre "tableaux"
+    if (!tableMonthsSet.has(monthKey)) continue;
 
     const catLabel = cats.length ? String(cats[0].label || UNCATEGORIZED_LABEL) : UNCATEGORIZED_LABEL;
     let catMonths = byCategoryMap.get(catLabel);
@@ -159,7 +188,7 @@ function computeDepenses(transactions, options = {}) {
   }
 
   // --- byMonth (13 mois, zeros pour les mois sans transaction) ---
-  const byMonth = months13.map((month) => {
+  const byMonth = graphMonths.map((month) => {
     const e = byMonthMap.get(month) || { total: 0, fixed: 0, pilotable: 0 };
     return { month, total: round2(e.total), fixed: round2(e.fixed), pilotable: round2(e.pilotable) };
   });
@@ -168,13 +197,13 @@ function computeDepenses(transactions, options = {}) {
   const byCategory = [];
   for (const [label, catMonths] of byCategoryMap) {
     let total12m = 0;
-    for (const mk of months12) total12m += catMonths.get(mk) || 0;
+    for (const mk of tableMonths) total12m += catMonths.get(mk) || 0;
     const currentMonth = catMonths.get(currentMonthKey) || 0;
     let prev6Sum = 0;
     for (const mk of prev6) prev6Sum += catMonths.get(mk) || 0;
-    const avg6m = prev6Sum / 6;
+    const avg6m = prev6.length ? prev6Sum / prev6.length : 0;
     const gap = currentMonth - avg6m;
-    const derive = currentMonth > avg6m * DERIVE_RATIO && gap >= DERIVE_MIN_GAP;
+    const derive = deriveEnabled && currentMonth > avg6m * DERIVE_RATIO && gap >= DERIVE_MIN_GAP;
     byCategory.push({
       label,
       total12m: round2(total12m),
@@ -224,7 +253,7 @@ function computeDepenses(transactions, options = {}) {
   const sortiesMoisCourant = byMonth[byMonth.length - 1].total;
   let prev6TotalSum = 0;
   for (const mk of prev6) prev6TotalSum += (byMonthMap.get(mk) || { total: 0 }).total;
-  const moyenne6m = round2(prev6TotalSum / 6);
+  const moyenne6m = round2(prev6TotalSum / (prev6.length || 1));
   const pctVsMoyenne6m = moyenne6m > 0
     ? Math.round(((sortiesMoisCourant - moyenne6m) / moyenne6m) * 1000) / 10
     : null;

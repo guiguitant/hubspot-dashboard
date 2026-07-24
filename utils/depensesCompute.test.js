@@ -307,3 +307,36 @@ describe('computeDepenses : sans categorie et KPIs', () => {
     expect([...totals].sort((a, b) => b - a)).toEqual(totals);
   });
 });
+
+describe('computeDepenses : mode periode explicite (start/end)', () => {
+  const CAT = { id: 8791754, label: 'Logiciels & Services Web' };
+
+  test('byMonth couvre exactement les mois de la periode', () => {
+    const res = computeDepenses([
+      tx('2025-03-10', -100, 'CARTE 10/03 ELEVENLABS.IO', [CAT]),
+    ], { start: '2025-01-01', end: '2025-12-31' });
+    expect(res.byMonth).toHaveLength(12);
+    expect(res.byMonth[0].month).toBe('2025-01');
+    expect(res.byMonth[11].month).toBe('2025-12');
+    expect(res.byMonth.find(m => m.month === '2025-03').total).toBe(100);
+  });
+
+  test('les transactions hors periode sont ignorees', () => {
+    const res = computeDepenses([
+      tx('2025-06-10', -200, 'CARTE 10/06 ELEVENLABS.IO', [CAT]),
+      tx('2026-01-10', -999, 'CARTE 10/01 ELEVENLABS.IO', [CAT]), // hors periode
+    ], { start: '2025-01-01', end: '2025-12-31' });
+    expect(res.byCategory.find(c => c.label === 'Logiciels & Services Web').total12m).toBe(200);
+    expect(res.byMonth.find(m => m.month === '2026-01')).toBeUndefined();
+  });
+
+  test('pas de derive en mode periode meme si une categorie pique le dernier mois', () => {
+    const res = computeDepenses([
+      tx('2025-11-10', -100, 'CARTE OPENAI 2025-11', [CAT]),
+      tx('2025-12-10', -900, 'CARTE OPENAI 2025-12', [CAT]),
+    ], { start: '2025-01-01', end: '2025-12-31' });
+    const cat = res.byCategory.find(c => c.label === 'Logiciels & Services Web');
+    expect(cat.derive).toBe(false);
+    expect(cat.total12m).toBe(1000);
+  });
+});
