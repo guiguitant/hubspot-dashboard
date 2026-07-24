@@ -5114,7 +5114,7 @@ function masseSalarialeMois(annee, mois, masseSalarialeData, masseOverrides = {}
 //   'previ'          → mois clos : charges CR_Prev HT + subv/aides Plan_TRE_Prév (vue 100% budget annuel,
 //                      aligne avec les lignes cumulées de CR_Prev). Le soldeDebutFirstMonth reste ancré Qonto,
 //                      mais le cumul intermédiaire projette le budget au lieu de la réalité bancaire.
-async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, masseSalarialeData, masseOverrides = {}, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals, crPrevData, caEstimatif, customerInvoices = [], caSource = 'factures', pastMode = 'real', includeGSheet = true, includePipeline = true, includeCaNotion = true, includeSalariesBaseline = true, revenusRecurrentsExtras = [], subventionsAnnoncees = [], gsheetOverrides = [] }) {
+async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, masseSalarialeData, masseOverrides = {}, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals, crPrevData, caEstimatif, customerInvoices = [], caSource = 'factures', pastMode = 'real', includeGSheet = true, includePipeline = true, includeCaNotion = true, includeSalariesBaseline = true, revenusRecurrentsExtras = [], subventionsAnnoncees = [], gsheetOverrides = [], remboursementCreditByMonth = {} }) {
   // --- A encaisser : deux sources ---
   // 1) Factures ÉMISES depuis Pennylane (source de vérité pour late/upcoming, avec deadline et remaining_amount réels)
   // 2) Factures PRÉVISIONNELLES depuis Notion (missions dont la facture n'est pas encore émise)
@@ -6042,6 +6042,9 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
       // Phase E++ : zero seulement si M-1 a été recalculé avec override (shouldStripBaselineTva).
       // Si M-1 n'a pas d'override, le baseline credit est conservé (recalc = baseline → identique).
       creditTvaPlanTre: (showPlanTreFinancements && !shouldStripBaselineTva) ? Math.round(creditTvaByMonth_local[mKey] || 0) : 0,
+      // Remboursement du crédit d'impôt CIR/CII (part non imputée sur l'IS d'un exercice N, restituée en N+1) :
+      // encaissement pur, mois non clos uniquement. Alimenté par remboursementCreditByMonth (clé 'YYYY-MM').
+      remboursementCreditImpot: isClos ? 0 : Math.round(remboursementCreditByMonth[mKey] || 0),
       // Détail lignes par catégorie (pour expansion accordéon dans modale)
       chargesPlanTreLines: (() => {
         const l = { ...(planTreDecLinesByMonth[mKey] || {}) };
@@ -6087,6 +6090,7 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
                       + (mois.subvPlanTre || 0) + (mois.aidePlanTre || 0)
                       + (mois.pretPlanTre || 0) + (mois.avancePlanTre || 0) + (mois.rembOpcoPlanTre || 0)
                       + (mois.creditTvaPlanTre || 0)
+                      + (mois.remboursementCreditImpot || 0)
                       + (mois.creditsPlanTre || 0)
                       + (mois.revenusExceptionnels || 0)
                       + (mois.fictionalEncaissements || 0) + (mois.revenusRecurrents || 0)
@@ -6141,6 +6145,24 @@ app.get('/api/tresorerie', async (req, res) => {
     const revenus = [];
 
     const crPrevData = await fetchAndParseCRPrev();
+
+    // Remboursement du credit d'impot CIR/CII : la part non imputee sur l'IS d'un exercice N est
+    // restituee en N+1 (septembre par defaut, surchargeable via CREDIT_REMB_MONTH). On l'injecte comme
+    // encaissement dans les mois futurs de la prevision. Tolerant : un echec ne fait pas tomber la treso.
+    const CREDIT_REMB_MONTH = parseInt(process.env.CREDIT_REMB_MONTH || '9', 10);
+    const remboursementCreditByMonth = {};
+    try {
+      const targets = (qontoData.previsionnel || []).filter(m => !m.isClos && m.mois === CREDIT_REMB_MONTH);
+      for (const m of targets) {
+        const r = await computeResultatFactuelForYear(m.annee - 1); // credit exercice N -> rembourse en N+1
+        if (r.remboursementCredit > 0) {
+          remboursementCreditByMonth[`${m.annee}-${String(m.mois).padStart(2, '0')}`] = r.remboursementCredit;
+        }
+      }
+    } catch (e) {
+      console.error('Erreur calcul remboursement credit CIR/CII:', e.message);
+    }
+
     const result = await buildPrevisionnel({
       qontoData, pipelineDeals, notionMissions,
       masseSalarialeData, masseOverrides: {}, revenus,
@@ -6148,6 +6170,7 @@ app.get('/api/tresorerie', async (req, res) => {
       crPrevData, caEstimatif: null,
       customerInvoices,
       includePipeline,
+      remboursementCreditByMonth,
     });
 
     // Trésorerie nette de dette (photo instant T) = solde Qonto tous comptes − Σ(engagements fermes).
@@ -7900,6 +7923,49 @@ async function computePipelinePondere() {
   // Réutilise le calcul unique (factor=1 : pipeline pondéré brut, sans override scénario)
   const total = weightPipelineDeals(pipelineDeals).reduce((sum, e) => sum + e.weighted, 0);
   return Math.round(total);
+}
+
+// Cascade "factuelle" (CA facturé -> résultat -> IS -> crédit -> impôt net) d'une année.
+// Miroir de la branche factuelle de /api/ebe (mêmes formules, mêmes briques), extrait pour être
+// réutilisé par la trésorerie (remboursement du crédit d'impôt en N+1). Si /api/ebe évolue, garder aligné.
+// remboursementCredit = part du crédit NON imputée sur l'IS = max(0, crédit - IS) (restitution PME immédiate,
+// conforme à la réponse Actemis). sumDotationsForYear/sumCreditsForYear sont déjà tolérants (0 si erreur).
+async function computeResultatFactuelForYear(year) {
+  const start = `${year}-01-01`, end = `${year}-12-31`;
+  const [missions, chargesData, financements, amortissements, creditImpot] = await Promise.all([
+    fetchAllNotionMissions(),
+    computeChargesHybride(start, end),
+    fetchFinancementsForYear(year),
+    sumDotationsForYear(year),
+    sumCreditsForYear(year),
+  ]);
+  const startDate = new Date(start);
+  const endDate = new Date(end); endDate.setHours(23, 59, 59, 999);
+  let caFacture = 0;
+  for (const m of missions) {
+    if (m.dateFactureAcompte && m.montantAcompte > 0) {
+      const d = new Date(m.dateFactureAcompte);
+      if (d >= startDate && d <= endDate) caFacture += m.montantAcompte;
+    }
+    if (m.dateFactureFinale) {
+      const montantSolde = m.ca - m.montantAcompte;
+      if (montantSolde > 0) {
+        const d = new Date(m.dateFactureFinale);
+        if (d >= startDate && d <= endDate) caFacture += montantSolde;
+      }
+    }
+  }
+  caFacture = Math.round(caFacture);
+  const totalCharges = Math.round(chargesData.totalCharges || 0);
+  const totalSubv = financements.subventions.reduce((s, f) => s + f.montant, 0);
+  const totalAide = financements.aides.reduce((s, f) => s + f.montant, 0);
+  const ebe = caFacture - totalCharges + totalSubv + totalAide;
+  const resExploit = Math.round(ebe) - amortissements;
+  const isBrut = computeIS(resExploit);
+  const creditTotal = creditImpot.total;
+  const impotNet = isBrut - creditTotal;
+  const remboursementCredit = Math.max(0, creditTotal - isBrut);
+  return { year, caFacture, totalCharges, resExploit, isBrut, creditTotal, impotNet, remboursementCredit };
 }
 
 app.get('/api/ebe', async (req, res) => {
