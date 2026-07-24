@@ -13874,6 +13874,7 @@
       const pipelineEnc = mois.pipelinePondereEncaissements || 0;
       const rembAvancePlanTreVal = mois.rembAvancePlanTre || 0;
       const creditTvaVal = mois.creditTvaPlanTre || 0;
+      const remboursementCreditVal = mois.remboursementCreditImpot || 0;
       // Charges TTC Plan TRE Prév (mois non-clos) ou Qonto réel TTC (mois clos)
       const chargesTTC = (mois.decaissementsTRE || mois.decaissements || 0) + rembAvancePlanTreVal;
       const chargesPlanTreDetail = mois.chargesPlanTreDetail || {};
@@ -13899,7 +13900,7 @@
       // Calcul du total encaissements (= encForSolde miroir backend)
       // Pour clos : encTRE = Qonto réel (inclut tout). pennyPaid = 0 (déjà dans encTRE).
       // Pour non-clos : encTRE = factures forecast. + pennyPaid + financements (validés et non) + creditTva + pipeline
-      const totalEnc = encTRE + pennyPaidTotal + finValidesTotal + finPreviTotal + creditTvaVal + creditsPlanTreVal + pipelineEnc;
+      const totalEnc = encTRE + pennyPaidTotal + finValidesTotal + finPreviTotal + creditTvaVal + remboursementCreditVal + creditsPlanTreVal + pipelineEnc;
 
       // --- Soldes ---
       let html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.8rem;margin-bottom:1.2rem">';
@@ -14038,6 +14039,9 @@
         }
         if (creditTvaVal > 0) {
           html += accordion('Crédit de TVA (remboursement TVA)', creditTvaVal, 'rgba(15,123,108,0.45)', '&#9679;', '');
+        }
+        if (remboursementCreditVal > 0) {
+          html += accordion('Remboursement CIR/CII (exercice ' + (mois.annee - 1) + ')', remboursementCreditVal, 'rgba(15,123,108,0.45)', '&#9679;', '');
         }
         // Crédits Plan TRE (catégories cm.X à total négatif → reclassées en encaissement).
         // Un accordéon par catégorie créditée, avec détail ligne par ligne.
