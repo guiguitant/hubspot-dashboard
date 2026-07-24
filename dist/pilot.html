@@ -3946,78 +3946,6 @@
   <!-- end page-immobilisations -->
 
   <!-- PAGE: Depenses -->
-  <div class="app-page" id="page-depenses">
-  <div class="page">
-
-    <div class="page-icon">&#128184;</div>
-    <h1 class="page-title">Depenses</h1>
-    <p class="page-desc">Ou part l'argent, et qu'est-ce qui derive ? Transactions bancaires Pennylane des 12 derniers mois, hors virements internes. <span id="depensesFreshness" style="color:var(--text-secondary)"></span></p>
-
-    <div class="error-banner" id="depensesErrorBanner"></div>
-    <div id="depensesPennylaneWarning" style="display:none;padding:0.6rem 1rem;background:rgba(224,62,62,0.08);border-left:3px solid var(--danger);border-radius:4px;margin-bottom:1rem;font-size:0.85rem;color:var(--text)"></div>
-
-    <!-- KPIs -->
-    <div class="kpi-row" id="depensesKpis">
-      <div class="kpi-block">
-        <div class="kpi-label">Sorties ce mois <span class="kpi-unit">TTC</span></div>
-        <div class="kpi-value" id="depKpiSorties">--</div>
-        <div class="kpi-sub" id="depKpiSortiesSub"></div>
-      </div>
-      <div class="kpi-block">
-        <div class="kpi-label">Moyenne mensuelle <span class="kpi-unit">6 mois</span></div>
-        <div class="kpi-value" id="depKpiMoyenne">--</div>
-        <div class="kpi-sub" id="depKpiMoyenneSub"></div>
-      </div>
-      <div class="kpi-block">
-        <div class="kpi-label">Depenses recurrentes</div>
-        <div class="kpi-value" id="depKpiAbos">--</div>
-        <div class="kpi-sub" id="depKpiAbosSub"></div>
-      </div>
-      <div class="kpi-block">
-        <div class="kpi-label">Sans categorie</div>
-        <div class="kpi-value" id="depKpiSansCat">--</div>
-        <div class="kpi-sub" id="depKpiSansCatSub"></div>
-      </div>
-    </div>
-
-    <!-- Chart: sorties par mois -->
-    <div class="section">
-      <div class="section-title">Sorties par mois (13 mois)</div>
-      <div style="position:relative;height:350px;margin-bottom:1rem">
-        <canvas id="depensesChart"></canvas>
-      </div>
-    </div>
-
-    <!-- Tableau par categorie -->
-    <div class="section">
-      <div class="section-title">Par categorie (12 mois)</div>
-      <div id="depensesTableCategories">
-        <p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p>
-      </div>
-    </div>
-
-    <!-- Top fournisseurs -->
-    <div class="section">
-      <div class="section-title">Top 15 fournisseurs (12 mois)</div>
-      <p style="color:var(--text-secondary);font-size:0.8rem;margin:-0.4rem 0 0.75rem">Hors salaires, TVA, impots et virements internes.</p>
-      <div id="depensesTableVendors">
-        <p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p>
-      </div>
-    </div>
-
-    <!-- Depenses recurrentes detectees -->
-    <div class="section">
-      <div class="section-title">Depenses recurrentes detectees (presentes 4 mois ou plus)</div>
-      <p style="color:var(--text-secondary);font-size:0.8rem;margin:-0.4rem 0 0.75rem">Fournisseurs presents sur au moins 4 mois distincts. Cout mensuel estime = total / nombre de mois de presence.</p>
-      <div id="depensesSubscriptions">
-        <p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p>
-      </div>
-    </div>
-
-  </div>
-  </div>
-  <!-- end page-depenses -->
-
   <!-- PAGE: Analytics -->
   <div class="app-page" id="page-analytics">
   <div class="page">
@@ -4112,54 +4040,66 @@
 
     <!-- Onglet Charges -->
     <div id="analytics-tab-charges" style="display:none">
-      <!-- Toggle prévisionnel -->
-      <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:1.5rem">
-        <input type="checkbox" id="chargesPrevCheckbox" onchange="toggleChargesPrev(this.checked)" style="width:15px;height:15px;cursor:pointer;accent-color:var(--primary)">
-        <label for="chargesPrevCheckbox" style="font-size:0.9rem;cursor:pointer;color:var(--text)">Prévisionnel (données gsheet)</label>
-      </div>
-      <!-- KPI Charges projetées (visibles uniquement quand la checkbox est cochée) -->
-      <div id="analyticsChargesProjCards" style="display:none;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:2rem">
+      <!-- 3 cards instantanees (source Pennylane, toujours actuelles, independantes de la periode) -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:2rem">
         <div class="kpi-block">
-          <div class="kpi-label">Total projeté</div>
-          <div class="kpi-value" id="analyticsChargesTotalProjete">--</div>
-          <div class="kpi-sub">réel + prévisionnel</div>
-        </div>
-        <div class="kpi-block" id="kpiChargesReel" style="display:none">
-          <div class="kpi-label" style="display:flex;align-items:center;gap:0.4rem">
-            <span style="width:8px;height:8px;border-radius:50%;background:#7A9BBF;display:inline-block"></span>Réel (Qonto)
-          </div>
-          <div class="kpi-value" id="analyticsChargesReelTotal">--</div>
-          <div class="kpi-sub" id="analyticsChargesReelPeriode">--</div>
-        </div>
-        <div class="kpi-block" id="kpiChargesPrev" style="display:none">
-          <div class="kpi-label" style="display:flex;align-items:center;gap:0.4rem">
-            <span style="width:8px;height:8px;border-radius:50%;background:#9ECAB4;display:inline-block"></span>Prévi (GSheet)
-          </div>
-          <div class="kpi-value" id="analyticsChargesPrevTotal">--</div>
-          <div class="kpi-sub" id="analyticsChargesPrevPeriode">--</div>
+          <div class="kpi-label">Sorties ce mois <span class="kpi-unit">TTC</span></div>
+          <div class="kpi-value" id="depKpiSorties">--</div>
+          <div class="kpi-sub" id="depKpiSortiesSub"></div>
         </div>
         <div class="kpi-block">
-          <div class="kpi-label">Moy. mens. projetée</div>
-          <div class="kpi-value" id="analyticsChargesMoyenneProjetee">--</div>
-          <div class="kpi-sub">total projeté / nb mois</div>
+          <div class="kpi-label">Moyenne mensuelle <span class="kpi-unit">6 mois</span></div>
+          <div class="kpi-value" id="depKpiMoyenne">--</div>
+          <div class="kpi-sub" id="depKpiMoyenneSub"></div>
+        </div>
+        <div class="kpi-block">
+          <div class="kpi-label">Dépenses récurrentes</div>
+          <div class="kpi-value" id="depKpiAbos">--</div>
+          <div class="kpi-sub" id="depKpiAbosSub"></div>
         </div>
       </div>
+
+      <!-- Bandeau erreur Pennylane (detail indisponible) -->
+      <div id="depensesPennylaneWarning" style="display:none;padding:0.6rem 1rem;background:rgba(224,62,62,0.08);border-left:3px solid var(--danger);border-radius:4px;margin-bottom:1rem;font-size:0.85rem;color:var(--text)"></div>
+
+      <!-- Bloc Comparatif : Qonto reel + previsionnel GSheet -->
       <div class="section">
-        <div class="section-title">Charges N vs N-1 (par mois)</div>
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:1rem;margin-bottom:0.75rem;flex-wrap:wrap">
+          <div class="section-title" style="margin-bottom:0">Charges N vs N-1 (par mois)</div>
+          <span style="font-size:0.72rem;color:var(--text-secondary)">Source : Qonto (réel) + GSheet (prévisionnel, mois hachurés)</span>
+        </div>
         <div style="position:relative;height:300px"><canvas id="analyticsChargesComparaison"></canvas></div>
       </div>
+
+      <!-- Bloc Detail des depenses : Pennylane (saisie comptable), pilote par la periode -->
+      <div style="display:flex;align-items:baseline;gap:0.6rem;margin:2.5rem 0 0.75rem;flex-wrap:wrap">
+        <h2 style="font-size:1.05rem;font-weight:600;margin:0">Détail des dépenses</h2>
+        <span style="font-size:0.72rem;color:var(--text-secondary)">Source : Pennylane (saisie comptable) · sur la période sélectionnée</span>
+      </div>
+
       <div class="section">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
-          <div class="section-title" style="margin-bottom:0">Répartition des charges par catégorie</div>
-          <div style="display:flex;gap:0.5rem">
-            <button id="btnAnalyticsChargesCat" onclick="setAnalyticsChargesMode('categories')" style="padding:0.3rem 0.8rem;border-radius:4px;border:1px solid var(--border);background:var(--primary);color:#fff;font-size:0.8rem;cursor:pointer">Catégories</button>
-            <button id="btnAnalyticsChargesSousCat" onclick="setAnalyticsChargesMode('sous-categories')" style="padding:0.3rem 0.8rem;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:0.8rem;cursor:pointer">Sous-catégories</button>
-          </div>
-        </div>
+        <div class="section-title">Sorties par mois</div>
+        <div style="position:relative;height:350px"><canvas id="depensesChart"></canvas></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Répartition par catégorie</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;align-items:start">
           <div style="position:relative;height:500px"><canvas id="analyticsChargesChart"></canvas></div>
-          <div id="analyticsChargesDetail"><p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p></div>
+          <div id="depensesTableCategories"><p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p></div>
         </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Top 15 fournisseurs</div>
+        <p style="color:var(--text-secondary);font-size:0.8rem;margin:-0.4rem 0 0.75rem">Hors salaires, TVA, impots et virements internes.</p>
+        <div id="depensesTableVendors"><p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Dépenses récurrentes détectées (présentes 4 mois ou plus)</div>
+        <p style="color:var(--text-secondary);font-size:0.8rem;margin:-0.4rem 0 0.75rem">Fournisseurs presents sur au moins 4 mois distincts. Cout mensuel estime = total / nombre de mois de presence.</p>
+        <div id="depensesSubscriptions"><p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p></div>
       </div>
     </div>
 
@@ -5559,7 +5499,6 @@
       if (page === 'kpi') initKpi();
       if (page === 'frais-km' && !fraisKmData) refreshFraisKmClients();
       if (page === 'analyse-clients' && !analyseClientsData) refreshAnalyseClients();
-      if (page === 'depenses') { if (depensesData) { renderDepensesKpis(); renderDepensesChart(); renderDepensesCategories(); renderDepensesVendors(); renderDepensesSubscriptions(); } else refreshDepensesData(); }
     }
 
     function toggleComSubnav(forceOpen) {
@@ -5588,7 +5527,6 @@
       else if (currentPage === 'scenarios') refreshScenariosPage();
       else if (currentPage === 'frais-km') refreshFraisKmClients();
       else if (currentPage === 'analyse-clients') { analyseClientsData = null; refreshAnalyseClients(); }
-      else if (currentPage === 'depenses') refreshDepensesData();
     }
 
     const MONTHS_FR = [
@@ -10090,18 +10028,27 @@
       tabCharges.style.visibility = 'hidden';
 
       try {
-        const endpoint = analyticsChargesPrev
-          ? `/api/charges-hybride?start=${start}&end=${end}`
-          : `/api/charges?start=${start}&end=${end}`;
-        const res = await fetch(endpoint);
-        analyticsChargesData = await res.json();
-        if (!analyticsChargesData.ventilationCharges) return;
-        const source = analyticsChargesMode === 'sous-categories' && analyticsChargesData.ventilationChargesDetail
-          ? analyticsChargesData.ventilationChargesDetail.map(v => ({ label: v.sousCat || v.categorie, montant: v.montant }))
-          : analyticsChargesData.ventilationCharges.map(v => ({ label: v.categorie, montant: v.montant }));
-        renderPieChart('analyticsChargesChart', source.slice(0, 10));
-        renderAnalyticsChargesDetail();
-        renderChargesComparaison(analyticsChargesData.comparaison);
+        // Comparatif N vs N-1 : Qonto reel + previsionnel GSheet (hybride, toujours integre)
+        const cRes = await fetch(`/api/charges-hybride?start=${start}&end=${end}`);
+        analyticsChargesData = await cRes.json();
+        if (analyticsChargesData && analyticsChargesData.comparaison) renderChargesComparaison(analyticsChargesData.comparaison);
+
+        // Detail des depenses : Pennylane, pilote par la periode selectionnee
+        const dRes = await fetch(`/api/depenses?start=${start}&end=${end}`);
+        depensesData = await dRes.json();
+        const warnEl = document.getElementById('depensesPennylaneWarning');
+        if (warnEl) {
+          if (depensesData.pennylaneError) {
+            warnEl.textContent = 'Pennylane indisponible (' + depensesData.pennylaneError + ') : le detail des depenses n\'est pas fiable.';
+            warnEl.style.display = 'block';
+          } else warnEl.style.display = 'none';
+        }
+        renderDepensesKpis();
+        renderDepensesChart();
+        renderDepensesCategoriesPie();
+        renderDepensesCategories();
+        renderDepensesVendors();
+        renderDepensesSubscriptions();
       } catch(e) {
         console.error('Erreur chargement charges:', e);
       } finally {
@@ -14488,17 +14435,21 @@
       }
     }
 
+    // Etat du detail depenses (source Pennylane). Declares explicitement : sans ca, "depensesChart"
+    // resout vers l'element canvas (acces par id sur window) et depensesChart.destroy() plante.
+    let depensesData = null;
+    let depensesChart = null;
+
     function renderDepensesKpis() {
-      const k = (depensesData && depensesData.kpis) || {};
+      // Cards "instantanees" : toujours la fenetre glissante (snapshot), independant de la periode selectionnee.
+      const s = (depensesData && depensesData.snapshot) || {};
       const hasError = !!(depensesData && depensesData.pennylaneError);
-      document.getElementById('depKpiSorties').textContent = hasError ? '--' : formatEuro(k.sortiesMoisCourant);
-      document.getElementById('depKpiSortiesSub').textContent = hasError ? '' : (k.pctVsMoyenne6m == null ? 'Pas assez d\'historique' : formatPercent(k.pctVsMoyenne6m) + ' vs moyenne 6 mois');
-      document.getElementById('depKpiMoyenne').textContent = hasError ? '--' : formatEuro(k.moyenne6m);
+      document.getElementById('depKpiSorties').textContent = hasError ? '--' : formatEuro(s.sortiesMoisCourant);
+      document.getElementById('depKpiSortiesSub').textContent = hasError ? '' : (s.pctVsMoyenne6m == null ? 'Pas assez d\'historique' : formatPercent(s.pctVsMoyenne6m) + ' vs moyenne 6 mois');
+      document.getElementById('depKpiMoyenne').textContent = hasError ? '--' : formatEuro(s.moyenne6m);
       document.getElementById('depKpiMoyenneSub').textContent = hasError ? '' : 'Hors virements internes';
-      document.getElementById('depKpiAbos').textContent = hasError ? '--' : formatEuro(k.abonnementsMensuels) + '/mois';
-      document.getElementById('depKpiAbosSub').textContent = hasError ? '' : ((depensesData.subscriptions || []).length + ' fournisseurs recurrents');
-      document.getElementById('depKpiSansCat').textContent = hasError ? '--' : String(k.sansCategorieCount || 0);
-      document.getElementById('depKpiSansCatSub').textContent = hasError ? '' : formatEuro(k.sansCategorieTotal) + ' a categoriser';
+      document.getElementById('depKpiAbos').textContent = hasError ? '--' : formatEuro(s.abonnementsMensuels) + '/mois';
+      document.getElementById('depKpiAbosSub').textContent = hasError ? '' : 'abonnements detectes (6 mois glissants)';
     }
 
     function renderDepensesChart() {
@@ -14588,22 +14539,30 @@
       });
     }
 
+    // Camembert des categories (source Pennylane, sur la periode) : reutilise renderPieChart.
+    function renderDepensesCategoriesPie() {
+      if (!depensesData || depensesData.pennylaneError) { destroyAnalyticsChart('analyticsChargesChart'); return; }
+      const rows = (depensesData.byCategory || []).map(c => ({ label: c.label, montant: c.total12m }));
+      renderPieChart('analyticsChargesChart', rows.slice(0, 10));
+    }
+
     function renderDepensesCategories() {
       const el = document.getElementById('depensesTableCategories');
+      if (!depensesData) return;
       if (depensesData.pennylaneError) { el.innerHTML = DEPENSES_UNAVAILABLE_HTML; return; }
       const rows = depensesData.byCategory || [];
       if (!rows.length) {
-        el.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Aucune transaction sur les 12 derniers mois.</p>';
+        el.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Aucune transaction sur la periode.</p>';
         return;
       }
-      let html = '<table><thead><tr><th>Categorie</th><th>Total 12 mois</th><th>Mois courant</th><th>Moyenne 6 mois</th><th>Derive</th></tr></thead><tbody>';
+      const total = rows.reduce((s, c) => s + (c.total12m || 0), 0);
+      let html = '<table><thead><tr><th>Categorie</th><th>Total</th><th>%</th></tr></thead><tbody>';
       rows.forEach(c => {
+        const pct = total > 0 ? ((c.total12m / total) * 100).toFixed(1) : '0.0';
         html += '<tr>'
           + '<td>' + escapeHtml(c.label) + '</td>'
           + '<td style="font-weight:600">' + formatEuro(c.total12m) + '</td>'
-          + '<td>' + formatEuro(c.currentMonth) + '</td>'
-          + '<td>' + formatEuro(c.avg6m) + '</td>'
-          + '<td>' + (c.derive ? '<span class="tag tag-red">DERIVE +' + formatEuro(c.deriveAmount) + '</span>' : '') + '</td>'
+          + '<td style="color:var(--text-secondary)">' + pct + '%</td>'
           + '</tr>';
       });
       html += '</tbody></table>';
@@ -14618,7 +14577,7 @@
         el.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Aucun fournisseur sur les 12 derniers mois.</p>';
         return;
       }
-      let html = '<table><thead><tr><th>Fournisseur</th><th style="text-align:left">Categorie</th><th>Total 12 mois</th><th>Transactions</th><th>Mois presents</th><th></th></tr></thead><tbody>';
+      let html = '<table><thead><tr><th>Fournisseur</th><th style="text-align:left">Categorie</th><th>Total</th><th>Transactions</th><th>Mois presents</th><th></th></tr></thead><tbody>';
       rows.forEach(v => {
         html += '<tr>'
           + '<td>' + escapeHtml(v.vendor) + '</td>'
@@ -14643,13 +14602,13 @@
       }
       const total = (depensesData.kpis && depensesData.kpis.abonnementsMensuels) || 0;
       let html = '<div style="padding:0.5rem 1rem;border-radius:var(--radius);background:var(--warning-bg);color:var(--warning);font-size:0.85rem;font-weight:500;margin-bottom:0.75rem">Total recurrent estime : ' + formatEuro(total) + ' par mois (' + subs.length + ' fournisseurs)</div>';
-      html += '<table><thead><tr><th>Fournisseur</th><th style="text-align:left">Categorie</th><th>Cout mensuel estime</th><th>Mois presents</th><th>Total 12 mois</th></tr></thead><tbody>';
+      html += '<table><thead><tr><th>Fournisseur</th><th style="text-align:left">Categorie</th><th>Cout mensuel estime</th><th>Mois presents</th><th>Total</th></tr></thead><tbody>';
       subs.forEach(s => {
         html += '<tr>'
           + '<td>' + escapeHtml(s.vendor) + '</td>'
           + '<td style="text-align:left;color:var(--text-secondary)">' + escapeHtml(s.category) + '</td>'
           + '<td style="font-weight:600">' + formatEuro(s.monthlyEstimate) + '</td>'
-          + '<td>' + s.monthsPresent + '/12</td>'
+          + '<td>' + s.monthsPresent + ' mois</td>'
           + '<td>' + formatEuro(s.total12m) + '</td>'
           + '</tr>';
       });
