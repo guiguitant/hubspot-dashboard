@@ -13103,8 +13103,13 @@
       const resources = Object.keys(map).map(k => {
         const r = map[k];
         let maxUtil = 0;
-        for (const y of Object.keys(r.parAnnee)) maxUtil = Math.max(maxUtil, r.parAnnee[y].util);
+        const immosSet = {};
+        for (const y of Object.keys(r.parAnnee)) {
+          maxUtil = Math.max(maxUtil, r.parAnnee[y].util);
+          for (const nom of Object.keys(r.parAnnee[y].byImmo)) immosSet[nom] = true;
+        }
         r.maxUtil = maxUtil;
+        r.immos = Object.keys(immosSet).sort();   // immos ou la ressource est utilisee (union sur les annees)
         return r;
       });
       // Tri : depassements d'abord, puis par type, puis par nom
@@ -13134,12 +13139,19 @@
         h += '<div style="overflow-x:auto;margin-top:0.7rem">';
         h += '<table style="width:100%;border-collapse:collapse;font-size:0.8rem"><thead><tr style="color:var(--text-secondary);border-bottom:1px solid var(--border)">';
         h += '<th style="text-align:left;padding:0.3rem 0.5rem 0.3rem 0">Ressource</th>';
+        h += '<th style="text-align:left;padding:0.3rem 0.5rem">Immobilisations</th>';
         for (const y of data.annees) h += '<th style="text-align:center;padding:0.3rem 0.5rem">' + y + '</th>';
         h += '</tr></thead><tbody>';
         for (const r of data.resources) {
           h += '<tr style="border-bottom:1px solid rgba(120,119,116,0.12)">';
           h += '<td style="padding:0.35rem 0.5rem 0.35rem 0">' + escapeHtml(r.display)
             + ' <span style="font-size:0.62rem;color:var(--text-secondary);border:1px solid var(--border);border-radius:3px;padding:0 0.2rem">' + _ressTypeLabel(r.type) + '</span></td>';
+          // Colonne Immobilisations : etiquettes des immos ou la ressource apparait (partagee = accent primaire)
+          const shared = (r.immos || []).length >= 2;
+          h += '<td style="padding:0.3rem 0.5rem;max-width:280px">' + (r.immos || []).map(nom =>
+            '<span style="display:inline-block;font-size:0.66rem;border-radius:3px;padding:0.05rem 0.35rem;margin:0.1rem 0.2rem 0.1rem 0;'
+            + (shared ? 'background:rgba(15,123,108,0.10);border:1px solid var(--primary);color:var(--primary)' : 'background:var(--bg-secondary);border:1px solid var(--border);color:var(--text-secondary)')
+            + '">' + escapeHtml(nom) + '</span>').join('') + '</td>';
           for (const y of data.annees) {
             const cell = r.parAnnee[y];
             if (!cell) { h += '<td style="text-align:center;padding:0.35rem 0.5rem;color:var(--text-secondary)">·</td>'; continue; }
