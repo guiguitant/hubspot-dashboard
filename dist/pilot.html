@@ -12920,8 +12920,7 @@
       const resExploit= projete ? d.resultatExploitation.projete : d.resultatExploitation.factuel;
       const isBrut    = projete ? d.is.projete : d.is.factuel;
       const credit    = d.creditImpot ? d.creditImpot.total : 0;
-      const impotNet  = d.impotNet ? (projete ? d.impotNet.projete : d.impotNet.factuel) : isBrut;
-      const resNet    = projete ? d.resultatNet.projete : d.resultatNet.factuel;
+      const resNet    = projete ? d.resultatNet.projete : d.resultatNet.factuel; // apres credit (estimatif)
 
       // Fabrique une ligne. opts : {neg, plus, total, sep, onclick}
       const row = (label, val, opts = {}) => {
@@ -12953,14 +12952,19 @@
       html += row('Dotations aux amortissements', d.amortissements, { neg: d.amortissements > 0, sep: true, onclick: "navigateTo('immobilisations')" });
       if (!d.amortissements) html += subRow('Aucune immobilisation active cette annee (module Immobilisations)', formatEuro(0));
       html += row("= Resultat d'exploitation", resExploit, { total: true });
-      html += row('Impot sur les societes (IS brut)', isBrut, { neg: true, sep: true, onclick: "openCrDetailModal('is')" });
+      html += row('Impot sur les societes (IS)', isBrut, { neg: true, sep: true, onclick: "openCrDetailModal('is')" });
+      // Resultat net "solide" : apres IS, SANS le credit d'impot (qui n'est qu'une estimation).
+      const resNetApresIS = resExploit - isBrut;
+      html += row('= Resultat net' + (credit ? ' (apres IS)' : ''), resNetApresIS, { total: true });
       if (credit) {
-        // Le credit d'impot CII/CIR vient reduire l'IS. Restituable pour une PME (produit d'impot meme a perte).
-        html += row("Credit d'impot (CII / CIR)", credit, { plus: true, onclick: "openCrDetailModal('credit')" });
-        const produit = impotNet < 0;
-        html += subRow(produit ? "= Produit d'impot net (restitution PME)" : "= Impot net a payer", (produit ? '+ ' : '− ') + formatEuro(Math.abs(impotNet)));
+        // Bloc ESTIMATIF (italique) : le credit CII/CIR est une estimation (methode a valider avec
+        // l'expert-comptable). On l'affiche a part, avec le resultat net estimatif qui en decoule.
+        html += '<div style="margin-top:0.7rem;padding-top:0.5rem;border-top:1px dashed var(--border);font-style:italic;color:var(--text-secondary)">';
+        html += '<div style="font-size:0.74rem;margin-bottom:0.4rem">Estimatif, a valider avec l\'expert-comptable. Le credit d\'impot CII/CIR reduit l\'IS ; l\'exces est restitue (PME).</div>';
+        html += '<div class="cr-row clickable" onclick="openCrDetailModal(\'credit\')" style="font-style:italic"><span>+ Credit d\'impot estime (CII / CIR) <span style="font-size:0.68rem">detail</span></span><span style="color:var(--primary)">+ ' + formatEuro(credit) + '</span></div>';
+        html += '<div class="cr-row" style="font-style:italic;font-weight:700"><span>= Resultat net estimatif (apres credit)</span><span>' + formatEuro(resNet) + '</span></div>';
+        html += '</div>';
       }
-      html += row('= Resultat net', resNet, { total: true });
 
       document.getElementById('crTable').innerHTML = html;
       const fresh = document.getElementById('crFreshness');
