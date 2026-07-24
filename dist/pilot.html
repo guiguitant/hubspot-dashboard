@@ -3917,7 +3917,7 @@
       </div>
       <label style="display:inline-flex;align-items:center;gap:0.4rem;font-size:0.85rem;color:var(--text-secondary);cursor:pointer;user-select:none">
         <input type="checkbox" id="crProjete" checked onchange="renderCompteResultat()" style="cursor:pointer">
-        Projete (pipeline pondere + previsionnel)
+        Projete (pipeline pondere)
       </label>
       <span id="crFreshness" style="margin-left:auto;font-size:0.78rem;color:var(--text-secondary)"></span>
     </div>
@@ -4830,10 +4830,16 @@
                 <input type="number" id="posteQuotePart" value="100" min="0" max="100" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
               </label>
               <label style="font-size:0.72rem;color:var(--text-secondary);width:100px">Source
-                <select id="posteSource" onchange="_posteToggleAgree()" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+                <select id="posteSource" onchange="_posteToggleAgree(); document.getElementById('posteProrata').value = this.value === 'prestation' ? 'ponctuel' : 'continu'" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
                   <option value="autre">Autre</option>
                   <option value="salaire">Salaire</option>
                   <option value="prestation">Prestation</option>
+                </select>
+              </label>
+              <label style="font-size:0.72rem;color:var(--text-secondary);width:110px" title="Continu = cout etale dans le temps (salaire) : prorata au temps. Ponctuel = facture a dates discretes (prestation) : montant plein.">Prise en compte
+                <select id="posteProrata" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+                  <option value="continu">Prorata temps</option>
+                  <option value="ponctuel">Ponctuel</option>
                 </select>
               </label>
               <label style="font-size:0.72rem;color:var(--text-secondary);width:80px">Credit
@@ -13222,6 +13228,16 @@
         await refreshImmobilisations();
       } catch (e) { alert('Erreur : ' + e.message); }
     }
+    // Bascule le mode de prise en compte d'un poste. ponctuelActuel = etat courant ; on ecrit prorata_temporel = ponctuelActuel
+    // (si c'etait ponctuel -> repasse en continu=true ; si c'etait continu -> passe en ponctuel=false).
+    async function updatePosteModeCard(immoId, posteId, ponctuelActuel) {
+      try {
+        const res = await fetch('/api/immobilisations/' + immoId + '/postes/' + posteId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prorata_temporel: !!ponctuelActuel }) });
+        if (!res.ok) { const b = await res.json(); throw new Error(b.error || 'Erreur'); }
+        immoActiveTab[immoId] = 'postes';
+        await refreshImmobilisations();
+      } catch (e) { alert('Erreur : ' + e.message); }
+    }
 
     // Onglet Postes : tableau editable (modifier % en direct, supprimer une ligne), groupe par annee
     function _renderPostesSummary(im) {
@@ -13245,9 +13261,13 @@
             tag = ' <span style="font-size:0.6rem;color:' + col + ';font-weight:600;border:1px solid ' + col + ';border-radius:3px;padding:0 0.2rem">' + p.credit_type.toUpperCase() + '</span>';
             if (p.source === 'prestation' && !p.prestataire_agree) tag += ' <span style="font-size:0.6rem;color:var(--danger)">non agree</span>';
           }
-          const periodeTxt = (p.date_debut || p.date_fin) ? ' <span style="font-size:0.64rem;color:var(--text-secondary)">(' + Math.round(prorata * 100) + '% jours)</span>' : '';
+          const ponctuel = (p.prorata_temporel === false);
+          // Badge de mode cliquable : continu (prorata au temps) <-> ponctuel (montant plein)
+          const modeBadge = ' <span onclick="updatePosteModeCard(\'' + im.id + '\',\'' + p.id + '\',' + ponctuel + ')" title="Prise en compte : cliquer pour basculer continu / ponctuel" style="cursor:pointer;font-size:0.6rem;color:var(--text-secondary);border:1px dashed var(--border);border-radius:3px;padding:0 0.2rem">' + (ponctuel ? 'ponctuel' : 'continu') + '</span>';
+          // "% jours" seulement pour un poste continu (le ponctuel garde son montant plein)
+          const periodeTxt = (!ponctuel && (p.date_debut || p.date_fin)) ? ' <span style="font-size:0.64rem;color:var(--text-secondary)">(' + Math.round(prorata * 100) + '% jours)</span>' : '';
           rows.push('<tr style="border-bottom:1px solid rgba(120,119,116,0.12)">'
-            + '<td style="padding:0.3rem 0 0.3rem 0.6rem">' + escapeHtml(p.libelle) + tag + periodeTxt + '</td>'
+            + '<td style="padding:0.3rem 0 0.3rem 0.6rem">' + escapeHtml(p.libelle) + tag + modeBadge + periodeTxt + '</td>'
             + '<td style="text-align:right;padding:0.3rem;color:var(--text-secondary)">' + formatEuro(p.montant) + '</td>'
             + '<td style="text-align:center;padding:0.2rem"><input type="number" value="' + quote + '" min="0" max="100" onchange="updatePosteQuoteCard(\'' + im.id + '\',\'' + p.id + '\',this.value)" style="width:46px;padding:0.15rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);text-align:right"></td>'
             + '<td style="text-align:right;padding:0.3rem;font-weight:600">' + formatEuro(retenu) + '</td>'
@@ -13556,6 +13576,9 @@
           date_debut: debut, date_fin: fin,
         };
         if (q && q !== 100) poste.quote_part = q; // envoyee seulement si != 100 (tolerance migration 38)
+        // Prestation = cout ponctuel (facturee a dates discretes) : pas de prorata calendaire.
+        // Salaire / autre = continu (defaut). Envoye seulement si false (tolerance migration 39).
+        if (source === 'prestation') poste.prorata_temporel = false;
         return poste;
       });
       try {
@@ -13588,6 +13611,8 @@
       // quote_part envoyee seulement si != 100 (tolerance migration 38 non appliquee)
       const _qp = Number(document.getElementById('posteQuotePart').value);
       if (_qp && _qp !== 100) payload.quote_part = _qp;
+      // mode de prise en compte : ponctuel => pas de prorata calendaire (envoye seulement si false, tolerance migration 39)
+      if (document.getElementById('posteProrata').value === 'ponctuel') payload.prorata_temporel = false;
       try {
         const res = await fetch('/api/immobilisations/' + id + '/postes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         const b = await res.json();
@@ -13596,6 +13621,7 @@
         document.getElementById('posteLibelle').value = '';
         document.getElementById('posteMontant').value = '';
         document.getElementById('posteSource').value = 'autre';
+        document.getElementById('posteProrata').value = 'continu';
         document.getElementById('posteCredit').value = 'none';
         document.getElementById('posteAgree').checked = false;
         _posteToggleAgree();
@@ -13703,6 +13729,7 @@
 
     // Prorata d'un poste (miroir du serveur) : fraction de son annee couverte par [date_debut, date_fin]. 1 sinon.
     function _posteProrataFront(p) {
+      if (p.prorata_temporel === false) return 1; // poste ponctuel : montant plein
       if (!p.date_debut && !p.date_fin) return 1;
       const annee = Number(p.annee);
       if (!annee) return 1;
@@ -13740,16 +13767,19 @@
             const prorata = _posteProrataFront(p);
             const quote = (p.quote_part != null ? Number(p.quote_part) : 100) / 100;
             const retenu = Math.round((Number(p.montant) || 0) * quote * prorata);
+            const ponctuel = (p.prorata_temporel === false);
             const reduit = quote !== 1 || prorata < 1;
             const quoteTxt = quote !== 1 ? ' <span style="font-size:0.66rem;color:var(--text-secondary)">quote-part ' + Math.round(quote * 100) + '%</span>' : '';
+            const ponctuelTxt = ponctuel ? ' <span style="font-size:0.62rem;color:var(--text-secondary);border:1px dashed var(--border);border-radius:3px;padding:0 0.2rem" title="Cout ponctuel : montant plein, pas de prorata calendaire">ponctuel</span>' : '';
+            // Periode : on affiche le % jours seulement en mode continu (le ponctuel garde son montant plein)
             const periodeTxt = (p.date_debut || p.date_fin)
-              ? ' <span style="font-size:0.65rem;color:var(--text-secondary)">(' + (p.date_debut ? _immoFmtDate(p.date_debut) : '...') + ' → ' + (p.date_fin ? _immoFmtDate(p.date_fin) : '...') + ', ' + Math.round(prorata * 100) + '%)</span>'
+              ? ' <span style="font-size:0.65rem;color:var(--text-secondary)">(' + (p.date_debut ? _immoFmtDate(p.date_debut) : '...') + ' → ' + (p.date_fin ? _immoFmtDate(p.date_fin) : '...') + (ponctuel ? '' : ', ' + Math.round(prorata * 100) + '%') + ')</span>'
               : '';
             const montantTxt = reduit
               ? '<strong>' + formatEuro(retenu) + '</strong> <span style="font-size:0.66rem;color:var(--text-secondary)">/ ' + formatEuro(p.montant) + '</span>'
               : formatEuro(p.montant);
             h += '<tr style="border-bottom:1px solid var(--border)">'
-              + '<td style="padding:0.3rem 0 0.3rem 0.6rem">' + escapeHtml(p.libelle) + tag + quoteTxt + periodeTxt
+              + '<td style="padding:0.3rem 0 0.3rem 0.6rem">' + escapeHtml(p.libelle) + tag + ponctuelTxt + quoteTxt + periodeTxt
                 + (p.subvention > 0 ? ' <span style="font-size:0.68rem;color:var(--text-secondary)">(subv. ' + formatEuro(p.subvention) + ')</span>' : '')
                 + '</td>'
               + '<td style="padding:0.3rem;text-align:right;white-space:nowrap">' + montantTxt + '</td>'

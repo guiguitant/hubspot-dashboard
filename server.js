@@ -582,6 +582,7 @@ function computePlanAmortissement(immo) {
 // Prorata temporis d'un poste : fraction de son année couverte par [date_debut, date_fin].
 // 1 si pas de dates (année pleine). date_fin est inclusive.
 function _prorataPoste(p) {
+  if (p.prorata_temporel === false) return 1; // poste ponctuel (prestation) : montant plein, pas de prorata calendaire
   if (!p.date_debut && !p.date_fin) return 1;
   const annee = Number(p.annee);
   if (!annee) return 1;
@@ -8019,7 +8020,7 @@ app.get('/api/immobilisations/postes-disponibles', async (req, res) => {
 // POST /api/immobilisations/:id/postes
 app.post('/api/immobilisations/:id/postes', async (req, res) => {
   try {
-    const { libelle, source, source_ref, montant, credit_type, prestataire_agree, subvention, annee, date_debut, date_fin, quote_part } = req.body || {};
+    const { libelle, source, source_ref, montant, credit_type, prestataire_agree, subvention, annee, date_debut, date_fin, quote_part, prorata_temporel } = req.body || {};
     if (!libelle || !libelle.trim()) return res.status(400).json({ error: 'Libellé du poste requis' });
     const row = {
       immobilisation_id: req.params.id,
@@ -8036,6 +8037,7 @@ app.post('/api/immobilisations/:id/postes', async (req, res) => {
     if (date_debut) row.date_debut = date_debut;
     if (date_fin) row.date_fin = date_fin;
     if (quote_part != null && quote_part !== '') row.quote_part = Number(quote_part);
+    if (typeof prorata_temporel === 'boolean') row.prorata_temporel = prorata_temporel; // tolérance migration 39
     const { data, error } = await supabaseAdmin.from('immobilisation_postes').insert(row).select().single();
     if (error) return res.status(500).json({ error: error.message });
     res.json(data);
@@ -8060,6 +8062,7 @@ app.put('/api/immobilisations/:id/postes/:pid', async (req, res) => {
     if (b.date_debut !== undefined) update.date_debut = b.date_debut || null;
     if (b.date_fin !== undefined) update.date_fin = b.date_fin || null;
     if (b.quote_part !== undefined && b.quote_part !== '') update.quote_part = Number(b.quote_part);
+    if (typeof b.prorata_temporel === 'boolean') update.prorata_temporel = b.prorata_temporel;
     const { data, error } = await supabaseAdmin.from('immobilisation_postes').update(update).eq('id', req.params.pid).select().single();
     if (error) return res.status(500).json({ error: error.message });
     res.json(data);
