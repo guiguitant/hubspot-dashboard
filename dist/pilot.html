@@ -4779,6 +4779,12 @@
           <!-- Projet CIR/CII : periode (lissage des aides) + aides publiques -->
           <div id="immoProjetSection" style="display:none;border-top:1px solid var(--border);padding-top:0.8rem">
             <div style="font-weight:600;font-size:0.85rem;margin-bottom:0.4rem">Projet CIR/CII : periode &amp; aides</div>
+            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.6rem" title="Depenses = livrable developpe en interne (salaires/prestations pris l'annee d'engagement). Amortissements = actif amortissable acquis servant a la R&D (assiette = dotations etalees).">Assiette du credit d'impot
+              <select id="immoAssietteCredit" onchange="_immoSaveAssietteCredit()" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+                <option value="depenses">Depenses engagees l'annee (livrable cree en interne)</option>
+                <option value="amortissement">Dotations aux amortissements (actif acquis servant a la R&amp;D)</option>
+              </select>
+            </label>
             <div style="display:flex;gap:0.9rem;flex-wrap:wrap">
               <label style="font-size:0.75rem;color:var(--text-secondary);flex:1;min-width:130px">Debut projet
                 <input type="date" id="immoDebutProjet" onchange="_immoSaveProjetDates()" style="width:100%;margin-top:0.2rem;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
@@ -13066,33 +13072,57 @@
       if (!bloc) return;
       const c = bloc[type];
       const T = type.toUpperCase();
-      const postes = (im.postes || []).filter(p => Number(p.annee) === annee && p.credit_type === type && ((p.source !== 'prestation') || p.prestataire_agree));
+      const modeAmort = im.assiette_credit === 'amortissement';   // methode B
+      const elig = p => (p.source !== 'prestation') || p.prestataire_agree;
+      const retenuOf = p => Math.round((Number(p.montant) || 0) * ((p.quote_part != null ? Number(p.quote_part) : 100) / 100) * _posteProrataFront(p));
+      const line = (label, val, o) => { o = o || {}; return '<div style="display:flex;justify-content:space-between;padding:0.25rem 0' + (o.color ? ';color:' + o.color : '') + (o.top ? ';border-top:2px solid var(--border);padding-top:0.45rem' : '') + (o.bold ? ';font-weight:700' : '') + '"><span>' + label + '</span><span>' + (o.sign || '') + formatEuro(Math.abs(val)) + '</span></div>'; };
       document.getElementById('tresoMoisDetailTitle').textContent = 'Base ' + T + ' ' + annee;
-      let html = '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.6rem">Depenses eligibles ' + T + ' de l\'annee, moins l\'aide publique lissee, plus la reintegration des avances.</div>';
-      if (postes.length) {
-        html += '<div style="font-weight:600;font-size:0.82rem;margin-bottom:0.2rem">Depenses eligibles</div>';
-        html += '<table style="width:100%;border-collapse:collapse;font-size:0.8rem"><tbody>';
-        for (const p of postes) {
-          const prorata = _posteProrataFront(p);
-          const quote = (p.quote_part != null ? Number(p.quote_part) : 100) / 100;
-          const retenu = Math.round((Number(p.montant) || 0) * quote * prorata);
-          let calc = formatEuro(p.montant);
-          if (quote !== 1) calc += ' x ' + Math.round(quote * 100) + '%';
-          if (prorata < 1) calc += ' x ' + Math.round(prorata * 100) + '% (jours)';
-          if (p.subvention > 0) calc += ' - ' + formatEuro(p.subvention) + ' subv.';
-          html += '<tr style="border-bottom:1px solid var(--border)"><td style="padding:0.3rem 0">' + escapeHtml(p.libelle)
-            + ' <span style="font-size:0.7rem;color:var(--text-secondary)">' + calc + '</span></td>'
-            + '<td style="text-align:right;padding:0.3rem 0">' + formatEuro(retenu - (Number(p.subvention) || 0)) + '</td></tr>';
-        }
-        html += '</tbody></table>';
+      let html = '';
+
+      if (modeAmort) {
+        // Methode B : assiette = dotations aux amortissements de l'annee (+ forfait 75% pour le CIR).
+        html += '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.6rem">Assiette = dotations aux amortissements ' + T + ' de l\'annee (actif acquis servant a la R&D)' + (type === 'cir' ? ', plus le forfait de fonctionnement' : '') + ', moins l\'aide lissee, plus la reintegration des avances.</div>';
+        const forfaitPart = (type === 'cir') ? Math.round(c.brute - c.brute / 1.75) : 0;
+        html += line('Dotation eligible ' + T + ' de l\'annee', c.brute - forfaitPart);
+        if (forfaitPart) html += line('+ Forfait de fonctionnement (75% des amortissements)', forfaitPart, { sign: '+ ', color: 'var(--primary)' });
       } else {
-        html += '<div style="color:var(--text-secondary);font-size:0.82rem">Aucune depense eligible ' + T + ' cette annee.</div>';
+        // Methode A : depenses engagees l'annee (+ forfait 40% du personnel pour le CIR).
+        html += '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.6rem">Depenses eligibles ' + T + ' de l\'annee' + (type === 'cir' ? ', plus le forfait de fonctionnement (40% du personnel)' : '') + ', moins l\'aide lissee, plus la reintegration des avances.</div>';
+        const postes = (im.postes || []).filter(p => Number(p.annee) === annee && p.credit_type === type && elig(p));
+        let depensesSum = 0;
+        if (postes.length) {
+          html += '<div style="font-weight:600;font-size:0.82rem;margin-bottom:0.2rem">Depenses eligibles</div>';
+          html += '<table style="width:100%;border-collapse:collapse;font-size:0.8rem"><tbody>';
+          for (const p of postes) {
+            const prorata = _posteProrataFront(p);
+            const quote = (p.quote_part != null ? Number(p.quote_part) : 100) / 100;
+            const net = retenuOf(p) - (Number(p.subvention) || 0);
+            depensesSum += net;
+            let calc = formatEuro(p.montant);
+            if (quote !== 1) calc += ' x ' + Math.round(quote * 100) + '%';
+            if (prorata < 1) calc += ' x ' + Math.round(prorata * 100) + '% (jours)';
+            if (p.subvention > 0) calc += ' - ' + formatEuro(p.subvention) + ' subv.';
+            html += '<tr style="border-bottom:1px solid var(--border)"><td style="padding:0.3rem 0">' + escapeHtml(p.libelle)
+              + ' <span style="font-size:0.7rem;color:var(--text-secondary)">' + calc + '</span></td>'
+              + '<td style="text-align:right;padding:0.3rem 0">' + formatEuro(net) + '</td></tr>';
+          }
+          html += '</tbody></table>';
+        } else {
+          html += '<div style="color:var(--text-secondary);font-size:0.82rem">Aucune depense eligible ' + T + ' cette annee.</div>';
+        }
+        // Forfait personnel CIR = base brute serveur - somme des depenses (absorbe l'arrondi). Jamais pour le CII.
+        const forfait = c.brute - depensesSum;
+        if (type === 'cir' && forfait >= 1) {
+          html += line('Sous-total depenses eligibles', depensesSum);
+          html += line('+ Forfait de fonctionnement (40% du personnel)', forfait, { sign: '+ ', color: 'var(--primary)' });
+        }
       }
+
       html += '<div style="margin-top:0.6rem;border-top:1px solid var(--border);padding-top:0.4rem">';
-      html += '<div style="display:flex;justify-content:space-between;padding:0.25rem 0"><span>Base brute (depenses eligibles)</span><strong>' + formatEuro(c.brute) + '</strong></div>';
-      if (c.deduction) html += '<div style="display:flex;justify-content:space-between;padding:0.25rem 0;color:var(--danger)"><span>- Aide publique lissee (quote-part ' + T + ')</span><span>- ' + formatEuro(c.deduction) + '</span></div>';
-      if (c.reintegration) html += '<div style="display:flex;justify-content:space-between;padding:0.25rem 0;color:var(--primary)"><span>+ Reintegration avance remboursee</span><span>+ ' + formatEuro(c.reintegration) + '</span></div>';
-      html += '<div style="display:flex;justify-content:space-between;padding:0.45rem 0;border-top:2px solid var(--border);font-weight:700"><span>Base ' + T + ' nette</span><strong>' + formatEuro(c.nette) + '</strong></div>';
+      html += line('Base brute', c.brute, { bold: true });
+      if (c.deduction) html += line('- Aide publique lissee (quote-part ' + T + ')', c.deduction, { sign: '- ', color: 'var(--danger)' });
+      if (c.reintegration) html += line('+ Reintegration avance remboursee', c.reintegration, { sign: '+ ', color: 'var(--primary)' });
+      html += line('Base ' + T + ' nette', c.nette, { top: true, bold: true });
       html += '<div style="display:flex;justify-content:space-between;padding:0.35rem 0;color:var(--primary);font-weight:700"><span>Credit ' + T + ' estime (' + (type === 'cir' ? '30' : '20') + '%)</span><strong>' + formatEuro(c.creditEstime) + '</strong></div>';
       html += '</div>';
       document.getElementById('tresoMoisDetailBody').innerHTML = html;
@@ -13490,6 +13520,7 @@
       document.getElementById('immoPostesSection').style.display = 'block';
       document.getElementById('immoDebutProjet').value = (im.date_debut_projet || '').slice(0, 10);
       document.getElementById('immoFinProjet').value = (im.date_fin_projet || '').slice(0, 10);
+      document.getElementById('immoAssietteCredit').value = (im.assiette_credit === 'amortissement') ? 'amortissement' : 'depenses';
       renderPostesInModal(im);
       renderAidesInModal(im);
       document.getElementById('immoModalOverlay').classList.add('active');
@@ -13690,6 +13721,17 @@
       };
       try {
         const res = await fetch('/api/immobilisations/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        if (!res.ok) { const b = await res.json(); throw new Error(b.error || 'Erreur'); }
+        await _reloadImmoInModal(id);
+      } catch (e) { alert('Erreur : ' + e.message); }
+    }
+
+    // Sauvegarde le mode d'assiette du credit (methode A depenses / methode B dotations amortissements)
+    async function _immoSaveAssietteCredit() {
+      const id = document.getElementById('immoEditId').value;
+      if (!id) return;
+      try {
+        const res = await fetch('/api/immobilisations/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assiette_credit: document.getElementById('immoAssietteCredit').value }) });
         if (!res.ok) { const b = await res.json(); throw new Error(b.error || 'Erreur'); }
         await _reloadImmoInModal(id);
       } catch (e) { alert('Erreur : ' + e.message); }

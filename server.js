@@ -524,6 +524,11 @@ const IS_TAUX_NORMAL  = parseFloat(process.env.IS_TAUX_NORMAL  || '0.25');
 // Crédit estimé = base nette × taux. (plafonds à valider avec l'expert-comptable : CII plafonné à 400 k€/an.)
 const CIR_TAUX = parseFloat(process.env.CIR_TAUX || '0.30');
 const CII_TAUX = parseFloat(process.env.CII_TAUX || '0.20');
+// Forfait de fonctionnement du CIR (ne s'applique PAS au CII, forfait supprimé depuis 2023) :
+// 40 % des dépenses de personnel (taux passé de 43 % à 40 % au 15/02/2025) + 75 % des dotations aux
+// amortissements des immobilisations affectées à la recherche. S'AJOUTE à l'assiette éligible.
+const CIR_FORFAIT_PERSONNEL     = parseFloat(process.env.CIR_FORFAIT_PERSONNEL     || '0.40');
+const CIR_FORFAIT_AMORTISSEMENT = parseFloat(process.env.CIR_FORFAIT_AMORTISSEMENT || '0.75');
 
 // Calcule l'IS sur un résultat imposable (barème progressif PME). Utilisé par le Compte de résultat (Phase 4).
 // NB : les acomptes IS de la projection de trésorerie restent saisis manuellement dans l'onglet Plan_TRE (choix métier).
@@ -678,17 +683,38 @@ function reintegrationAvanceAnnee(aide, annee) {
 function computeBasesParAnnee(immo, postes, aides) {
   postes = postes || []; aides = aides || [];
   const eligible = p => _posteEligibleCredit(p);
+  // Méthode B (assiette = dotations aux amortissements, étalée) pour un actif amortissable acquis ;
+  // sinon méthode A (assiette = dépenses engagées l'année). Cf. migration 40.
+  const modeAmort = immo.assiette_credit === 'amortissement';
+
+  // Proportion CIR/CII (répartition des aides publiques, communes aux deux types).
   const totalCir = postes.filter(p => p.credit_type === 'cir' && eligible(p)).reduce((s, p) => s + montantPosteRetenu(p), 0);
   const totalCii = postes.filter(p => p.credit_type === 'cii' && eligible(p)).reduce((s, p) => s + montantPosteRetenu(p), 0);
   const totalCredit = totalCir + totalCii;
   const part = { cir: totalCredit > 0 ? totalCir / totalCredit : 0, cii: totalCredit > 0 ? totalCii / totalCredit : 0 };
 
+  // Plan d'amortissement (méthode B) : la base éligible d'un type est étalée au rythme des dotations.
+  const eff = montantAmortissable(immo, postes);
+  const plan = computePlanAmortissement({ ...immo, montant: eff }).plan;
+  const totalDot = plan.reduce((s, r) => s + r.dotation, 0) || 1;
+  const dotByYear = {};
+  for (const r of plan) dotByYear[r.annee] = r.dotation;
+  // Base éligible nette de subvention par type (montant total, servant à l'étalement méthode B).
+  const baseEligType = t => postes.filter(p => p.credit_type === t && eligible(p)).reduce((s, p) => s + montantPosteRetenu(p) - (Number(p.subvention) || 0), 0);
+  const baseElig = { cir: baseEligType('cir'), cii: baseEligType('cii') };
+
   const annees = new Set();
-  for (const p of postes) if (p.annee != null) annees.add(Number(p.annee));
-  if (immo.date_debut_projet && immo.date_fin_projet) {
-    const y1 = new Date(immo.date_debut_projet).getFullYear();
-    const y2 = new Date(immo.date_fin_projet).getFullYear();
-    for (let y = y1; y <= y2; y++) annees.add(y);
+  if (modeAmort) {
+    // Méthode B : années = années d'amortissement.
+    for (const r of plan) annees.add(r.annee);
+  } else {
+    // Méthode A : années de dépense (+ fenêtre projet).
+    for (const p of postes) if (p.annee != null) annees.add(Number(p.annee));
+    if (immo.date_debut_projet && immo.date_fin_projet) {
+      const y1 = new Date(immo.date_debut_projet).getFullYear();
+      const y2 = new Date(immo.date_fin_projet).getFullYear();
+      for (let y = y1; y <= y2; y++) annees.add(y);
+    }
   }
   for (const a of aides) {
     if (a.type === 'avance' && a.remboursement_debut && Number(a.remboursement_montant_annuel) > 0) {
@@ -704,9 +730,27 @@ function computeBasesParAnnee(immo, postes, aides) {
     const reintTotale = aides.filter(a => a.type === 'avance').reduce((s, a) => s + reintegrationAvanceAnnee(a, annee), 0);
     const bloc = { annee };
     for (const type of ['cir', 'cii']) {
-      const brute = postes
-        .filter(p => Number(p.annee) === annee && p.credit_type === type && eligible(p))
-        .reduce((s, p) => s + montantPosteRetenu(p) - (Number(p.subvention) || 0), 0);
+      let brute;
+      if (modeAmort) {
+        // Méthode B : quote-part de la base éligible étalée selon la dotation de l'année,
+        // + forfait de fonctionnement (CIR : 75 % des dotations ; jamais pour le CII).
+        const frac = (dotByYear[annee] || 0) / totalDot;
+        const alloc = baseElig[type] * frac;
+        const forfait = (type === 'cir') ? alloc * CIR_FORFAIT_AMORTISSEMENT : 0;
+        brute = alloc + forfait;
+      } else {
+        // Méthode A : dépenses éligibles de l'année, + forfait de fonctionnement
+        // (CIR : 40 % des dépenses de PERSONNEL ; jamais pour le CII, ni sur la sous-traitance).
+        const depenses = postes
+          .filter(p => Number(p.annee) === annee && p.credit_type === type && eligible(p))
+          .reduce((s, p) => s + montantPosteRetenu(p) - (Number(p.subvention) || 0), 0);
+        const forfaitPerso = (type === 'cir')
+          ? CIR_FORFAIT_PERSONNEL * postes
+              .filter(p => Number(p.annee) === annee && p.credit_type === 'cir' && p.source === 'salaire' && eligible(p))
+              .reduce((s, p) => s + montantPosteRetenu(p), 0)
+          : 0;
+        brute = depenses + forfaitPerso;
+      }
       const deduction = aideLisseeTotale * part[type];
       const reintegration = reintTotale * part[type];
       const nette = Math.round(Math.max(0, brute - deduction + reintegration));
@@ -8170,7 +8214,7 @@ app.delete('/api/immobilisations/:id/aides/:aid', async (req, res) => {
 // POST /api/immobilisations — création (justification obligatoire : choix immobiliser / charge)
 app.post('/api/immobilisations', async (req, res) => {
   try {
-    const { libelle, montant, date_mise_en_service, duree_annees, traitement, justification, date_debut_projet, date_fin_projet } = req.body || {};
+    const { libelle, montant, date_mise_en_service, duree_annees, traitement, justification, date_debut_projet, date_fin_projet, assiette_credit } = req.body || {};
     if (!libelle || !libelle.trim()) return res.status(400).json({ error: 'Libellé requis' });
     if (!date_mise_en_service) return res.status(400).json({ error: 'Date de mise en service requise' });
     if (!justification || !justification.trim()) return res.status(400).json({ error: 'Justification requise (choix immobiliser / charge)' });
@@ -8186,6 +8230,8 @@ app.post('/api/immobilisations', async (req, res) => {
     // Champs Phase 5.3 ajoutés seulement si renseignés (tolérance migration 35 non appliquée)
     if (date_debut_projet) row.date_debut_projet = date_debut_projet;
     if (date_fin_projet) row.date_fin_projet = date_fin_projet;
+    // Mode d'assiette du crédit (migration 40) : envoyé seulement si 'amortissement' (défaut 'depenses')
+    if (assiette_credit === 'amortissement') row.assiette_credit = 'amortissement';
     const { data, error } = await supabaseAdmin.from('immobilisations').insert(row).select().single();
     if (error) return res.status(500).json({ error: error.message });
     res.json(data);
@@ -8207,6 +8253,7 @@ app.put('/api/immobilisations/:id', async (req, res) => {
     if (typeof b.justification === 'string') update.justification = b.justification.trim();
     if (b.date_debut_projet !== undefined) update.date_debut_projet = b.date_debut_projet || null;
     if (b.date_fin_projet !== undefined) update.date_fin_projet = b.date_fin_projet || null;
+    if (b.assiette_credit === 'depenses' || b.assiette_credit === 'amortissement') update.assiette_credit = b.assiette_credit;
     const { data, error } = await supabaseAdmin.from('immobilisations').update(update).eq('id', req.params.id).select().single();
     if (error) return res.status(500).json({ error: error.message });
     res.json(data);
