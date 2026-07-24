@@ -13250,11 +13250,11 @@
         await refreshImmobilisations();
       } catch (e) { alert('Erreur : ' + e.message); }
     }
-    // Bascule le mode de prise en compte d'un poste. ponctuelActuel = etat courant ; on ecrit prorata_temporel = ponctuelActuel
-    // (si c'etait ponctuel -> repasse en continu=true ; si c'etait continu -> passe en ponctuel=false).
-    async function updatePosteModeCard(immoId, posteId, ponctuelActuel) {
+    // Change le mode de prise en compte d'un poste depuis le menu deroulant ('continu' | 'ponctuel').
+    // continu = prorata au temps (prorata_temporel=true) ; ponctuel = montant plein (false).
+    async function setPosteModeCard(immoId, posteId, mode) {
       try {
-        const res = await fetch('/api/immobilisations/' + immoId + '/postes/' + posteId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prorata_temporel: !!ponctuelActuel }) });
+        const res = await fetch('/api/immobilisations/' + immoId + '/postes/' + posteId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prorata_temporel: mode === 'continu' }) });
         if (!res.ok) { const b = await res.json(); throw new Error(b.error || 'Erreur'); }
         immoActiveTab[immoId] = 'postes';
         await refreshImmobilisations();
@@ -13267,7 +13267,7 @@
       if (!postes.length) return '<div style="font-size:0.82rem;color:var(--text-secondary);padding:0.4rem 0">Aucun poste. Cliquez sur "Editer" pour composer l\'assiette.</div>';
       const parAnnee = {};
       for (const p of postes) { const a = p.annee || '—'; (parAnnee[a] = parAnnee[a] || []).push(p); }
-      let h = '<table style="width:100%;border-collapse:collapse;font-size:0.8rem"><thead><tr style="color:var(--text-secondary);border-bottom:1px solid var(--border)"><th style="text-align:left;padding:0.3rem 0">Poste</th><th style="text-align:right;padding:0.3rem">Montant</th><th style="text-align:center;padding:0.3rem">%</th><th style="text-align:right;padding:0.3rem">Retenu</th><th></th></tr></thead><tbody>';
+      let h = '<table style="width:100%;border-collapse:collapse;font-size:0.8rem"><thead><tr style="color:var(--text-secondary);border-bottom:1px solid var(--border)"><th style="text-align:left;padding:0.3rem 0">Poste</th><th style="text-align:right;padding:0.3rem">Montant</th><th style="text-align:center;padding:0.3rem">%</th><th style="text-align:center;padding:0.3rem">Prise en compte</th><th style="text-align:right;padding:0.3rem">Retenu</th><th></th></tr></thead><tbody>';
       let grandTotal = 0;
       for (const annee of Object.keys(parAnnee).sort()) {
         let sumRetenu = 0; const rows = [];
@@ -13284,27 +13284,33 @@
             if (p.source === 'prestation' && !p.prestataire_agree) tag += ' <span style="font-size:0.6rem;color:var(--danger)">non agree</span>';
           }
           const ponctuel = (p.prorata_temporel === false);
-          // Badge de mode cliquable : continu (prorata au temps) <-> ponctuel (montant plein)
-          const modeBadge = ' <span onclick="updatePosteModeCard(\'' + im.id + '\',\'' + p.id + '\',' + ponctuel + ')" title="Prise en compte : cliquer pour basculer continu / ponctuel" style="cursor:pointer;font-size:0.6rem;color:var(--text-secondary);border:1px dashed var(--border);border-radius:3px;padding:0 0.2rem">' + (ponctuel ? 'ponctuel' : 'continu') + '</span>';
+          // Menu deroulant de mode (colonne dediee) : continu = prorata au temps, ponctuel = montant plein
+          const modeSelect = '<select onchange="setPosteModeCard(\'' + im.id + '\',\'' + p.id + '\',this.value)" title="Continu = prorata au temps (salaire). Ponctuel = montant plein (prestation facturee a dates precises)." style="font-size:0.72rem;padding:0.15rem 0.2rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:' + (ponctuel ? 'var(--primary)' : 'var(--text)') + ';font-weight:' + (ponctuel ? '600' : '400') + '">'
+            + '<option value="continu"' + (ponctuel ? '' : ' selected') + '>continu</option>'
+            + '<option value="ponctuel"' + (ponctuel ? ' selected' : '') + '>ponctuel</option>'
+            + '</select>';
           // "% jours" seulement pour un poste continu (le ponctuel garde son montant plein)
           const periodeTxt = (!ponctuel && (p.date_debut || p.date_fin)) ? ' <span style="font-size:0.64rem;color:var(--text-secondary)">(' + Math.round(prorata * 100) + '% jours)</span>' : '';
           rows.push('<tr style="border-bottom:1px solid rgba(120,119,116,0.12)">'
-            + '<td style="padding:0.3rem 0 0.3rem 0.6rem">' + escapeHtml(p.libelle) + tag + modeBadge + periodeTxt + '</td>'
+            + '<td style="padding:0.3rem 0 0.3rem 0.6rem">' + escapeHtml(p.libelle) + tag + periodeTxt + '</td>'
             + '<td style="text-align:right;padding:0.3rem;color:var(--text-secondary)">' + formatEuro(p.montant) + '</td>'
             + '<td style="text-align:center;padding:0.2rem"><input type="number" value="' + quote + '" min="0" max="100" onchange="updatePosteQuoteCard(\'' + im.id + '\',\'' + p.id + '\',this.value)" style="width:46px;padding:0.15rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);text-align:right"></td>'
+            + '<td style="text-align:center;padding:0.2rem">' + modeSelect + '</td>'
             + '<td style="text-align:right;padding:0.3rem;font-weight:600">' + formatEuro(retenu) + '</td>'
             + '<td style="text-align:right;padding:0.3rem 0 0.3rem 0.4rem"><button class="btn" onclick="deletePosteCard(\'' + im.id + '\',\'' + p.id + '\')" style="padding:0.05rem 0.35rem;font-size:0.72rem;color:var(--danger)" title="Supprimer">&times;</button></td>'
             + '</tr>');
         }
         grandTotal += sumRetenu;
-        h += '<tr style="background:var(--bg-secondary)"><td colspan="5" style="padding:0.3rem 0.5rem;font-weight:600;font-size:0.74rem">Annee ' + annee + '</td></tr>';
+        h += '<tr style="background:var(--bg-secondary)"><td colspan="6" style="padding:0.3rem 0.5rem;font-weight:600;font-size:0.74rem">Annee ' + annee + '</td></tr>';
         h += rows.join('');
         // Sous-total de l'annee (montants retenus uniquement)
-        h += '<tr><td colspan="3" style="padding:0.3rem 0.5rem 0.3rem 0.6rem;text-align:right;font-size:0.76rem;color:var(--text-secondary)">Sous-total ' + annee + '</td><td style="text-align:right;padding:0.3rem;font-weight:700">' + formatEuro(sumRetenu) + '</td><td></td></tr>';
+        h += '<tr><td colspan="4" style="padding:0.3rem 0.5rem 0.3rem 0.6rem;text-align:right;font-size:0.76rem;color:var(--text-secondary)">Sous-total ' + annee + '</td><td style="text-align:right;padding:0.3rem;font-weight:700">' + formatEuro(sumRetenu) + '</td><td></td></tr>';
       }
       // Total general de l'immo (depenses retenues uniquement = assiette avant deduction des aides)
-      h += '<tr style="border-top:2px solid var(--border)"><td colspan="3" style="padding:0.45rem 0.5rem 0.45rem 0.6rem;text-align:right;font-weight:700">Total depenses retenues</td><td style="text-align:right;padding:0.45rem;font-weight:700;color:var(--primary)">' + formatEuro(grandTotal) + '</td><td></td></tr>';
+      h += '<tr style="border-top:2px solid var(--border)"><td colspan="4" style="padding:0.45rem 0.5rem 0.45rem 0.6rem;text-align:right;font-weight:700">Total depenses retenues</td><td style="text-align:right;padding:0.45rem;font-weight:700;color:var(--primary)">' + formatEuro(grandTotal) + '</td><td></td></tr>';
+      // Legende : le mode est modifiable directement dans la colonne "Prise en compte"
       h += '</tbody></table>';
+      h += '<div style="font-size:0.7rem;color:var(--text-secondary);margin-top:0.4rem;font-style:italic">Colonne "Prise en compte" (modifiable) : <strong>continu</strong> = cout etale, prorata au temps (salaire) · <strong>ponctuel</strong> = montant plein, facture a dates precises (prestation).</div>';
       return h;
     }
 
