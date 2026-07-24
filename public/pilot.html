@@ -12912,7 +12912,9 @@
       const ca        = projete ? d.ca.projete : d.ca.facture;
       const ebe       = projete ? d.ebe.projete : d.ebe.factuel;
       const resExploit= projete ? d.resultatExploitation.projete : d.resultatExploitation.factuel;
-      const is        = projete ? d.is.projete : d.is.factuel;
+      const isBrut    = projete ? d.is.projete : d.is.factuel;
+      const credit    = d.creditImpot ? d.creditImpot.total : 0;
+      const impotNet  = d.impotNet ? (projete ? d.impotNet.projete : d.impotNet.factuel) : isBrut;
       const resNet    = projete ? d.resultatNet.projete : d.resultatNet.factuel;
 
       // Fabrique une ligne. opts : {neg, plus, total, sep, onclick}
@@ -12945,7 +12947,13 @@
       html += row('Dotations aux amortissements', d.amortissements, { neg: d.amortissements > 0, sep: true, onclick: "navigateTo('immobilisations')" });
       if (!d.amortissements) html += subRow('Aucune immobilisation active cette annee (module Immobilisations)', formatEuro(0));
       html += row("= Resultat d'exploitation", resExploit, { total: true });
-      html += row('Impot sur les societes (IS)', is, { neg: true, sep: true, onclick: "openCrDetailModal('is')" });
+      html += row('Impot sur les societes (IS brut)', isBrut, { neg: true, sep: true, onclick: "openCrDetailModal('is')" });
+      if (credit) {
+        // Le credit d'impot CII/CIR vient reduire l'IS. Restituable pour une PME (produit d'impot meme a perte).
+        html += row("Credit d'impot (CII / CIR)", credit, { plus: true, onclick: "openCrDetailModal('credit')" });
+        const produit = impotNet < 0;
+        html += subRow(produit ? "= Produit d'impot net (restitution PME)" : "= Impot net a payer", (produit ? '+ ' : '− ') + formatEuro(Math.abs(impotNet)));
+      }
       html += row('= Resultat net', resNet, { total: true });
 
       document.getElementById('crTable').innerHTML = html;
@@ -12983,7 +12991,21 @@
         title = 'Impot sur les societes ' + d.year;
         body = '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.6rem">Bareme PME : 15% jusqu\'a 42 500 EUR de resultat imposable, puis 25% au-dela.</div>';
         body += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid var(--border)"><span>Resultat d\'exploitation (base)</span><strong>' + formatEuro(base) + '</strong></div>';
-        body += '<div style="display:flex;justify-content:space-between;padding:0.5rem 0"><span>IS calcule</span><strong style="color:var(--danger)">' + formatEuro(is) + '</strong></div>';
+        body += '<div style="display:flex;justify-content:space-between;padding:0.5rem 0"><span>IS brut calcule</span><strong style="color:var(--danger)">' + formatEuro(is) + '</strong></div>';
+        if (d.creditImpot && d.creditImpot.total) body += '<div style="font-size:0.76rem;color:var(--text-secondary);margin-top:0.3rem">Le credit d\'impot CII/CIR (' + formatEuro(d.creditImpot.total) + ') vient ensuite reduire cet IS. Voir la ligne "Credit d\'impot".</div>';
+      } else if (kind === 'credit') {
+        const c = d.creditImpot || { cii: 0, cir: 0, total: 0 };
+        const isBrut = projete ? d.is.projete : d.is.factuel;
+        const impotNet = d.impotNet ? (projete ? d.impotNet.projete : d.impotNet.factuel) : isBrut;
+        const produit = impotNet < 0;
+        title = "Credit d'impot CII / CIR " + d.year;
+        body = '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.6rem">Credit d\'impot des immobilisations eligibles de l\'exercice (base nette x taux : CII 20%, CIR 30%). Il se deduit de l\'IS ; pour une PME l\'exces est restitue.</div>';
+        if (c.cii) body += '<div style="display:flex;justify-content:space-between;padding:0.35rem 0;border-bottom:1px solid var(--border)"><span>Credit CII (20%)</span><span style="color:var(--primary)">+ ' + formatEuro(c.cii) + '</span></div>';
+        if (c.cir) body += '<div style="display:flex;justify-content:space-between;padding:0.35rem 0;border-bottom:1px solid var(--border)"><span>Credit CIR (30%)</span><span style="color:var(--primary)">+ ' + formatEuro(c.cir) + '</span></div>';
+        body += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid var(--border)"><span>Total credit d\'impot</span><strong style="color:var(--primary)">+ ' + formatEuro(c.total) + '</strong></div>';
+        body += '<div style="display:flex;justify-content:space-between;padding:0.35rem 0"><span>IS brut de l\'exercice</span><span>− ' + formatEuro(isBrut) + '</span></div>';
+        body += '<div style="display:flex;justify-content:space-between;padding:0.45rem 0;border-top:2px solid var(--border);font-weight:700' + (produit ? ';color:var(--primary)' : '') + '"><span>' + (produit ? "Produit d'impot net (restitue)" : "Impot net a payer") + '</span><span>' + (produit ? '+ ' : '− ') + formatEuro(Math.abs(impotNet)) + '</span></div>';
+        body += '<div style="font-size:0.72rem;color:var(--text-secondary);margin-top:0.5rem"><a onclick="navigateTo(\'immobilisations\')" style="cursor:pointer;text-decoration:underline">Detail par immobilisation dans le module Immobilisations</a></div>';
       }
       document.getElementById('tresoMoisDetailTitle').textContent = title;
       document.getElementById('tresoMoisDetailBody').innerHTML = body;

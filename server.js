@@ -739,6 +739,30 @@ async function sumDotationsForYear(year) {
   }
 }
 
+// Somme des crédits d'impôt CII/CIR de toutes les immos imputables à une année (année des dépenses éligibles).
+// Le crédit d'impôt vient en déduction de l'IS de l'exercice ; restituable pour une PME (produit d'impôt
+// même si l'IS brut = 0). Alimente le Compte de résultat. TOLÉRANT : {0,0,0} si tables absentes / erreur.
+async function sumCreditsForYear(year) {
+  try {
+    const y = Number(year);
+    const { data, error } = await supabaseAdmin.from('immobilisations').select('*');
+    if (error || !data) return { cii: 0, cir: 0, total: 0 };
+    const [byPostes, byAides] = await Promise.all([fetchPostesByImmo(), fetchAidesByImmo()]);
+    let cii = 0, cir = 0;
+    for (const immo of data) {
+      const postes = byPostes[immo.id] || [];
+      // Même repli d'année que /api/immobilisations : postes sans année => année de mise en service.
+      const fallbackYear = immo.date_mise_en_service ? new Date(immo.date_mise_en_service).getFullYear() : new Date().getFullYear();
+      const postesN = postes.map(p => ({ ...p, annee: p.annee != null ? p.annee : fallbackYear }));
+      const bloc = computeBasesParAnnee(immo, postesN, byAides[immo.id] || []).find(b => b.annee === y);
+      if (bloc) { cii += bloc.cii.creditEstime; cir += bloc.cir.creditEstime; }
+    }
+    return { cii: Math.round(cii), cir: Math.round(cir), total: Math.round(cii + cir) };
+  } catch (e) {
+    return { cii: 0, cir: 0, total: 0 };
+  }
+}
+
 // --- Fetch open deals for pipeline kanban ---
 let openDealsCache = null;
 let openDealsCacheTime = 0;
@@ -7857,10 +7881,15 @@ app.get('/api/ebe', async (req, res) => {
     // Charge non décaissée : impacte le Compte de résultat, jamais l'EBE ni la trésorerie.
     // Tolérant : 0 si la table immobilisations n'existe pas encore (migration non appliquée).
     const amortissements = await sumDotationsForYear(yearParam);
+    const creditImpot = await sumCreditsForYear(yearParam); // { cii, cir, total } imputable a l'exercice
     const resExploitFactuel = Math.round(ebeFactuel) - amortissements;
     const resExploitProjete = Math.round(ebeProjete) - amortissements;
-    const isFactuel = computeIS(resExploitFactuel);
-    const isProjete = computeIS(resExploitProjete);
+    const isBrutFactuel = computeIS(resExploitFactuel);
+    const isBrutProjete = computeIS(resExploitProjete);
+    // Le credit d'impot CII/CIR reduit l'IS de l'exercice. Pour une PME l'exces est restitue :
+    // impot net peut etre negatif (produit d'impot), ce qui augmente le resultat net meme a perte.
+    const impotNetFactuel = isBrutFactuel - creditImpot.total;
+    const impotNetProjete = isBrutProjete - creditImpot.total;
 
     res.json({
       year: yearParam,
@@ -7876,8 +7905,10 @@ app.get('/api/ebe', async (req, res) => {
       ebe: { factuel: Math.round(ebeFactuel), projete: Math.round(ebeProjete) },
       amortissements,
       resultatExploitation: { factuel: resExploitFactuel, projete: resExploitProjete },
-      is: { factuel: isFactuel, projete: isProjete },
-      resultatNet: { factuel: resExploitFactuel - isFactuel, projete: resExploitProjete - isProjete },
+      is: { factuel: isBrutFactuel, projete: isBrutProjete },              // IS brut (avant credit d'impot)
+      creditImpot,                                                          // { cii, cir, total } de l'exercice
+      impotNet: { factuel: impotNetFactuel, projete: impotNetProjete },     // IS apres credit (negatif = produit d'impot)
+      resultatNet: { factuel: resExploitFactuel - impotNetFactuel, projete: resExploitProjete - impotNetProjete },
       fetchedAt: new Date().toISOString(),
     });
   } catch (err) {
