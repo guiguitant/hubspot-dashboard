@@ -12992,6 +12992,8 @@
     let immoTotalCreditCii = 0;
     let immoActiveTab = {}; // immoId -> 'postes' | 'amort'
     let immoExpanded = {};  // immoId -> bool (accordeon deplie)
+    let ressourcesExpanded = false;   // panneau "Ressources mobilisees" replie/deplie
+    let ressourcesRecapData = null;   // cache du dernier calcul (pour la modale de detail)
 
     function _immoFmtDate(iso) {
       if (!iso) return '';
@@ -13065,6 +13067,120 @@
       html += '<div style="display:flex;justify-content:space-between;padding:0.45rem 0;border-top:2px solid var(--border);font-weight:700"><span>Base ' + T + ' nette</span><strong>' + formatEuro(c.nette) + '</strong></div>';
       html += '<div style="display:flex;justify-content:space-between;padding:0.35rem 0;color:var(--primary);font-weight:700"><span>Credit ' + T + ' estime (' + (type === 'cir' ? '30' : '20') + '%)</span><strong>' + formatEuro(c.creditEstime) + '</strong></div>';
       html += '</div>';
+      document.getElementById('tresoMoisDetailBody').innerHTML = html;
+      document.getElementById('tresoMoisDetailModalOverlay').classList.add('active');
+    }
+
+    // --- Ressources mobilisees : controle de sur-affectation (transversal a toutes les immos) ---
+    // Une ressource (salaire, prestation, charge...) ne peut pas etre affectee a plus de 100% toutes
+    // immos confondues, sinon on compterait deux fois la meme depense. On agrege par libelle normalise.
+    function _normRessKey(s) { return String(s || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+    function _ressTypeLabel(s) { return s === 'salaire' ? 'salaire' : (s === 'prestation' ? 'prestation' : 'autre'); }
+    function toggleRessourcesRecap() { ressourcesExpanded = !ressourcesExpanded; renderImmobilisations(); }
+
+    function _computeRessourcesRecap() {
+      const map = {};          // key -> { display, type, parAnnee: { year: { util, retenu, byImmo:{immo:{util,retenu}} } } }
+      const anneesSet = {};
+      for (const im of (immoData || [])) {
+        for (const p of (im.postes || [])) {
+          const key = _normRessKey(p.libelle);
+          if (!key) continue;
+          const year = (p.annee != null && p.annee !== '') ? String(p.annee) : '?';
+          anneesSet[year] = true;
+          const quote = (p.quote_part != null ? Number(p.quote_part) : 100) / 100;
+          const prorata = _posteProrataFront(p);
+          const util = quote * prorata;                                   // fraction 0..1+ du cout annuel de la ressource
+          const retenu = Math.round((Number(p.montant) || 0) * quote * prorata);
+          if (!map[key]) map[key] = { key, display: p.libelle, type: p.source || 'autre', parAnnee: {} };
+          const cell = map[key].parAnnee[year] || (map[key].parAnnee[year] = { util: 0, retenu: 0, byImmo: {} });
+          cell.util += util;
+          cell.retenu += retenu;
+          const bi = cell.byImmo[im.libelle] || (cell.byImmo[im.libelle] = { util: 0, retenu: 0 });
+          bi.util += util; bi.retenu += retenu;
+        }
+      }
+      const annees = Object.keys(anneesSet).sort();
+      const resources = Object.keys(map).map(k => {
+        const r = map[k];
+        let maxUtil = 0;
+        for (const y of Object.keys(r.parAnnee)) maxUtil = Math.max(maxUtil, r.parAnnee[y].util);
+        r.maxUtil = maxUtil;
+        return r;
+      });
+      // Tri : depassements d'abord, puis par type, puis par nom
+      resources.sort((a, b) =>
+        ((b.maxUtil > 1.0001) - (a.maxUtil > 1.0001))
+        || String(a.type).localeCompare(String(b.type))
+        || String(a.display).localeCompare(String(b.display)));
+      return { annees, resources };
+    }
+
+    function _renderRessourcesRecap() {
+      const data = _computeRessourcesRecap();
+      ressourcesRecapData = data;
+      if (!data.resources.length) return '';
+      const nbAlerts = data.resources.filter(r => r.maxUtil > 1.0001).length;
+      let h = '<div class="section" style="margin-bottom:0.8rem">';
+      // En-tete cliquable (deplie/replie), avec pastille d'alerte
+      h += '<div onclick="toggleRessourcesRecap()" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:1rem">';
+      h += '<div style="font-weight:600;font-size:0.95rem">'
+        + '<span style="display:inline-block;width:0.9rem;color:var(--text-secondary);font-size:0.7rem;transform:rotate(' + (ressourcesExpanded ? '90' : '0') + 'deg);transition:transform 0.15s">&#9654;</span> '
+        + 'Ressources mobilisees <span style="font-weight:400;color:var(--text-secondary);font-size:0.82rem">· controle de sur-affectation</span></div>';
+      h += '<div style="font-size:0.8rem">' + (nbAlerts
+        ? '<span style="color:var(--danger);font-weight:600">' + nbAlerts + ' depassement' + (nbAlerts > 1 ? 's' : '') + ' &gt; 100%</span>'
+        : '<span style="color:var(--primary)">Aucun depassement</span>') + '</div>';
+      h += '</div>';
+      if (ressourcesExpanded) {
+        h += '<div style="overflow-x:auto;margin-top:0.7rem">';
+        h += '<table style="width:100%;border-collapse:collapse;font-size:0.8rem"><thead><tr style="color:var(--text-secondary);border-bottom:1px solid var(--border)">';
+        h += '<th style="text-align:left;padding:0.3rem 0.5rem 0.3rem 0">Ressource</th>';
+        for (const y of data.annees) h += '<th style="text-align:center;padding:0.3rem 0.5rem">' + y + '</th>';
+        h += '</tr></thead><tbody>';
+        for (const r of data.resources) {
+          h += '<tr style="border-bottom:1px solid rgba(120,119,116,0.12)">';
+          h += '<td style="padding:0.35rem 0.5rem 0.35rem 0">' + escapeHtml(r.display)
+            + ' <span style="font-size:0.62rem;color:var(--text-secondary);border:1px solid var(--border);border-radius:3px;padding:0 0.2rem">' + _ressTypeLabel(r.type) + '</span></td>';
+          for (const y of data.annees) {
+            const cell = r.parAnnee[y];
+            if (!cell) { h += '<td style="text-align:center;padding:0.35rem 0.5rem;color:var(--text-secondary)">·</td>'; continue; }
+            const pct = Math.round(cell.util * 100);
+            const over = cell.util > 1.0001;
+            const bg = over ? 'background:rgba(220,53,69,0.10);' : '';
+            h += '<td onclick="openRessourceDetailModal(\'' + encodeURIComponent(r.key) + '\',\'' + y + '\')" title="Detail par immo" style="text-align:center;padding:0.35rem 0.5rem;cursor:pointer;' + bg + '">'
+              + '<span style="font-weight:' + (over ? '700' : '500') + ';color:' + (over ? 'var(--danger)' : 'var(--text)') + '">' + pct + '%</span></td>';
+          }
+          h += '</tr>';
+        }
+        h += '</tbody></table>';
+        h += '<div style="font-size:0.7rem;color:var(--text-secondary);margin-top:0.5rem;font-style:italic">Taux = somme des quote-parts (x prorata jours) d\'une ressource sur toutes les immos. &gt; 100% = sur-affectee (double comptage probable). Moyenne annuelle. Cliquez une cellule pour le detail par immo.</div>';
+        h += '</div>';
+      }
+      h += '</div>';
+      return h;
+    }
+
+    function openRessourceDetailModal(keyEnc, year) {
+      const key = decodeURIComponent(keyEnc);
+      const data = ressourcesRecapData;
+      if (!data) return;
+      const r = data.resources.find(x => x.key === key);
+      if (!r || !r.parAnnee[year]) return;
+      const cell = r.parAnnee[year];
+      const over = cell.util > 1.0001;
+      document.getElementById('tresoMoisDetailTitle').textContent = 'Ressource : ' + r.display + ' · ' + year;
+      let html = '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.6rem">Repartition de cette ressource entre les immobilisations sur ' + year + '. La somme des quote-parts ne devrait pas depasser 100%.</div>';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:0.8rem"><thead><tr style="color:var(--text-secondary);border-bottom:1px solid var(--border)"><th style="text-align:left;padding:0.3rem 0">Immobilisation</th><th style="text-align:center;padding:0.3rem">Quote-part</th><th style="text-align:right;padding:0.3rem">Retenu</th></tr></thead><tbody>';
+      const immos = Object.keys(cell.byImmo).sort();
+      for (const nom of immos) {
+        const bi = cell.byImmo[nom];
+        html += '<tr style="border-bottom:1px solid rgba(120,119,116,0.12)"><td style="padding:0.3rem 0">' + escapeHtml(nom) + '</td>'
+          + '<td style="text-align:center;padding:0.3rem">' + Math.round(bi.util * 100) + '%</td>'
+          + '<td style="text-align:right;padding:0.3rem">' + formatEuro(bi.retenu) + '</td></tr>';
+      }
+      html += '</tbody></table>';
+      html += '<div style="margin-top:0.6rem;border-top:2px solid var(--border);padding-top:0.45rem;display:flex;justify-content:space-between;font-weight:700' + (over ? ';color:var(--danger)' : '') + '">'
+        + '<span>Total affecte</span><span>' + Math.round(cell.util * 100) + '% · ' + formatEuro(cell.retenu) + '</span></div>';
+      if (over) html += '<div style="font-size:0.76rem;color:var(--danger);margin-top:0.4rem">Sur-affectation : cette ressource est comptee au-dela de 100%. Verifiez les quote-parts (double comptage entre immos).</div>';
       document.getElementById('tresoMoisDetailBody').innerHTML = html;
       document.getElementById('tresoMoisDetailModalOverlay').classList.add('active');
     }
@@ -13210,7 +13326,7 @@
         list.innerHTML = '<p style="color:var(--text-secondary);font-size:0.9rem;padding:1.5rem;text-align:center">Aucune immobilisation. Cliquez sur "+ Nouvelle immobilisation".</p>';
         return;
       }
-      let html = '';
+      let html = _renderRessourcesRecap();   // panneau transversal de controle de sur-affectation
       for (const im of immoData) {
         const isImmo = im.traitement === 'immobilise';
         const badge = isImmo
