@@ -13062,7 +13062,7 @@
       if (c.deduction) html += '<div style="display:flex;justify-content:space-between;padding:0.25rem 0;color:var(--danger)"><span>- Aide publique lissee (quote-part ' + T + ')</span><span>- ' + formatEuro(c.deduction) + '</span></div>';
       if (c.reintegration) html += '<div style="display:flex;justify-content:space-between;padding:0.25rem 0;color:var(--primary)"><span>+ Reintegration avance remboursee</span><span>+ ' + formatEuro(c.reintegration) + '</span></div>';
       html += '<div style="display:flex;justify-content:space-between;padding:0.45rem 0;border-top:2px solid var(--border);font-weight:700"><span>Base ' + T + ' nette</span><strong>' + formatEuro(c.nette) + '</strong></div>';
-      html += '<div style="display:flex;justify-content:space-between;padding:0.35rem 0;color:var(--primary);font-weight:700"><span>Credit ' + T + ' estime (~30%)</span><strong>' + formatEuro(c.creditEstime) + '</strong></div>';
+      html += '<div style="display:flex;justify-content:space-between;padding:0.35rem 0;color:var(--primary);font-weight:700"><span>Credit ' + T + ' estime (' + (type === 'cir' ? '30' : '20') + '%)</span><strong>' + formatEuro(c.creditEstime) + '</strong></div>';
       html += '</div>';
       document.getElementById('tresoMoisDetailBody').innerHTML = html;
       document.getElementById('tresoMoisDetailModalOverlay').classList.add('active');
@@ -13177,7 +13177,7 @@
         if (hasCir) h += '<td style="text-align:right;padding:0.35rem">' + formatEuro(totCir) + '</td><td style="text-align:right;padding:0.35rem;color:var(--primary)">' + formatEuro(totCirCr) + '</td>';
         if (hasCii) h += '<td style="text-align:right;padding:0.35rem">' + formatEuro(totCii) + '</td><td style="text-align:right;padding:0.35rem;color:var(--primary)">' + formatEuro(totCiiCr) + '</td>';
         h += '</tr></tbody></table>';
-        h += '<div style="font-size:0.7rem;color:var(--text-secondary);margin-top:0.3rem">Credit estime = base nette x 30% (taux CIR/CII, a valider avec le comptable ; plafonds non appliques).</div>';
+        h += '<div style="font-size:0.7rem;color:var(--text-secondary);margin-top:0.3rem">Credit estime = base nette x taux (CIR 30%, CII 20%), a valider avec le comptable ; plafonds non appliques.</div>';
       }
       return h;
     }

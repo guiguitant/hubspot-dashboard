@@ -520,10 +520,10 @@ const IS_SEUIL_REDUIT = parseFloat(process.env.IS_SEUIL_REDUIT || '42500');
 const IS_TAUX_NORMAL  = parseFloat(process.env.IS_TAUX_NORMAL  || '0.25');
 
 // --- Taux des crédits d'impôt (configurables via .env) ---
-// CII : 30 % en métropole depuis 2023. CIR : 30 % jusqu'à 100 M€ de dépenses. Crédit estimé = base nette × taux.
-// (plafonds/paliers à valider avec l'expert-comptable : CII plafonné à 400 k€/an de dépenses.)
+// CII : 20 % en métropole (loi de finances 2025, depuis les dépenses 2025). CIR : 30 % jusqu'à 100 M€.
+// Crédit estimé = base nette × taux. (plafonds à valider avec l'expert-comptable : CII plafonné à 400 k€/an.)
 const CIR_TAUX = parseFloat(process.env.CIR_TAUX || '0.30');
-const CII_TAUX = parseFloat(process.env.CII_TAUX || '0.30');
+const CII_TAUX = parseFloat(process.env.CII_TAUX || '0.20');
 
 // Calcule l'IS sur un résultat imposable (barème progressif PME). Utilisé par le Compte de résultat (Phase 4).
 // NB : les acomptes IS de la projection de trésorerie restent saisis manuellement dans l'onglet Plan_TRE (choix métier).
