@@ -519,6 +519,12 @@ const IS_TAUX_REDUIT  = parseFloat(process.env.IS_TAUX_REDUIT  || '0.15');
 const IS_SEUIL_REDUIT = parseFloat(process.env.IS_SEUIL_REDUIT || '42500');
 const IS_TAUX_NORMAL  = parseFloat(process.env.IS_TAUX_NORMAL  || '0.25');
 
+// --- Taux des crédits d'impôt (configurables via .env) ---
+// CII : 30 % en métropole depuis 2023. CIR : 30 % jusqu'à 100 M€ de dépenses. Crédit estimé = base nette × taux.
+// (plafonds/paliers à valider avec l'expert-comptable : CII plafonné à 400 k€/an de dépenses.)
+const CIR_TAUX = parseFloat(process.env.CIR_TAUX || '0.30');
+const CII_TAUX = parseFloat(process.env.CII_TAUX || '0.30');
+
 // Calcule l'IS sur un résultat imposable (barème progressif PME). Utilisé par le Compte de résultat (Phase 4).
 // NB : les acomptes IS de la projection de trésorerie restent saisis manuellement dans l'onglet Plan_TRE (choix métier).
 function computeIS(resultatImposable) {
@@ -702,11 +708,13 @@ function computeBasesParAnnee(immo, postes, aides) {
         .reduce((s, p) => s + montantPosteRetenu(p) - (Number(p.subvention) || 0), 0);
       const deduction = aideLisseeTotale * part[type];
       const reintegration = reintTotale * part[type];
+      const nette = Math.round(Math.max(0, brute - deduction + reintegration));
       bloc[type] = {
         brute: Math.round(brute),
         deduction: Math.round(deduction),
         reintegration: Math.round(reintegration),
-        nette: Math.round(Math.max(0, brute - deduction + reintegration)),
+        nette,
+        creditEstime: Math.round(nette * (type === 'cir' ? CIR_TAUX : CII_TAUX)),
       };
     }
     result.push(bloc);
@@ -7891,7 +7899,7 @@ app.get('/api/immobilisations', async (req, res) => {
       .order('date_mise_en_service', { ascending: false });
     if (error) return res.status(500).json({ error: error.message });
     const [postesParImmo, aidesParImmo] = await Promise.all([fetchPostesByImmo(), fetchAidesByImmo()]);
-    let totalBaseCir = 0, totalBaseCii = 0;
+    let totalBaseCir = 0, totalBaseCii = 0, totalCreditCir = 0, totalCreditCii = 0;
     const immobilisations = (data || []).map(immo => {
       const postes = postesParImmo[immo.id] || [];
       const aides = aidesParImmo[immo.id] || [];
@@ -7903,8 +7911,12 @@ app.get('/api/immobilisations', async (req, res) => {
       const basesParAnnee = computeBasesParAnnee(immo, postesN, aides);
       const baseCir = basesParAnnee.reduce((s, b) => s + b.cir.nette, 0);
       const baseCii = basesParAnnee.reduce((s, b) => s + b.cii.nette, 0);
+      const creditCir = basesParAnnee.reduce((s, b) => s + b.cir.creditEstime, 0);
+      const creditCii = basesParAnnee.reduce((s, b) => s + b.cii.creditEstime, 0);
       totalBaseCir += baseCir;
       totalBaseCii += baseCii;
+      totalCreditCir += creditCir;
+      totalCreditCii += creditCii;
       return {
         ...immo,
         montantSaisi,                 // montant manuel d'origine (si pas de postes)
@@ -7913,11 +7925,13 @@ app.get('/api/immobilisations', async (req, res) => {
         aides,
         baseCir,
         baseCii,
+        creditCir,
+        creditCii,
         basesParAnnee,
         planAmortissement: computePlanAmortissement({ ...immo, montant: montantEffectif }),
       };
     });
-    res.json({ immobilisations, totalBaseCir: Math.round(totalBaseCir), totalBaseCii: Math.round(totalBaseCii) });
+    res.json({ immobilisations, totalBaseCir: Math.round(totalBaseCir), totalBaseCii: Math.round(totalBaseCii), totalCreditCir: Math.round(totalCreditCir), totalCreditCii: Math.round(totalCreditCii) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

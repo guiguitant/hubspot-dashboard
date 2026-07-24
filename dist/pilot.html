@@ -12988,6 +12988,9 @@
     let immoData = [];
     let immoTotalBaseCir = 0;
     let immoTotalBaseCii = 0;
+    let immoTotalCreditCir = 0;
+    let immoTotalCreditCii = 0;
+    let immoActiveTab = {}; // immoId -> 'postes' | 'amort'
 
     function _immoFmtDate(iso) {
       if (!iso) return '';
@@ -13015,6 +13018,8 @@
         immoData = body.immobilisations || [];
         immoTotalBaseCir = body.totalBaseCir || 0;
         immoTotalBaseCii = body.totalBaseCii || 0;
+        immoTotalCreditCir = body.totalCreditCir || 0;
+        immoTotalCreditCii = body.totalCreditCii || 0;
         renderImmobilisations();
       } catch (err) {
         console.error('Erreur immobilisations:', err);
@@ -13056,10 +13061,125 @@
       html += '<div style="display:flex;justify-content:space-between;padding:0.25rem 0"><span>Base brute (depenses eligibles)</span><strong>' + formatEuro(c.brute) + '</strong></div>';
       if (c.deduction) html += '<div style="display:flex;justify-content:space-between;padding:0.25rem 0;color:var(--danger)"><span>- Aide publique lissee (quote-part ' + T + ')</span><span>- ' + formatEuro(c.deduction) + '</span></div>';
       if (c.reintegration) html += '<div style="display:flex;justify-content:space-between;padding:0.25rem 0;color:var(--primary)"><span>+ Reintegration avance remboursee</span><span>+ ' + formatEuro(c.reintegration) + '</span></div>';
-      html += '<div style="display:flex;justify-content:space-between;padding:0.45rem 0;border-top:2px solid var(--border);font-weight:700"><span>Base ' + T + ' nette</span><strong style="color:var(--primary)">' + formatEuro(c.nette) + '</strong></div>';
+      html += '<div style="display:flex;justify-content:space-between;padding:0.45rem 0;border-top:2px solid var(--border);font-weight:700"><span>Base ' + T + ' nette</span><strong>' + formatEuro(c.nette) + '</strong></div>';
+      html += '<div style="display:flex;justify-content:space-between;padding:0.35rem 0;color:var(--primary);font-weight:700"><span>Credit ' + T + ' estime (~30%)</span><strong>' + formatEuro(c.creditEstime) + '</strong></div>';
       html += '</div>';
       document.getElementById('tresoMoisDetailBody').innerHTML = html;
       document.getElementById('tresoMoisDetailModalOverlay').classList.add('active');
+    }
+
+    // --- Onglets de la carte immo + tableau de postes editable ---
+    function _immoTabBtn(id, key, label, active) {
+      const on = active === key;
+      return '<button onclick="setImmoTab(\'' + id + '\',\'' + key + '\')" style="padding:0.35rem 0.7rem;font-size:0.8rem;border:none;background:none;cursor:pointer;border-bottom:2px solid ' + (on ? 'var(--primary)' : 'transparent') + ';color:' + (on ? 'var(--text)' : 'var(--text-secondary)') + ';font-weight:' + (on ? '600' : '400') + '">' + label + '</button>';
+    }
+    function setImmoTab(id, key) { immoActiveTab[id] = key; renderImmobilisations(); }
+
+    async function updatePosteQuoteCard(immoId, posteId, value) {
+      try {
+        const res = await fetch('/api/immobilisations/' + immoId + '/postes/' + posteId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ quote_part: Number(value) }) });
+        if (!res.ok) { const b = await res.json(); throw new Error(b.error || 'Erreur'); }
+        immoActiveTab[immoId] = 'postes';
+        await refreshImmobilisations();
+      } catch (e) { alert('Erreur : ' + e.message); }
+    }
+    async function deletePosteCard(immoId, posteId) {
+      if (!confirm('Supprimer ce poste ?')) return;
+      try {
+        const res = await fetch('/api/immobilisations/' + immoId + '/postes/' + posteId, { method: 'DELETE' });
+        if (!res.ok) { const b = await res.json(); throw new Error(b.error || 'Erreur'); }
+        immoActiveTab[immoId] = 'postes';
+        await refreshImmobilisations();
+      } catch (e) { alert('Erreur : ' + e.message); }
+    }
+
+    // Onglet Postes : tableau editable (modifier % en direct, supprimer une ligne), groupe par annee
+    function _renderPostesSummary(im) {
+      const postes = im.postes || [];
+      if (!postes.length) return '<div style="font-size:0.82rem;color:var(--text-secondary);padding:0.4rem 0">Aucun poste. Cliquez sur "Editer" pour composer l\'assiette.</div>';
+      const parAnnee = {};
+      for (const p of postes) { const a = p.annee || '—'; (parAnnee[a] = parAnnee[a] || []).push(p); }
+      let h = '<table style="width:100%;border-collapse:collapse;font-size:0.8rem"><thead><tr style="color:var(--text-secondary);border-bottom:1px solid var(--border)"><th style="text-align:left;padding:0.3rem 0">Poste</th><th style="text-align:right;padding:0.3rem">Montant</th><th style="text-align:center;padding:0.3rem">%</th><th style="text-align:right;padding:0.3rem">Retenu</th><th></th></tr></thead><tbody>';
+      for (const annee of Object.keys(parAnnee).sort()) {
+        let sumRetenu = 0; const rows = [];
+        for (const p of parAnnee[annee]) {
+          const eligible = (p.source !== 'prestation') || p.prestataire_agree;
+          const prorata = _posteProrataFront(p);
+          const quote = (p.quote_part != null ? Number(p.quote_part) : 100);
+          const retenu = Math.round((Number(p.montant) || 0) * (quote / 100) * prorata);
+          sumRetenu += retenu;
+          let tag = '';
+          if (p.credit_type === 'cir' || p.credit_type === 'cii') {
+            const col = eligible ? 'var(--primary)' : 'var(--text-secondary)';
+            tag = ' <span style="font-size:0.6rem;color:' + col + ';font-weight:600;border:1px solid ' + col + ';border-radius:3px;padding:0 0.2rem">' + p.credit_type.toUpperCase() + '</span>';
+            if (p.source === 'prestation' && !p.prestataire_agree) tag += ' <span style="font-size:0.6rem;color:var(--danger)">non agree</span>';
+          }
+          const periodeTxt = (p.date_debut || p.date_fin) ? ' <span style="font-size:0.64rem;color:var(--text-secondary)">(' + Math.round(prorata * 100) + '% jours)</span>' : '';
+          rows.push('<tr style="border-bottom:1px solid rgba(120,119,116,0.12)">'
+            + '<td style="padding:0.3rem 0 0.3rem 0.6rem">' + escapeHtml(p.libelle) + tag + periodeTxt + '</td>'
+            + '<td style="text-align:right;padding:0.3rem;color:var(--text-secondary)">' + formatEuro(p.montant) + '</td>'
+            + '<td style="text-align:center;padding:0.2rem"><input type="number" value="' + quote + '" min="0" max="100" onchange="updatePosteQuoteCard(\'' + im.id + '\',\'' + p.id + '\',this.value)" style="width:46px;padding:0.15rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);text-align:right"></td>'
+            + '<td style="text-align:right;padding:0.3rem;font-weight:600">' + formatEuro(retenu) + '</td>'
+            + '<td style="text-align:right;padding:0.3rem 0 0.3rem 0.4rem"><button class="btn" onclick="deletePosteCard(\'' + im.id + '\',\'' + p.id + '\')" style="padding:0.05rem 0.35rem;font-size:0.72rem;color:var(--danger)" title="Supprimer">&times;</button></td>'
+            + '</tr>');
+        }
+        h += '<tr style="background:var(--bg-secondary)"><td colspan="5" style="padding:0.3rem 0.5rem;font-weight:600;font-size:0.74rem">Annee ' + annee + ' <span style="color:var(--text-secondary);font-weight:400">&nbsp;·&nbsp; retenu ' + formatEuro(sumRetenu) + '</span></td></tr>';
+        h += rows.join('');
+      }
+      h += '</tbody></table>';
+      return h;
+    }
+
+    // Onglet Amortissement : plan + base & credit CIR/CII estime par annee
+    function _renderAmortAndBase(im, year) {
+      let h = '';
+      const isImmo = im.traitement === 'immobilise';
+      const plan = (im.planAmortissement && im.planAmortissement.plan) || [];
+      if (isImmo && plan.length) {
+        h += '<table style="width:100%;border-collapse:collapse;font-size:0.82rem">';
+        h += '<thead><tr style="color:var(--text-secondary);border-bottom:1px solid var(--border)"><th style="text-align:left;padding:0.35rem 0">Annee</th><th style="text-align:right;padding:0.35rem">Dotation</th><th style="text-align:right;padding:0.35rem">Cumul</th><th style="text-align:right;padding:0.35rem 0 0.35rem 0.5rem">VNC</th></tr></thead><tbody>';
+        for (const r of plan) {
+          const cur = r.annee === year ? ' style="font-weight:600;background:var(--bg-secondary)"' : '';
+          h += '<tr' + cur + '><td style="text-align:left;padding:0.3rem 0">' + r.annee + '</td>'
+            + '<td style="text-align:right;padding:0.3rem">' + formatEuro(r.dotation) + '</td>'
+            + '<td style="text-align:right;padding:0.3rem;color:var(--text-secondary)">' + formatEuro(r.cumul) + '</td>'
+            + '<td style="text-align:right;padding:0.3rem 0 0.3rem 0.5rem">' + formatEuro(r.vnc) + '</td></tr>';
+        }
+        h += '</tbody></table>';
+      } else if (!isImmo) {
+        h += '<div style="font-size:0.8rem;color:var(--text-secondary)">Passe directement en charge : pas d\'amortissement.</div>';
+      }
+      const bpa = (im.basesParAnnee || []).filter(b => b.cir.brute || b.cii.brute || b.cir.deduction || b.cii.deduction || b.cir.reintegration || b.cii.reintegration);
+      if (bpa.length) {
+        const hasCir = bpa.some(b => b.cir.brute || b.cir.deduction || b.cir.reintegration);
+        const hasCii = bpa.some(b => b.cii.brute || b.cii.deduction || b.cii.reintegration);
+        h += '<div style="font-size:0.8rem;font-weight:600;margin-top:0.9rem;margin-bottom:0.3rem">Base &amp; credit CIR/CII estime par annee</div>';
+        h += '<table style="width:100%;border-collapse:collapse;font-size:0.8rem"><thead><tr style="color:var(--text-secondary);border-bottom:1px solid var(--border)"><th style="text-align:left;padding:0.3rem 0">Annee</th>';
+        if (hasCir) h += '<th style="text-align:right;padding:0.3rem">Base CIR</th><th style="text-align:right;padding:0.3rem">CIR estime</th>';
+        if (hasCii) h += '<th style="text-align:right;padding:0.3rem">Base CII</th><th style="text-align:right;padding:0.3rem">CII estime</th>';
+        h += '</tr></thead><tbody>';
+        let totCir = 0, totCii = 0, totCirCr = 0, totCiiCr = 0;
+        for (const b of bpa) {
+          h += '<tr style="border-bottom:1px solid rgba(120,119,116,0.12)"><td style="padding:0.28rem 0">' + b.annee + '</td>';
+          if (hasCir) {
+            totCir += b.cir.nette; totCirCr += b.cir.creditEstime;
+            h += '<td style="text-align:right;padding:0.28rem;cursor:pointer;text-decoration:underline dotted" title="Detail du calcul" onclick="openBaseDetailModal(\'' + im.id + '\',' + b.annee + ',\'cir\')">' + formatEuro(b.cir.nette) + '</td>'
+              + '<td style="text-align:right;padding:0.28rem;color:var(--primary);font-weight:600">' + formatEuro(b.cir.creditEstime) + '</td>';
+          }
+          if (hasCii) {
+            totCii += b.cii.nette; totCiiCr += b.cii.creditEstime;
+            h += '<td style="text-align:right;padding:0.28rem;cursor:pointer;text-decoration:underline dotted" title="Detail du calcul" onclick="openBaseDetailModal(\'' + im.id + '\',' + b.annee + ',\'cii\')">' + formatEuro(b.cii.nette) + '</td>'
+              + '<td style="text-align:right;padding:0.28rem;color:var(--primary);font-weight:600">' + formatEuro(b.cii.creditEstime) + '</td>';
+          }
+          h += '</tr>';
+        }
+        h += '<tr style="border-top:2px solid var(--border);font-weight:700"><td style="padding:0.35rem 0">Total</td>';
+        if (hasCir) h += '<td style="text-align:right;padding:0.35rem">' + formatEuro(totCir) + '</td><td style="text-align:right;padding:0.35rem;color:var(--primary)">' + formatEuro(totCirCr) + '</td>';
+        if (hasCii) h += '<td style="text-align:right;padding:0.35rem">' + formatEuro(totCii) + '</td><td style="text-align:right;padding:0.35rem;color:var(--primary)">' + formatEuro(totCiiCr) + '</td>';
+        h += '</tr></tbody></table>';
+        h += '<div style="font-size:0.7rem;color:var(--text-secondary);margin-top:0.3rem">Credit estime = base nette x 30% (taux CIR/CII, a valider avec le comptable ; plafonds non appliques).</div>';
+      }
+      return h;
     }
 
     function renderImmobilisations() {
@@ -13074,8 +13194,8 @@
       document.getElementById('immoDotationAnnee').innerHTML =
         immoData.length
           ? 'Dotation ' + year + ' (vers Compte de resultat) : <strong>' + formatEuro(dotAnnee) + '</strong>'
-            + (immoTotalBaseCir ? ' &nbsp;·&nbsp; Base CIR nette : <strong>' + formatEuro(immoTotalBaseCir) + '</strong>' : '')
-            + (immoTotalBaseCii ? ' &nbsp;·&nbsp; Base CII nette : <strong>' + formatEuro(immoTotalBaseCii) + '</strong>' : '')
+            + (immoTotalCreditCir ? ' &nbsp;·&nbsp; CIR estime : <strong style="color:var(--primary)">' + formatEuro(immoTotalCreditCir) + '</strong>' : '')
+            + (immoTotalCreditCii ? ' &nbsp;·&nbsp; CII estime : <strong style="color:var(--primary)">' + formatEuro(immoTotalCreditCii) + '</strong>' : '')
           : '';
 
       if (!immoData.length) {
@@ -13103,39 +13223,14 @@
           + '<button class="btn" onclick="editImmo(\'' + im.id + '\')" style="padding:0.3rem 0.6rem;font-size:0.8rem">Editer</button>'
           + '<button class="btn" onclick="deleteImmo(\'' + im.id + '\')" style="padding:0.3rem 0.6rem;font-size:0.8rem;color:var(--danger)">Supprimer</button>'
           + '</div></div>';
-        const plan = (im.planAmortissement && im.planAmortissement.plan) || [];
-        if (isImmo && plan.length) {
-          html += '<table style="width:100%;border-collapse:collapse;font-size:0.82rem;margin-top:0.75rem">';
-          html += '<thead><tr style="color:var(--text-secondary);border-bottom:1px solid var(--border)"><th style="text-align:left;padding:0.35rem 0">Annee</th><th style="text-align:right;padding:0.35rem">Dotation</th><th style="text-align:right;padding:0.35rem">Cumul</th><th style="text-align:right;padding:0.35rem 0 0.35rem 0.5rem">VNC</th></tr></thead><tbody>';
-          for (const r of plan) {
-            const cur = r.annee === year ? ' style="font-weight:600;background:var(--bg-secondary)"' : '';
-            html += '<tr' + cur + '><td style="text-align:left;padding:0.3rem 0">' + r.annee + '</td>'
-              + '<td style="text-align:right;padding:0.3rem">' + formatEuro(r.dotation) + '</td>'
-              + '<td style="text-align:right;padding:0.3rem;color:var(--text-secondary)">' + formatEuro(r.cumul) + '</td>'
-              + '<td style="text-align:right;padding:0.3rem 0 0.3rem 0.5rem">' + formatEuro(r.vnc) + '</td></tr>';
-          }
-          html += '</tbody></table>';
-        } else if (!isImmo) {
-          html += '<div style="font-size:0.8rem;color:var(--text-secondary);margin-top:0.5rem">Passe directement en charge : pas d\'amortissement.</div>';
-        }
-        // Tableau base CIR/CII par annee (si aides ou base non nulle sur plusieurs annees)
-        const bpa = (im.basesParAnnee || []).filter(b => b.cir.brute || b.cii.brute || b.cir.deduction || b.cii.deduction || b.cir.reintegration || b.cii.reintegration);
-        if (bpa.length) {
-          const hasCir = bpa.some(b => b.cir.brute || b.cir.deduction || b.cir.reintegration);
-          const hasCii = bpa.some(b => b.cii.brute || b.cii.deduction || b.cii.reintegration);
-          html += '<div style="font-size:0.8rem;font-weight:600;margin-top:0.9rem;margin-bottom:0.3rem">Base CIR/CII nette par annee</div>';
-          html += '<table style="width:100%;border-collapse:collapse;font-size:0.8rem"><thead><tr style="color:var(--text-secondary);border-bottom:1px solid var(--border)"><th style="text-align:left;padding:0.3rem 0">Annee</th>';
-          if (hasCir) html += '<th style="text-align:right;padding:0.3rem">Base CIR</th>';
-          if (hasCii) html += '<th style="text-align:right;padding:0.3rem">Base CII</th>';
-          html += '</tr></thead><tbody>';
-          for (const b of bpa) {
-            html += '<tr style="border-bottom:1px solid rgba(120,119,116,0.12)"><td style="padding:0.28rem 0">' + b.annee + '</td>';
-            if (hasCir) html += '<td style="text-align:right;padding:0.28rem;color:var(--primary);cursor:pointer;text-decoration:underline dotted" title="Voir le detail du calcul" onclick="openBaseDetailModal(\'' + im.id + '\',' + b.annee + ',\'cir\')">' + formatEuro(b.cir.nette) + '</td>';
-            if (hasCii) html += '<td style="text-align:right;padding:0.28rem;color:var(--primary);cursor:pointer;text-decoration:underline dotted" title="Voir le detail du calcul" onclick="openBaseDetailModal(\'' + im.id + '\',' + b.annee + ',\'cii\')">' + formatEuro(b.cii.nette) + '</td>';
-            html += '</tr>';
-          }
-          html += '</tbody></table>';
-        }
+        // Onglets : Postes (editable) | Amortissement & base CII
+        const tab = immoActiveTab[im.id] || ((im.postes && im.postes.length) ? 'postes' : 'amort');
+        html += '<div style="display:flex;gap:0.3rem;margin-top:0.85rem;border-bottom:1px solid var(--border)">';
+        html += _immoTabBtn(im.id, 'postes', 'Postes' + ((im.postes && im.postes.length) ? ' (' + im.postes.length + ')' : ''), tab);
+        html += _immoTabBtn(im.id, 'amort', 'Amortissement & base', tab);
+        html += '</div>';
+        html += '<div id="postes-tab-' + im.id + '" style="display:' + (tab === 'postes' ? 'block' : 'none') + ';margin-top:0.5rem">' + _renderPostesSummary(im) + '</div>';
+        html += '<div id="amort-tab-' + im.id + '" style="display:' + (tab === 'amort' ? 'block' : 'none') + ';margin-top:0.5rem">' + _renderAmortAndBase(im, year) + '</div>';
         html += '</div>';
       }
       list.innerHTML = html;
