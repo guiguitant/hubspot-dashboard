@@ -3,7 +3,6 @@ const express = require('express');
 const https = require('https');
 const http = require('http');
 const path = require('path');
-const AdmZip = require('adm-zip');
 const fs = require('fs');
 const crypto = require('crypto');
 const { authenticator } = require('otplib');
@@ -488,6 +487,325 @@ const KANBAN_STAGES = [
   { id: 'contractsent', label: 'Contrat envoyé', probability: 80 },
   { id: '2077692138', label: 'À relancer plus tard', probability: 20, forecast: false },
 ];
+
+// --- Calcul UNIQUE du pipeline pondéré HubSpot ---
+// Un seul endroit applique le barème KANBAN_STAGES (les stages forecast:false sont exclus).
+// Retourne le détail pondéré par deal (weighted = amount * probability/100 * factor) pour que
+// l'appelant totalise (EBE) ou distribue par mois d'encaissement (prévisionnel trésorerie).
+function weightPipelineDeals(pipelineDeals, factor = 1) {
+  const entries = [];
+  for (const stage of KANBAN_STAGES) {
+    if (stage.forecast === false) continue;
+    const deals = pipelineDeals[stage.label] || [];
+    for (const deal of deals) {
+      entries.push({
+        name: deal.name,
+        amount: deal.amount,
+        probability: deal.probability,
+        weighted: deal.amount * (deal.probability / 100) * factor,
+        stage: stage.label,
+        closedate: deal.closedate,
+      });
+    }
+  }
+  return entries;
+}
+
+// --- Paramètres IS (impôt sur les sociétés) — configurables, jamais codés en dur ---
+// Taux réduit PME 15 % jusqu'à 42 500 € de bénéfice imposable, puis taux normal 25 %.
+// Surchargeables via .env (IS_TAUX_REDUIT / IS_SEUIL_REDUIT / IS_TAUX_NORMAL) pour ajustement
+// après validation avec l'expert-comptable, sans toucher au code.
+const IS_TAUX_REDUIT  = parseFloat(process.env.IS_TAUX_REDUIT  || '0.15');
+const IS_SEUIL_REDUIT = parseFloat(process.env.IS_SEUIL_REDUIT || '42500');
+const IS_TAUX_NORMAL  = parseFloat(process.env.IS_TAUX_NORMAL  || '0.25');
+
+// --- Taux des crédits d'impôt (configurables via .env) ---
+// CII : 20 % en métropole (loi de finances 2025, depuis les dépenses 2025). CIR : 30 % jusqu'à 100 M€.
+// Crédit estimé = base nette × taux. (plafonds à valider avec l'expert-comptable : CII plafonné à 400 k€/an.)
+const CIR_TAUX = parseFloat(process.env.CIR_TAUX || '0.30');
+const CII_TAUX = parseFloat(process.env.CII_TAUX || '0.20');
+// Forfait de fonctionnement du CIR (ne s'applique PAS au CII, forfait supprimé depuis 2023) :
+// 40 % des dépenses de personnel (taux passé de 43 % à 40 % au 15/02/2025) + 75 % des dotations aux
+// amortissements des immobilisations affectées à la recherche. S'AJOUTE à l'assiette éligible.
+const CIR_FORFAIT_PERSONNEL     = parseFloat(process.env.CIR_FORFAIT_PERSONNEL     || '0.40');
+const CIR_FORFAIT_AMORTISSEMENT = parseFloat(process.env.CIR_FORFAIT_AMORTISSEMENT || '0.75');
+
+// Calcule l'IS sur un résultat imposable (barème progressif PME). Utilisé par le Compte de résultat (Phase 4).
+// NB : les acomptes IS de la projection de trésorerie restent saisis manuellement dans l'onglet Plan_TRE (choix métier).
+function computeIS(resultatImposable) {
+  if (!resultatImposable || resultatImposable <= 0) return 0;
+  const partReduite = Math.min(resultatImposable, IS_SEUIL_REDUIT) * IS_TAUX_REDUIT;
+  const partNormale = Math.max(0, resultatImposable - IS_SEUIL_REDUIT) * IS_TAUX_NORMAL;
+  return Math.round(partReduite + partNormale);
+}
+
+// --- Amortissement linéaire prorata temporis (module Immobilisations, Phase 5) ---
+// Charge non décaissée : impacte le Compte de résultat, jamais l'EBE ni la trésorerie.
+function _daysBetween(a, b) { return Math.round((b - a) / 86400000); }
+
+// Dotation d'une immo pour une année civile. Annuité pleine = montant / durée ;
+// 1re et dernière année proratisées (base jours) => somme des dotations = montant sur toute la durée.
+function computeDotationForYear(immo, year) {
+  if (!immo || immo.traitement !== 'immobilise') return 0;
+  const M = Number(immo.montant) || 0;
+  const N = Number(immo.duree_annees) || 0;
+  if (M <= 0 || N <= 0 || !immo.date_mise_en_service) return 0;
+  const dms = new Date(immo.date_mise_en_service);
+  if (isNaN(dms.getTime())) return 0;
+  const fin = new Date(dms); fin.setFullYear(fin.getFullYear() + N); // fin d'amortissement (exclue)
+  const debutAnnee = new Date(year, 0, 1);
+  const finAnnee   = new Date(year + 1, 0, 1); // exclue
+  const start = dms > debutAnnee ? dms : debutAnnee;
+  const end   = fin < finAnnee ? fin : finAnnee;
+  if (end <= start) return 0; // hors période d'amortissement
+  const joursAnnee = _daysBetween(debutAnnee, finAnnee); // 365 ou 366
+  const fraction = _daysBetween(start, end) / joursAnnee;
+  return Math.round((M / N) * fraction);
+}
+
+// Plan d'amortissement complet d'une immo : { plan: [{ annee, dotation, cumul, vnc }], montant }.
+function computePlanAmortissement(immo) {
+  const M = Number(immo.montant) || 0;
+  const N = Number(immo.duree_annees) || 0;
+  const plan = [];
+  if (immo.traitement !== 'immobilise' || M <= 0 || N <= 0 || !immo.date_mise_en_service) {
+    return { plan, montant: M };
+  }
+  const y0 = new Date(immo.date_mise_en_service).getFullYear();
+  let cumul = 0;
+  // prorata temporis : l'amortissement peut s'étaler sur N+1 années civiles (1re et dernière partielles)
+  for (let y = y0; y <= y0 + N; y++) {
+    const dotation = computeDotationForYear(immo, y);
+    if (dotation === 0 && y > y0) break;
+    cumul += dotation;
+    plan.push({ annee: y, dotation, cumul, vnc: Math.max(0, Math.round(M - cumul)) });
+  }
+  return { plan, montant: M };
+}
+
+// --- Postes d'assiette (Phase 5.2/5.3) : composent le montant amortissable + la base CIR/CII ---
+// Prorata temporis d'un poste : fraction de son année couverte par [date_debut, date_fin].
+// 1 si pas de dates (année pleine). date_fin est inclusive.
+function _prorataPoste(p) {
+  if (p.prorata_temporel === false) return 1; // poste ponctuel (prestation) : montant plein, pas de prorata calendaire
+  if (!p.date_debut && !p.date_fin) return 1;
+  const annee = Number(p.annee);
+  if (!annee) return 1;
+  const debutAnnee = new Date(annee, 0, 1), finAnnee = new Date(annee + 1, 0, 1);
+  const d = p.date_debut ? new Date(p.date_debut) : debutAnnee;
+  const fEnd = p.date_fin ? new Date(new Date(p.date_fin).getTime() + 86400000) : finAnnee; // fin incluse
+  const start = d > debutAnnee ? d : debutAnnee;
+  const end = fEnd < finAnnee ? fEnd : finAnnee;
+  if (end <= start) return 0;
+  return _daysBetween(start, end) / _daysBetween(debutAnnee, finAnnee);
+}
+// Montant réellement retenu pour un poste : montant × quote-part d'affectation × prorata temporel.
+function montantPosteRetenu(p) {
+  const quote = (p.quote_part != null ? Number(p.quote_part) : 100) / 100;
+  return (Number(p.montant) || 0) * quote * _prorataPoste(p);
+}
+function _sumPostes(postes) {
+  return (postes || []).reduce((s, p) => s + montantPosteRetenu(p), 0);
+}
+// Éligibilité d'un poste à un crédit d'impôt (CIR ou CII).
+// Règle : la sous-traitance (source 'prestation') n'est éligible que si le prestataire est agréé.
+// Les dépenses internes (salaire) / autres ne sont pas soumises à l'agrément.
+function _posteEligibleCredit(p) {
+  if (p.source === 'prestation') return !!p.prestataire_agree;
+  return true;
+}
+// Base nette de subvention pour un type de crédit ('cir' | 'cii') = Σ(postes éligibles de ce type : montant − subvention).
+function _baseCredit(postes, type) {
+  return (postes || [])
+    .filter(p => p.credit_type === type && _posteEligibleCredit(p))
+    .reduce((s, p) => s + (Number(p.montant) || 0) - (Number(p.subvention) || 0), 0);
+}
+// Montant amortissable effectif : somme des postes si l'immo en a, sinon le montant saisi manuellement.
+function montantAmortissable(immo, postes) {
+  return (postes && postes.length) ? _sumPostes(postes) : (Number(immo.montant) || 0);
+}
+
+// Récupère tous les postes groupés par immobilisation. TOLÉRANT si la table postes n'existe pas encore.
+async function fetchPostesByImmo() {
+  const byImmo = {};
+  try {
+    const { data, error } = await supabaseAdmin.from('immobilisation_postes').select('*');
+    if (error || !data) return byImmo;
+    for (const p of data) (byImmo[p.immobilisation_id] = byImmo[p.immobilisation_id] || []).push(p);
+  } catch (e) { /* table absente : postes vides */ }
+  return byImmo;
+}
+
+// --- Aides publiques (Phase 5.3) : lissage sur le projet + réintégration des avances ---
+// Récupère toutes les aides groupées par immobilisation. TOLÉRANT si la table n'existe pas encore.
+async function fetchAidesByImmo() {
+  const byImmo = {};
+  try {
+    const { data, error } = await supabaseAdmin.from('immobilisation_aides').select('*');
+    if (error || !data) return byImmo;
+    for (const a of data) (byImmo[a.immobilisation_id] = byImmo[a.immobilisation_id] || []).push(a);
+  } catch (e) { /* table absente */ }
+  return byImmo;
+}
+
+// Quote-part d'une aide imputée à une année civile (lissage prorata temporis sur la durée du projet).
+function lisserAideAnnee(aide, annee, debutProjet, finProjet) {
+  const M = Number(aide.montant) || 0;
+  if (M <= 0 || !debutProjet || !finProjet) return 0;
+  const debut = new Date(debutProjet), fin = new Date(finProjet);
+  if (isNaN(debut.getTime()) || isNaN(fin.getTime()) || fin <= debut) return 0;
+  const debutAnnee = new Date(annee, 0, 1), finAnnee = new Date(annee + 1, 0, 1);
+  const start = debut > debutAnnee ? debut : debutAnnee;
+  const end   = fin < finAnnee ? fin : finAnnee;
+  if (end <= start) return 0;
+  return M * (_daysBetween(start, end) / _daysBetween(debut, fin));
+}
+
+// Montant d'une avance remboursé (donc réintégré à la base) une année donnée.
+// Profil : remboursement_montant_annuel par an dès remboursement_debut, jusqu'à rembourser le montant total.
+function reintegrationAvanceAnnee(aide, annee) {
+  if (aide.type !== 'avance') return 0;
+  const M = Number(aide.montant) || 0;
+  const annuel = Number(aide.remboursement_montant_annuel) || 0;
+  if (M <= 0 || annuel <= 0 || !aide.remboursement_debut) return 0;
+  const y0 = new Date(aide.remboursement_debut).getFullYear();
+  if (isNaN(y0) || annee < y0) return 0;
+  const dejaRembourse = (annee - y0) * annuel; // 0 la 1re année
+  if (dejaRembourse >= M) return 0;            // déjà tout remboursé
+  return Math.min(annuel, M - dejaRembourse);  // dernière année : reliquat
+}
+
+// Base CIR/CII nette par année d'une immo : brute (postes) − aides lissées + réintégrations d'avance.
+// Les aides ne portent plus de tag CIR/CII : leur déduction (et la réintégration des avances) est
+// répartie au PRORATA de la proportion CIR/CII du projet (calculée sur tous les postes éligibles,
+// toutes années). Cela gère les projets mixtes ET les années sans poste (réintégrations post-projet).
+// Retour : [{ annee, cir:{brute,deduction,reintegration,nette}, cii:{...} }].
+function computeBasesParAnnee(immo, postes, aides) {
+  postes = postes || []; aides = aides || [];
+  const eligible = p => _posteEligibleCredit(p);
+  // Méthode B (assiette = dotations aux amortissements, étalée) pour un actif amortissable acquis ;
+  // sinon méthode A (assiette = dépenses engagées l'année). Cf. migration 40.
+  const modeAmort = immo.assiette_credit === 'amortissement';
+
+  // Proportion CIR/CII (répartition des aides publiques, communes aux deux types).
+  const totalCir = postes.filter(p => p.credit_type === 'cir' && eligible(p)).reduce((s, p) => s + montantPosteRetenu(p), 0);
+  const totalCii = postes.filter(p => p.credit_type === 'cii' && eligible(p)).reduce((s, p) => s + montantPosteRetenu(p), 0);
+  const totalCredit = totalCir + totalCii;
+  const part = { cir: totalCredit > 0 ? totalCir / totalCredit : 0, cii: totalCredit > 0 ? totalCii / totalCredit : 0 };
+
+  // Plan d'amortissement (méthode B) : la base éligible d'un type est étalée au rythme des dotations.
+  const eff = montantAmortissable(immo, postes);
+  const plan = computePlanAmortissement({ ...immo, montant: eff }).plan;
+  const totalDot = plan.reduce((s, r) => s + r.dotation, 0) || 1;
+  const dotByYear = {};
+  for (const r of plan) dotByYear[r.annee] = r.dotation;
+  // Base éligible nette de subvention par type (montant total, servant à l'étalement méthode B).
+  const baseEligType = t => postes.filter(p => p.credit_type === t && eligible(p)).reduce((s, p) => s + montantPosteRetenu(p) - (Number(p.subvention) || 0), 0);
+  const baseElig = { cir: baseEligType('cir'), cii: baseEligType('cii') };
+
+  const annees = new Set();
+  if (modeAmort) {
+    // Méthode B : années = années d'amortissement.
+    for (const r of plan) annees.add(r.annee);
+  } else {
+    // Méthode A : années de dépense (+ fenêtre projet).
+    for (const p of postes) if (p.annee != null) annees.add(Number(p.annee));
+    if (immo.date_debut_projet && immo.date_fin_projet) {
+      const y1 = new Date(immo.date_debut_projet).getFullYear();
+      const y2 = new Date(immo.date_fin_projet).getFullYear();
+      for (let y = y1; y <= y2; y++) annees.add(y);
+    }
+  }
+  for (const a of aides) {
+    if (a.type === 'avance' && a.remboursement_debut && Number(a.remboursement_montant_annuel) > 0) {
+      const y0 = new Date(a.remboursement_debut).getFullYear();
+      const n = Math.ceil((Number(a.montant) || 0) / Number(a.remboursement_montant_annuel));
+      for (let k = 0; k < n; k++) annees.add(y0 + k);
+    }
+  }
+  const result = [];
+  for (const annee of [...annees].sort((x, y) => x - y)) {
+    // Aide lissée et réintégration TOTALES de l'année (tous crédits confondus), réparties ensuite au prorata.
+    const aideLisseeTotale = aides.reduce((s, a) => s + lisserAideAnnee(a, annee, immo.date_debut_projet, immo.date_fin_projet), 0);
+    const reintTotale = aides.filter(a => a.type === 'avance').reduce((s, a) => s + reintegrationAvanceAnnee(a, annee), 0);
+    const bloc = { annee };
+    for (const type of ['cir', 'cii']) {
+      let brute;
+      if (modeAmort) {
+        // Méthode B : quote-part de la base éligible étalée selon la dotation de l'année,
+        // + forfait de fonctionnement (CIR : 75 % des dotations ; jamais pour le CII).
+        const frac = (dotByYear[annee] || 0) / totalDot;
+        const alloc = baseElig[type] * frac;
+        const forfait = (type === 'cir') ? alloc * CIR_FORFAIT_AMORTISSEMENT : 0;
+        brute = alloc + forfait;
+      } else {
+        // Méthode A : dépenses éligibles de l'année, + forfait de fonctionnement
+        // (CIR : 40 % des dépenses de PERSONNEL ; jamais pour le CII, ni sur la sous-traitance).
+        const depenses = postes
+          .filter(p => Number(p.annee) === annee && p.credit_type === type && eligible(p))
+          .reduce((s, p) => s + montantPosteRetenu(p) - (Number(p.subvention) || 0), 0);
+        const forfaitPerso = (type === 'cir')
+          ? CIR_FORFAIT_PERSONNEL * postes
+              .filter(p => Number(p.annee) === annee && p.credit_type === 'cir' && p.source === 'salaire' && eligible(p))
+              .reduce((s, p) => s + montantPosteRetenu(p), 0)
+          : 0;
+        brute = depenses + forfaitPerso;
+      }
+      const deduction = aideLisseeTotale * part[type];
+      const reintegration = reintTotale * part[type];
+      const nette = Math.round(Math.max(0, brute - deduction + reintegration));
+      bloc[type] = {
+        brute: Math.round(brute),
+        deduction: Math.round(deduction),
+        reintegration: Math.round(reintegration),
+        nette,
+        creditEstime: Math.round(nette * (type === 'cir' ? CIR_TAUX : CII_TAUX)),
+      };
+    }
+    result.push(bloc);
+  }
+  return result;
+}
+
+// Somme des dotations de toutes les immobilisations pour une année (alimente le Compte de résultat).
+// TOLÉRANT : si la table n'existe pas encore (migration non appliquée) ou erreur Supabase, renvoie 0.
+async function sumDotationsForYear(year) {
+  try {
+    const { data, error } = await supabaseAdmin.from('immobilisations').select('*');
+    if (error || !data) return 0;
+    const byImmo = await fetchPostesByImmo();
+    return data.reduce((sum, immo) => {
+      const eff = montantAmortissable(immo, byImmo[immo.id]);
+      return sum + computeDotationForYear({ ...immo, montant: eff }, year);
+    }, 0);
+  } catch (e) {
+    return 0;
+  }
+}
+
+// Somme des crédits d'impôt CII/CIR de toutes les immos imputables à une année (année des dépenses éligibles).
+// Le crédit d'impôt vient en déduction de l'IS de l'exercice ; restituable pour une PME (produit d'impôt
+// même si l'IS brut = 0). Alimente le Compte de résultat. TOLÉRANT : {0,0,0} si tables absentes / erreur.
+async function sumCreditsForYear(year) {
+  try {
+    const y = Number(year);
+    const { data, error } = await supabaseAdmin.from('immobilisations').select('*');
+    if (error || !data) return { cii: 0, cir: 0, total: 0 };
+    const [byPostes, byAides] = await Promise.all([fetchPostesByImmo(), fetchAidesByImmo()]);
+    let cii = 0, cir = 0;
+    for (const immo of data) {
+      const postes = byPostes[immo.id] || [];
+      // Même repli d'année que /api/immobilisations : postes sans année => année de mise en service.
+      const fallbackYear = immo.date_mise_en_service ? new Date(immo.date_mise_en_service).getFullYear() : new Date().getFullYear();
+      const postesN = postes.map(p => ({ ...p, annee: p.annee != null ? p.annee : fallbackYear }));
+      const bloc = computeBasesParAnnee(immo, postesN, byAides[immo.id] || []).find(b => b.annee === y);
+      if (bloc) { cii += bloc.cii.creditEstime; cir += bloc.cir.creditEstime; }
+    }
+    return { cii: Math.round(cii), cir: Math.round(cir), total: Math.round(cii + cir) };
+  } catch (e) {
+    return { cii: 0, cir: 0, total: 0 };
+  }
+}
 
 // --- Fetch open deals for pipeline kanban ---
 let openDealsCache = null;
@@ -1447,57 +1765,8 @@ function notionRequest(endpoint, method = 'GET', body = null) {
   });
 }
 
-// --- Google Sheets CSV ---
-const GSHEET_PUBLISHED_ID = '2PACX-1vQVkfg9jVxUTYGkLCs5xgXRuowmXEMZ8h2TT0kDfhbpQQugS1lgB729gbXbWJ5uEBK6CZ3E0DWJ9ijM';
+// --- Google Sheets CSV : onglet CR_Prev (classeur principal, lu via gviz comme les autres onglets) ---
 const CRPREV_GID = '1891894048';
-
-function fetchCSV(url) {
-  return new Promise((resolve, reject) => {
-    const follow = (targetUrl) => {
-      const parsed = new URL(targetUrl);
-      const options = {
-        hostname: parsed.hostname,
-        path: parsed.pathname + parsed.search,
-        method: 'GET',
-        headers: { 'User-Agent': 'Mozilla/5.0' },
-      };
-      const req = https.request(options, (res) => {
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          return follow(res.headers.location);
-        }
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => res.statusCode < 400 ? resolve(data) : reject(new Error(`CSV ${res.statusCode}`)));
-      });
-      req.on('error', reject);
-      req.end();
-    };
-    follow(url);
-  });
-}
-
-function parseCsvCRPrev(text) {
-  const rows = [];
-  let current = [], field = '', inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (inQuotes) {
-      if (ch === '"' && text[i + 1] === '"') { field += '"'; i++; }
-      else if (ch === '"') inQuotes = false;
-      else field += ch;
-    } else {
-      if (ch === '"') inQuotes = true;
-      else if (ch === ',') { current.push(field); field = ''; }
-      else if (ch === '\n' || ch === '\r') {
-        if (ch === '\r' && text[i + 1] === '\n') i++;
-        current.push(field); field = '';
-        rows.push(current); current = [];
-      } else field += ch;
-    }
-  }
-  if (field || current.length) { current.push(field); rows.push(current); }
-  return rows;
-}
 
 let crPrevCache = null;
 let crPrevCacheTime = 0;
@@ -1506,9 +1775,9 @@ const CRPREV_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 async function fetchAndParseCRPrev() {
   if (crPrevCache && (Date.now() - crPrevCacheTime) < CRPREV_CACHE_TTL) return crPrevCache;
 
-  const url = `https://docs.google.com/spreadsheets/d/e/${GSHEET_PUBLISHED_ID}/pub?output=csv&gid=${CRPREV_GID}`;
-  const csvText = await fetchCSV(url);
-  const rows = parseCsvCRPrev(csvText);
+  // Lecture unifiee : onglet CR_Prev du classeur principal via le mecanisme gviz commun (parseCSV).
+  const csvText = await fetchGoogleSheetCSV(CRPREV_GID);
+  const rows = parseCSV(csvText);
 
   // Trouver la ligne contenant les mois (format MM/YYYY)
   let monthRowIdx = -1;
@@ -3905,6 +4174,7 @@ async function buildTresorerieFromQonto(horizonMonths = 12, { includePreviousMon
 
   // Fetch bank balance + transactions from Qonto
   let solde = null;
+  let soldeTousComptes = null;
   let transactions = [];
   try {
     const org = await qontoRequest('/v2/organization');
@@ -3912,6 +4182,9 @@ async function buildTresorerieFromQonto(horizonMonths = 12, { includePreviousMon
     if (bankAccounts.length > 0) {
       const mainAccount = bankAccounts.reduce((a, b) => (b.balance_cents > a.balance_cents ? b : a));
       solde = mainAccount.balance;
+      // Somme de TOUS les comptes Qonto : sert à la "trésorerie nette de dette" (photo instant T).
+      // Le solde du compte principal reste la base de la projection (aucune régression sur le prévisionnel).
+      soldeTousComptes = bankAccounts.reduce((s, a) => s + (a.balance || 0), 0);
       transactions = await fetchQontoTransactions(mainAccount.iban, 6);
     }
   } catch (err) {
@@ -4033,6 +4306,7 @@ async function buildTresorerieFromQonto(horizonMonths = 12, { includePreviousMon
 
   const result = {
     soldeActuel: solde,
+    soldeTousComptes: soldeTousComptes != null ? Math.round(soldeTousComptes) : null,
     soldeDebutFirstMonth: Math.round(soldeDebutFirstMonth),
     moisCourantKey,
     chargesMoisCourant: Math.round(chargesMoisCourant),
@@ -4064,8 +4338,8 @@ const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID || '1btTMlLB4cNIN_PAkKOujBkO
 const GID_MASSE_SALARIALE = 798407110;
 const GID_SALARIES_META = 1450270387;
 const GID_PLAN_TRESORERIE = 2116491556;
-const GID_PROJETS = 0;
 const GID_CATEGORIES_TVA = 771195553;
+const GID_DETTES = 1905721989;
 
 function fetchGoogleSheetCSV(gid) {
   return new Promise((resolve, reject) => {
@@ -4143,6 +4417,48 @@ function parseFrenchNumber(str) {
   const cleaned = str.replace(/[€\s\u00a0]/g, '').replace(',', '.').trim();
   const val = parseFloat(cleaned);
   return isNaN(val) ? 0 : val;
+}
+
+// --- Onglet Dettes & engagements fermes (GID 1905721989) ---
+// Source de vérité des engagements fermes (dette financière + engagements votés).
+// Colonnes : C(2)=libellé, D(3)=durée, E(4)=montant initial, F(5)=taux, G(6)=montant restant dû, H(7)=contrôle.
+// Données à partir de la ligne 4 (lignes 1-3 = en-têtes). Montants au format FR "58 800 €".
+// Cache court car ces montants bougent peu mais on veut une photo fraîche.
+let dettesCache = null;
+let dettesCacheTime = 0;
+const DETTES_CACHE_TTL = 5 * 60 * 1000;
+
+function parseDettes(csv) {
+  const rows = parseCSV(csv);
+  const dettes = [];
+  for (let i = 3; i < rows.length; i++) { // ligne 4 = index 3
+    const r = rows[i];
+    const label = (r[2] || '').trim();
+    if (!label) continue; // ignore les lignes vides / séparateurs
+    dettes.push({
+      label,
+      montantInitial: parseFrenchNumber(r[4]),
+      taux: (r[5] || '').trim(),
+      restant: parseFrenchNumber(r[6]),
+      controle: (r[7] || '').trim().toUpperCase() === 'TRUE',
+    });
+  }
+  // Total = somme des restants dûs des lignes validées (contrôle = TRUE)
+  const totalRestant = dettes
+    .filter(d => d.controle)
+    .reduce((sum, d) => sum + d.restant, 0);
+  return { dettes, totalRestant };
+}
+
+async function fetchAndParseDettes() {
+  if (dettesCache && (Date.now() - dettesCacheTime) < DETTES_CACHE_TTL) {
+    return dettesCache;
+  }
+  const csv = await fetchGoogleSheetCSV(GID_DETTES);
+  const data = parseDettes(csv);
+  dettesCache = data;
+  dettesCacheTime = Date.now();
+  return data;
 }
 
 // Find month columns: look for header row with "01/YYYY" pattern
@@ -5027,23 +5343,18 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
   const pipelinePondereEncaissements = {};
   if (includePipeline) {
     const fallbackDate = new Date(); fallbackDate.setMonth(fallbackDate.getMonth() + 1);
-    for (const stage of KANBAN_STAGES) {
-      if (stage.forecast === false) continue;
-      const deals = pipelineDeals[stage.label] || [];
-      for (const deal of deals) {
-        const weighted = deal.amount * (deal.probability / 100) * factor;
-        pipelinePondere += weighted;
-        pipelineDetail.push({
-          name: deal.name, amount: deal.amount,
-          probability: deal.probability, weighted: Math.round(weighted), stage: stage.label,
-          closedate: deal.closedate,
-        });
-        // Distribuer le poids dans le mois d'encaissement attendu (= closedate + 45j)
-        const closing = deal.closedate ? new Date(deal.closedate) : fallbackDate;
-        const cashDate = new Date(closing); cashDate.setDate(cashDate.getDate() + 45);
-        const mKey = `${cashDate.getFullYear()}-${String(cashDate.getMonth() + 1).padStart(2, '0')}`;
-        pipelinePondereEncaissements[mKey] = (pipelinePondereEncaissements[mKey] || 0) + weighted;
-      }
+    for (const entry of weightPipelineDeals(pipelineDeals, factor)) {
+      pipelinePondere += entry.weighted;
+      pipelineDetail.push({
+        name: entry.name, amount: entry.amount,
+        probability: entry.probability, weighted: Math.round(entry.weighted), stage: entry.stage,
+        closedate: entry.closedate,
+      });
+      // Distribuer le poids dans le mois d'encaissement attendu (= closedate + 45j)
+      const closing = entry.closedate ? new Date(entry.closedate) : fallbackDate;
+      const cashDate = new Date(closing); cashDate.setDate(cashDate.getDate() + 45);
+      const mKey = `${cashDate.getFullYear()}-${String(cashDate.getMonth() + 1).padStart(2, '0')}`;
+      pipelinePondereEncaissements[mKey] = (pipelinePondereEncaissements[mKey] || 0) + entry.weighted;
     }
   }
 
@@ -5813,12 +6124,15 @@ app.get('/api/tresorerie', async (req, res) => {
     let pennylaneError = null;
     let masseSalarialeData = null;
     let masseSalarialeError = null;
-    const [qontoData, pipelineDeals, notionMissions, pennylaneRes, masseRes] = await Promise.all([
+    let dettesError = null;
+    const [qontoData, pipelineDeals, notionMissions, pennylaneRes, masseRes, dettesRes] = await Promise.all([
       buildTresorerieFromQonto(12, { includePreviousMonth: true }),
       fetchOpenDeals(),
       fetchAllNotionMissions(),
       fetchCustomerInvoices().catch(err => { pennylaneError = err.message; return []; }),
       fetchAndParseMasseSalarialeDetailed().catch(err => { masseSalarialeError = err.message; return null; }),
+      // Onglet Dettes : tolère un échec (l'onglet injoignable ne doit pas planter toute la trésorerie).
+      fetchAndParseDettes().catch(err => { dettesError = err.message; console.error('Erreur lecture Dettes:', err.message); return null; }),
     ]);
     customerInvoices = pennylaneRes;
     masseSalarialeData = masseRes;
@@ -5836,9 +6150,44 @@ app.get('/api/tresorerie', async (req, res) => {
       includePipeline,
     });
 
+    // Trésorerie nette de dette (photo instant T) = solde Qonto tous comptes − Σ(engagements fermes).
+    // Cas particulier des AVANCES REMBOURSABLES : on retranche le RÉEL perçu et pas encore remboursé
+    // (avanceRemboursableRestante, dérivé de l'onglet Plan_TRE_Prév filtré à la date du jour) et non le
+    // montant conventionné de l'onglet Dettes (qui inclut souvent des tranches pas encore encaissées).
+    // Les autres engagements (emprunts, primes...) restent lus tels quels de l'onglet Dettes.
+    // Convention : une ligne Dettes est une avance si son libellé contient "avance".
+    const soldeQonto = qontoData.soldeTousComptes != null ? qontoData.soldeTousComptes : qontoData.soldeActuel;
+    const avanceReelle = Math.round(result.avanceRemboursableRestante || 0);
+    const estAvance = (label) => /avance/i.test(label || '');
+    let dettesList = dettesRes ? dettesRes.dettes.slice() : [];
+    let totalDettes = 0;
+    if (dettesRes) {
+      const totalNonAvance = dettesList
+        .filter(d => d.controle && !estAvance(d.label))
+        .reduce((s, d) => s + d.restant, 0);
+      totalDettes = totalNonAvance + avanceReelle;
+      // Remplace le montant engagé des lignes d'avance par le réel perçu (global) ; les avances
+      // supplémentaires éventuelles passent à 0 pour ne pas compter le réel plusieurs fois.
+      let avanceAffectee = false;
+      dettesList = dettesList.map(d => {
+        if (!estAvance(d.label)) return d;
+        const restant = avanceAffectee ? 0 : avanceReelle;
+        avanceAffectee = true;
+        return { ...d, restant, montantEngage: d.restant, reel: true };
+      });
+    }
+    const tresorerieNetteDeDette = (soldeQonto != null && dettesRes)
+      ? Math.round(soldeQonto - totalDettes)
+      : null;
+
     res.json({
       source: 'qonto',
       soldeActuel: qontoData.soldeActuel,
+      soldeQonto,
+      tresorerieNetteDeDette,
+      dettes: dettesList,
+      totalDettes: Math.round(totalDettes),
+      dettesError,
       avanceRemboursableRestante: result.avanceRemboursableRestante || 0,
       avanceTotaleRecue: result.avanceTotaleRecue || 0,
       avanceDejaRemboursee: result.avanceDejaRemboursee || 0,
@@ -5877,24 +6226,41 @@ const DEPENSES_CACHE_TTL = 10 * 60 * 1000; // 10 min, comme customerInvoices
 // simultanes partagent la meme promesse (meme pattern que fetchCustomerInvoices).
 let _inFlightFetchDepensesTransactions = null;
 
-// Fetch dedie 13 mois (mois courant + 12 precedents) pour l'onglet Depenses.
+// Borne basse par defaut : 13 mois (mois courant + 12 precedents).
+function _defaultDepensesFromDate() {
+  const from = new Date();
+  from.setDate(1);
+  from.setMonth(from.getMonth() - 12);
+  return `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}-01`;
+}
+
+// Fetch Pennylane pour l'onglet Charges/Depenses.
+// - sans argument : fenetre par defaut 13 mois + singleton anti-concurrence (appels simultanes partages).
+// - avec fromDate ('YYYY-MM-DD') : borne basse = min(fromDate, defaut) pour couvrir a la fois la periode
+//   demandee ET la fenetre glissante du snapshot ; fetch direct (cle variable, pas de singleton).
 // limit=100 : pages par defaut a 20 items, donc 5x moins d'appels API.
-function fetchDepensesTransactions() {
-  if (_inFlightFetchDepensesTransactions) return _inFlightFetchDepensesTransactions;
-  _inFlightFetchDepensesTransactions = (async () => {
-    const from = new Date();
-    from.setDate(1);
-    from.setMonth(from.getMonth() - 12);
-    const fromDate = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}-01`;
-    const filter = JSON.stringify([{ field: 'date', operator: 'gteq', value: fromDate }]);
-    return pennylaneFetchAll('/transactions', { filter, limit: '100' });
-  })().finally(() => { _inFlightFetchDepensesTransactions = null; });
-  return _inFlightFetchDepensesTransactions;
+function fetchDepensesTransactions(fromDate) {
+  if (!fromDate) {
+    if (_inFlightFetchDepensesTransactions) return _inFlightFetchDepensesTransactions;
+    _inFlightFetchDepensesTransactions = (async () => {
+      const filter = JSON.stringify([{ field: 'date', operator: 'gteq', value: _defaultDepensesFromDate() }]);
+      return pennylaneFetchAll('/transactions', { filter, limit: '100' });
+    })().finally(() => { _inFlightFetchDepensesTransactions = null; });
+    return _inFlightFetchDepensesTransactions;
+  }
+  const def = _defaultDepensesFromDate();
+  const from = String(fromDate) < def ? String(fromDate) : def;
+  const filter = JSON.stringify([{ field: 'date', operator: 'gteq', value: from }]);
+  return pennylaneFetchAll('/transactions', { filter, limit: '100' });
 }
 
 app.get('/api/depenses', async (req, res) => {
   try {
-    if (depensesCache && (Date.now() - depensesCacheTime) < DEPENSES_CACHE_TTL) {
+    const { start, end } = req.query;
+    const hasPeriod = !!(start && end);
+
+    // Sans periode : reponse cachee 10 min (comportement historique).
+    if (!hasPeriod && depensesCache && (Date.now() - depensesCacheTime) < DEPENSES_CACHE_TTL) {
       return res.json(depensesCache);
     }
 
@@ -5902,18 +6268,35 @@ app.get('/api/depenses', async (req, res) => {
     // il degrade en tableau vide + champ pennylaneError pour que le front affiche un bandeau
     // (jamais de zeros silencieux).
     let pennylaneError = null;
-    const transactions = await fetchDepensesTransactions()
+    const transactions = await fetchDepensesTransactions(hasPeriod ? String(start) : null)
       .catch(err => { pennylaneError = err.message; return []; });
 
-    const computed = computeDepenses(transactions);
+    // Detail : periode explicite si fournie (mode periode), sinon fenetre glissante 13 mois.
+    const computed = hasPeriod
+      ? computeDepenses(transactions, { start, end })
+      : computeDepenses(transactions);
+
+    // Snapshot (3 cards "instantanees" : sorties ce mois, moyenne 6 mois, recurrentes) : TOUJOURS
+    // la fenetre glissante, independant de la periode selectionnee. computeDepenses en mode glissant
+    // ignore les transactions hors des 13 derniers mois, donc le fetch elargi n'a pas d'impact ici.
+    const snapshotSource = hasPeriod ? computeDepenses(transactions) : computed;
+    const snapshot = {
+      sortiesMoisCourant: snapshotSource.kpis.sortiesMoisCourant,
+      pctVsMoyenne6m: snapshotSource.kpis.pctVsMoyenne6m,
+      moyenne6m: snapshotSource.kpis.moyenne6m,
+      abonnementsMensuels: snapshotSource.kpis.abonnementsMensuels,
+      currentMonth: snapshotSource.kpis.currentMonth,
+    };
+
     const responsePayload = {
       ...computed,
+      snapshot,
       pennylaneError,
       fetchedAt: new Date().toISOString(),
     };
 
-    // Un resultat en erreur n'est JAMAIS mis en cache (sinon 10 min de zeros).
-    if (!pennylaneError) {
+    // Cache uniquement la reponse par defaut sans erreur (les periodes ne sont pas cachees).
+    if (!hasPeriod && !pennylaneError) {
       depensesCache = responsePayload;
       depensesCacheTime = Date.now();
     }
@@ -6986,6 +7369,7 @@ app.get('/api/analytics', async (req, res) => {
     const endNm1 = new Date(endDate); endNm1.setFullYear(endNm1.getFullYear() - 1);
 
     let ca = 0;
+    let caSigne = 0, nbSigne = 0, nbFactures = 0; // caSigne/nbSigne = missions signees (creation Notion) ; nbFactures = emissions acompte/solde sur la periode
     const bySubventionne = {};
     const byAcquisition = {};
     const byNatureMission = {};
@@ -7001,12 +7385,18 @@ app.get('/api/analytics', async (req, res) => {
     }
 
     for (const m of missions) {
+      // CA signe : datage par la date de creation de la ligne Notion (proxy de la date de signature)
+      if (m.dateCreation && m.ca > 0) {
+        const dSign = new Date(m.dateCreation);
+        if (dSign >= startDate && dSign <= endDate) { caSigne += m.ca; nbSigne += 1; }
+      }
+
       let montantPeriode = 0;
 
       // Acompte N
       if (m.dateFactureAcompte && m.montantAcompte > 0) {
         const d = new Date(m.dateFactureAcompte);
-        if (d >= startDate && d <= endDate) { montantPeriode += m.montantAcompte; addToMois(caParMoisN, m.dateFactureAcompte, m.montantAcompte); }
+        if (d >= startDate && d <= endDate) { montantPeriode += m.montantAcompte; nbFactures++; addToMois(caParMoisN, m.dateFactureAcompte, m.montantAcompte); }
         if (d >= startNm1 && d <= endNm1) addToMois(caParMoisNm1, m.dateFactureAcompte, m.montantAcompte);
       }
 
@@ -7015,7 +7405,7 @@ app.get('/api/analytics', async (req, res) => {
         const montantSolde = m.ca - m.montantAcompte;
         if (montantSolde > 0) {
           const d = new Date(m.dateFactureFinale);
-          if (d >= startDate && d <= endDate) { montantPeriode += montantSolde; addToMois(caParMoisN, m.dateFactureFinale, montantSolde); }
+          if (d >= startDate && d <= endDate) { montantPeriode += montantSolde; nbFactures++; addToMois(caParMoisN, m.dateFactureFinale, montantSolde); }
           if (d >= startNm1 && d <= endNm1) addToMois(caParMoisNm1, m.dateFactureFinale, montantSolde);
         }
       }
@@ -7051,6 +7441,9 @@ app.get('/api/analytics', async (req, res) => {
     res.json({
       start, end,
       ca: Math.round(ca),
+      caSigne: Math.round(caSigne),
+      nbSigne,
+      nbFactures,
       bySubventionne: toArray(bySubventionne),
       byAcquisition: toArray(byAcquisition),
       byNatureMission: toArray(byNatureMission),
@@ -7504,14 +7897,8 @@ async function fetchFinancementsForYear(year) {
 
 async function computePipelinePondere() {
   const pipelineDeals = await fetchOpenDeals();
-  let total = 0;
-  for (const stage of KANBAN_STAGES) {
-    if (stage.forecast === false) continue;
-    const deals = pipelineDeals[stage.label] || [];
-    for (const deal of deals) {
-      total += deal.amount * (deal.probability / 100);
-    }
-  }
+  // Réutilise le calcul unique (factor=1 : pipeline pondéré brut, sans override scénario)
+  const total = weightPipelineDeals(pipelineDeals).reduce((sum, e) => sum + e.weighted, 0);
   return Math.round(total);
 }
 
@@ -7563,10 +7950,40 @@ app.get('/api/ebe', async (req, res) => {
     const caProjete  = caFacture + pipelinePondere;
     const ebeProjete = caProjete - totalCharges + totalSubv + totalAide;
 
+    // 5b) Masse salariale de l'année — INFO uniquement (déjà comprise dans totalCharges via "Frais de personnel").
+    // Affichée en sous-ligne du Compte de résultat SANS être resoustraite (évite le double comptage).
+    let masseSalarialeAnnuelle = null;
+    try {
+      const masse = await fetchAndParseMasseSalarialeDetailed();
+      let sum = 0;
+      for (const [mKey, m] of Object.entries(masse.byMonth || {})) {
+        if (mKey.startsWith(String(yearParam) + '-')) sum += (m.total || 0);
+      }
+      masseSalarialeAnnuelle = Math.round(sum);
+    } catch (e) {
+      masseSalarialeAnnuelle = null; // info indisponible : ne bloque pas le résultat
+    }
+
+    // 6) Cascade jusqu'au résultat net.
+    // Dotations aux amortissements de l'année (module Immobilisations, Phase 5).
+    // Charge non décaissée : impacte le Compte de résultat, jamais l'EBE ni la trésorerie.
+    // Tolérant : 0 si la table immobilisations n'existe pas encore (migration non appliquée).
+    const amortissements = await sumDotationsForYear(yearParam);
+    const creditImpot = await sumCreditsForYear(yearParam); // { cii, cir, total } imputable a l'exercice
+    const resExploitFactuel = Math.round(ebeFactuel) - amortissements;
+    const resExploitProjete = Math.round(ebeProjete) - amortissements;
+    const isBrutFactuel = computeIS(resExploitFactuel);
+    const isBrutProjete = computeIS(resExploitProjete);
+    // Le credit d'impot CII/CIR reduit l'IS de l'exercice. Pour une PME l'exces est restitue :
+    // impot net peut etre negatif (produit d'impot), ce qui augmente le resultat net meme a perte.
+    const impotNetFactuel = isBrutFactuel - creditImpot.total;
+    const impotNetProjete = isBrutProjete - creditImpot.total;
+
     res.json({
       year: yearParam,
       ca: { facture: caFacture, pipelinePondere, projete: caProjete },
       charges: { total: totalCharges },
+      masseSalarialeAnnuelle,
       financements: {
         subventions: financements.subventions,
         aides: financements.aides,
@@ -7574,10 +7991,329 @@ app.get('/api/ebe', async (req, res) => {
         totalAide,
       },
       ebe: { factuel: Math.round(ebeFactuel), projete: Math.round(ebeProjete) },
+      amortissements,
+      resultatExploitation: { factuel: resExploitFactuel, projete: resExploitProjete },
+      is: { factuel: isBrutFactuel, projete: isBrutProjete },              // IS brut (avant credit d'impot)
+      creditImpot,                                                          // { cii, cir, total } de l'exercice
+      impotNet: { factuel: impotNetFactuel, projete: impotNetProjete },     // IS apres credit (negatif = produit d'impot)
+      resultatNet: { factuel: resExploitFactuel - impotNetFactuel, projete: resExploitProjete - impotNetProjete },
       fetchedAt: new Date().toISOString(),
     });
   } catch (err) {
     console.error('Erreur /api/ebe:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// IMMOBILISATIONS (module Phase 5) — CRUD + plan d'amortissement
+// Table mono-locataire (dashboardGate protège déjà toutes les /api/*). Client supabaseAdmin.
+// ============================================================
+
+// GET /api/immobilisations — liste enrichie (postes, montant effectif, plan d'amortissement, base CIR)
+app.get('/api/immobilisations', async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('immobilisations')
+      .select('*')
+      .order('date_mise_en_service', { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    const [postesParImmo, aidesParImmo] = await Promise.all([fetchPostesByImmo(), fetchAidesByImmo()]);
+    let totalBaseCir = 0, totalBaseCii = 0, totalCreditCir = 0, totalCreditCii = 0;
+    const immobilisations = (data || []).map(immo => {
+      const postes = postesParImmo[immo.id] || [];
+      const aides = aidesParImmo[immo.id] || [];
+      const montantSaisi = Number(immo.montant) || 0;
+      const montantEffectif = Math.round(montantAmortissable(immo, postes));
+      // Repli d'année pour les postes sans année (Phase 5.2) : année de mise en service.
+      const fallbackYear = immo.date_mise_en_service ? new Date(immo.date_mise_en_service).getFullYear() : new Date().getFullYear();
+      const postesN = postes.map(p => ({ ...p, annee: p.annee != null ? p.annee : fallbackYear }));
+      const basesParAnnee = computeBasesParAnnee(immo, postesN, aides);
+      const baseCir = basesParAnnee.reduce((s, b) => s + b.cir.nette, 0);
+      const baseCii = basesParAnnee.reduce((s, b) => s + b.cii.nette, 0);
+      const creditCir = basesParAnnee.reduce((s, b) => s + b.cir.creditEstime, 0);
+      const creditCii = basesParAnnee.reduce((s, b) => s + b.cii.creditEstime, 0);
+      totalBaseCir += baseCir;
+      totalBaseCii += baseCii;
+      totalCreditCir += creditCir;
+      totalCreditCii += creditCii;
+      return {
+        ...immo,
+        montantSaisi,                 // montant manuel d'origine (si pas de postes)
+        montant: montantEffectif,     // assiette amortissable réellement utilisée
+        postes,
+        aides,
+        baseCir,
+        baseCii,
+        creditCir,
+        creditCii,
+        basesParAnnee,
+        planAmortissement: computePlanAmortissement({ ...immo, montant: montantEffectif }),
+      };
+    });
+    res.json({ immobilisations, totalBaseCir: Math.round(totalBaseCir), totalBaseCii: Math.round(totalBaseCii), totalCreditCir: Math.round(totalCreditCir), totalCreditCii: Math.round(totalCreditCii) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/immobilisations/postes-disponibles — "postes connus" détaillés par ANNÉE :
+// - employés : coût réel par employé et par année (masse salariale)
+// - lignes de charges : sous-catégories détaillées de chaque famille CR_Prév, par année
+// Retour : { annees:[...], employes:[{nom, parAnnee:{year:cout}, total}], lignesCharges:[{famille, label, parAnnee, total}] }
+app.get('/api/immobilisations/postes-disponibles', async (req, res) => {
+  try {
+    const anneesSet = new Set();
+    const addYearsFrom = (byMonth, acc) => {
+      for (const [mKey, val] of Object.entries(byMonth || {})) {
+        const y = parseInt(String(mKey).slice(0, 4), 10);
+        if (!y) continue;
+        anneesSet.add(y);
+        acc[y] = (acc[y] || 0) + (Number(val) || 0);
+      }
+    };
+    const finalize = (acc) => {
+      const pa = {}; let tot = 0;
+      for (const [y, v] of Object.entries(acc)) { pa[y] = Math.round(v); tot += v; }
+      return { parAnnee: pa, total: Math.round(tot) };
+    };
+
+    // Employés : coût par employé et par année
+    const empAcc = {};
+    try {
+      const masse = await fetchAndParseMasseSalarialeDetailed();
+      for (const [mKey, m] of Object.entries(masse.byMonth || {})) {
+        const y = parseInt(String(mKey).slice(0, 4), 10);
+        if (!y) continue;
+        anneesSet.add(y);
+        for (const d of (m.detail || [])) {
+          const nom = d.nom || '?';
+          empAcc[nom] = empAcc[nom] || {};
+          empAcc[nom][y] = (empAcc[nom][y] || 0) + (Number(d.cout) || 0);
+        }
+      }
+    } catch (e) { /* masse salariale indisponible */ }
+    const employes = Object.entries(empAcc)
+      .map(([nom, acc]) => ({ nom, ...finalize(acc) }))
+      .filter(e => e.total > 0)
+      .sort((a, b) => b.total - a.total);
+
+    // Charges CR_Prév : lignes détaillées (sous-catégories) par famille et par année
+    const lignesCharges = [];
+    try {
+      const cr = await fetchAndParseCRPrev();
+      const subCats = cr.subCategories || {};
+      const cats = cr.categories || {};
+      for (const [famille, lignes] of Object.entries(subCats)) {
+        const keys = Object.keys(lignes || {});
+        if (keys.length) {
+          for (const [ligne, byMonth] of Object.entries(lignes)) {
+            const acc = {}; addYearsFrom(byMonth, acc);
+            const f = finalize(acc);
+            if (f.total > 0) lignesCharges.push({ famille, label: ligne, ...f });
+          }
+        } else {
+          const acc = {}; addYearsFrom(cats[famille] || {}, acc);
+          const f = finalize(acc);
+          if (f.total > 0) lignesCharges.push({ famille, label: famille, ...f });
+        }
+      }
+      // Familles présentes dans categories mais sans détail de lignes
+      for (const [famille, byMonth] of Object.entries(cats)) {
+        if (subCats[famille]) continue;
+        const acc = {}; addYearsFrom(byMonth, acc);
+        const f = finalize(acc);
+        if (f.total > 0) lignesCharges.push({ famille, label: famille, ...f });
+      }
+      lignesCharges.sort((a, b) => (a.famille === b.famille ? b.total - a.total : a.famille.localeCompare(b.famille)));
+    } catch (e) { /* CR_Prév indisponible */ }
+
+    const annees = [...anneesSet].sort((a, b) => a - b);
+    res.json({ annees, employes, lignesCharges });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Sous-CRUD postes d'une immobilisation ---
+// POST /api/immobilisations/:id/postes
+app.post('/api/immobilisations/:id/postes', async (req, res) => {
+  try {
+    const { libelle, source, source_ref, montant, credit_type, prestataire_agree, subvention, annee, date_debut, date_fin, quote_part, prorata_temporel } = req.body || {};
+    if (!libelle || !libelle.trim()) return res.status(400).json({ error: 'Libellé du poste requis' });
+    const row = {
+      immobilisation_id: req.params.id,
+      libelle: libelle.trim(),
+      source: ['salaire', 'prestation', 'autre'].includes(source) ? source : 'autre',
+      source_ref: source_ref || null,
+      montant: Number(montant) || 0,
+      credit_type: ['none', 'cir', 'cii'].includes(credit_type) ? credit_type : 'none',
+      prestataire_agree: !!prestataire_agree,
+      subvention: Number(subvention) || 0,
+    };
+    // Champs ajoutés seulement si renseignés (tolérance migrations 35/37/38 non appliquées)
+    if (annee != null && annee !== '') row.annee = parseInt(annee, 10);
+    if (date_debut) row.date_debut = date_debut;
+    if (date_fin) row.date_fin = date_fin;
+    if (quote_part != null && quote_part !== '') row.quote_part = Number(quote_part);
+    if (typeof prorata_temporel === 'boolean') row.prorata_temporel = prorata_temporel; // tolérance migration 39
+    const { data, error } = await supabaseAdmin.from('immobilisation_postes').insert(row).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/immobilisations/:id/postes/:pid
+app.put('/api/immobilisations/:id/postes/:pid', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const update = { updated_at: new Date().toISOString() };
+    if (typeof b.libelle === 'string' && b.libelle.trim()) update.libelle = b.libelle.trim();
+    if (['salaire', 'prestation', 'autre'].includes(b.source)) update.source = b.source;
+    if (b.source_ref !== undefined) update.source_ref = b.source_ref || null;
+    if (b.montant != null) update.montant = Number(b.montant) || 0;
+    if (['none', 'cir', 'cii'].includes(b.credit_type)) update.credit_type = b.credit_type;
+    if (typeof b.prestataire_agree === 'boolean') update.prestataire_agree = b.prestataire_agree;
+    if (b.subvention != null) update.subvention = Number(b.subvention) || 0;
+    if (b.annee !== undefined) update.annee = (b.annee != null && b.annee !== '') ? parseInt(b.annee, 10) : null;
+    if (b.date_debut !== undefined) update.date_debut = b.date_debut || null;
+    if (b.date_fin !== undefined) update.date_fin = b.date_fin || null;
+    if (b.quote_part !== undefined && b.quote_part !== '') update.quote_part = Number(b.quote_part);
+    if (typeof b.prorata_temporel === 'boolean') update.prorata_temporel = b.prorata_temporel;
+    const { data, error } = await supabaseAdmin.from('immobilisation_postes').update(update).eq('id', req.params.pid).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/immobilisations/:id/postes/:pid
+app.delete('/api/immobilisations/:id/postes/:pid', async (req, res) => {
+  try {
+    const { count, error } = await supabaseAdmin.from('immobilisation_postes').delete({ count: 'exact' }).eq('id', req.params.pid);
+    if (error) return res.status(500).json({ error: error.message });
+    if (!count) return res.status(404).json({ error: 'Poste introuvable' });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Sous-CRUD aides d'une immobilisation (subvention / avance récupérable) ---
+// POST /api/immobilisations/:id/aides
+app.post('/api/immobilisations/:id/aides', async (req, res) => {
+  try {
+    const { type, financeur, montant, remboursement_debut, remboursement_montant_annuel, notes } = req.body || {};
+    const row = {
+      immobilisation_id: req.params.id,
+      type: type === 'avance' ? 'avance' : 'subvention',
+      financeur: financeur || null,
+      montant: Number(montant) || 0,
+      remboursement_debut: remboursement_debut || null,
+      remboursement_montant_annuel: (remboursement_montant_annuel != null && remboursement_montant_annuel !== '') ? Number(remboursement_montant_annuel) : null,
+      notes: notes || null,
+    };
+    const { data, error } = await supabaseAdmin.from('immobilisation_aides').insert(row).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/immobilisations/:id/aides/:aid
+app.put('/api/immobilisations/:id/aides/:aid', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const update = { updated_at: new Date().toISOString() };
+    if (b.type === 'avance' || b.type === 'subvention') update.type = b.type;
+    if (b.financeur !== undefined) update.financeur = b.financeur || null;
+    if (b.montant != null) update.montant = Number(b.montant) || 0;
+    if (b.remboursement_debut !== undefined) update.remboursement_debut = b.remboursement_debut || null;
+    if (b.remboursement_montant_annuel !== undefined) update.remboursement_montant_annuel = (b.remboursement_montant_annuel != null && b.remboursement_montant_annuel !== '') ? Number(b.remboursement_montant_annuel) : null;
+    if (b.notes !== undefined) update.notes = b.notes || null;
+    const { data, error } = await supabaseAdmin.from('immobilisation_aides').update(update).eq('id', req.params.aid).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/immobilisations/:id/aides/:aid
+app.delete('/api/immobilisations/:id/aides/:aid', async (req, res) => {
+  try {
+    const { count, error } = await supabaseAdmin.from('immobilisation_aides').delete({ count: 'exact' }).eq('id', req.params.aid);
+    if (error) return res.status(500).json({ error: error.message });
+    if (!count) return res.status(404).json({ error: 'Aide introuvable' });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/immobilisations — création (justification obligatoire : choix immobiliser / charge)
+app.post('/api/immobilisations', async (req, res) => {
+  try {
+    const { libelle, montant, date_mise_en_service, duree_annees, traitement, justification, date_debut_projet, date_fin_projet, assiette_credit } = req.body || {};
+    if (!libelle || !libelle.trim()) return res.status(400).json({ error: 'Libellé requis' });
+    if (!date_mise_en_service) return res.status(400).json({ error: 'Date de mise en service requise' });
+    if (!justification || !justification.trim()) return res.status(400).json({ error: 'Justification requise (choix immobiliser / charge)' });
+    const row = {
+      libelle: libelle.trim(),
+      montant: Number(montant) || 0,
+      date_mise_en_service,
+      duree_annees: Number(duree_annees) || 5,
+      methode: 'lineaire',
+      traitement: traitement === 'charge' ? 'charge' : 'immobilise',
+      justification: justification.trim(),
+    };
+    // Champs Phase 5.3 ajoutés seulement si renseignés (tolérance migration 35 non appliquée)
+    if (date_debut_projet) row.date_debut_projet = date_debut_projet;
+    if (date_fin_projet) row.date_fin_projet = date_fin_projet;
+    // Mode d'assiette du crédit (migration 40) : envoyé seulement si 'amortissement' (défaut 'depenses')
+    if (assiette_credit === 'amortissement') row.assiette_credit = 'amortissement';
+    const { data, error } = await supabaseAdmin.from('immobilisations').insert(row).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/immobilisations/:id — mise à jour partielle (ne modifie que les champs fournis)
+app.put('/api/immobilisations/:id', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const update = { updated_at: new Date().toISOString() };
+    if (typeof b.libelle === 'string' && b.libelle.trim()) update.libelle = b.libelle.trim();
+    if (b.montant != null) update.montant = Number(b.montant) || 0;
+    if (b.date_mise_en_service) update.date_mise_en_service = b.date_mise_en_service;
+    if (b.duree_annees != null) update.duree_annees = Number(b.duree_annees) || 5;
+    if (b.traitement === 'charge' || b.traitement === 'immobilise') update.traitement = b.traitement;
+    if (typeof b.justification === 'string') update.justification = b.justification.trim();
+    if (b.date_debut_projet !== undefined) update.date_debut_projet = b.date_debut_projet || null;
+    if (b.date_fin_projet !== undefined) update.date_fin_projet = b.date_fin_projet || null;
+    if (b.assiette_credit === 'depenses' || b.assiette_credit === 'amortissement') update.assiette_credit = b.assiette_credit;
+    const { data, error } = await supabaseAdmin.from('immobilisations').update(update).eq('id', req.params.id).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/immobilisations/:id
+app.delete('/api/immobilisations/:id', async (req, res) => {
+  try {
+    const { count, error } = await supabaseAdmin.from('immobilisations').delete({ count: 'exact' }).eq('id', req.params.id);
+    if (error) return res.status(500).json({ error: error.message });
+    if (!count) return res.status(404).json({ error: 'Immobilisation introuvable' });
+    res.json({ ok: true });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
@@ -10568,767 +11304,6 @@ app.get('/api/emelia-label-contacts', async (req, res) => {
   }
 });
 
-// =============================================================================
-// PROPOSAL ENGINE — recherche deals HubSpot
-// =============================================================================
-
-// GET /api/proposal/deals
-// Retourne tous les deals open du pipeline (filtrés côté client pour le "commence par")
-// retourne id + dealname + company + stage
-app.get('/api/proposal/deals', async (req, res) => {
-  try {
-    const stageIds = KANBAN_STAGES.map(s => s.id);
-    const body = {
-      filterGroups: [{
-        filters: [
-          { propertyName: 'hs_is_closed', operator: 'EQ',  value: 'false' },
-          { propertyName: 'pipeline',     operator: 'EQ',  value: 'default' },
-          { propertyName: 'dealstage',    operator: 'IN',  values: stageIds },
-        ],
-      }],
-      properties: ['dealname', 'dealstage', 'amount'],
-      associations: ['companies'],
-      limit: 100,
-    };
-
-    const result = await hubspotSearch(body);
-    const deals  = result.results || [];
-
-    // Résoudre les noms d'entreprises associées
-    const companyIds = [];
-    const dealToCompanyId = {};
-    for (const deal of deals) {
-      const assoc = deal.associations?.companies?.results?.[0];
-      if (assoc) {
-        dealToCompanyId[deal.id] = assoc.id;
-        companyIds.push(assoc.id);
-      }
-    }
-
-    // Batch fetch des entreprises (une seule requête)
-    const companyNames = {};
-    if (companyIds.length > 0) {
-      const batchPayload = JSON.stringify({ inputs: companyIds.map(id => ({ id })), properties: ['name'] });
-      const companyData  = await new Promise((resolve, reject) => {
-        let reqPath = '/crm/v3/objects/companies/batch/read';
-        const options = {
-          hostname: HUBSPOT_HOST,
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(batchPayload) },
-        };
-        reqPath = addAuth(options, reqPath);
-        options.path = reqPath;
-        const req = https.request(options, (r) => {
-          let data = '';
-          r.on('data', c => data += c);
-          r.on('end', () => {
-            try { resolve(JSON.parse(data)); } catch { resolve({ results: [] }); }
-          });
-        });
-        req.on('error', reject);
-        req.write(batchPayload);
-        req.end();
-      });
-      for (const c of (companyData.results || [])) {
-        companyNames[c.id] = c.properties?.name || '';
-      }
-    }
-
-    const stageLabel = {};
-    for (const s of KANBAN_STAGES) stageLabel[s.id] = s.label;
-
-    const output = deals.map(deal => ({
-      id:       deal.id,
-      dealname: deal.properties.dealname || '',
-      company:  companyNames[dealToCompanyId[deal.id]] || '',
-      stage:    stageLabel[deal.properties.dealstage] || deal.properties.dealstage || '',
-      amount:   deal.properties.amount ? parseFloat(deal.properties.amount) : null,
-    }));
-
-    res.json(output);
-  } catch (e) {
-    console.error('[Proposal search]', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// =============================================================================
-// PROPOSAL ENGINE — génération PPTX en Node.js (adm-zip)
-// =============================================================================
-
-const PROPOSAL_TEMPLATE_PATH = process.env.PROPOSAL_TEMPLATE_PATH ||
-  path.join(__dirname, 'proposal_engine', 'Template master proposition v3.pptx');
-const PROPOSAL_CONFIG_PATH = path.join(__dirname, 'proposal_engine', 'slide_config.json');
-
-const PROPOSAL_MISSION_MAP = {
-  'Bilan Carbone':   { section: 'Bilan_Carbone', cal: 'Bilan Carbone', fin: 'Bilan_Carbone',   intitule: "Mesure de l'empreinte carbone",  nature: 'Standard',        langueAuto: 'FR' },
-  'ACV':             { section: 'ACV',            cal: 'ACV',           fin: 'ACV',             intitule: 'Analyse de Cycle de Vie',         nature: 'Standard',        langueAuto: 'FR' },
-  'FDES / PEP':      { section: 'FDES_PEP',       cal: 'FDES_PEP',      fin: 'FDES_PEP',        intitule: 'FDES / PEP',                      nature: 'Standard',        langueAuto: 'FR' },
-  'EPD':             { section: 'EPD',             cal: 'EPD',           fin: 'EPD',             intitule: 'Environmental Product Declaration',nature: 'Standard',        langueAuto: 'EN' },
-  'Outil sur-mesure':{ section: null,              cal: null,            fin: 'Outil_sur_mesure', intitule: 'Outil sur-mesure',                nature: 'Outil_sur_mesure', langueAuto: 'FR' },
-};
-
-const PROPOSAL_SUBVENTION = {
-  Rev3_50pct: { label: 'Booster Transformation – Rev3 (50%)',       programme: 'Booster Transformation',  operateur: 'Rev3',      pct: '50%' },
-  BPI_40pct:  { label: "Diag Décarbon'Action – Bpifrance (40%)",   programme: "Diag Décarbon'Action",    operateur: 'Bpifrance', pct: '40%' },
-  Rev3_30pct: { label: 'Booster Transformation – Rev3 (30%)',       programme: 'Booster Transformation',  operateur: 'Rev3',      pct: '30%' },
-  BPI_70pct:  { label: 'Diag Ecoconception – Bpifrance (70%)',      programme: 'Diag Ecoconception',      operateur: 'Bpifrance', pct: '70%' },
-  BPI_60pct:  { label: 'Diag Ecoconception – Bpifrance (60%)',      programme: 'Diag Ecoconception',      operateur: 'Bpifrance', pct: '60%' },
-  standard:   { label: 'Sans subvention',                           programme: '',                        operateur: '',          pct: '' },
-};
-
-function proposalSlidesToKeep(mission, subKey, langue, config) {
-  const m    = PROPOSAL_MISSION_MAP[mission];
-  const keep = new Set();
-
-  // Slide 1 — couverture
-  keep.add(0);
-
-  // Intro : FR → slides 2-9, EN → slides 10-17
-  const introSlides = config.sections.introduction.slides_per_langue[langue];
-  introSlides.forEach(s => keep.add(s - 1));
-
-  // Contexte : header slide 18 + slide 19 (FR) ou 20 (EN)
-  keep.add(config.sections.contexte.section_header_slide - 1);
-  keep.add(config.sections.contexte.slide_per_langue[langue] - 1);
-
-  // Méthodo
-  if (m.nature === 'Outil_sur_mesure') {
-    config.sections.methodo.blocs.Outil_sur_mesure.slides.forEach(s => keep.add(s - 1));
-  } else {
-    config.sections.methodo.blocs[m.section].slides.forEach(s => keep.add(s - 1));
-  }
-
-  // Calendrier : seulement pour les missions Standard
-  if (m.nature === 'Standard') {
-    keep.add(config.sections.calendrier.section_header_slide - 1);
-    keep.add(config.sections.calendrier.slides_per_mission[m.cal] - 1);
-  }
-
-  // Proposition financière : header + slide selon combinaison
-  keep.add(config.sections.proposition_financiere.section_header_slide - 1);
-  const finEntry = config.sections.proposition_financiere.slides_per_combinaison[m.fin];
-  if (typeof finEntry === 'object' && finEntry.slide) {
-    keep.add(finEntry.slide - 1);
-  } else if (finEntry && finEntry.options) {
-    const slideNum = finEntry.options[subKey] || Object.values(finEntry.options)[0];
-    keep.add(slideNum - 1);
-  }
-
-  return keep;
-}
-
-function proposalDeleteSlides(zip, keepIndices) {
-  const presXml    = zip.readAsText('ppt/presentation.xml');
-  const presRels   = zip.readAsText('ppt/_rels/presentation.xml.rels');
-  let   ctypes     = zip.readAsText('[Content_Types].xml');
-
-  // Ordered rIds from sldIdLst
-  const listMatch = presXml.match(/<p:sldIdLst>([\s\S]*?)<\/p:sldIdLst>/);
-  if (!listMatch) return;
-  const rIds = [], sldEntries = [];
-  const sldPat = /<p:sldId\b[^>]*\/>/g;
-  let m;
-  while ((m = sldPat.exec(listMatch[1])) !== null) {
-    const rIdM = m[0].match(/r:id="([^"]+)"/);
-    if (rIdM) { rIds.push(rIdM[1]); sldEntries.push(m[0]); }
-  }
-
-  // rId → slide file target
-  const rIdToTarget = {};
-  const relPat = /<Relationship\b[^>]*\/>/g;
-  while ((m = relPat.exec(presRels)) !== null) {
-    const rel = m[0];
-    const id  = (rel.match(/\bId="([^"]+)"/) || [])[1];
-    const tgt = (rel.match(/\bTarget="([^"]+)"/) || [])[1];
-    const typ = (rel.match(/\bType="([^"]+)"/) || [])[1];
-    if (id && tgt && typ && typ.endsWith('/slide')) rIdToTarget[id] = tgt;
-  }
-
-  let newPres = presXml, newRels = presRels;
-  rIds.forEach((rId, idx) => {
-    if (keepIndices.has(idx)) return;
-    const tgt = rIdToTarget[rId];
-    if (!tgt) return;
-    const slidePath = `ppt/${tgt}`;
-    const slideName = tgt.split('/').pop();
-    const relsPath  = `ppt/slides/_rels/${slideName}.rels`;
-    try { zip.deleteFile(slidePath); }  catch(_) {}
-    try { zip.deleteFile(relsPath); }   catch(_) {}
-    newPres = newPres.replace(sldEntries[idx], '');
-    newRels = newRels.replace(new RegExp(`<Relationship\\b[^>]*\\bId="${rId}"[^>]*\\/>`, 'g'), '');
-    ctypes  = ctypes.replace(new RegExp(`<Override[^>]*PartName="/ppt/slides/${slideName.replace('.', '\\.')}"[^>]*\\/>`, 'g'), '');
-  });
-
-  zip.updateFile('ppt/presentation.xml',          Buffer.from(newPres,  'utf8'));
-  zip.updateFile('ppt/_rels/presentation.xml.rels', Buffer.from(newRels, 'utf8'));
-  zip.updateFile('[Content_Types].xml',            Buffer.from(ctypes,   'utf8'));
-}
-
-function proposalReplaceText(zip, replacements) {
-  zip.getEntries().forEach(entry => {
-    const name = entry.entryName;
-    if (!name.endsWith('.xml') && !name.endsWith('.rels')) return;
-    let content = zip.readAsText(name), changed = false;
-    for (const [k, v] of Object.entries(replacements)) {
-      if (content.includes(k)) { content = content.split(k).join(v || ''); changed = true; }
-    }
-    if (changed) zip.updateFile(name, Buffer.from(content, 'utf8'));
-  });
-}
-
-function getLogoPixelDims(buf) {
-  // PNG : dimensions aux octets 16-23
-  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) {
-    return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
-  }
-  // JPEG : chercher marqueur SOF0/SOF1/SOF2
-  if (buf[0] === 0xFF && buf[1] === 0xD8) {
-    let i = 2;
-    while (i < buf.length - 8) {
-      if (buf[i] !== 0xFF) { i++; continue; }
-      const mk = buf[i + 1];
-      if (mk === 0xC0 || mk === 0xC1 || mk === 0xC2) {
-        return { h: buf.readUInt16BE(i + 5), w: buf.readUInt16BE(i + 7) };
-      }
-      i += 2 + buf.readUInt16BE(i + 2);
-    }
-  }
-  return null;
-}
-
-// Corrige le ratio de toutes les p:pic référençant un rId donné dans un XML
-function _fixPicRatio(xml, rId, imgAR) {
-  const picPat = /<p:pic\b[\s\S]*?<\/p:pic>/g;
-  let picM, count = 0;
-  while ((picM = picPat.exec(xml)) !== null) {
-    if (!picM[0].includes(`r:embed="${rId}"`)) continue;
-    const offM = picM[0].match(/<a:off\b[^>]*x="(-?\d+)"[^>]*y="(-?\d+)"/);
-    const extM = picM[0].match(/<a:ext\b[^>]*cx="(\d+)"[^>]*cy="(\d+)"/);
-    if (!offM || !extM) continue;
-    const origX = parseInt(offM[1]), origY = parseInt(offM[2]);
-    const origCx = parseInt(extM[1]), origCy = parseInt(extM[2]);
-    const boxAR = origCx / origCy;
-    let newCx, newCy, newX, newY;
-    if (imgAR > boxAR) {
-      newCx = origCx; newCy = Math.round(origCx / imgAR);
-      newX = origX;   newY  = origY + Math.round((origCy - newCy) / 2);
-    } else {
-      newCy = origCy; newCx = Math.round(origCy * imgAR);
-      newY  = origY;  newX  = origX + Math.round((origCx - newCx) / 2);
-    }
-    const updated = picM[0]
-      .replace(/<a:off\b[^>]*x="-?\d+"[^>]*y="-?\d+"/, `<a:off x="${newX}" y="${newY}"`)
-      .replace(/<a:ext\b[^>]*cx="\d+"[^>]*cy="\d+"/, `<a:ext cx="${newCx}" cy="${newCy}"`);
-    xml = xml.replace(picM[0], updated);
-    count++;
-  }
-  return { xml, count };
-}
-
-function proposalReplaceLogo(zip, logoBuffer) {
-  try {
-    let slide1Xml    = zip.readAsText('ppt/slides/slide1.xml');
-    const slide1Rels = zip.readAsText('ppt/slides/_rels/slide1.xml.rels');
-
-    // Dernier r:embed dans slide1 = logo client
-    const blipPat = /<a:blip\b[^>]*r:embed="([^"]+)"/g;
-    let bm, lastRId;
-    while ((bm = blipPat.exec(slide1Xml)) !== null) lastRId = bm[1];
-    if (!lastRId) { console.warn('[Proposal] Logo: aucun blip trouvé'); return; }
-
-    // Résoudre le fichier média via les rels de slide1
-    const relEntries = slide1Rels.match(/<Relationship\b[^>]*\/>/g) || [];
-    let slideTarget = null;
-    for (const rel of relEntries) {
-      if (rel.includes(`Id="${lastRId}"`)) {
-        const m = rel.match(/Target="([^"]+)"/);
-        if (m) { slideTarget = m[1]; break; }
-      }
-    }
-    if (!slideTarget) { console.warn('[Proposal] Logo: relation introuvable pour', lastRId); return; }
-
-    // Chemin absolu ZIP du fichier média (ex: ppt/media/image2.png)
-    const mediaPath = `ppt/${slideTarget.replace(/^\.\.\//, '')}`;
-    const entry = zip.getEntry(mediaPath);
-    if (!entry) { console.warn('[Proposal] Logo: entrée ZIP introuvable:', mediaPath); return; }
-
-    // Remplacer les bytes de l'image (affecte toutes les shapes qui référencent ce fichier)
-    zip.updateFile(mediaPath, logoBuffer);
-
-    const dims = getLogoPixelDims(logoBuffer);
-    if (!dims) { console.log('[Proposal] Logo: remplacé (format non reconnu, pas de resize)'); return; }
-    const imgAR = dims.w / dims.h;
-
-    // --- Corriger slide1.xml ---
-    const r1 = _fixPicRatio(slide1Xml, lastRId, imgAR);
-    slide1Xml = r1.xml;
-    zip.updateFile('ppt/slides/slide1.xml', Buffer.from(slide1Xml, 'utf8'));
-
-    // --- Corriger slideMaster1.xml (le logo peut aussi apparaître dans le master) ---
-    const masterXmlPath = 'ppt/slideMasters/slideMaster1.xml';
-    const masterRelsPath = 'ppt/slideMasters/_rels/slideMaster1.xml.rels';
-    try {
-      let masterXml  = zip.readAsText(masterXmlPath);
-      const masterRels = zip.readAsText(masterRelsPath);
-      // Trouver le rId du master qui pointe vers le même fichier média
-      const mediaFilename = mediaPath.replace('ppt/media/', '');
-      const masterRelEntries = masterRels.match(/<Relationship\b[^>]*\/>/g) || [];
-      let masterRId = null;
-      for (const rel of masterRelEntries) {
-        if (rel.includes(mediaFilename)) {
-          const m = rel.match(/Id="([^"]+)"/);
-          if (m) { masterRId = m[1]; break; }
-        }
-      }
-      if (masterRId) {
-        const r2 = _fixPicRatio(masterXml, masterRId, imgAR);
-        masterXml = r2.xml;
-        zip.updateFile(masterXmlPath, Buffer.from(masterXml, 'utf8'));
-        console.log(`[Proposal] Logo: ratio corrigé slide1(${r1.count}) + master(${r2.count}) ✓`);
-      } else {
-        console.log(`[Proposal] Logo: ratio corrigé slide1(${r1.count}) [pas dans master] ✓`);
-      }
-    } catch(_) {
-      console.log(`[Proposal] Logo: ratio corrigé slide1(${r1.count}) [master inaccessible] ✓`);
-    }
-  } catch(e) { console.warn('[Proposal] Logo erreur:', e.message); }
-}
-
-// Enrichissement SIRENE via API Data.gouv (gratuit, sans clé)
-async function fetchSireneData(siren) {
-  if (!siren || !/^\d{9}$/.test(siren.replace(/\s/g, ''))) return null;
-  const cleanSiren = siren.replace(/\s/g, '');
-  try {
-    const resp = await fetch(
-      `https://recherche-entreprises.api.gouv.fr/search?q=${cleanSiren}&page=1&per_page=1`,
-      { signal: AbortSignal.timeout(4000) }
-    );
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    const r = data?.results?.[0];
-    if (!r) return null;
-    const naf    = r.activite_principale || '';
-    const libNaf = r.libelle_activite_principale || '';
-    const taille = r.tranche_effectif_salarie || '';
-    const TAILLE_MAP = {
-      '00':'0 salarié','01':'1-2','02':'3-5','03':'6-9','11':'10-19','12':'20-49',
-      '21':'50-99','22':'100-199','31':'200-249','32':'250-499','41':'500-999',
-      '42':'1000-1999','51':'2000-4999','52':'5000-9999','53':'10000+',
-    };
-    const tailleLib = TAILLE_MAP[taille] ? `${TAILLE_MAP[taille]} salariés` : '';
-    const lines = [
-      `Raison sociale : ${r.nom_complet || ''}`,
-      naf     ? `Code NAF : ${naf} — ${libNaf}` : '',
-      tailleLib ? `Effectif : ${tailleLib}` : '',
-      r.siege?.code_postal ? `Siège : ${r.siege.libelle_commune || ''} (${r.siege.code_postal})` : '',
-    ].filter(Boolean);
-    console.log('[Proposal SIRENE] données récupérées pour', cleanSiren);
-    return lines.join('\n');
-  } catch(e) {
-    console.warn('[Proposal SIRENE] Erreur:', e.message);
-    return null;
-  }
-}
-
-// Appel Claude API pour générer les placeholders de contexte client
-async function proposalGenerateAIContext({ nom_entreprise, mission, nature, langue, contexte_consultant, siren_data, config }) {
-  const fallback = config.ai_personalization.fallback_si_erreur;
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    console.warn('[Proposal AI] ANTHROPIC_API_KEY absente — fallback');
-    return fallback;
-  }
-
-  const userPrompt = config.ai_personalization.prompt_utilisateur_template
-    .replace('{nom_entreprise}',     nom_entreprise       || '')
-    .replace('{type_mission}',       mission              || '')
-    .replace('{nature_mission}',     nature               || 'Standard')
-    .replace('{langue}',             langue               || 'FR')
-    .replace('{siren_data}',         siren_data           || 'Non renseigné')
-    .replace('{contexte_consultant}',contexte_consultant  || '');
-
-  try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type':    'application/json',
-        'x-api-key':       apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model:      config.ai_personalization.model_recommande,
-        max_tokens: config.ai_personalization.max_tokens,
-        system:     config.ai_personalization.prompt_systeme,
-        messages:   [{ role: 'user', content: userPrompt }],
-      }),
-    });
-
-    if (!resp.ok) {
-      console.warn('[Proposal AI] HTTP', resp.status, '— fallback');
-      return fallback;
-    }
-
-    const data = await resp.json();
-    let text = data?.content?.[0]?.text?.trim() || '';
-    // Claude entoure parfois le JSON de backticks malgré l'instruction — on les retire
-    text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-    if (!text) throw new Error('Réponse vide');
-    const parsed = JSON.parse(text);
-    console.log('[Proposal AI] contexte généré ✓', Object.keys(parsed));
-    return { ...fallback, ...parsed };
-  } catch(e) {
-    console.warn('[Proposal AI] Erreur:', e.message, '— fallback');
-    return fallback;
-  }
-}
-
-// Conversion PPTX → PDF via PowerPoint COM automation (PowerShell)
-const PROPOSAL_TMP_DIR = path.join(__dirname, 'tmp');
-if (!fs.existsSync(PROPOSAL_TMP_DIR)) fs.mkdirSync(PROPOSAL_TMP_DIR);
-
-async function convertPptxToPdfCloudConvert(pptxBuffer) {
-  const apiKey = process.env.CLOUDCONVERT_API_KEY;
-  if (!apiKey) throw new Error('CLOUDCONVERT_API_KEY non configurée');
-
-  // Créer un job : upload → convert → export
-  const jobRes = await fetch('https://api.cloudconvert.com/v2/jobs', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      tasks: {
-        'upload':  { operation: 'import/upload' },
-        'convert': { operation: 'convert', input: 'upload', input_format: 'pptx', output_format: 'pdf' },
-        'export':  { operation: 'export/url', input: 'convert' },
-      },
-    }),
-  });
-  if (!jobRes.ok) throw new Error('CloudConvert: erreur création job (' + jobRes.status + ')');
-  const job = await jobRes.json();
-  const jobId = job.data.id;
-  const uploadTask = job.data.tasks.find(t => t.name === 'upload');
-
-  // Uploader le PPTX vers l'URL presignée
-  const { url: uploadUrl, parameters: uploadParams } = uploadTask.result.form;
-  const form = new FormData();
-  for (const [k, v] of Object.entries(uploadParams)) form.append(k, v);
-  form.append('file', new Blob([pptxBuffer], {
-    type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  }), 'presentation.pptx');
-  const uploadRes = await fetch(uploadUrl, { method: 'POST', body: form });
-  if (!uploadRes.ok) throw new Error('CloudConvert: erreur upload (' + uploadRes.status + ')');
-
-  // Attendre la fin du job (poll toutes les 2s, max 60s)
-  for (let i = 0; i < 30; i++) {
-    await new Promise(r => setTimeout(r, 2000));
-    const statusRes = await fetch(`https://api.cloudconvert.com/v2/jobs/${jobId}`, {
-      headers: { 'Authorization': `Bearer ${apiKey}` },
-    });
-    const status = await statusRes.json();
-    if (status.data.status === 'error') throw new Error('CloudConvert: conversion échouée');
-    const exportTask = status.data.tasks.find(t => t.name === 'export');
-    if (exportTask?.status === 'finished') {
-      const pdfUrl = exportTask.result.files[0].url;
-      const pdfRes = await fetch(pdfUrl);
-      const pdfBuf = Buffer.from(await pdfRes.arrayBuffer());
-      console.log('[Proposal PDF] CloudConvert OK', Math.round(pdfBuf.length / 1024), 'KB');
-      return pdfBuf;
-    }
-  }
-  throw new Error('CloudConvert: timeout');
-}
-
-async function convertPptxToPdf(pptxBuffer) {
-  const id       = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const pptxPath = path.join(PROPOSAL_TMP_DIR, `${id}.pptx`);
-  const pdfPath  = path.join(PROPOSAL_TMP_DIR, `${id}.pdf`);
-
-  if (process.platform === 'win32') {
-    // Windows : PowerShell + COM PowerPoint
-    fs.writeFileSync(pptxPath, pptxBuffer);
-    try {
-      const pptxEsc = pptxPath.replace(/\\/g, '\\\\');
-      const pdfEsc  = pdfPath.replace(/\\/g, '\\\\');
-      const psScript = `
-$ErrorActionPreference = 'Stop'
-$ppt = New-Object -ComObject PowerPoint.Application
-try {
-  $pres = $ppt.Presentations.Open('${pptxEsc}', $true, $false, $false)
-  $pres.SaveAs('${pdfEsc}', 32)
-  $pres.Close()
-} finally {
-  $ppt.Quit()
-  [System.Runtime.Interopservices.Marshal]::ReleaseComObject($ppt) | Out-Null
-}
-`.trim();
-      await new Promise((resolve, reject) => {
-        execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', psScript],
-          { timeout: 45000 },
-          (err, stdout, stderr) => {
-            if (err) reject(new Error(stderr?.trim() || err.message));
-            else resolve();
-          }
-        );
-      });
-      const pdf = fs.readFileSync(pdfPath);
-      console.log('[Proposal PDF] conversion OK', Math.round(pdf.length / 1024), 'KB');
-      return pdf;
-    } finally {
-      try { fs.unlinkSync(pptxPath); } catch(_) {}
-      try { fs.unlinkSync(pdfPath);  } catch(_) {}
-    }
-  } else {
-    // Linux : CloudConvert API
-    return convertPptxToPdfCloudConvert(pptxBuffer);
-  }
-}
-
-// GET /api/proposal/siren-search?q=... — autocomplete SIREN ou raison sociale (Data.gouv, 5 résultats)
-app.get('/api/proposal/siren-search', async (req, res) => {
-  const { q } = req.query;
-  if (!q || q.trim().length < 2) return res.status(400).json({ error: 'Requête trop courte' });
-  const TAILLE_MAP = {
-    '00':'0 salarié','01':'1-2 sal.','02':'3-5 sal.','03':'6-9 sal.',
-    '11':'10-19 sal.','12':'20-49 sal.','21':'50-99 sal.','22':'100-199 sal.',
-    '31':'200-249 sal.','32':'250-499 sal.','41':'500-999 sal.',
-    '42':'1 000-1 999 sal.','51':'2 000-4 999 sal.','52':'5 000-9 999 sal.','53':'10 000+ sal.',
-  };
-  try {
-    const resp = await fetch(
-      `https://recherche-entreprises.api.gouv.fr/search?q=${encodeURIComponent(q.trim())}&page=1&per_page=5`,
-      { signal: AbortSignal.timeout(5000) }
-    );
-    if (!resp.ok) return res.status(502).json({ error: 'Data.gouv indisponible' });
-    const data = await resp.json();
-    const results = (data?.results || []).map(r => ({
-      siren:     r.siren || '',
-      nom:       r.nom_complet || '',
-      naf_code:  r.activite_principale || '',
-      naf_label: r.libelle_activite_principale || '',
-      effectif:  TAILLE_MAP[r.tranche_effectif_salarie || ''] || '',
-      ville:     r.siege?.libelle_commune || '',
-      code_postal: r.siege?.code_postal || '',
-      adresse:   r.siege?.adresse || '',
-    }));
-    res.json({ results });
-  } catch(e) {
-    console.warn('[Proposal SIRENE search]', e.message);
-    res.status(504).json({ error: 'Timeout ou erreur réseau' });
-  }
-});
-
-// POST /api/proposal/ai-context — prévisualisation du contexte IA sans générer le PPTX
-app.post('/api/proposal/ai-context', express.json(), async (req, res) => {
-  try {
-    const { mission, langue: langueInput, contexte_consultant, siren, nom_entreprise } = req.body || {};
-    const mInf = PROPOSAL_MISSION_MAP[mission];
-    if (!mInf) return res.status(400).json({ error: `Mission inconnue : ${mission}` });
-
-    const langue = (langueInput === 'FR' || langueInput === 'EN') ? langueInput : mInf.langueAuto;
-    const config = JSON.parse(fs.readFileSync(PROPOSAL_CONFIG_PATH, 'utf8'));
-
-    const siren_data = await fetchSireneData(siren);
-
-    const aiCtx = await proposalGenerateAIContext({
-      nom_entreprise: nom_entreprise || '',
-      mission, nature: mInf.nature, langue,
-      contexte_consultant: contexte_consultant || '',
-      siren_data,
-      config,
-    });
-
-    res.json({ ok: true, context: aiCtx, langue });
-  } catch(e) {
-    console.error('[Proposal AI context]', e);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// GET /api/proposal/config
-app.get('/api/proposal/config', (req, res) => {
-  try {
-    const config = JSON.parse(fs.readFileSync(PROPOSAL_CONFIG_PATH, 'utf8'));
-    const result = {};
-    for (const mission of Object.keys(PROPOSAL_MISSION_MAP)) {
-      const m = PROPOSAL_MISSION_MAP[mission];
-      if (m.nature === 'Outil_sur_mesure') {
-        result[mission] = [{ key: 'standard', label: 'Sans subvention' }];
-        continue;
-      }
-      const finEntry = config.sections.proposition_financiere.slides_per_combinaison[m.fin];
-      const subKeys = (finEntry && typeof finEntry === 'object' && finEntry.options)
-        ? Object.keys(finEntry.options)
-        : ['standard'];
-      result[mission] = subKeys.map(k => ({ key: k, label: (PROPOSAL_SUBVENTION[k] || {}).label || k }));
-    }
-    res.json(result);
-  } catch(e) { res.status(500).json({ error: e.message }); }
-});
-
-// POST /api/proposal/generate
-app.post('/api/proposal/generate', express.json({ limit: '20mb' }), async (req, res) => {
-  try {
-    const {
-      nom_entreprise, mission, subvention = 'standard', logo_base64,
-      langue: langueInput, montant_ht, deal_id,
-      contexte_consultant, siren,
-      ai_context,
-      format = 'pptx',
-    } = req.body || {};
-
-    if (!nom_entreprise?.trim()) return res.status(400).json({ error: "Nom de l'entreprise requis" });
-    const mInf = PROPOSAL_MISSION_MAP[mission];
-    if (!mInf) return res.status(400).json({ error: `Mission inconnue : ${mission}` });
-    if (!fs.existsSync(PROPOSAL_TEMPLATE_PATH))
-      return res.status(500).json({ error: `Template PPTX introuvable. Définir PROPOSAL_TEMPLATE_PATH dans .env` });
-
-    // Langue : forcée par l'utilisateur ou auto selon la mission
-    const langue = (langueInput === 'FR' || langueInput === 'EN') ? langueInput : mInf.langueAuto;
-
-    const config = JSON.parse(fs.readFileSync(PROPOSAL_CONFIG_PATH, 'utf8'));
-
-    // Contexte IA : utiliser le contexte pré-calculé si fourni, sinon appeler Claude
-    const keep = proposalSlidesToKeep(mission, subvention, langue, config);
-    let aiCtx;
-    if (ai_context) {
-      aiCtx = ai_context;
-    } else {
-      const siren_data = await fetchSireneData(siren);
-      aiCtx = await proposalGenerateAIContext({
-        nom_entreprise: nom_entreprise.trim(),
-        mission, nature: mInf.nature, langue,
-        contexte_consultant: contexte_consultant || '',
-        siren_data,
-        config,
-      });
-    }
-
-    const zip = new AdmZip(PROPOSAL_TEMPLATE_PATH);
-    proposalDeleteSlides(zip, keep);
-
-    const sub = PROPOSAL_SUBVENTION[subvention] || PROPOSAL_SUBVENTION.standard;
-    const pctNum = parseInt(sub.pct) || 0;
-    const complementPct = pctNum > 0 ? String(100 - pctNum) : '';
-
-    proposalReplaceText(zip, {
-      '{{NOM_ENTREPRISE}}':          nom_entreprise.trim(),
-      '{{TYPE_MISSION}}':            mission,
-      '{{PROGRAMME_SUBVENTION}}':    sub.programme,
-      '{{OPERATEUR_SUBVENTION}}':    sub.operateur,
-      '{{POURCENTAGE_SUBVENTION}}':  sub.pct,
-      '{{COMPLEMENT_POURCENTAGE}}':  complementPct,
-      '{{MONTANT_SUBVENTION}}':      '',
-      '{{PRIX_APRES_SUBVENTION}}':   '',
-      '{{INTITULE_MISSION}}':        mInf.intitule,
-      '{{MONTANT}}':                 montant_ht ? String(montant_ht) : '',
-      '{{CONTEXTE_CLIENT}}':         aiCtx.CONTEXTE_CLIENT         || '',
-      '{{ENJEU_1}}':                 aiCtx.ENJEU_1                 || '',
-      '{{ENJEU_2}}':                 aiCtx.ENJEU_2                 || '',
-      '{{ENJEU_3}}':                 aiCtx.ENJEU_3                 || '',
-      '{{POURQUOI_MAINTENANT}}':     aiCtx.POURQUOI_MAINTENANT     || '',
-      '{{NOTE_CONTEXTE}}':           aiCtx.NOTE_CONTEXTE           || '',
-      '{{CONTEXTE_METIER}}':         aiCtx.CONTEXTE_METIER         || '',
-      '{{ENJEUX_DATA}}':             aiCtx.ENJEUX_DATA             || '',
-      '{{PERIMETRE_OUTIL}}':         aiCtx.PERIMETRE_OUTIL         || '',
-    });
-
-    if (logo_base64) proposalReplaceLogo(zip, Buffer.from(logo_base64, 'base64'));
-
-    const safeName = nom_entreprise.trim().replace(/[^a-zA-Z0-9 _\-éèêëàâùûüôîïç]/gi, '').trim();
-    const pptxBuf  = zip.toBuffer();
-
-    // Sauvegarde automatique dans deal_metadata + Supabase Storage si un deal est lié
-    if (deal_id) {
-      const storagePath = `${deal_id}.pptx`;
-      (async () => {
-        // Créer le bucket s'il n'existe pas
-        try {
-          const { error: bucketErr } = await supabaseAdmin.storage.createBucket('proposals', { public: false });
-          if (bucketErr && !bucketErr.message.includes('already exists')) {
-            console.warn('[Proposal] Storage createBucket:', bucketErr.message);
-          }
-        } catch(e) {}
-
-        let uploadOk = false;
-        try {
-          const { error: upErr } = await supabaseAdmin.storage
-            .from('proposals')
-            .upload(storagePath, pptxBuf, {
-              contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-              upsert: true,
-            });
-          if (upErr) console.warn('[Proposal] Storage upload:', upErr.message);
-          else uploadOk = true;
-        } catch(e) { console.warn('[Proposal] Storage upload exception:', e.message); }
-
-        const { error: dbErr } = await supabaseAdmin.from('deal_metadata').upsert({
-          deal_id,
-          proposal_sent_at:      new Date().toISOString(),
-          proposal_mission:      mission,
-          proposal_nom:          nom_entreprise.trim(),
-          proposal_storage_path: uploadOk ? storagePath : null,
-          updated_at:            new Date().toISOString(),
-        }, { onConflict: 'deal_id' });
-        if (dbErr) console.warn('[Proposal] deal_metadata upsert:', dbErr.message);
-      })();
-    }
-
-    if (format === 'pdf') {
-      const pdfBuf = await convertPptxToPdf(pptxBuf);
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="Proposition_${safeName}.pdf"`);
-      res.send(pdfBuf);
-    } else {
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
-      res.setHeader('Content-Disposition', `attachment; filename="Proposition_${safeName}.pptx"`);
-      res.send(pptxBuf);
-    }
-  } catch(e) {
-    console.error('[Proposal]', e);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// GET /api/proposal/redownload/:deal_id?format=pptx|pdf
-app.get('/api/proposal/redownload/:deal_id', async (req, res) => {
-  try {
-    const { deal_id } = req.params;
-    const format = req.query.format === 'pdf' ? 'pdf' : 'pptx';
-
-    const { data: meta, error: metaErr } = await supabaseAdmin
-      .from('deal_metadata')
-      .select('proposal_storage_path, proposal_nom, proposal_mission')
-      .eq('deal_id', deal_id)
-      .single();
-
-    if (metaErr || !meta?.proposal_storage_path) {
-      return res.status(404).json({ error: 'Aucune propale stockée pour ce deal' });
-    }
-
-    const { data: fileData, error: dlErr } = await supabaseAdmin.storage
-      .from('proposals')
-      .download(meta.proposal_storage_path);
-
-    if (dlErr || !fileData) return res.status(404).json({ error: 'Fichier introuvable dans le storage' });
-
-    const pptxBuf = Buffer.from(await fileData.arrayBuffer());
-    const safeName = (meta.proposal_nom || 'Proposition').replace(/[^a-zA-Z0-9 _\-éèêëàâùûüôîïç]/gi, '').trim();
-
-    if (format === 'pdf') {
-      const pdfBuf = await convertPptxToPdf(pptxBuf);
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="Proposition_${safeName}.pdf"`);
-      res.send(pdfBuf);
-    } else {
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
-      res.setHeader('Content-Disposition', `attachment; filename="Proposition_${safeName}.pptx"`);
-      res.send(pptxBuf);
-    }
-  } catch(e) {
-    console.error('[Proposal redownload]', e);
-    res.status(500).json({ error: e.message });
-  }
-});
 
 // POST /api/admin/regenerate-sales-nav-urls — Force-regenerate all campaign URLs (admin only)
 app.post('/api/admin/regenerate-sales-nav-urls', accountContext, async (req, res) => {
