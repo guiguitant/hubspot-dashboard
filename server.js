@@ -7369,7 +7369,7 @@ app.get('/api/analytics', async (req, res) => {
     const endNm1 = new Date(endDate); endNm1.setFullYear(endNm1.getFullYear() - 1);
 
     let ca = 0;
-    let caSigne = 0, nbSigne = 0; // CA signe = missions dont la date de signature (creation Notion) tombe dans la periode
+    let caSigne = 0, nbSigne = 0, nbFactures = 0; // caSigne/nbSigne = missions signees (creation Notion) ; nbFactures = emissions acompte/solde sur la periode
     const bySubventionne = {};
     const byAcquisition = {};
     const byNatureMission = {};
@@ -7396,7 +7396,7 @@ app.get('/api/analytics', async (req, res) => {
       // Acompte N
       if (m.dateFactureAcompte && m.montantAcompte > 0) {
         const d = new Date(m.dateFactureAcompte);
-        if (d >= startDate && d <= endDate) { montantPeriode += m.montantAcompte; addToMois(caParMoisN, m.dateFactureAcompte, m.montantAcompte); }
+        if (d >= startDate && d <= endDate) { montantPeriode += m.montantAcompte; nbFactures++; addToMois(caParMoisN, m.dateFactureAcompte, m.montantAcompte); }
         if (d >= startNm1 && d <= endNm1) addToMois(caParMoisNm1, m.dateFactureAcompte, m.montantAcompte);
       }
 
@@ -7405,7 +7405,7 @@ app.get('/api/analytics', async (req, res) => {
         const montantSolde = m.ca - m.montantAcompte;
         if (montantSolde > 0) {
           const d = new Date(m.dateFactureFinale);
-          if (d >= startDate && d <= endDate) { montantPeriode += montantSolde; addToMois(caParMoisN, m.dateFactureFinale, montantSolde); }
+          if (d >= startDate && d <= endDate) { montantPeriode += montantSolde; nbFactures++; addToMois(caParMoisN, m.dateFactureFinale, montantSolde); }
           if (d >= startNm1 && d <= endNm1) addToMois(caParMoisNm1, m.dateFactureFinale, montantSolde);
         }
       }
@@ -7443,6 +7443,7 @@ app.get('/api/analytics', async (req, res) => {
       ca: Math.round(ca),
       caSigne: Math.round(caSigne),
       nbSigne,
+      nbFactures,
       bySubventionne: toArray(bySubventionne),
       byAcquisition: toArray(byAcquisition),
       byNatureMission: toArray(byNatureMission),

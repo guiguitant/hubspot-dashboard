@@ -3351,10 +3351,6 @@
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="6" width="12" height="8" rx="1"/><path d="M5 6V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/><path d="M8 9v2"/></svg>
           Immobilisations
         </button>
-        <button class="sidebar-link" onclick="navigateTo('depenses')" data-page="depenses">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="4" width="14" height="9" rx="1"/><circle cx="8" cy="8.5" r="2.5"/><path d="M1 7h2M13 7h2"/></svg>
-          Depenses
-        </button>
       </div>
       <button class="sidebar-link" onclick="navigateTo('analytics')" data-page="analytics">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 12l4-4 3 3 4-5 3 2"/><path d="M1 15h14"/></svg>
@@ -4034,10 +4030,6 @@
       <div style="display:flex;flex-wrap:nowrap;gap:0.5rem;margin-bottom:1rem;overflow-x:auto">
         <button class="analytics-preset active" onclick="selectPreset('exercice-courant')">Exercice courant</button>
         <button class="analytics-preset" onclick="selectPreset('exercice-precedent')">Exercice précédent</button>
-        <button class="analytics-preset" onclick="selectPreset('annee-courante')">Année en cours</button>
-        <button class="analytics-preset" onclick="selectPreset('mois-courant')">Mois en cours</button>
-        <button class="analytics-preset" onclick="selectPreset('mois-dernier')">Mois dernier</button>
-        <button class="analytics-preset" onclick="selectPreset('7-jours')">7 derniers jours</button>
         <button class="analytics-preset" onclick="selectPreset('custom')">Date personnalisée</button>
       </div>
       <div id="analyticsCustomDates" style="display:none;align-items:center;gap:0.75rem;flex-wrap:wrap">
@@ -4050,35 +4042,10 @@
       <div id="analyticsPeriodLabel" style="font-size:0.85rem;color:var(--text-secondary);margin-top:0.5rem"></div>
     </div>
 
-    <!-- Top KPI (communs aux onglets, toujours en mode réel) -->
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:2rem">
-      <div class="kpi-block">
-        <div class="kpi-label">CA Facturé</div>
-        <div class="kpi-value" id="analyticsCa">--</div>
-        <div class="kpi-sub" id="analyticsCaSub">sur la période</div>
-      </div>
-      <div class="kpi-block">
-        <div class="kpi-label">Charges réelles</div>
-        <div class="kpi-value" id="analyticsTopCharges">--</div>
-        <div class="kpi-sub">Qonto, sur la période</div>
-      </div>
-      <div class="kpi-block">
-        <div class="kpi-label">Moyenne mensuelle</div>
-        <div class="kpi-value" id="analyticsTopMoyenne">--</div>
-        <div class="kpi-sub">charges, par mois</div>
-      </div>
-      <div class="kpi-block kpi-tooltip-wrapper" id="kpiTopEbe" style="display:none">
-        <div class="kpi-label">EBE</div>
-        <div class="kpi-value" id="analyticsTopEbe">--</div>
-        <div class="kpi-sub">projection annuelle</div>
-        <div class="kpi-tooltip-content" id="analyticsTopEbeTooltip"></div>
-      </div>
-    </div>
-
     <!-- Onglets -->
     <div class="analytics-tabs">
-      <button class="analytics-tab active" onclick="switchAnalyticsTab('ca')">Chiffre d'affaires</button>
-      <button class="analytics-tab" onclick="switchAnalyticsTab('charges')">Charges</button>
+      <button class="analytics-tab active" onclick="switchAnalyticsTab('ca', this)">Chiffre d'affaires</button>
+      <button class="analytics-tab" onclick="switchAnalyticsTab('charges', this)">Charges</button>
     </div>
 
     <!-- Overlay chargement analytics -->
@@ -4089,53 +4056,29 @@
 
     <!-- Onglet CA -->
     <div id="analytics-tab-ca">
-      <!-- Toggle pipeline pondéré (visible uniquement pour les 3 presets éligibles à l'EBE) -->
-      <div id="caPipelineToggleWrapper" style="display:none;align-items:center;gap:0.6rem;margin-bottom:1.5rem">
-        <input type="checkbox" id="caPipelineCheckbox" onchange="toggleCaPipeline(this.checked)" style="width:15px;height:15px;cursor:pointer;accent-color:var(--primary)">
-        <label for="caPipelineCheckbox" style="font-size:0.9rem;cursor:pointer;color:var(--text)">Avec pipeline pondéré</label>
-      </div>
-      <!-- KPI CA (masqués quand 'Avec pipeline pondéré' est coché) -->
-      <div id="analyticsCaBaseCards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:2rem">
+      <!-- KPI CA (source Notion) -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:2rem">
         <div class="kpi-block">
-          <div class="kpi-label">Nombre de factures</div>
-          <div class="kpi-value" id="analyticsNbMissions">--</div>
-          <div class="kpi-sub">missions facturées</div>
+          <div class="kpi-label">CA Facturé</div>
+          <div class="kpi-value" id="analyticsCa">--</div>
+          <div class="kpi-sub">acomptes + soldes facturés</div>
+        </div>
+        <div class="kpi-block">
+          <div class="kpi-label">CA Signé</div>
+          <div class="kpi-value" id="analyticsCaSigne">--</div>
+          <div class="kpi-sub">missions signées sur la période</div>
         </div>
         <div class="kpi-block">
           <div class="kpi-label">Ticket moyen</div>
           <div class="kpi-value" id="analyticsTicketMoyen">--</div>
-          <div class="kpi-sub">par mission</div>
+          <div class="kpi-sub">par facture</div>
+        </div>
+        <div class="kpi-block">
+          <div class="kpi-label">Nb factures</div>
+          <div class="kpi-value" id="analyticsNbMissions">--</div>
+          <div class="kpi-sub">émises sur la période</div>
         </div>
       </div>
-      <!-- KPI CA projeté (visibles uniquement quand la checkbox 'Avec pipeline pondéré' est cochée) -->
-      <div id="analyticsCaProjCards" style="display:none;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:2rem">
-        <div class="kpi-block">
-          <div class="kpi-label">Total CA projeté</div>
-          <div class="kpi-value" id="analyticsCaTotalProjete">--</div>
-          <div class="kpi-sub">facturé + pipeline</div>
-        </div>
-        <div class="kpi-block">
-          <div class="kpi-label" style="display:flex;align-items:center;gap:0.4rem">
-            <span style="width:8px;height:8px;border-radius:50%;background:#7A9BBF;display:inline-block"></span>Facturé
-          </div>
-          <div class="kpi-value" id="analyticsCaFacturePart">--</div>
-          <div class="kpi-sub">missions facturées</div>
-        </div>
-        <div class="kpi-block">
-          <div class="kpi-label" style="display:flex;align-items:center;gap:0.4rem">
-            <span style="width:8px;height:8px;border-radius:50%;background:#9ECAB4;display:inline-block"></span>Pipeline
-          </div>
-          <div class="kpi-value" id="analyticsCaPipelinePart">--</div>
-          <div class="kpi-sub">HubSpot pondéré</div>
-        </div>
-        <div class="kpi-block kpi-tooltip-wrapper">
-          <div class="kpi-label">EBE projeté</div>
-          <div class="kpi-value" id="analyticsCaEbeProjete">--</div>
-          <div class="kpi-sub">CA projeté − charges + aides</div>
-          <div class="kpi-tooltip-content" id="analyticsCaEbeTooltip"></div>
-        </div>
-      </div>
-
       <!-- Comparaison CA N vs N-1 -->
       <div class="section" style="margin-bottom:2rem">
         <div class="section-title">CA N vs N-1 (par mois)</div>
@@ -9974,36 +9917,23 @@
     function getPresetRange(preset) {
       const now = new Date();
       const year = now.getFullYear();
-      const month = now.getMonth();
-      const pad = n => String(n).padStart(2, '0');
-      const lastDayOfMonth = (y, m) => new Date(y, m + 1, 0).getDate();
       switch (preset) {
         case 'exercice-courant':   return { start: `${year}-01-01`, end: `${year}-12-31` };
         case 'exercice-precedent': return { start: `${year-1}-01-01`, end: `${year-1}-12-31` };
-        case 'annee-courante':     return { start: `${year}-01-01`, end: now.toISOString().split('T')[0] };
-        case 'mois-courant':       return { start: `${year}-${pad(month+1)}-01`, end: `${year}-${pad(month+1)}-${lastDayOfMonth(year, month)}` };
-        case 'mois-dernier': {
-          const d = new Date(year, month, 0);
-          return { start: `${d.getFullYear()}-${pad(d.getMonth()+1)}-01`, end: d.toISOString().split('T')[0] };
-        }
-        case '7-jours': {
-          const d7 = new Date(now); d7.setDate(d7.getDate() - 7);
-          return { start: d7.toISOString().split('T')[0], end: now.toISOString().split('T')[0] };
-        }
         default: return null;
       }
     }
 
-    function switchAnalyticsTab(tab) {
+    function switchAnalyticsTab(tab, btn) {
       document.querySelectorAll('.analytics-tab').forEach(b => b.classList.remove('active'));
-      event.target.classList.add('active');
+      if (btn) btn.classList.add('active');
       document.getElementById('analytics-tab-ca').style.display = tab === 'ca' ? '' : 'none';
       document.getElementById('analytics-tab-charges').style.display = tab === 'charges' ? '' : 'none';
       if (tab === 'charges') renderAnalyticsChargesChart();
     }
 
     let analyticsChargesMode = 'categories';
-    let analyticsChargesPrev = false;
+    let analyticsChargesPrev = true; // previsionnel toujours integre : passe = Qonto reel, mois courant + futurs = GSheet
 
     function toggleChargesPrev(checked) {
       analyticsChargesPrev = checked;
@@ -10166,7 +10096,6 @@
         const res = await fetch(endpoint);
         analyticsChargesData = await res.json();
         if (!analyticsChargesData.ventilationCharges) return;
-        if (analyticsChargesPrev) updateChargesProjCards(analyticsChargesData);
         const source = analyticsChargesMode === 'sous-categories' && analyticsChargesData.ventilationChargesDetail
           ? analyticsChargesData.ventilationChargesDetail.map(v => ({ label: v.sousCat || v.categorie, montant: v.montant }))
           : analyticsChargesData.ventilationCharges.map(v => ({ label: v.categorie, montant: v.montant }));
@@ -10376,9 +10305,6 @@
       }
       analyticsCurrentStart = start;
       analyticsCurrentEnd = end;
-      // Invalider le cache EBE à chaque changement de période
-      analyticsEbeCache = null;
-      updateCaPipelineState();
 
       // Afficher l'overlay de chargement
       const loader = document.getElementById('analyticsLoader');
@@ -10389,41 +10315,15 @@
       tabCharges.style.visibility = 'hidden';
 
       try {
-        // Toujours fetch analytics (CA) + charges réel (pour les cards du haut, peu importe le tab actif)
-        const fetches = [
-          fetch(`/api/analytics?start=${start}&end=${end}`),
-          fetch(`/api/charges?start=${start}&end=${end}`),
-        ];
-        // Si la checkbox prévisionnel est cochée, fetch également l'endpoint hybride (pour les 4 cards du tab + graphes)
-        const chargesVisible = tabCharges.style.display !== 'none';
-        if (analyticsChargesPrev) {
-          fetches.push(fetch(`/api/charges-hybride?start=${start}&end=${end}`));
-        }
-
-        const results = await Promise.all(fetches);
-        const analyticsData = await results[0].json();
-        const chargesRealData = await results[1].json();
-
+        // Onglet CA : source Notion (CA facture, CA signe, ticket moyen, nb factures + graphes)
+        const res = await fetch(`/api/analytics?start=${start}&end=${end}`);
+        const analyticsData = await res.json();
         renderAnalytics(analyticsData);
-        updateTopChargesKpis(chargesRealData);
-        updateTopEbeCard();
-        updateCaProjCards();
 
-        if (chargesVisible) {
-          if (analyticsChargesPrev) {
-            analyticsChargesData = await results[2].json();
-            if (!analyticsChargesData.ventilationCharges) return;
-            updateChargesProjCards(analyticsChargesData);
-          } else {
-            analyticsChargesData = chargesRealData;
-            if (!analyticsChargesData.ventilationCharges) return;
-          }
-          const source = analyticsChargesMode === 'sous-categories' && analyticsChargesData.ventilationChargesDetail
-            ? analyticsChargesData.ventilationChargesDetail.map(v => ({ label: v.sousCat || v.categorie, montant: v.montant }))
-            : analyticsChargesData.ventilationCharges.map(v => ({ label: v.categorie, montant: v.montant }));
-          renderPieChart('analyticsChargesChart', source.slice(0, 10));
-          renderAnalyticsChargesDetail();
-          renderChargesComparaison(analyticsChargesData.comparaison);
+        // Onglet Charges : rendu (comparatif hybride + detail) uniquement s'il est visible.
+        // renderAnalyticsChargesChart fetche /api/charges-hybride (previsionnel toujours integre).
+        if (tabCharges.style.display !== 'none') {
+          await renderAnalyticsChargesChart();
         }
       } catch (err) {
         console.error('Erreur analytics:', err);
@@ -10627,9 +10527,10 @@
       const fmt = d => new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
       document.getElementById('analyticsPeriodLabel').textContent = `Du ${fmt(data.start)} au ${fmt(data.end)}`;
       document.getElementById('analyticsCa').textContent = formatEuro(data.ca);
-      const nbMissions = (data.byClient || []).length;
-      document.getElementById('analyticsNbMissions').textContent = nbMissions;
-      document.getElementById('analyticsTicketMoyen').textContent = nbMissions > 0 ? formatEuro(Math.round(data.ca / nbMissions)) : '—';
+      document.getElementById('analyticsCaSigne').textContent = formatEuro(data.caSigne || 0);
+      const nbFactures = data.nbFactures || 0;
+      document.getElementById('analyticsNbMissions').textContent = nbFactures;
+      document.getElementById('analyticsTicketMoyen').textContent = nbFactures > 0 ? formatEuro(Math.round(data.ca / nbFactures)) : '—';
 
       if (data.comparaison) renderCaComparaison(data.comparaison);
       if (data.bySubventionne) renderPieChart('chartSubventionne', data.bySubventionne);
