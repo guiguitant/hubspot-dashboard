@@ -3994,7 +3994,7 @@
         <div class="kpi-block">
           <div class="kpi-label">CA Signé</div>
           <div class="kpi-value" id="analyticsCaSigne">--</div>
-          <div class="kpi-sub">missions signées sur la période</div>
+          <div class="kpi-sub" id="analyticsCaSigneSub">deals gagnés HubSpot sur la période</div>
         </div>
         <div class="kpi-block">
           <div class="kpi-label">Ticket moyen</div>
@@ -10277,6 +10277,13 @@
       document.getElementById('analyticsPeriodLabel').textContent = `Du ${fmt(data.start)} au ${fmt(data.end)}`;
       document.getElementById('analyticsCa').textContent = formatEuro(data.ca);
       document.getElementById('analyticsCaSigne').textContent = formatEuro(data.caSigne || 0);
+      const caSigneSub = document.getElementById('analyticsCaSigneSub');
+      if (caSigneSub) {
+        // Transparence : on indique si on affiche le repli Notion (HubSpot indisponible) plutôt que la source de vérité HubSpot.
+        caSigneSub.textContent = data.caSigneSource === 'notion'
+          ? 'missions signées Notion (repli · HubSpot indisponible)'
+          : 'deals gagnés HubSpot sur la période';
+      }
       const nbFactures = data.nbFactures || 0;
       document.getElementById('analyticsNbMissions').textContent = nbFactures;
       document.getElementById('analyticsTicketMoyen').textContent = nbFactures > 0 ? formatEuro(Math.round(data.ca / nbFactures)) : '—';

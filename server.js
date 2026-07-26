@@ -959,19 +959,18 @@ async function fetchWonDealsForMonth(year, month) {
     }));
 }
 
-// Deals gagnés (closed-won, pipeline default) dont la date de clôture tombe dans `year`.
-// Base du "CA signé" des primes (étage 1). Retourne [{ id, amount }].
-async function fetchWonDealsForYear(year) {
-  const from = new Date(Date.UTC(year, 0, 1)).toISOString();
-  const to = new Date(Date.UTC(year + 1, 0, 1)).toISOString();
+// Deals gagnés (closed-won, pipeline default) dont la date de clôture tombe dans [fromISO, toISO[.
+// Bornes en ISO UTC, `toISO` exclusif. Base commune du "CA signé" (primes KPI + onglet Analytics).
+// Retourne [{ id, amount }].
+async function fetchWonDealsBetween(fromISO, toISO) {
   const deals = [];
   let after;
   while (true) {
     const body = {
       filterGroups: [{ filters: [
         { propertyName: 'hs_is_closed_won', operator: 'EQ', value: 'true' },
-        { propertyName: 'closedate', operator: 'GTE', value: from },
-        { propertyName: 'closedate', operator: 'LT', value: to },
+        { propertyName: 'closedate', operator: 'GTE', value: fromISO },
+        { propertyName: 'closedate', operator: 'LT', value: toISO },
       ] }],
       properties: ['amount', 'closedate', 'pipeline'],
       sorts: [{ propertyName: 'closedate', direction: 'DESCENDING' }],
@@ -986,6 +985,14 @@ async function fetchWonDealsForYear(year) {
   return deals
     .filter(d => !d.properties.pipeline || d.properties.pipeline === 'default')
     .map(d => ({ id: d.id, amount: parseFloat(d.properties.amount) || 0 }));
+}
+
+// Deals gagnés (closed-won, pipeline default) dont la date de clôture tombe dans `year`.
+// Base du "CA signé" des primes (étage 1). Retourne [{ id, amount }].
+async function fetchWonDealsForYear(year) {
+  const from = new Date(Date.UTC(year, 0, 1)).toISOString();
+  const to = new Date(Date.UTC(year + 1, 0, 1)).toISOString();
+  return fetchWonDealsBetween(from, to);
 }
 
 // CA signé HubSpot d'une année réparti par assignee (deal_metadata.assignee).
@@ -7392,7 +7399,10 @@ app.get('/api/analytics', async (req, res) => {
     const endNm1 = new Date(endDate); endNm1.setFullYear(endNm1.getFullYear() - 1);
 
     let ca = 0;
-    let caSigne = 0, nbSigne = 0, nbFactures = 0; // caSigne/nbSigne = missions signees (creation Notion) ; nbFactures = emissions acompte/solde sur la periode
+    let nbFactures = 0; // nbFactures = emissions acompte/solde sur la periode
+    // Repli Notion du CA signé (utilisé seulement si HubSpot est indisponible) :
+    // missions datées par leur création Notion (proxy signature), hors "Annulé".
+    let caSigneNotion = 0, nbSigneNotion = 0;
     const bySubventionne = {};
     const byAcquisition = {};
     const byNatureMission = {};
@@ -7408,10 +7418,10 @@ app.get('/api/analytics', async (req, res) => {
     }
 
     for (const m of missions) {
-      // CA signe : datage par la date de creation de la ligne Notion (proxy de la date de signature)
-      if (m.dateCreation && m.ca > 0) {
+      // CA signé (repli Notion) : datage par la date de création de la ligne Notion (proxy de la date de signature), hors "Annulé".
+      if (m.dateCreation && m.ca > 0 && m.etat !== 'Annulé') {
         const dSign = new Date(m.dateCreation);
-        if (dSign >= startDate && dSign <= endDate) { caSigne += m.ca; nbSigne += 1; }
+        if (dSign >= startDate && dSign <= endDate) { caSigneNotion += m.ca; nbSigneNotion += 1; }
       }
 
       let montantPeriode = 0;
@@ -7448,6 +7458,22 @@ app.get('/api/analytics', async (req, res) => {
       }
     }
 
+    // CA signé = deals gagnés HubSpot sur la période (source de vérité, aligné sur l'onglet KPI).
+    // Bornes en UTC pour coïncider avec le KPI quand la période est une année civile.
+    // Repli automatique sur le calcul Notion ci-dessus si HubSpot est indisponible.
+    let caSigne = caSigneNotion, nbSigne = nbSigneNotion, caSigneSource = 'notion';
+    try {
+      const fromISO = `${String(start).slice(0, 10)}T00:00:00.000Z`;
+      const toDate = new Date(`${String(end).slice(0, 10)}T00:00:00.000Z`);
+      toDate.setUTCDate(toDate.getUTCDate() + 1); // borne exclusive : lendemain minuit UTC
+      const wonDeals = await fetchWonDealsBetween(fromISO, toDate.toISOString());
+      caSigne = wonDeals.reduce((s, d) => s + d.amount, 0);
+      nbSigne = wonDeals.length;
+      caSigneSource = 'hubspot';
+    } catch (e) {
+      console.error('Analytics CA signé HubSpot error:', e.message);
+    }
+
     const toArray = obj => Object.entries(obj)
       .map(([label, montant]) => ({ label, montant: Math.round(montant) }))
       .sort((a, b) => b.montant - a.montant);
@@ -7466,6 +7492,7 @@ app.get('/api/analytics', async (req, res) => {
       ca: Math.round(ca),
       caSigne: Math.round(caSigne),
       nbSigne,
+      caSigneSource,
       nbFactures,
       bySubventionne: toArray(bySubventionne),
       byAcquisition: toArray(byAcquisition),
