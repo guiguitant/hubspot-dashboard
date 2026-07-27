@@ -997,22 +997,7 @@ async function fetchWonDealsForYear(year) {
 
 // CA signé HubSpot d'une année réparti par assignee (deal_metadata.assignee).
 // { total, unassigned, byAssignee: { [name]: montant } }. Null-safe : renvoie null en cas d'échec.
-async function computeCommercialSigned(year) {
-  const wonDeals = await fetchWonDealsForYear(year);
-  const { data: metaRows } = await supabaseAdmin.from('deal_metadata').select('deal_id, assignee');
-  const assigneeByDeal = {};
-  for (const r of metaRows || []) assigneeByDeal[String(r.deal_id)] = r.assignee || null;
-  const byAssignee = {};
-  let total = 0, unassigned = 0;
-  for (const d of wonDeals) {
-    total += d.amount;
-    const a = assigneeByDeal[String(d.id)];
-    if (a) byAssignee[a] = (byAssignee[a] || 0) + d.amount;
-    else unassigned += d.amount;
-  }
-  for (const k of Object.keys(byAssignee)) byAssignee[k] = Math.round(byAssignee[k]);
-  return { year, total: Math.round(total), unassigned: Math.round(unassigned), byAssignee };
-}
+// (computeCommercialSigned retirée : le CA signé du KPI vient désormais uniquement de Notion, plus de HubSpot.)
 
 app.get('/api/won-deals', async (req, res) => {
   const year = parseInt(req.query.year, 10);
@@ -6354,15 +6339,10 @@ app.get('/api/kpi', async (req, res) => {
     if (splErr) throw splErr;
     if (factErr) throw factErr;
     const result = computeKpi({ missions, objectives: objectives || [], splits: splits || [], year });
-    // Base de l'objectif collectif (primes étage 2) : facturation de l'exercice.
+    // Base de l'objectif collectif (primes étage 2) : facturation de l'exercice (source : Notion).
     result.facturation = computeBillingForYear(missions, factOverrides || [], year);
-    // Base du CA signé (primes étage 1) : deals gagnés HubSpot, par assignee.
-    try {
-      result.commercial = await computeCommercialSigned(year);
-    } catch (e) {
-      console.error('KPI commercial (HubSpot) error:', e.message);
-      result.commercial = null;
-    }
+    // CA signé (bandeau + primes étage 1) : 100% Notion, déjà calculé par computeKpi (réalisé par partner/type).
+    // Plus aucun appel HubSpot ici : la source unique du CA signé est Notion.
     res.json(result);
   } catch (e) {
     console.error('GET /api/kpi error:', e.message);

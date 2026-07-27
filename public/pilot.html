@@ -4040,8 +4040,13 @@
 
     <!-- Onglet Charges -->
     <div id="analytics-tab-charges" style="display:none">
-      <!-- 3 cards instantanees (source Pennylane, toujours actuelles, independantes de la periode) -->
+      <!-- Cards instantanees, toujours actuelles, independantes de la periode selectionnee -->
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:2rem">
+        <div class="kpi-block">
+          <div class="kpi-label">Charges annuelles <span class="kpi-unit">TTC</span></div>
+          <div class="kpi-value" id="chargesAnnuellesValue">--</div>
+          <div class="kpi-sub" id="chargesAnnuellesSub">Qonto (réel) + prévi · année en cours</div>
+        </div>
         <div class="kpi-block">
           <div class="kpi-label">Sorties ce mois <span class="kpi-unit">TTC</span></div>
           <div class="kpi-value" id="depKpiSorties">--</div>
@@ -4182,7 +4187,7 @@
       #page-kpi .kpi-section-label h3 { margin:0; font-size:1.08rem; color:var(--text); white-space:nowrap; }
       #page-kpi .kpi-section-label .line { flex:1; height:1px; background:var(--border); }
       /* Overview tiles */
-      #kpiOverview { display:grid; grid-template-columns:repeat(4,1fr); gap:1rem; margin:0 0 .5rem; }
+      #kpiOverview { display:grid; grid-template-columns:repeat(3,1fr); gap:1rem; margin:0 0 .5rem; }
       @media (max-width:980px){ #kpiOverview { grid-template-columns:1fr 1fr; } }
       @media (max-width:560px){ #kpiOverview { grid-template-columns:1fr; } }
       #kpiOverview .kpi-ov { border:1px solid var(--border); border-radius:14px; background:var(--card); padding:1rem 1.15rem 1.1rem; position:relative; overflow:hidden; transition:box-shadow .18s ease, transform .18s ease; }
@@ -4216,7 +4221,7 @@
 
     <div id="kpiUnclassified" class="section" style="display:none; border-color:var(--warning); background:var(--warning-bg);"></div>
 
-    <div class="kpi-section-label" id="kpiChartsLabel"><h3>Avancement par partner</h3><span class="line"></span></div>
+    <div class="kpi-section-label" id="kpiChartsLabel"><h3>Avancement par partner</h3><span style="font-size:.72rem;color:var(--text-secondary);white-space:nowrap;">source : Notion</span><span class="line"></span><label style="display:inline-flex;align-items:center;gap:.4rem;font-size:.8rem;color:var(--text-secondary);cursor:pointer;white-space:nowrap;"><input type="checkbox" id="kpiToggleOpere" onchange="toggleKpiOpere()" style="cursor:pointer;"> Afficher le CA opéré</label></div>
     <div id="kpiCharts"></div>
 
     <!-- ESTIMATEUR DE PRIMES -->
@@ -9872,6 +9877,7 @@
 
     let analyticsChargesPrev = true; // previsionnel toujours integre : passe = Qonto reel, mois courant + futurs = GSheet
     let analyticsChargesData = null;
+    let chargesAnnuellesCache = null; // total charges annuelles (annee en cours), garde en memoire pour eviter un refetch Qonto a chaque changement de periode
 
     async function renderAnalyticsChargesChart() {
       const start = analyticsCurrentStart;
@@ -9888,6 +9894,7 @@
         const cRes = await fetch(`/api/charges-hybride?start=${start}&end=${end}`);
         analyticsChargesData = await cRes.json();
         if (analyticsChargesData && analyticsChargesData.comparaison) renderChargesComparaison(analyticsChargesData.comparaison);
+        renderChargesAnnuelles(); // card "Charges annuelles" (annee en cours, figee) : reutilise ces donnees si periode = annee, sinon appel dedie
 
         // Detail des depenses : Pennylane, pilote par la periode selectionnee
         const dRes = await fetch(`/api/depenses?start=${start}&end=${end}`);
@@ -9910,6 +9917,28 @@
       } finally {
         loader.style.display = 'none';
         tabCharges.style.visibility = '';
+      }
+    }
+
+    // Card "Charges annuelles" : total de l'annee civile en cours = Qonto reel (mois passes) + previsionnel GSheet (mois courant et futurs).
+    // Figee sur l'annee, independante du filtre de periode. Si la periode selectionnee EST deja l'annee en cours, on reutilise les donnees
+    // deja chargees (aucun appel en plus) ; sinon on fait un appel dedie une seule fois, garde en memoire (Qonto est lent).
+    async function renderChargesAnnuelles() {
+      const el = document.getElementById('chargesAnnuellesValue');
+      if (!el) return;
+      const year = new Date().getFullYear();
+      if (analyticsChargesData && analyticsCurrentStart === `${year}-01-01` && analyticsCurrentEnd === `${year}-12-31`) {
+        el.textContent = formatEuro(analyticsChargesData.totalCharges || 0);
+        return;
+      }
+      if (chargesAnnuellesCache != null) { el.textContent = formatEuro(chargesAnnuellesCache); return; }
+      try {
+        const r = await fetch(`/api/charges-hybride?start=${year}-01-01&end=${year}-12-31`);
+        const d = await r.json();
+        chargesAnnuellesCache = d.totalCharges || 0;
+        el.textContent = formatEuro(chargesAnnuellesCache);
+      } catch (e) {
+        console.error('Erreur Charges annuelles:', e);
       }
     }
 
@@ -10463,6 +10492,14 @@
       return g;
     }
 
+    // CA opéré optionnel dans les graphes (case à cocher). Masqué par défaut : la page s'ouvre sur le signé.
+    let kpiShowOpere = false;
+    function toggleKpiOpere() {
+      const cb = document.getElementById('kpiToggleOpere');
+      kpiShowOpere = cb ? cb.checked : false;
+      renderKpiCharts();
+    }
+
     function renderKpiCharts() {
       // Détruit les anciens charts pour éviter les fuites mémoire.
       kpiChartInstances.forEach(c => c.destroy());
@@ -10475,6 +10512,9 @@
         return;
       }
       container.innerHTML = '';
+
+      // Types affichés : le CA opéré est optionnel (case à cocher, masqué par défaut).
+      const activeTypes = kpiShowOpere ? KPI_TYPES : KPI_TYPES.filter(t => t.key !== 'opere');
 
       const primary  = kpiCssVar('--primary', '#003D2E');
       const trackCol = 'rgba(127,127,127,0.16)';
@@ -10508,15 +10548,15 @@
           '<div class="kpi-canvas-wrap"><canvas id="' + canvasId + '"></canvas></div>';
         container.appendChild(card);
 
-        const labels = KPI_TYPES.map(t => t.label);
-        const objdata = KPI_TYPES.map(t => block.data[t.key].objectif);
-        const realdata = KPI_TYPES.map(t => block.data[t.key].realise);
+        const labels = activeTypes.map(t => t.label);
+        const objdata = activeTypes.map(t => block.data[t.key].objectif);
+        const realdata = activeTypes.map(t => block.data[t.key].realise);
         // Max de l'axe Y = l'objectif le plus haut, mais on étire si un réalisé le dépasse
         // (0 objectif → auto-échelle).
         const maxObj = Math.max.apply(null, objdata);
         const axisMax = maxObj > 0 ? Math.max(maxObj, Math.max.apply(null, realdata)) : undefined;
         // % d'avancement par type (affiché au-dessus de la barre Réalisé).
-        const txLabels = KPI_TYPES.map(t => {
+        const txLabels = activeTypes.map(t => {
           const tx = block.data[t.key].tx;
           return tx === null ? '—' : Math.round(tx * 100) + '%';
         });
@@ -10543,7 +10583,7 @@
           options: {
             responsive: true, maintainAspectRatio: false,
             layout: { padding: { top: 20 } },
-            onClick: (evt, els) => { if (els && els.length) openKpiDetail(block, KPI_TYPES[els[0].index].key); },
+            onClick: (evt, els) => { if (els && els.length) openKpiDetail(block, activeTypes[els[0].index].key); },
             onHover: (evt, els) => { if (evt.native) evt.native.target.style.cursor = (els && els.length) ? 'pointer' : 'default'; },
             scales: {
               y: { beginAtZero: true,
@@ -10577,13 +10617,11 @@
       if (empty) { box.style.display = 'none'; return; }
       box.style.display = '';
       const a = kpiData.all;
-      const com = kpiData.commercial || null;
-      // CA signé = deals gagnés HubSpot (repli sur le réalisé Notion si indispo).
-      const signeReal = com ? com.total : ((a.newsale.realise || 0) + (a.upsale.realise || 0));
+      // CA signé = 100% Notion : réalisé Newsale + Upsale (missions rattachées à l'année via factures / "Année final").
+      const signeReal = (a.newsale.realise || 0) + (a.upsale.realise || 0);
       const signeObj  = (a.newsale.objectif || 0) + (a.upsale.objectif || 0);
       const avPct = signeObj > 0 ? Math.round(signeReal / signeObj * 100) : null;
-      const signeSub = signeObj > 0 ? ('Objectif ' + kpiFmtEur(signeObj)) : (com ? 'Deals gagnés HubSpot' : 'Pas d\'objectif défini');
-      const fac = kpiData.facturation || { facture: 0, aFacturer: 0, total: 0 };
+      const signeSub = signeObj > 0 ? ('Objectif ' + kpiFmtEur(signeObj) + ' · source Notion') : 'Source Notion · pas d\'objectif défini';
 
       let poolVal = '—', poolSub = 'Réglez via « Réglages primes »';
       try {
@@ -10602,7 +10640,6 @@
 
       box.innerHTML =
         tile('signe', 'CA signé', kpiFmtEur(signeReal), signeSub) +
-        tile('opere', 'Facturation ' + (kpiData.year || ''), kpiFmtEur(fac.total), 'facturé ' + kpiFmtEur(fac.facture) + ' · à facturer ' + kpiFmtEur(fac.aFacturer)) +
         tileBar('av', 'Avancement signé', (avPct === null ? '—' : avPct + ' %'), avPct) +
         tile('pool', 'Prime pool estimée', poolVal, poolSub);
     }
@@ -10802,21 +10839,10 @@
       const factu = kpiData.facturation || null;
       const caFactDefault = factu ? (factu.total || 0) : (kpiData.all && kpiData.all.opere ? kpiData.all.opere.realise : 0);
       primeState = { realises: {}, caFacture: caFactDefault };
-      // CA signé = deals gagnés HubSpot par assignee ; new/repeat réparti via le ratio Notion
-      // de chaque personne. Repli sur le réalisé Notion si HubSpot indisponible.
-      const com = kpiData.commercial || null;
-      // Rattachement tolérant : prénom normalisé (ex. "Guillaume Tant" ↔ "Guillaume").
-      const byAssigneeNorm = {};
-      if (com && com.byAssignee) for (const k of Object.keys(com.byAssignee)) byAssigneeNorm[primeNameKey(k)] = com.byAssignee[k];
+      // CA signé = réalisé Notion par partner : New = Newsale, Repeat = Upsale
+      // (missions rattachées à l'année via leurs factures / "Année final", cf. computeKpi).
       parts.forEach(p => {
-        const notionNew = p.newsale.realise || 0, notionRep = p.upsale.realise || 0, notionSum = notionNew + notionRep;
-        if (com && com.byAssignee) {
-          const hub = byAssigneeNorm[primeNameKey(p.partner)] || 0;
-          const ratioNew = notionSum > 0 ? notionNew / notionSum : 1; // pas d'historique → tout en new
-          primeState.realises[p.partner] = { new: Math.round(hub * ratioNew), repeat: Math.round(hub * (1 - ratioNew)) };
-        } else {
-          primeState.realises[p.partner] = { new: notionNew, repeat: notionRep };
-        }
+        primeState.realises[p.partner] = { new: p.newsale.realise || 0, repeat: p.upsale.realise || 0 };
       });
 
       const rowsHtml = parts.map((p, i) => {
@@ -10839,8 +10865,7 @@
         + '</div>'
         + '<div class="prime-panel">'
           + '<p class="prime-panel-h">Hypothèses</p>'
-          + '<p class="prime-panel-sub">CA signé = deals gagnés HubSpot par assignee' + (com ? '' : ' (HubSpot indispo : repli sur le réalisé Notion)') + ', réparti new/repeat selon le ratio Notion de chacun. Éditable pour simuler — « ↺ Données réelles » restaure. Taux, paliers et résultat se règlent via « Réglages primes ».</p>'
-          + ((com && com.unassigned > 0) ? '<p class="prime-panel-sub" style="color:var(--warning);">⚠️ ' + primeFmtEur(com.unassigned) + ' de deals gagnés non assignés (exclus des commissions). Assigne-les dans l\'onglet Commercial pour les inclure.</p>' : '')
+          + '<p class="prime-panel-sub">CA signé = réalisé Notion par partner (New = Newsale, Repeat = Upsale), missions rattachées à l\'année via leurs factures ou le champ « Année final ». Éditable pour simuler : « ↺ Données réelles » restaure. Taux, paliers et résultat se règlent via « Réglages primes ».</p>'
           + '<table class="prime-inputs"><thead><tr><th>Personne</th><th>New signé</th><th>Repeat signé</th><th>Taux new / repeat</th></tr></thead><tbody>' + rowsHtml + '</tbody></table>'
           + '<p class="prime-caopere">CA facturé ' + (kpiData.year || '') + ' (base paliers, étage 2) : <span class="prime-cellin"><input id="prime-cafacture-in" type="text" inputmode="numeric" value="' + primeIntFr(primeState.caFacture) + '"><span class="u">€</span></span>'
             + (factu ? '<span style="color:var(--text-secondary);">facturé ' + primeFmtEur(factu.facture) + ' · à facturer ' + primeFmtEur(factu.aFacturer) + '</span>' : '')

@@ -10,6 +10,29 @@ function yearOf(iso) {
   return iso ? Number(String(iso).slice(0, 4)) : null;
 }
 
+// Année (number) d'une date de facture ('2025-12-15' ou ISO) ou d'une string d'année ('2026'), sinon null.
+function yearOfDate(d) {
+  return d ? Number(String(d).slice(0, 4)) : null;
+}
+
+// CA signé d'une mission rattaché à `year` (source : Notion).
+// Une mission = acompte + solde, chacun rattaché à l'année d'émission de SA facture :
+//   - acompte = montantAcompte, daté par dateFactureAcompte ; si non émise → année du champ "Année final".
+//   - solde   = ca - montantAcompte, daté par dateFactureFinale ; si non émise → année du champ "Année final".
+// Une mission facturée à cheval contribue donc à deux années. Sans date ni "Année final" → 0 (non rattachable).
+function signedAmountForYear(m, year) {
+  const ca = Number(m.ca) || 0;
+  const acompte = Number(m.montantAcompte) || 0;
+  const solde = Math.max(0, ca - acompte);
+  const anneeFinal = m.anneeFinal ? Number(m.anneeFinal) : null;
+  const acompteYear = m.dateFactureAcompte ? yearOfDate(m.dateFactureAcompte) : anneeFinal;
+  const soldeYear   = m.dateFactureFinale ? yearOfDate(m.dateFactureFinale) : anneeFinal;
+  let total = 0;
+  if (acompteYear === year) total += acompte;
+  if (soldeYear === year)   total += solde;
+  return total;
+}
+
 // Répartit `ca` entre `partners` selon `overrides` ({partner: pct}) si non vide,
 // sinon à parts égales. Retourne { partner: montant }.
 function splitAmount(ca, partners, overrides) {
@@ -70,41 +93,47 @@ function computeKpi({ missions, objectives, splits, year }) {
   const missionsForSplit = [];
 
   for (const m of missions || []) {
-    if (yearOf(m.dateCreation) !== year) continue;
     const ca = Number(m.ca) || 0;
+    // CA signé (source Notion) rattaché à `year` : acompte/solde répartis par date d'émission de facture,
+    // repli sur "Année final" si non facturé. 0 si l'état est "Annulé" (exclu du signé).
+    const caSigne = SIGNE_EXCLUDED_STATES.includes(m.etat) ? 0 : signedAmountForYear(m, year);
+    // Opéré : critère d'année inchangé (date de création de la ligne Notion) + CA total de la mission.
+    const isOpereYear = yearOf(m.dateCreation) === year && OPERE_STATES.includes(m.etat);
 
-    // --- Signé (commercial) : états != Annulé ---
-    if (!SIGNE_EXCLUDED_STATES.includes(m.etat)) {
+    // --- Signé (commercial) ---
+    if (caSigne > 0) {
       let type = null;
       if (m.typeCa === 'Newsale') type = 'newsale';
       else if (m.typeCa === 'Upsale') type = 'upsale';
 
       if (type) {
-        const shares = splitAmount(ca, m.partnerCommercial, (splitIndex[m.id] || {}).commercial);
+        const shares = splitAmount(caSigne, m.partnerCommercial, (splitIndex[m.id] || {}).commercial);
         for (const [p, amt] of Object.entries(shares)) { add(p, type, amt); addDetail(p, type, m, amt); }
-        allDetail[type].push({ id: m.id, nom: m.nom, client: m.client, montant: Math.round(ca) });
+        allDetail[type].push({ id: m.id, nom: m.nom, client: m.client, montant: Math.round(caSigne) });
       } else {
-        unclassified.push({ id: m.id, nom: m.nom, client: m.client, ca });
+        unclassified.push({ id: m.id, nom: m.nom, client: m.client, ca: Math.round(caSigne) });
       }
     }
 
-    // --- Opéré (opérationnel) : En cours / Terminé ---
-    if (OPERE_STATES.includes(m.etat)) {
+    // --- Opéré (opérationnel) : En cours / Terminé, daté par la création ---
+    if (isOpereYear) {
       const shares = splitAmount(ca, m.partnerOperationnel, (splitIndex[m.id] || {}).operationnel);
       for (const [p, amt] of Object.entries(shares)) { add(p, 'opere', amt); addDetail(p, 'opere', m, amt); }
       allDetail.opere.push({ id: m.id, nom: m.nom, client: m.client, montant: Math.round(ca) });
     }
 
-    // --- missionsForSplit : missions de l'année à 2+ partners sur un axe ---
-    const com = m.partnerCommercial || [];
-    const ope = m.partnerOperationnel || [];
-    if (com.length >= 2 || ope.length >= 2) {
-      missionsForSplit.push({
-        id: m.id, nom: m.nom, ca,
-        commercial: com, operationnel: ope,
-        splitCommercial: displaySplit(com, (splitIndex[m.id] || {}).commercial),
-        splitOperationnel: displaySplit(ope, (splitIndex[m.id] || {}).operationnel),
-      });
+    // --- missionsForSplit : missions à 2+ partners contribuant à l'année (signé ou opéré) ---
+    if (caSigne > 0 || isOpereYear) {
+      const com = m.partnerCommercial || [];
+      const ope = m.partnerOperationnel || [];
+      if (com.length >= 2 || ope.length >= 2) {
+        missionsForSplit.push({
+          id: m.id, nom: m.nom, ca,
+          commercial: com, operationnel: ope,
+          splitCommercial: displaySplit(com, (splitIndex[m.id] || {}).commercial),
+          splitOperationnel: displaySplit(ope, (splitIndex[m.id] || {}).operationnel),
+        });
+      }
     }
   }
 
@@ -151,4 +180,4 @@ function computeKpi({ missions, objectives, splits, year }) {
   return { year, partners, all, unclassified, missionsForSplit, allDetails: allDetail };
 }
 
-module.exports = { computeKpi, yearOf, splitAmount, displaySplit, OPERE_STATES, SIGNE_EXCLUDED_STATES };
+module.exports = { computeKpi, yearOf, yearOfDate, signedAmountForYear, splitAmount, displaySplit, OPERE_STATES, SIGNE_EXCLUDED_STATES };
