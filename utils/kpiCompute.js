@@ -33,6 +33,19 @@ function signedAmountForYear(m, year) {
   return total;
 }
 
+// Total « CA <année> HT » (source Notion) : somme, sur toutes les missions non « Annulé »,
+// du CA rattaché à `year` (facturé ou non, via signedAmountForYear). C'est LE chiffre partagé
+// par le Cockpit, l'onglet Analytics et le KPI, pour qu'ils affichent tous la même valeur.
+// Inclut les missions sans type_ca (elles font partie du CA de l'année même si non classées).
+function totalCaAnnee(missions, year) {
+  let total = 0;
+  for (const m of missions || []) {
+    if (SIGNE_EXCLUDED_STATES.includes(m.etat)) continue;
+    total += signedAmountForYear(m, year);
+  }
+  return Math.round(total);
+}
+
 // Répartit `ca` entre `partners` selon `overrides` ({partner: pct}) si non vide,
 // sinon à parts égales. Retourne { partner: montant }.
 function splitAmount(ca, partners, overrides) {
@@ -177,7 +190,7 @@ function computeKpi({ missions, objectives, splits, year }) {
 
   for (const type of TYPES) allDetail[type].sort((a, b) => b.montant - a.montant);
 
-  return { year, partners, all, unclassified, missionsForSplit, allDetails: allDetail };
+  return { year, partners, all, unclassified, missionsForSplit, allDetails: allDetail, caAnnee: totalCaAnnee(missions, year) };
 }
 
-module.exports = { computeKpi, yearOf, yearOfDate, signedAmountForYear, splitAmount, displaySplit, OPERE_STATES, SIGNE_EXCLUDED_STATES };
+module.exports = { computeKpi, yearOf, yearOfDate, signedAmountForYear, totalCaAnnee, splitAmount, displaySplit, OPERE_STATES, SIGNE_EXCLUDED_STATES };

@@ -9,7 +9,7 @@ const { authenticator } = require('otplib');
 const { execFile } = require('child_process');
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
-const { computeKpi } = require('./utils/kpiCompute');
+const { computeKpi, totalCaAnnee } = require('./utils/kpiCompute');
 const { computeBillingForYear } = require('./utils/billing');
 const { buildSalesNavUrl } = require('./utils/buildSalesNavUrl');
 const multer = require('multer');
@@ -7470,6 +7470,10 @@ app.get('/api/analytics', async (req, res) => {
     res.json({
       start, end,
       ca: Math.round(ca),
+      // CA « de l'année » (source Notion, définition « CA <année> HT ») : facturé + non facturé
+      // rattaché à l'année via « Année final ». Calculé par la fonction partagée avec le KPI et le
+      // Cockpit, pour que les trois pages affichent exactement le même chiffre.
+      caAnnee: totalCaAnnee(missions, parseInt(String(start).slice(0, 4), 10)),
       caSigne: Math.round(caSigne),
       nbSigne,
       caSigneSource,
@@ -7529,6 +7533,21 @@ app.get('/api/analytics/missions', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('Erreur /api/analytics/missions:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// CA « de l'année » (source Notion) pour une année pleine : facturé + non facturé rattaché à
+// l'année via « Année final ». Utilisé par la card « CA <année> HT » du Cockpit. Même fonction
+// partagée que /api/analytics et /api/kpi, donc valeur identique sur les trois pages.
+app.get('/api/ca-annee', async (req, res) => {
+  try {
+    const year = parseInt(req.query.year, 10);
+    if (Number.isNaN(year)) return res.status(400).json({ error: 'Paramètre year requis' });
+    const missions = await fetchAllNotionMissions();
+    res.json({ year, caAnnee: totalCaAnnee(missions, year) });
+  } catch (err) {
+    console.error('Erreur /api/ca-annee:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

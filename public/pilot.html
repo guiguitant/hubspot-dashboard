@@ -417,6 +417,8 @@
       gap: 0.75rem;
       margin-bottom: 2.5rem;
     }
+    /* Rangee qui accueille un nombre variable de cards (ex : Cockpit avec 5 KPIs) : s'ajuste seule. */
+    .kpi-row.kpi-row-auto { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
 
     .kpi-block {
       border-radius: var(--radius);
@@ -428,6 +430,8 @@
     .kpi-block:nth-child(2) { background: var(--success-bg); }
     .kpi-block:nth-child(3) { background: var(--warning-bg); }
     .kpi-block:nth-child(4) { background: var(--purple-bg); }
+    /* 5e teinte : rangees a 5 cards (ex : Cockpit avec la card « CA <annee> HT ») */
+    .kpi-block:nth-child(5) { background: var(--danger-bg); }
 
     .kpi-block .kpi-label {
       font-size: 0.75rem;
@@ -3422,8 +3426,8 @@
 
     <div class="error-banner" id="cockpitErrorBanner"></div>
 
-    <!-- Rangee 1 : 4 KPIs cles -->
-    <div class="kpi-row">
+    <!-- Rangee 1 : KPIs cles -->
+    <div class="kpi-row kpi-row-auto">
       <div class="kpi-block">
         <div class="kpi-label">Solde bancaire</div>
         <div class="kpi-value" id="ckSolde">--</div>
@@ -3435,9 +3439,14 @@
         <div class="kpi-sub" id="ckRunwaySub">mois de tresorerie</div>
       </div>
       <div class="kpi-block">
-        <div class="kpi-label">CA YTD</div>
+        <div class="kpi-label">CA signé</div>
         <div class="kpi-value" id="ckCaYtd">--</div>
         <div class="kpi-sub" id="ckCaYtdSub"></div>
+      </div>
+      <div class="kpi-block">
+        <div class="kpi-label">CA <span id="ckCaAnneeYear">2026</span> <span class="kpi-unit">HT</span></div>
+        <div class="kpi-value" id="ckCaAnnee">--</div>
+        <div class="kpi-sub">CA affecté à l'année · source Notion</div>
       </div>
       <div class="kpi-block">
         <div class="kpi-label">Pipeline pondere</div>
@@ -3496,7 +3505,7 @@
     <!-- KPIs -->
     <div class="kpi-row">
       <div class="kpi-block" onclick="openYtdDealsModal()" style="cursor:pointer">
-        <div class="kpi-label">CA YTD</div>
+        <div class="kpi-label">CA signé</div>
         <div class="kpi-value" id="kpiCaYtd">--</div>
         <div class="kpi-sub"><span id="kpiCaYtdSub"></span> <span id="kpiCaVsObj" class="tag" style="margin-left:0.3rem"></span></div>
       </div>
@@ -3987,9 +3996,9 @@
       <!-- KPI CA (source Notion) -->
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:2rem">
         <div class="kpi-block">
-          <div class="kpi-label">CA Facturé</div>
+          <div class="kpi-label">CA <span id="analyticsCaYear">2026</span> <span class="kpi-unit">HT</span></div>
           <div class="kpi-value" id="analyticsCa">--</div>
-          <div class="kpi-sub">acomptes + soldes facturés</div>
+          <div class="kpi-sub" id="analyticsCaSub">CA affecté à l'année · source Notion</div>
         </div>
         <div class="kpi-block">
           <div class="kpi-label">CA Signé</div>
@@ -4208,7 +4217,7 @@
         <div>
           <div class="kpi-eyebrow">Pilotage</div>
           <h2 class="kpi-page-title">Objectifs &amp; avancement</h2>
-          <p class="kpi-page-sub">CA signé et opéré par partner, avancement sur objectifs, et estimation des primes commerciales — sur l'année sélectionnée.</p>
+          <p class="kpi-page-sub">CA de l'année et opéré par partner, avancement sur objectifs, et estimation des primes commerciales, sur l'année sélectionnée.</p>
         </div>
         <div class="kpi-controls">
           <span class="kpi-year-wrap"><label for="kpiYear">Année</label><select id="kpiYear" onchange="initKpi()"></select></span>
@@ -4317,7 +4326,7 @@
       <div class="prime-head">
         <div>
           <h2>Estimateur de primes</h2>
-          <p class="prime-sub">Deux étages : commission individuelle sur le CA signé (new / repeat) + prime collective annuelle à paliers sur la facturation de l'année (facturé + à facturer). Pré-rempli avec les données KPI, éditable pour simuler.</p>
+          <p class="prime-sub">Deux étages : commission individuelle sur le CA de l'année (new / repeat) + prime collective annuelle à paliers sur la facturation de l'année (facturé + à facturer). Pré-rempli avec les données KPI, éditable pour simuler.</p>
         </div>
         <div class="prime-actions">
           <button class="analytics-tab" onclick="resetPrimeRealises()" title="Réinitialiser new/repeat et CA facturé aux données KPI">↺ Données réelles</button>
@@ -6336,7 +6345,7 @@
       const totalForecast = forecastDeals.reduce((s, d) => s + d.amount, 0);
       const totalAll = totalSigned + totalForecast;
 
-      document.getElementById('dealsModalTitle').textContent = `CA YTD — Jan a ${MONTHS_FR[currentMonth]} ${CURRENT_YEAR}`;
+      document.getElementById('dealsModalTitle').textContent = `CA signé · janv. à ${MONTHS_FR[currentMonth]} ${CURRENT_YEAR}`;
       document.getElementById('dealsModalTotal').textContent = formatEuro(totalAll) + ' — ' + combined.length + ' deal(s)';
 
       // Signed deals first (sorted by amount), then forecast deals
@@ -10093,7 +10102,7 @@
       tabCharges.style.visibility = 'hidden';
 
       try {
-        // Onglet CA : source Notion (CA facture, CA signe, ticket moyen, nb factures + graphes)
+        // Onglet CA : CA de l'annee (Notion) + CA signe (HubSpot) + ticket moyen, nb factures + graphes
         const res = await fetch(`/api/analytics?start=${start}&end=${end}`);
         const analyticsData = await res.json();
         renderAnalytics(analyticsData);
@@ -10304,7 +10313,11 @@
     function renderAnalytics(data) {
       const fmt = d => new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
       document.getElementById('analyticsPeriodLabel').textContent = `Du ${fmt(data.start)} au ${fmt(data.end)}`;
-      document.getElementById('analyticsCa').textContent = formatEuro(data.ca);
+      // CA « de l'année » (facturé ou non, source Notion) : même chiffre que le Cockpit et le KPI.
+      // Repli sur data.ca (facturé seul) si le champ n'est pas renvoyé, par sécurité.
+      document.getElementById('analyticsCa').textContent = formatEuro(data.caAnnee != null ? data.caAnnee : data.ca);
+      const analyticsCaYearEl = document.getElementById('analyticsCaYear');
+      if (analyticsCaYearEl) analyticsCaYearEl.textContent = String(data.start).slice(0, 4);
       document.getElementById('analyticsCaSigne').textContent = formatEuro(data.caSigne || 0);
       const caSigneSub = document.getElementById('analyticsCaSigneSub');
       if (caSigneSub) {
@@ -10607,7 +10620,7 @@
       });
     }
 
-    // Bandeau de synthèse en haut de page : CA signé, opéré, avancement, pool de primes estimé.
+    // Bandeau de synthèse en haut de page : CA de l'année, opéré, avancement, pool de primes estimé.
     function renderKpiOverview() {
       const box = document.getElementById('kpiOverview');
       const label = document.getElementById('kpiChartsLabel');
@@ -10617,11 +10630,13 @@
       if (empty) { box.style.display = 'none'; return; }
       box.style.display = '';
       const a = kpiData.all;
-      // CA signé = 100% Notion : réalisé Newsale + Upsale (missions rattachées à l'année via factures / "Année final").
+      // La tuile principale affiche le total « CA <année> HT » = caAnnee (source Notion, facturé ou non),
+      // identique au Cockpit et à Analytics. L'avancement, lui, compare le réalisé signé classé
+      // (Newsale + Upsale) à l'objectif : c'est la seule part rattachable à un objectif de partner.
       const signeReal = (a.newsale.realise || 0) + (a.upsale.realise || 0);
       const signeObj  = (a.newsale.objectif || 0) + (a.upsale.objectif || 0);
       const avPct = signeObj > 0 ? Math.round(signeReal / signeObj * 100) : null;
-      const signeSub = signeObj > 0 ? ('Objectif ' + kpiFmtEur(signeObj) + ' · source Notion') : 'Source Notion · pas d\'objectif défini';
+      const signeSub = signeObj > 0 ? ('Objectif ' + kpiFmtEur(signeObj) + ' · Notion, facturé ou non') : 'Notion, facturé ou non · pas d\'objectif défini';
 
       let poolVal = '—', poolSub = 'Réglez via « Réglages primes »';
       try {
@@ -10639,8 +10654,8 @@
         + '<div class="kpi-ov-bar"><span style="width:' + Math.max(0, Math.min(pct == null ? 0 : pct, 100)) + '%;"></span></div></div>';
 
       box.innerHTML =
-        tile('signe', 'CA signé', kpiFmtEur(signeReal), signeSub) +
-        tileBar('av', 'Avancement signé', (avPct === null ? '—' : avPct + ' %'), avPct) +
+        tile('signe', 'CA ' + (kpiData.year || '') + ' HT', kpiFmtEur(kpiData.caAnnee || 0), signeSub) +
+        tileBar('av', 'Avancement', (avPct === null ? '—' : avPct + ' %'), avPct) +
         tile('pool', 'Prime pool estimée', poolVal, poolSub);
     }
 
@@ -10766,7 +10781,7 @@
     }
 
     // ===== Estimateur de primes (onglet KPI) =====
-    // Étage 1 : commission perso sur CA signé (new=Newsale, repeat=Upsale).
+    // Étage 1 : commission perso sur CA de l'année (new=Newsale, repeat=Upsale).
     // Étage 2 : prime collective annuelle à paliers sur la facturation de l'année (facturé + à facturer).
     let primeConfig = null;              // { rates:{[p]:{txNew,txRepeat}}, tiers:[{seuil,taux}], resultatAnnuel, gateTrimestriel }
     let primeState = null;               // { realises:{[p]:{new,repeat}}, caFacture } — copie de travail (simulation)
@@ -10839,7 +10854,7 @@
       const factu = kpiData.facturation || null;
       const caFactDefault = factu ? (factu.total || 0) : (kpiData.all && kpiData.all.opere ? kpiData.all.opere.realise : 0);
       primeState = { realises: {}, caFacture: caFactDefault };
-      // CA signé = réalisé Notion par partner : New = Newsale, Repeat = Upsale
+      // CA de l'année = réalisé Notion par partner : New = Newsale, Repeat = Upsale
       // (missions rattachées à l'année via leurs factures / "Année final", cf. computeKpi).
       parts.forEach(p => {
         primeState.realises[p.partner] = { new: p.newsale.realise || 0, repeat: p.upsale.realise || 0 };
@@ -10865,7 +10880,7 @@
         + '</div>'
         + '<div class="prime-panel">'
           + '<p class="prime-panel-h">Hypothèses</p>'
-          + '<p class="prime-panel-sub">CA signé = réalisé Notion par partner (New = Newsale, Repeat = Upsale), missions rattachées à l\'année via leurs factures ou le champ « Année final ». Éditable pour simuler : « ↺ Données réelles » restaure. Taux, paliers et résultat se règlent via « Réglages primes ».</p>'
+          + '<p class="prime-panel-sub">CA de l\'année = réalisé Notion par partner (New = Newsale, Repeat = Upsale), missions rattachées à l\'année via leurs factures ou le champ « Année final ». Éditable pour simuler : « ↺ Données réelles » restaure. Taux, paliers et résultat se règlent via « Réglages primes ».</p>'
           + '<table class="prime-inputs"><thead><tr><th>Personne</th><th>New signé</th><th>Repeat signé</th><th>Taux new / repeat</th></tr></thead><tbody>' + rowsHtml + '</tbody></table>'
           + '<p class="prime-caopere">CA facturé ' + (kpiData.year || '') + ' (base paliers, étage 2) : <span class="prime-cellin"><input id="prime-cafacture-in" type="text" inputmode="numeric" value="' + primeIntFr(primeState.caFacture) + '"><span class="u">€</span></span>'
             + (factu ? '<span style="color:var(--text-secondary);">facturé ' + primeFmtEur(factu.facture) + ' · à facturer ' + primeFmtEur(factu.aFacturer) + '</span>' : '')
@@ -10922,9 +10937,9 @@
       const parts = primeParticipants;
       const n = parts.length;
 
-      // CA signé total dans le panneau
+      // CA de l'année total dans le panneau
       const sigLbl = document.getElementById('prime-casigne-lbl');
-      if (sigLbl) sigLbl.textContent = ' · CA signé total : ' + primeFmtEur(R.caSigne);
+      if (sigLbl) sigLbl.textContent = ' · CA de l\'année total : ' + primeFmtEur(R.caSigne);
 
       // --- Escalier des paliers ---
       const firstSeuil = R.tiersAsc.length ? R.tiersAsc[0].seuil : 0;
@@ -10942,7 +10957,7 @@
       }).join('');
       const stairsCard = '<div class="prime-card"><p class="prime-card-h">Étage 2 — palier collectif atteint</p>'
         + '<div class="prime-stairs">' + stairs + '</div>'
-        + '<p class="prime-stairs-foot">CA signé : <b>' + primeFmtEur(R.caSigne) + '</b> → CA facturé : <b>' + primeFmtEur(R.caFacture) + '</b> → palier <b>' + primeFmtPct(R.tauxColl) + '</b> → prime collective <b>' + primeFmtEur(R.collTotal) + '</b> (<b>' + primeFmtEur(R.collPart) + '</b>/personne).</p></div>';
+        + '<p class="prime-stairs-foot">CA de l\'année : <b>' + primeFmtEur(R.caSigne) + '</b> → CA facturé : <b>' + primeFmtEur(R.caFacture) + '</b> → palier <b>' + primeFmtPct(R.tauxColl) + '</b> → prime collective <b>' + primeFmtEur(R.collTotal) + '</b> (<b>' + primeFmtEur(R.collPart) + '</b>/personne).</p></div>';
 
       // --- 3 KPIs ---
       const kpis = '<div class="prime-kpis">'
@@ -10981,7 +10996,7 @@
       const avgQ = R.caSigne / 4;
       const gateOk = avgQ >= (primeConfig.gateTrimestriel || 0);
       const gate = '<div class="prime-card"><div class="prime-gatecard">'
-        + '<div class="gk-txt">Étage 1 — seuil de rentabilité : <b>' + primeFmtEur(primeConfig.gateTrimestriel) + '</b> de CA / trimestre. CA signé annuel ÷ 4 (moyenne) : <b>' + primeFmtEur(avgQ) + '</b>.</div>'
+        + '<div class="gk-txt">Étage 1 · seuil de rentabilité : <b>' + primeFmtEur(primeConfig.gateTrimestriel) + '</b> de CA / trimestre. CA de l\'année ÷ 4 (moyenne) : <b>' + primeFmtEur(avgQ) + '</b>.</div>'
         + '<div class="prime-gk-state" style="background:' + (gateOk ? 'var(--success-bg)' : 'var(--warning-bg)') + ';">' + (gateOk ? 'Au-dessus en moyenne' : 'Sous le seuil en moyenne') + '</div>'
         + '</div></div>';
 
@@ -11006,7 +11021,7 @@
       const parts = primeParticipants.length ? primeParticipants : primeCommercialPartners().map(p => p.partner);
 
       // A. Taux par personne
-      let html = '<div class="kpi-rg-h">Taux par personne <span class="kpi-rg-badge">% sur CA signé</span></div>';
+      let html = '<div class="kpi-rg-h">Taux par personne <span class="kpi-rg-badge">% sur CA de l\'année</span></div>';
       if (parts.length === 0) {
         html += '<p style="color:var(--text-secondary);">Aucun partner commercial cette année.</p>';
       } else {
@@ -16291,7 +16306,7 @@
       }
       document.getElementById('ckRunwaySub').textContent = chargesMoy > 0 ? 'Charges moy. ' + formatEuro(chargesMoy) + '/mois' : '';
 
-      // CA YTD
+      // CA signé = cumul YTD des deals gagnés (source HubSpot). Libellé renommé, donnée inchangée.
       const currentMonth = new Date().getMonth();
       const data2026 = ckDashData.yearlyData[CURRENT_YEAR] || [];
       const caYTD = data2026.slice(0, currentMonth + 1).reduce((s, m) => s + m.total, 0);
@@ -16304,6 +16319,14 @@
       } else {
         document.getElementById('ckCaYtdSub').textContent = 'Cumul ' + MONTHS_FR[currentMonth];
       }
+
+      // CA de l'annee (source Notion) : meme chiffre que l'onglet Analytics et le KPI (fonction partagee cote serveur).
+      const ckCaAnneeYearEl = document.getElementById('ckCaAnneeYear');
+      if (ckCaAnneeYearEl) ckCaAnneeYearEl.textContent = CURRENT_YEAR;
+      fetch('/api/ca-annee?year=' + CURRENT_YEAR)
+        .then(r => r.json())
+        .then(d => { document.getElementById('ckCaAnnee').textContent = formatEuro(d.caAnnee || 0); })
+        .catch(e => console.error('Erreur CA annee cockpit:', e));
 
       // Pipeline pondere
       document.getElementById('ckPipeline').textContent = formatEuro(ckTresoData.pipelinePondere || 0);

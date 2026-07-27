@@ -1,5 +1,5 @@
 'use strict';
-const { computeKpi, OPERE_STATES, SIGNE_EXCLUDED_STATES } = require('./kpiCompute');
+const { computeKpi, totalCaAnnee, OPERE_STATES, SIGNE_EXCLUDED_STATES } = require('./kpiCompute');
 
 // Helper : fabrique une mission avec des valeurs par défaut raisonnables.
 // Par défaut : rien de facturé (montantAcompte 0, pas de dates de facture) et "Année final" = 2026
@@ -204,5 +204,47 @@ describe('computeKpi — missionsForSplit', () => {
   it('mission à 1 seul partner par axe → pas listée', () => {
     const r = computeKpi({ missions: [mission()], objectives: [], splits: [], year: 2026 });
     expect(r.missionsForSplit).toEqual([]);
+  });
+});
+
+describe('CA de l\'année (caAnnee) : total « CA 2026 HT » partagé', () => {
+  it('caAnnee = CA rattaché à l\'année, toutes missions non « Annulé »', () => {
+    const r = computeKpi({ missions: [mission()], objectives: [], splits: [], year: 2026 });
+    // 1 mission par défaut : solde 10000 rattaché à 2026 via « Année final »
+    expect(r.caAnnee).toBe(10000);
+  });
+
+  it('caAnnee inclut les missions non classées (type_ca vide), contrairement à newsale+upsale', () => {
+    const missions = [
+      mission({ id: 'a', typeCa: 'Newsale', ca: 10000 }),
+      mission({ id: 'b', typeCa: 'Non défini', ca: 5000 }),
+    ];
+    const r = computeKpi({ missions, objectives: [], splits: [], year: 2026 });
+    // newsale + upsale ne comptent QUE la mission classée...
+    expect(r.all.newsale.realise + r.all.upsale.realise).toBe(10000);
+    // ...alors que caAnnee compte les deux (total financier de l'année)
+    expect(r.caAnnee).toBe(15000);
+  });
+
+  it('caAnnee exclut « Annulé »', () => {
+    const missions = [
+      mission({ id: 'a', ca: 10000 }),
+      mission({ id: 'b', ca: 4000, etat: 'Annulé' }),
+    ];
+    expect(computeKpi({ missions, objectives: [], splits: [], year: 2026 }).caAnnee).toBe(10000);
+  });
+
+  it('caAnnee répartit une mission à cheval par date de facture', () => {
+    const m = mission({
+      ca: 10000, montantAcompte: 4000,
+      dateFactureAcompte: '2025-12-15', dateFactureFinale: '2026-01-20', anneeFinal: '2026',
+    });
+    expect(computeKpi({ missions: [m], objectives: [], splits: [], year: 2025 }).caAnnee).toBe(4000);
+    expect(computeKpi({ missions: [m], objectives: [], splits: [], year: 2026 }).caAnnee).toBe(6000);
+  });
+
+  it('totalCaAnnee est exporté et donne le même total que le champ caAnnee', () => {
+    const missions = [mission({ id: 'a', ca: 10000 }), mission({ id: 'b', ca: 5000, typeCa: 'Non défini' })];
+    expect(totalCaAnnee(missions, 2026)).toBe(15000);
   });
 });
