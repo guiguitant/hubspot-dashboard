@@ -562,6 +562,9 @@ app.post('/api/pipeline-ponderation', async (req, res) => {
 // Les hs_date_entered_* sont vides sur ce portail ; on reconstruit le parcours via l'historique
 // de la propriété dealstage (batch/read, max 50 ids/lot). Résultat mis en cache 12 h.
 const { analyzeDeal: analyzeDealForConversion, computeStageWinRates } = require('./utils/stageWinRates');
+// Dormance des deals : miroir serveur de la logique client, pour exclure du pipeline pondéré les mêmes
+// deals que la carte Commercial (la seule formule de référence). Voir utils/dealDormancy.js.
+const { isDealDormant } = require('./utils/dealDormancy');
 
 let conversionCache = null;
 let conversionCacheTime = 0;
@@ -636,6 +639,7 @@ function weightPipelineDeals(pipelineDeals, factor = 1) {
     if (stage.forecast === false) continue;
     const deals = pipelineDeals[stage.label] || [];
     for (const deal of deals) {
+      if (deal.dormant) continue; // deal « en sommeil » : exclu, comme dans la carte Commercial
       entries.push({
         name: deal.name,
         amount: deal.amount,
@@ -1003,6 +1007,23 @@ async function fetchOpenDeals() {
     }
   }
 
+  // Métadonnées locales (relances / notes / tâches / RDV) pour marquer les deals « en sommeil ».
+  // En cas d'échec Supabase, on n'exclut personne (metaLoaded=false) : on retombe sur l'ancien
+  // comportement plutôt que de vider le pipeline à tort.
+  let metaLoaded = false;
+  const metaByDeal = {};
+  try {
+    const { data: metaRows, error } = await supabaseAdmin
+      .from('deal_metadata')
+      .select('deal_id, relances, notes, tasks, next_meeting_at');
+    if (error) throw error;
+    for (const row of metaRows || []) metaByDeal[row.deal_id] = row;
+    metaLoaded = true;
+  } catch (e) {
+    console.error('[fetchOpenDeals] deal_metadata KO, dormance non appliquée :', e.message);
+  }
+  const nowTs = Date.now();
+
   // Group by stage, only keep target stages
   const pipelineDeals = {};
   for (const stage of KANBAN_STAGES) {
@@ -1015,15 +1036,18 @@ async function fetchOpenDeals() {
     if (!stageInfo) continue;
 
     const stageEnteredKey = `hs_date_entered_${stageInfo.id}`;
+    const createdate = deal.properties.createdate || null;
     pipelineDeals[stageInfo.label].push({
       id: deal.id,
       name: deal.properties.dealname || 'Sans nom',
       amount: parseFloat(deal.properties.amount) || 0,
       probability: stageInfo.probability,
-      createdate: deal.properties.createdate || null,
+      createdate,
       closedate: deal.properties.closedate || null,
       stageEnteredAt: stageEnteredMap[deal.id] || deal.properties[stageEnteredKey] || null,
       description: deal.properties.description || '',
+      // « En sommeil » -> exclu du pipeline pondéré (weightPipelineDeals), même règle que le Commercial.
+      dormant: metaLoaded ? isDealDormant({ createdate }, metaByDeal[deal.id], nowTs) : false,
     });
   }
 
