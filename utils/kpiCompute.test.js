@@ -1,10 +1,10 @@
 'use strict';
-const { computeKpi, totalCaAnnee, OPERE_STATES, SIGNE_EXCLUDED_STATES } = require('./kpiCompute');
+const { computeKpi, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, OPERE_STATES, SIGNE_EXCLUDED_STATES } = require('./kpiCompute');
 
 // Helper : fabrique une mission avec des valeurs par défaut raisonnables.
-// Par défaut : rien de facturé (montantAcompte 0, pas de dates de facture) et "Année final" = 2026
-// → tout le CA (le solde) est rattaché au signé 2026 via "Année final". L'opéré, lui, reste daté
-// par dateCreation (2026). Les tests de datage par facture surchargent ces champs.
+// Par défaut : signée le 2026-03-01 (via dateCreation, faute de dateSignature) → tout le CA est
+// rattaché au signé 2026 (daté à la signature). L'opéré, lui, est daté par dateCreation (2026).
+// anneeFinal/dates de facture ne servent qu'à caAnnee (le total facturé), pas au réalisé signé.
 function mission(over = {}) {
   return {
     id: 'm1', nom: 'Mission', client: 'Client', ca: 10000,
@@ -89,50 +89,39 @@ describe('computeKpi — filtres états & année', () => {
   });
 });
 
-describe('computeKpi — CA signé : datage par facture + "Année final"', () => {
-  it('acompte facturé 2025 / solde facturé 2026 → réparti sur les deux années', () => {
+describe('computeKpi — CA signé : datage à la signature (comme les primes)', () => {
+  it('le CA entier tombe sur l\'année de signature, quelles que soient les dates de facture', () => {
     const m = mission({
-      ca: 10000, montantAcompte: 4000,
-      dateFactureAcompte: '2025-12-15', dateFactureFinale: '2026-01-20',
-      anneeFinal: '2026',
+      ca: 10000, dateSignature: '2026-03-01', montantAcompte: 4000,
+      dateFactureAcompte: '2025-12-15', dateFactureFinale: '2027-01-20', anneeFinal: '2027',
     });
-    const r2025 = computeKpi({ missions: [m], objectives: [], splits: [], year: 2025 });
-    const r2026 = computeKpi({ missions: [m], objectives: [], splits: [], year: 2026 });
-    expect(r2025.partners.find(p => p.partner === 'Vincent').newsale.realise).toBe(4000); // acompte
-    expect(r2026.partners.find(p => p.partner === 'Vincent').newsale.realise).toBe(6000); // solde = ca - acompte
+    // Signé en 2026 (signature) : tout le CA, pas de découpage acompte/solde ni de rattachement facture.
+    expect(computeKpi({ missions: [m], objectives: [], splits: [], year: 2026 }).partners.find(p => p.partner === 'Vincent').newsale.realise).toBe(10000);
+    expect(computeKpi({ missions: [m], objectives: [], splits: [], year: 2025 }).partners.find(p => p.partner === 'Vincent')).toBeUndefined();
+    expect(computeKpi({ missions: [m], objectives: [], splits: [], year: 2027 }).partners.find(p => p.partner === 'Vincent')).toBeUndefined();
   });
 
-  it('solde non encore facturé → rattaché à "Année final"', () => {
-    const m = mission({
-      ca: 10000, montantAcompte: 4000,
-      dateFactureAcompte: '2026-02-01', dateFactureFinale: null,
-      anneeFinal: '2026',
-    });
-    const r = computeKpi({ missions: [m], objectives: [], splits: [], year: 2026 });
-    // acompte 4000 (facture 2026) + solde 6000 (non facturé → Année final 2026) = 10000
-    expect(r.partners.find(p => p.partner === 'Vincent').newsale.realise).toBe(10000);
-  });
-
-  it('mission non facturée du tout → tout rattaché à "Année final"', () => {
-    const m = mission({ ca: 8000, montantAcompte: 0, dateFactureAcompte: null, dateFactureFinale: null, anneeFinal: '2027' });
-    expect(computeKpi({ missions: [m], objectives: [], splits: [], year: 2027 }).partners.find(p => p.partner === 'Vincent').newsale.realise).toBe(8000);
+  it('"Date de signature" prime sur la date de création', () => {
+    const m = mission({ ca: 8000, dateSignature: '2025-11-01', dateCreation: '2026-03-01T10:00:00.000Z' });
+    expect(computeKpi({ missions: [m], objectives: [], splits: [], year: 2025 }).partners.find(p => p.partner === 'Vincent').newsale.realise).toBe(8000);
     expect(computeKpi({ missions: [m], objectives: [], splits: [], year: 2026 }).partners.find(p => p.partner === 'Vincent')).toBeUndefined();
   });
 
-  it('la date de facture prime sur "Année final"', () => {
-    const m = mission({
-      ca: 10000, montantAcompte: 10000, // tout en acompte, solde = 0
-      dateFactureAcompte: '2025-06-01', dateFactureFinale: null,
-      anneeFinal: '2026', // ignoré pour l'acompte car sa facture est datée (2025)
-    });
-    expect(computeKpi({ missions: [m], objectives: [], splits: [], year: 2025 }).partners.find(p => p.partner === 'Vincent').newsale.realise).toBe(10000);
-    expect(computeKpi({ missions: [m], objectives: [], splits: [], year: 2026 }).partners.find(p => p.partner === 'Vincent')).toBeUndefined();
+  it('sans "Date de signature", repli sur la date de création', () => {
+    const m = mission({ ca: 5000, dateSignature: null, dateCreation: '2026-06-10T10:00:00.000Z' });
+    expect(computeKpi({ missions: [m], objectives: [], splits: [], year: 2026 }).partners.find(p => p.partner === 'Vincent').newsale.realise).toBe(5000);
   });
 
-  it('sans date de facture ni "Année final" → pas de signé (mais opéré possible)', () => {
-    const m = mission({ ca: 5000, montantAcompte: 0, dateFactureAcompte: null, dateFactureFinale: null, anneeFinal: '' });
+  it('les dates de facture ne touchent PAS le réalisé signé (uniquement caAnnee)', () => {
+    // Signé en 2026 mais facturé intégralement en 2027 : le signé reste sur 2026.
+    const m = mission({ ca: 10000, dateSignature: '2026-05-01', montantAcompte: 10000, dateFactureAcompte: '2027-01-01', dateFactureFinale: null, anneeFinal: '2027' });
+    expect(computeKpi({ missions: [m], objectives: [], splits: [], year: 2026 }).partners.find(p => p.partner === 'Vincent').newsale.realise).toBe(10000);
+  });
+
+  it('type non classé → pas en newsale/upsale, mais opéré OK (signé daté à la création)', () => {
+    const m = mission({ ca: 5000, dateSignature: null, dateCreation: '2026-04-01T10:00:00.000Z', typeCa: 'Non défini' });
     const r = computeKpi({ missions: [m], objectives: [], splits: [], year: 2026 });
-    expect(r.partners.find(p => p.partner === 'Vincent')).toBeUndefined();   // aucun signé rattaché
+    expect(r.partners.find(p => p.partner === 'Vincent')).toBeUndefined();          // non classé → pas en newsale
     expect(r.partners.find(p => p.partner === 'Guillaume').opere.realise).toBe(5000); // opéré via création 2026
   });
 });
@@ -246,5 +235,147 @@ describe('CA de l\'année (caAnnee) : total « CA 2026 HT » partagé', () => {
   it('totalCaAnnee est exporté et donne le même total que le champ caAnnee', () => {
     const missions = [mission({ id: 'a', ca: 10000 }), mission({ id: 'b', ca: 5000, typeCa: 'Non défini' })];
     expect(totalCaAnnee(missions, 2026)).toBe(15000);
+  });
+});
+
+describe('signedByQuarter — CA signé par trimestre (datage signature)', () => {
+  it('mission par défaut (Newsale, création 2026-03-01 = Q1)', () => {
+    const r = signedByQuarter([mission()], 2026, []);
+    expect(r.byPartner.Vincent.new).toEqual([10000, 0, 0, 0]);
+    expect(r.byPartner.Vincent.repeat).toEqual([0, 0, 0, 0]);
+    expect(r.quarterTotals).toEqual([10000, 0, 0, 0]);
+    expect(r.total).toBe(10000);
+  });
+
+  it('"Date de signature" prime sur la date de création pour le trimestre', () => {
+    const r = signedByQuarter([mission({ dateSignature: '2026-07-15', dateCreation: '2026-03-01T10:00:00.000Z' })], 2026, []);
+    expect(r.byPartner.Vincent.new).toEqual([0, 0, 10000, 0]); // Q3 (juillet)
+    expect(r.quarterTotals).toEqual([0, 0, 10000, 0]);
+  });
+
+  it('Upsale → bucket repeat', () => {
+    const r = signedByQuarter([mission({ typeCa: 'Upsale' })], 2026, []);
+    expect(r.byPartner.Vincent.repeat).toEqual([10000, 0, 0, 0]);
+    expect(r.byPartner.Vincent.new).toEqual([0, 0, 0, 0]);
+  });
+
+  it('2 partners → réparti 50/50 dans le trimestre, total non dédoublé', () => {
+    const r = signedByQuarter([mission({ partnerCommercial: ['Vincent', 'Nathan'] })], 2026, []);
+    expect(r.byPartner.Vincent.new).toEqual([5000, 0, 0, 0]);
+    expect(r.byPartner.Nathan.new).toEqual([5000, 0, 0, 0]);
+    expect(r.quarterTotals).toEqual([10000, 0, 0, 0]);
+  });
+
+  it('override 70/30 respecté', () => {
+    const r = signedByQuarter(
+      [mission({ id: 'mX', partnerCommercial: ['Vincent', 'Nathan'] })],
+      2026,
+      [
+        { mission_id: 'mX', axis: 'commercial', partner: 'Vincent', pct: 70 },
+        { mission_id: 'mX', axis: 'commercial', partner: 'Nathan', pct: 30 },
+      ],
+    );
+    expect(r.byPartner.Vincent.new[0]).toBe(7000);
+    expect(r.byPartner.Nathan.new[0]).toBe(3000);
+  });
+
+  it('non classée : compte dans quarterTotals (seuil) mais dans aucune prime perso', () => {
+    const r = signedByQuarter([mission({ typeCa: 'Non défini', ca: 5000 })], 2026, []);
+    expect(r.quarterTotals).toEqual([5000, 0, 0, 0]);
+    expect(r.partners).toEqual([]);
+    expect(r.byPartner).toEqual({});
+  });
+
+  it('Annulé exclu du total et des primes', () => {
+    const r = signedByQuarter([mission({ etat: 'Annulé' })], 2026, []);
+    expect(r.quarterTotals).toEqual([0, 0, 0, 0]);
+    expect(r.partners).toEqual([]);
+  });
+
+  it('missions sur des trimestres différents (Q1 et Q4)', () => {
+    const r = signedByQuarter([
+      mission({ id: 'a', dateSignature: '2026-02-10', ca: 8000, partnerCommercial: ['Vincent'] }),
+      mission({ id: 'b', dateSignature: '2026-11-20', ca: 12000, partnerCommercial: ['Vincent'] }),
+    ], 2026, []);
+    expect(r.byPartner.Vincent.new).toEqual([8000, 0, 0, 12000]);
+    expect(r.quarterTotals).toEqual([8000, 0, 0, 12000]);
+    expect(r.total).toBe(20000);
+  });
+
+  it('mauvaise année exclue', () => {
+    const r = signedByQuarter([mission({ dateSignature: '2025-05-01' })], 2026, []);
+    expect(r.quarterTotals).toEqual([0, 0, 0, 0]);
+    expect(r.total).toBe(0);
+  });
+
+  it('quarterOfDate mappe le mois vers le trimestre', () => {
+    expect(quarterOfDate('2026-01-15')).toBe(1);
+    expect(quarterOfDate('2026-04-01')).toBe(2);
+    expect(quarterOfDate('2026-09-30')).toBe(3);
+    expect(quarterOfDate('2026-12-31')).toBe(4);
+    expect(quarterOfDate(null)).toBeNull();
+  });
+
+  it('detailByPartner garde le détail des deals (traçabilité prime -> deal)', () => {
+    const r = signedByQuarter([mission({ id: 'm1', nom: 'Projet X', client: 'ClientX' })], 2026, []);
+    expect(r.detailByPartner.Vincent[0]).toEqual([{ id: 'm1', nom: 'Projet X', client: 'ClientX', montant: 10000, pct: 100, type: 'new' }]);
+    expect(r.detailByPartner.Vincent[1]).toEqual([]); // Q2 vide
+  });
+
+  it('split 2 partners : détail avec le bon montant et %', () => {
+    const r = signedByQuarter([mission({ id: 'mX', partnerCommercial: ['Vincent', 'Nathan'] })], 2026, []);
+    expect(r.detailByPartner.Vincent[0][0]).toMatchObject({ montant: 5000, pct: 50 });
+    expect(r.detailByPartner.Nathan[0][0]).toMatchObject({ montant: 5000, pct: 50 });
+  });
+
+  it('mission signée SANS partner : non attribuée (comptée dans quarterTotals, pas dans byPartner)', () => {
+    const r = signedByQuarter([mission({ partnerCommercial: [] })], 2026, []);
+    expect(r.quarterTotals).toEqual([10000, 0, 0, 0]);
+    expect(r.partners).toEqual([]);
+    expect(r.unattributed.total).toBe(10000);
+    expect(r.unattributed.missions[0]).toMatchObject({ reason: 'sans partner', ca: 10000 });
+  });
+
+  it('mission signée SANS type : non attribuée (reason "sans type")', () => {
+    const r = signedByQuarter([mission({ typeCa: 'Non défini' })], 2026, []);
+    expect(r.unattributed.total).toBe(10000);
+    expect(r.unattributed.missions[0].reason).toBe('sans type');
+  });
+
+  it('unattributed.total = somme des CA signés non rattachés', () => {
+    const r = signedByQuarter([
+      mission({ id: 'a', partnerCommercial: ['Vincent'], ca: 10000 }),
+      mission({ id: 'b', partnerCommercial: [], ca: 4000 }),
+      mission({ id: 'c', typeCa: 'Non défini', ca: 3000 }),
+    ], 2026, []);
+    expect(r.total).toBe(17000);
+    expect(r.unattributed.total).toBe(7000);
+  });
+});
+
+describe('clawbackCandidates : reprises sur deals annulés après paiement', () => {
+  it('mission Annulé signée sur un trimestre payé (T1, paidThrough=2) : candidat', () => {
+    const r = clawbackCandidates([mission({ id: 'a', etat: 'Annulé', dateSignature: '2026-02-10', partnerCommercial: ['Vincent'], ca: 8000 })], 2026, [], 2);
+    expect(r).toEqual([{ id: 'a', nom: 'Mission', client: 'Client', quarter: 1, partner: 'Vincent', montant: 8000, type: 'new' }]);
+  });
+
+  it('mission Annulé signée sur le trimestre courant (T3 > paidThrough 2) : PAS un candidat', () => {
+    const r = clawbackCandidates([mission({ etat: 'Annulé', dateSignature: '2026-08-10' })], 2026, [], 2);
+    expect(r).toEqual([]);
+  });
+
+  it('mission NON annulée : pas de clawback', () => {
+    const r = clawbackCandidates([mission({ dateSignature: '2026-02-10' })], 2026, [], 2);
+    expect(r).toEqual([]);
+  });
+
+  it('mission Annulé sans partner : ignorée (pas de prime générée)', () => {
+    const r = clawbackCandidates([mission({ etat: 'Annulé', dateSignature: '2026-02-10', partnerCommercial: [] })], 2026, [], 2);
+    expect(r).toEqual([]);
+  });
+
+  it('split respecté sur un clawback', () => {
+    const r = clawbackCandidates([mission({ id: 'x', etat: 'Annulé', dateSignature: '2026-02-10', partnerCommercial: ['Vincent', 'Nathan'], ca: 10000 })], 2026, [], 2);
+    expect(r.map(c => c.montant)).toEqual([5000, 5000]);
   });
 });

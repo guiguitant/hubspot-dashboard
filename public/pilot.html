@@ -728,7 +728,7 @@
     /* --- Kanban --- */
     .kanban-board {
       display: grid;
-      grid-template-columns: repeat(4, 1fr) auto auto;
+      grid-template-columns: repeat(4, 1fr) auto auto auto; /* 4 stages + 3 colonnes repliables (À trier, À relancer, Gagné) */
       gap: 0.75rem;
     }
 
@@ -778,7 +778,7 @@
     /* Pipeline élargi : déborde la largeur max de .page pour gagner de l'espace
        --extra = (min(viewport, 1600px) - page max-width) / 2, jamais négatif */
     .section-wide {
-      --extra: max(0px, calc((min(100vw, 1600px) - 1100px) / 2));
+      --extra: max(0px, calc((min(100vw - 220px, 1800px) - 1100px) / 2)); /* -220px = largeur de la nav fixe ; cap 1800px pour un pipeline un peu plus large */
       margin-left: calc(-1 * var(--extra));
       margin-right: calc(-1 * var(--extra));
     }
@@ -3448,7 +3448,7 @@
         <div class="kpi-value" id="ckCaAnnee">--</div>
         <div class="kpi-sub">CA affecté à l'année · source Notion</div>
       </div>
-      <div class="kpi-block">
+      <div class="kpi-block" onclick="openCockpitPipelineDetail()" style="cursor:pointer">
         <div class="kpi-label">Pipeline pondere</div>
         <div class="kpi-value" id="ckPipeline">--</div>
         <div class="kpi-sub" id="ckPipelineSub"></div>
@@ -3514,8 +3514,8 @@
         <div class="kpi-value" id="kpiObjYtd">--</div>
         <div class="kpi-sub" id="kpiObjYtdSub"></div>
       </div>
-      <div class="kpi-block">
-        <div class="kpi-label">Pipeline pondere</div>
+      <div class="kpi-block" onclick="openCommercialPipelineDetail()" style="cursor:pointer">
+        <div class="kpi-label" style="display:flex;align-items:center;justify-content:space-between;gap:0.4rem"><span>Pipeline pondere</span><button onclick="event.stopPropagation(); openPonderationModal()" title="Régler les % de pondération par étape" style="background:none;border:none;cursor:pointer;font-size:0.9rem;opacity:0.55;padding:0;line-height:1">&#9881;</button></div>
         <div class="kpi-value" id="kpiPipelineWeighted">--</div>
         <div class="kpi-sub" id="kpiPipelineWeightedSub"></div>
       </div>
@@ -3540,9 +3540,12 @@
 
     <!-- Pipeline Kanban -->
     <div class="section section-wide">
+      <!-- Contrôle de cohérence CA signé Notion <-> HubSpot (juste au-dessus du pipe) -->
+      <div id="commercialCoherence" style="margin:0 0 0.75rem"></div>
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.75rem">
         <div style="display:flex;align-items:center;gap:0.75rem">
           <div class="section-title" style="margin-bottom:0">Pipeline &mdash; Deals en cours</div>
+          <div class="pipeline-activity" id="pipelineActivity" style="display:flex;gap:0.4rem;margin:0"></div>
           <button class="new-deal-btn" onclick="openNewDealModal()">&#43; Nouveau deal</button>
           <button class="new-deal-btn" onclick="openTasksModal()" style="background:var(--bg);color:var(--text);border:1px solid var(--border)" title="Voir toutes les tâches, classées par échéance">&#128203; Toutes les tâches</button>
           <div class="pipeline-view-toggle" id="pipelineViewToggle">
@@ -3575,7 +3578,6 @@
         <span id="criticalCounterText">0 deal(s) critique(s)</span>
         <span style="opacity:0.85;font-weight:500;font-size:0.72rem">cliquer pour voir</span>
       </div>
-      <div class="pipeline-activity" id="pipelineActivity"></div>
       <div class="forecast-bar" id="forecastBar">
         <span><strong id="forecastCount">0</strong> deal(s) selectionne(s) &mdash; Forecast : <strong id="forecastAmount">0 €</strong></span>
         <button class="btn" onclick="clearForecast()">Tout deselectionner</button>
@@ -4326,7 +4328,7 @@
       <div class="prime-head">
         <div>
           <h2>Estimateur de primes</h2>
-          <p class="prime-sub">Deux étages : commission individuelle sur le CA de l'année (new / repeat) + prime collective annuelle à paliers sur la facturation de l'année (facturé + à facturer). Pré-rempli avec les données KPI, éditable pour simuler.</p>
+          <p class="prime-sub">Deux étages : commission individuelle sur le CA signé de l'année (new / repeat) + prime collective annuelle à paliers sur la facturation de l'année (facturé + à facturer). Pré-rempli avec les données KPI, éditable pour simuler.</p>
         </div>
         <div class="prime-actions">
           <button class="analytics-tab" onclick="resetPrimeRealises()" title="Réinitialiser new/repeat et CA facturé aux données KPI">↺ Données réelles</button>
@@ -5492,7 +5494,7 @@
       }
 
       if (page === 'cockpit') refreshCockpit();
-      if (page === 'dashboard') { fetchDealMetadata().then(() => renderKanban()); if (dashboardData) render(); else { refreshData(); } refreshEmeliaCampaign(); if (!repeatClientsData) fetchRepeatClients(); }
+      if (page === 'dashboard') { fetchDealMetadata().then(() => renderKanban()); if (dashboardData) render(); else { refreshData(); } refreshEmeliaCampaign(); if (!repeatClientsData) fetchRepeatClients(); renderCommercialCoherence(); }
       if (page === 'facturation') {
         if (factData) {
           // Patch 2++++ : on rafraîchit AUSSI le matching summary (même si factData existe), sinon le
@@ -5957,6 +5959,80 @@
     // --- Render ---
     const CURRENT_YEAR = 2026;
 
+    // Pastille de cohérence CA signé : Notion (daté signature, base primes) vs HubSpot (deals gagnés).
+    async function renderCommercialCoherence() {
+      const el = document.getElementById('commercialCoherence');
+      if (!el) return;
+      try {
+        const [kpi, ana] = await Promise.all([
+          fetch('/api/kpi?year=' + CURRENT_YEAR).then(r => r.json()),
+          fetch('/api/analytics?start=' + CURRENT_YEAR + '-01-01&end=' + CURRENT_YEAR + '-12-31').then(r => r.json()),
+        ]);
+        const notion = (kpi.signedQuarterly && kpi.signedQuarterly.total) || 0;
+        const hubspot = ana.caSigne || 0;
+        const ecart = hubspot - notion;
+        const ok = Math.abs(ecart) <= Math.max(2000, hubspot * 0.02); // tolérance : subventionné / arrondis
+        const col = ok ? 'var(--success)' : 'var(--danger)';
+        const bg = ok ? 'var(--success-bg)' : 'var(--danger-bg)';
+        const txt = ok ? '✓ CA signé cohérent Notion ↔ HubSpot' : '⚠ Écart CA signé Notion / HubSpot : ' + formatEuro(Math.abs(ecart));
+        el.innerHTML = '<div style="display:inline-flex;align-items:center;gap:0.55rem;padding:0.4rem 0.8rem;border-radius:8px;background:' + bg + ';font-size:0.82rem;flex-wrap:wrap">'
+          + '<span style="width:9px;height:9px;border-radius:50%;background:' + col + ';flex:0 0 auto"></span>'
+          + '<span style="font-weight:600;color:' + col + '">' + txt + '</span>'
+          + '<span style="color:var(--text-secondary)">Notion ' + formatEuro(notion) + ' · HubSpot ' + formatEuro(hubspot) + '</span>'
+          + '</div>';
+      } catch (e) { el.innerHTML = ''; }
+    }
+
+    // === Détail "Pipeline pondéré" au clic (partagé Cockpit + Commercial) ===
+    function closePipelinePondereDetail() {
+      const m = document.getElementById('pipelinePondereModal');
+      if (m) m.classList.remove('active');
+    }
+    // deals = [{ name, stage, amount, probability, weighted }] ; total optionnel.
+    function showPipelinePondereDetail(deals, total) {
+      const modal = document.getElementById('pipelinePondereModal');
+      const body = document.getElementById('pipelinePondereBody');
+      if (!modal || !body) return;
+      const list = (deals || []).slice().sort((a, b) => (b.weighted || 0) - (a.weighted || 0));
+      if (!list.length) {
+        body.innerHTML = '<p style="color:var(--text-secondary);margin:0">Aucun deal dans le pipeline pondéré.</p>';
+      } else {
+        let html = '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.6rem">Chaque deal est pondéré par la probabilité de son étape (barème du kanban commercial).</div>';
+        html += '<table style="width:100%;border-collapse:collapse;font-size:0.82rem"><thead><tr style="color:var(--text-secondary);border-bottom:1px solid var(--border)"><th style="text-align:left;padding:0.35rem 0">Deal</th><th style="text-align:left;padding:0.35rem">Étape</th><th style="text-align:right;padding:0.35rem">Montant</th><th style="text-align:right;padding:0.35rem">Proba</th><th style="text-align:right;padding:0.35rem 0 0.35rem 0.5rem">Pondéré</th></tr></thead><tbody>';
+        for (const d of list) {
+          const w = d.weighted != null ? d.weighted : (d.amount * (d.probability || 0) / 100);
+          html += '<tr style="border-bottom:1px solid var(--border)"><td style="padding:0.3rem 0">' + escapeHtml(d.name || '') + '</td>'
+            + '<td style="padding:0.3rem;color:var(--text-secondary)">' + escapeHtml(d.stage || '') + '</td>'
+            + '<td style="text-align:right;padding:0.3rem">' + formatEuro(d.amount) + '</td>'
+            + '<td style="text-align:right;padding:0.3rem;color:var(--text-secondary)">' + (d.probability || 0) + '%</td>'
+            + '<td style="text-align:right;padding:0.3rem 0 0.3rem 0.5rem;font-weight:600">' + formatEuro(w) + '</td></tr>';
+        }
+        const tot = total != null ? total : list.reduce((s, d) => s + (d.weighted != null ? d.weighted : d.amount * (d.probability || 0) / 100), 0);
+        html += '</tbody><tfoot><tr style="border-top:2px solid var(--border);font-weight:700"><td colspan="4" style="padding:0.5rem 0">Total pipeline pondéré</td><td style="text-align:right;padding:0.5rem 0 0.5rem 0.5rem">' + formatEuro(tot) + '</td></tr></tfoot></table>';
+        body.innerHTML = html;
+      }
+      modal.classList.add('active');
+    }
+    // Cockpit : source = ckTresoData.pipelineDetail (même valeur que la card ckPipeline).
+    function openCockpitPipelineDetail() {
+      if (!ckTresoData) return;
+      showPipelinePondereDetail(ckTresoData.pipelineDetail || [], ckTresoData.pipelinePondere);
+    }
+    // Commercial : deals ouverts hors "en sommeil" (pour coller exactement à la card kpiPipelineWeighted).
+    function openCommercialPipelineDetail() {
+      if (!dashboardData || !dashboardData.pipelineDeals) return;
+      const deals = []; let total = 0;
+      for (const stageName of KANBAN_STAGES_ORDER) {
+        for (const d of (dashboardData.pipelineDeals[stageName] || [])) {
+          if (isDealDormant(computeDealCriticality(d, dealMetadata[d.id] || {}))) continue;
+          const w = d.amount * (d.probability || 0) / 100;
+          deals.push({ name: d.name, stage: stageName, amount: d.amount, probability: d.probability, weighted: w });
+          total += w;
+        }
+      }
+      showPipelinePondereDetail(deals, total);
+    }
+
     function render() {
       if (!dashboardData) return;
 
@@ -6002,8 +6078,9 @@
       if (dashboardData.pipelineDeals) {
         for (const stageName of KANBAN_STAGES_ORDER) {
           const deals = dashboardData.pipelineDeals[stageName] || [];
-          pipelineCount += deals.length;
           for (const d of deals) {
+            if (isDealDormant(computeDealCriticality(d, dealMetadata[d.id] || {}))) continue; // en sommeil : hors pipeline pondéré
+            pipelineCount++;
             pipelineTotal += d.amount;
             pipelineWeighted += d.amount * (d.probability / 100);
           }
@@ -6641,6 +6718,53 @@
         <div class="kanban-cards">${cardsHtml}</div>`;
     }
 
+    // === Colonne "À trier / En sommeil" : deals >90j sans relance (ni RDV/tâche futur), exclus du pipeline pondéré ===
+    const DORMANT_DAYS = 90;
+    let dormantDeals = [];
+    let dormantColumnOpen = false;
+    // daysSinceTouch est null si RDV futur, tâche future ou deal récent (cf. computeDealCriticality) -> jamais en sommeil.
+    function isDealDormant(crit) { return !!crit && crit.daysSinceTouch !== null && crit.daysSinceTouch >= DORMANT_DAYS; }
+    function toggleDormantColumn() { dormantColumnOpen = !dormantColumnOpen; renderDormantColumn(); }
+    function renderDormantColumn() {
+      const col = document.getElementById('kanbanDormantColumn');
+      if (!col) return;
+      col.classList.toggle('expanded', dormantColumnOpen);
+      col.classList.toggle('collapsed', !dormantColumnOpen);
+      let deals = kanbanAssigneeFilter ? dormantDeals.filter(d => _dealMatchesAssignee(d.id)) : dormantDeals;
+      if (kanbanSearchQuery) deals = deals.filter(_dealMatchesSearch);
+      deals = deals.slice().sort((a, b) => (b.daysSinceTouch || 0) - (a.daysSinceTouch || 0));
+      const total = deals.reduce((s, d) => s + d.amount, 0);
+      if (!dormantColumnOpen) {
+        col.innerHTML = `
+          <div class="kanban-header" onclick="toggleDormantColumn()" title="Deals en sommeil (>${DORMANT_DAYS}j sans relance) — exclus du pipeline pondéré">
+            <span class="won-toggle-icon">&#9654;</span>
+            <span class="won-collapsed-label">À trier · ${deals.length}</span>
+          </div>`;
+        return;
+      }
+      let cardsHtml = '';
+      if (deals.length === 0) {
+        cardsHtml = `<div class="won-empty">Aucun deal en sommeil</div>`;
+      } else {
+        for (const d of deals) {
+          cardsHtml += `<div class="kanban-card kanban-card-relancer" data-deal-id="${d.id}" onclick="openDealSidebar('${d.id}')" style="cursor:pointer">
+            <div class="kanban-card-name">${d.name}</div>
+            <div class="kanban-card-meta">
+              <span class="kanban-card-amount">${formatEuro(d.amount)}</span>
+              <span class="kanban-card-won-date">${d.daysSinceTouch != null ? d.daysSinceTouch + 'j sans relance' : ''}</span>
+              ${assigneeAvatarHtml(d.id, (dealMetadata[d.id] || {}).assignee)}
+            </div>
+          </div>`;
+        }
+      }
+      col.innerHTML = `
+        <div class="kanban-header" onclick="toggleDormantColumn()" title="Replier">
+          <span class="kanban-header-label">&#9660; À trier · en sommeil</span>
+          <span class="kanban-header-count">${deals.length} &middot; ${formatEuro(total)}</span>
+        </div>
+        <div class="kanban-cards">${cardsHtml}</div>`;
+    }
+
     function renderKanban() {
       if (!dashboardData || !dashboardData.pipelineDeals) return;
       if (repeatClientsData) renderRepeatKpis();
@@ -6649,6 +6773,7 @@
       pipelineNewDeals = [];
       pipelineMovedDeals = [];
       pipelineCriticalDeals = [];
+      dormantDeals = [];
 
       for (const stageName of KANBAN_STAGES_ORDER) {
         const allStageDeals = dashboardData.pipelineDeals[stageName] || [];
@@ -6656,6 +6781,12 @@
           ? allStageDeals.filter(d => _dealMatchesAssignee(d.id))
           : allStageDeals;
         if (kanbanSearchQuery) deals = deals.filter(_dealMatchesSearch);
+        // Sortir les deals "en sommeil" (>90j sans relance, aucun RDV futur) des colonnes principales.
+        deals = deals.filter(d => {
+          const c = computeDealCriticality(d, dealMetadata[d.id] || {});
+          if (isDealDormant(c)) { dormantDeals.push({ ...d, stage: stageName, daysSinceTouch: c.daysSinceTouch }); return false; }
+          return true;
+        });
         const total = deals.reduce((s, d) => s + d.amount, 0);
 
         html += `<div class="kanban-column" data-stage="${stageName}"
@@ -6695,9 +6826,6 @@
             pipelineCriticalDeals.push({ ...deal, stage: stageName, reasons: crit.reasons, daysSinceTouch: crit.daysSinceTouch });
           }
           const criticalClass = crit.critical ? ' kanban-card-critical' : '';
-          const criticalBadge = crit.critical
-            ? `<span class="kanban-card-critical-badge" title="${crit.reasons.join(' · ')}">🚨 Critique</span>`
-            : '';
           const criticalReasons = crit.critical
             ? `<div class="kanban-card-critical-reasons">${crit.reasons.map(r => `<span class="kanban-card-critical-reason">${r}</span>`).join('')}</div>`
             : '';
@@ -6742,7 +6870,7 @@
               ondragend="onDragEnd(event)"
               onclick="openDealSidebar('${deal.id}')">
             <div class="kanban-card-forecast-cb${cbChecked}" onclick="toggleDealForecast(event,'${deal.id}')" title="Ajouter au forecast">&#10003;</div>
-            <div class="kanban-card-name" style="padding-right:1.4rem">${deal.name}${badge}${criticalBadge}</div>
+            <div class="kanban-card-name" style="padding-right:1.4rem">${deal.name}${badge}</div>
             ${criticalReasons}
             ${tagsHtml}
             <div class="kanban-card-meta">
@@ -6758,10 +6886,12 @@
       }
 
       // Colonnes repliables (fermées par défaut)
+      html += `<div id="kanbanDormantColumn" class="kanban-column-won kanban-column-relancer ${dormantColumnOpen ? 'expanded' : 'collapsed'}"></div>`;
       html += `<div id="kanbanRelancerColumn" class="kanban-column-won kanban-column-relancer ${relancerColumnOpen ? 'expanded' : 'collapsed'}"></div>`;
       html += `<div id="kanbanWonColumn" class="kanban-column-won ${wonColumnOpen ? 'expanded' : 'collapsed'}"></div>`;
 
       board.innerHTML = html;
+      renderDormantColumn();
       renderRelancerColumn();
       renderWonColumn();
 
@@ -6782,7 +6912,7 @@
       if (critEl) {
         critEl.classList.toggle('active', critN > 0);
         const txt = document.getElementById('criticalCounterText');
-        if (txt) txt.textContent = `${critN} deal${critN > 1 ? 's' : ''} critique${critN > 1 ? 's' : ''} — c'est très grave !`;
+        if (txt) txt.textContent = `${critN} deal${critN > 1 ? 's' : ''} critique${critN > 1 ? 's' : ''}`;
       }
 
       updateForecastBar();
@@ -7447,7 +7577,7 @@
       const txt = document.getElementById('criticalCounterText');
       const n = pipelineCriticalDeals.length;
       if (critEl) critEl.classList.toggle('active', n > 0);
-      if (txt) txt.textContent = `${n} deal${n > 1 ? 's' : ''} critique${n > 1 ? 's' : ''} — c'est très grave !`;
+      if (txt) txt.textContent = `${n} deal${n > 1 ? 's' : ''} critique${n > 1 ? 's' : ''}`;
     }
 
     function _refreshCriticalModalMeta() {
@@ -7733,13 +7863,22 @@
       const nextMeetingTime = meta.next_meeting_at ? new Date(meta.next_meeting_at).getTime() : 0;
       const nextMeetingIsFuture = nextMeetingTime > Date.now();
       const nextMeetingIsPast = nextMeetingTime > 0 && nextMeetingTime <= Date.now();
+      const nmDateStr = meta.next_meeting_at ? new Date(meta.next_meeting_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
+      const nmDays = nextMeetingTime ? Math.round((nextMeetingTime - Date.now()) / 86400000) : null;
+      // Un RDV passé n'alerte que s'il est resté SANS SUITE : aucune relance/note datée après le RDV.
+      const _touchAfterRdv = [
+        ...relances.map(r => r && r.at ? new Date(r.at).getTime() : 0),
+        ...(Array.isArray(meta.notes) ? meta.notes : []).map(n => n && n.at ? new Date(n.at).getTime() : 0),
+      ].some(t => t > nextMeetingTime);
+      const rdvFollowedUp = nextMeetingIsPast && _touchAfterRdv;   // RDV tenu / suivi
+      const rdvMissed = nextMeetingIsPast && !_touchAfterRdv;       // RDV passé sans suite
 
       document.getElementById('sidebarBody').innerHTML = `
         <div class="deal-sidebar-field">
           <div style="display:flex;gap:1rem;align-items:flex-end">
             <div style="flex:0 0 auto">
-              <div class="deal-sidebar-label">Stage</div>
-              <div><span class="deal-sidebar-stage-badge">${deal.stage || '—'}</span></div>
+              <div class="deal-sidebar-label">Statut</div>
+              <div><select class="deal-sidebar-input" id="sbStage" style="min-width:150px" onchange="onSidebarStageChange('${deal.id}', this)">${_sidebarStageOptions(deal.stage)}</select></div>
             </div>
             <div style="flex:1;min-width:0">
               <div class="deal-sidebar-label">Montant</div>
@@ -7764,10 +7903,11 @@
           </div>
           <div class="sb-section-body">
             <div class="deal-sidebar-field">
-              <div class="deal-sidebar-label">📅 Prochain rendez-vous ${nextMeetingIsFuture ? '<span style="color:#1d4ed8;font-weight:600">· planifié</span>' : (nextMeetingIsPast ? '<span style="color:var(--text-light);font-weight:500">· passé</span>' : '')}</div>
+              <div class="deal-sidebar-label">📅 Rendez-vous ${nextMeetingIsFuture ? `<span style="color:#1d4ed8;font-weight:600">· prévu dans ${nmDays} j</span>` : (rdvFollowedUp ? `<span style="color:var(--text-light);font-weight:500">· dernier le ${nmDateStr} (tenu)</span>` : (rdvMissed ? '' : '<span style="color:var(--text-light);font-weight:500">· aucun planifié</span>'))}</div>
+              ${rdvMissed ? `<div style="display:flex;align-items:center;gap:0.4rem;background:var(--danger-bg);color:#b91c1c;border-radius:6px;padding:0.4rem 0.6rem;font-size:0.8rem;font-weight:600;margin-bottom:0.4rem">⚠ RDV dépassé (${nmDateStr}, il y a ${Math.abs(nmDays)} j) · à reprogrammer</div>` : ''}
               <div style="display:flex;gap:0.4rem;align-items:center">
                 <input class="deal-sidebar-input" id="sbNextMeeting" type="datetime-local" value="${nextMeetingLocalVal}" style="flex:1">
-                <button class="relance-btn" id="sbNextMeetingSaveBtn" onclick="saveNextMeeting('${deal.id}')" style="flex:0 0 auto;padding:0.45rem 0.8rem">Enregistrer</button>
+                <button class="relance-btn" id="sbNextMeetingSaveBtn" onclick="saveNextMeeting('${deal.id}')" style="flex:0 0 auto;padding:0.45rem 0.8rem">${rdvMissed ? 'Reprogrammer' : 'Enregistrer'}</button>
                 ${meta.next_meeting_at ? `<button class="relance-btn" onclick="clearNextMeeting('${deal.id}')" style="flex:0 0 auto;padding:0.45rem 0.6rem;color:#b91c1c;border-color:rgba(239,68,68,0.3)" title="Effacer le RDV">✕</button>` : ''}
               </div>
               ${nextMeetingIsFuture ? `<div style="font-size:0.72rem;color:var(--text-secondary);margin-top:0.3rem;font-style:italic">Un RDV futur retire l'état critique du deal.</div>` : ''}
@@ -8391,6 +8531,88 @@
         btn.disabled = false;
         setTimeout(() => { if (btn) btn.textContent = 'Enregistrer'; }, 1500);
       }
+    }
+
+    // === Gestion d'un deal depuis la fiche (statut / renommer / supprimer) ===
+    // Statuts proposés dans le menu déroulant. "closedwon/closedlost" sont envoyés tels quels ;
+    // les stages ouverts sont envoyés par leur libellé (mappé en id côté serveur via STAGE_ID_MAP).
+    const SIDEBAR_STAGES = [
+      { label: 'RDV Qualif', value: 'RDV Qualif' },
+      { label: 'RDV Propale', value: 'RDV Propale' },
+      { label: 'Négociation', value: 'Négociation' },
+      { label: 'Contrat envoyé', value: 'Contrat envoyé' },
+      { label: 'À relancer plus tard', value: 'À relancer plus tard' },
+      { label: 'Gagné', value: 'closedwon' },
+      { label: 'Perdu', value: 'closedlost' },
+    ];
+    function _sidebarStageOptions(currentLabel) {
+      const known = SIDEBAR_STAGES.some(s => s.label === currentLabel);
+      let opts = SIDEBAR_STAGES.map(s => `<option value="${s.value}"${s.label === currentLabel ? ' selected' : ''}>${s.label}</option>`).join('');
+      if (!known && currentLabel) opts = `<option value="" selected disabled>${currentLabel}</option>` + opts; // statut inconnu : on l'affiche sans le perdre
+      return opts;
+    }
+    // Gagné/Perdu : on réutilise markCurrentDeal (prompt de date + MAJ locale).
+    // Stage ouvert (ex : rouvrir un deal gagné) : PATCH puis rechargement du dashboard.
+    function onSidebarStageChange(dealId, sel) {
+      const val = sel.value;
+      if (!val) return;
+      if (val === 'closedwon' || val === 'closedlost') { markCurrentDeal(val); return; }
+      changeSidebarStage(dealId, val);
+    }
+    async function changeSidebarStage(dealId, targetStage) {
+      try {
+        const r = await fetch(`/api/deals/${dealId}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stage: targetStage }),
+        });
+        if (!r.ok) throw new Error();
+        for (const k of Object.keys(wonDealsCache)) delete wonDealsCache[k];
+        await refreshData();               // le deal rouvert réapparaît dans le pipeline
+        if (typeof renderKanban === 'function') renderKanban();
+        openDealSidebar(dealId);           // recharge la fiche avec le nouveau statut
+      } catch { alert('Erreur lors du changement de statut.'); }
+    }
+    // Renommer le deal (dealname).
+    async function renameDeal(dealId) {
+      if (!dealId) return;
+      const titleEl = document.getElementById('sidebarDealName');
+      const current = titleEl ? titleEl.textContent : '';
+      const name = prompt('Nouveau nom du deal :', current);
+      if (name === null) return;
+      const trimmed = name.trim();
+      if (!trimmed) { alert('Le nom ne peut pas être vide.'); return; }
+      try {
+        const r = await fetch(`/api/deals/${dealId}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: trimmed }),
+        });
+        if (!r.ok) throw new Error();
+        if (titleEl) titleEl.textContent = trimmed;
+        const local = findDealInPipeline(dealId);
+        if (local) local.name = trimmed;
+        for (const k of Object.keys(wonDealsCache)) delete wonDealsCache[k];
+        renderKanban();
+      } catch { alert('Erreur lors du renommage.'); }
+    }
+    // Supprimer (archiver) le deal, avec confirmation obligatoire.
+    async function deleteCurrentDeal() {
+      const dealId = currentSidebarDealId;
+      if (!dealId) return;
+      const nameEl = document.getElementById('sidebarDealName');
+      const name = nameEl ? nameEl.textContent : 'ce deal';
+      if (!confirm(`Supprimer « ${name} » ?\n\nLe deal sera archivé dans HubSpot et retiré du dashboard. Action difficile à annuler.`)) return;
+      try {
+        const r = await fetch(`/api/deals/${dealId}`, { method: 'DELETE' });
+        if (!r.ok) throw new Error();
+        for (const deals of Object.values((dashboardData && dashboardData.pipelineDeals) || {})) {
+          const idx = deals.findIndex(d => d.id === dealId);
+          if (idx !== -1) deals.splice(idx, 1);
+        }
+        for (const k of Object.keys(wonDealsCache)) delete wonDealsCache[k];
+        closeDealSidebar();
+        renderKanban();
+        if (typeof wonColumnOpen !== 'undefined' && wonColumnOpen) loadWonDeals(wonColumnYear, wonColumnMonth);
+      } catch { alert('Erreur lors de la suppression.'); }
     }
 
     async function markCurrentDeal(outcome) {
@@ -10630,13 +10852,17 @@
       if (empty) { box.style.display = 'none'; return; }
       box.style.display = '';
       const a = kpiData.all;
-      // La tuile principale affiche le total « CA <année> HT » = caAnnee (source Notion, facturé ou non),
-      // identique au Cockpit et à Analytics. L'avancement, lui, compare le réalisé signé classé
-      // (Newsale + Upsale) à l'objectif : c'est la seule part rattachable à un objectif de partner.
+      // Deux avancements distincts, chacun sur la base de la prime qu'il pilote :
+      //  - INDIVIDUEL : réalisé signé classé (Newsale + Upsale, daté signature) ÷ objectif de CA signé
+      //    par associé (kpi_objectives). C'est la base de la prime individuelle (étage 1).
+      //  - COLLECTIF : CA facturé + à facturer (caAnnee) ÷ objectif de CA facturé. Base de la prime
+      //    collective (étage 2, paliers).
       const signeReal = (a.newsale.realise || 0) + (a.upsale.realise || 0);
       const signeObj  = (a.newsale.objectif || 0) + (a.upsale.objectif || 0);
       const avPct = signeObj > 0 ? Math.round(signeReal / signeObj * 100) : null;
-      const signeSub = signeObj > 0 ? ('Objectif ' + kpiFmtEur(signeObj) + ' · Notion, facturé ou non') : 'Notion, facturé ou non · pas d\'objectif défini';
+      const caFact = kpiData.caAnnee || 0;
+      const objFact = (primeConfig && Number(primeConfig.objectifFacture)) || 0;
+      const factPct = objFact > 0 ? Math.round(caFact / objFact * 100) : null;
 
       let poolVal = '—', poolSub = 'Réglez via « Réglages primes »';
       try {
@@ -10649,14 +10875,54 @@
 
       const tile = (cls, lab, val, sub) =>
         '<div class="kpi-ov ' + cls + '"><div class="kpi-ov-lab">' + lab + '</div><div class="kpi-ov-val">' + val + '</div><div class="kpi-ov-sub">' + sub + '</div></div>';
-      const tileBar = (cls, lab, val, pct) =>
-        '<div class="kpi-ov ' + cls + '"><div class="kpi-ov-lab">' + lab + '</div><div class="kpi-ov-val">' + val + '</div>'
-        + '<div class="kpi-ov-bar"><span style="width:' + Math.max(0, Math.min(pct == null ? 0 : pct, 100)) + '%;"></span></div></div>';
+      const tileBar = (cls, lab, val, pct, onclick, sub) =>
+        '<div class="kpi-ov ' + cls + '"' + (onclick ? ' onclick="' + onclick + '" style="cursor:pointer"' : '') + '><div class="kpi-ov-lab">' + lab + '</div><div class="kpi-ov-val">' + val + '</div>'
+        + '<div class="kpi-ov-bar"><span style="width:' + Math.max(0, Math.min(pct == null ? 0 : pct, 100)) + '%;"></span></div>'
+        + (sub ? '<div class="kpi-ov-sub">' + sub + '</div>' : '') + '</div>';
 
+      const caSigne = (kpiData.signedQuarterly && kpiData.signedQuarterly.total) || 0;
+      const subFact = objFact > 0
+        ? ('Objectif ' + kpiFmtEur(objFact) + ' · ' + (factPct == null ? '—' : factPct + ' %') + ' · facturé + à facturer')
+        : 'Facturé + à facturer · pas d\'objectif défini';
+      const subSigne = signeObj > 0
+        ? ('Objectif ' + kpiFmtEur(signeObj) + ' · ' + (avPct == null ? '—' : avPct + ' %') + ' · base prime indiv')
+        : 'Daté signature · base des primes · pas d\'objectif défini';
       box.innerHTML =
-        tile('signe', 'CA ' + (kpiData.year || '') + ' HT', kpiFmtEur(kpiData.caAnnee || 0), signeSub) +
-        tileBar('av', 'Avancement', (avPct === null ? '—' : avPct + ' %'), avPct) +
+        tileBar('signe', 'CA ' + (kpiData.year || '') + ' HT', kpiFmtEur(caFact), factPct, 'openKpiFactureDetail()', subFact) +
+        tileBar('av', 'CA signé ' + (kpiData.year || ''), kpiFmtEur(caSigne), avPct, 'openKpiAvancementDetail()', subSigne) +
         tile('pool', 'Prime pool estimée', poolVal, poolSub);
+    }
+
+    // Clic sur la tuile « CA HT » : explique l'avancement COLLECTIF (CA facturé ÷ objectif de CA facturé).
+    function openKpiFactureDetail() {
+      if (!kpiData) return;
+      const caFact = kpiData.caAnnee || 0;
+      const objFact = (primeConfig && Number(primeConfig.objectifFacture)) || 0;
+      const pct = objFact > 0 ? Math.round(caFact / objFact * 100) : null;
+      document.getElementById('kpiDetailTitle').textContent = 'CA facturé · avancement collectif';
+      let html = '<p class="kpi-detail-total">' + (pct === null ? 'Pas d\'objectif de CA facturé défini' : pct + ' % de l\'objectif de CA facturé') + '</p>';
+      html += '<div class="kpi-detail-row"><div><div class="kpi-detail-nom">CA facturé + à facturer</div><div class="kpi-detail-client">Source Notion · daté à la facture</div></div><div class="kpi-detail-montant">' + kpiFmtEur(caFact) + '</div></div>';
+      html += '<div class="kpi-detail-row"><div><div class="kpi-detail-nom">Objectif de CA facturé</div><div class="kpi-detail-client">Réglable via « Réglages primes »</div></div><div class="kpi-detail-montant">' + kpiFmtEur(objFact) + '</div></div>';
+      html += '<p style="color:var(--text-secondary);font-size:0.82rem;margin-top:0.6rem">Avancement collectif = CA facturé + à facturer ÷ objectif de CA facturé. C\'est la base de la prime collective (paliers, étage 2). Distinct de l\'avancement individuel, qui porte sur le CA signé.</p>';
+      document.getElementById('kpiDetailBody').innerHTML = html;
+      document.getElementById('kpiDetailModal').classList.add('active');
+    }
+
+    // Clic sur la tuile Avancement : explique le calcul (réalisé signé ÷ objectif signé).
+    function openKpiAvancementDetail() {
+      if (!kpiData || !kpiData.all) return;
+      const a = kpiData.all;
+      const newR = a.newsale.realise || 0, upR = a.upsale.realise || 0;
+      const newO = a.newsale.objectif || 0, upO = a.upsale.objectif || 0;
+      const real = newR + upR, obj = newO + upO;
+      const pct = obj > 0 ? Math.round(real / obj * 100) : null;
+      document.getElementById('kpiDetailTitle').textContent = 'CA signé · avancement individuel';
+      let html = '<p class="kpi-detail-total">' + (pct === null ? 'Pas d\'objectif de CA signé défini' : pct + ' % de l\'objectif de CA signé') + '</p>';
+      html += '<div class="kpi-detail-row"><div><div class="kpi-detail-nom">Réalisé signé</div><div class="kpi-detail-client">Newsale ' + kpiFmtEur(newR) + ' + Upsale ' + kpiFmtEur(upR) + '</div></div><div class="kpi-detail-montant">' + kpiFmtEur(real) + '</div></div>';
+      html += '<div class="kpi-detail-row"><div><div class="kpi-detail-nom">Objectif de CA signé</div><div class="kpi-detail-client">Newsale ' + kpiFmtEur(newO) + ' + Upsale ' + kpiFmtEur(upO) + '</div></div><div class="kpi-detail-montant">' + kpiFmtEur(obj) + '</div></div>';
+      html += '<p style="color:var(--text-secondary);font-size:0.82rem;margin-top:0.6rem">Avancement individuel = Réalisé signé ÷ Objectif de CA signé. Le réalisé = missions Notion classées Newsale/Upsale, datées à leur signature (base de la prime individuelle). Clique une barre de partner (graphes ci-dessous) pour le détail mission par mission.</p>';
+      document.getElementById('kpiDetailBody').innerHTML = html;
+      document.getElementById('kpiDetailModal').classList.add('active');
     }
 
     function renderKpiUnclassified() {
@@ -10686,7 +10952,7 @@
       const year = document.getElementById('kpiYear').value;
 
       // --- A. Objectifs : une ligne par partner, 3 champs ---
-      let html = '<div class="kpi-rg-h">Objectifs ' + year + ' <span class="kpi-rg-badge">€ par partner</span></div>';
+      let html = '<div class="kpi-rg-h">Objectifs de CA signé ' + year + ' <span class="kpi-rg-badge">€ par associé · Newsale + Upsale = base avancement indiv</span></div>';
       if (kpiData.partners.length === 0) {
         html += '<p style="color:var(--text-secondary);">Aucun partner détecté cette année.</p>';
       } else {
@@ -10822,6 +11088,7 @@
       }
       if (typeof primeConfig.resultatAnnuel !== 'number') primeConfig.resultatAnnuel = 150000;
       if (typeof primeConfig.gateTrimestriel !== 'number') primeConfig.gateTrimestriel = 120000;
+      if (typeof primeConfig.objectifFacture !== 'number') primeConfig.objectifFacture = 650000;
       if (!primeConfig.rates || typeof primeConfig.rates !== 'object') primeConfig.rates = {};
     }
 
@@ -10849,62 +11116,114 @@
       // Défauts de taux par partner (en mémoire, non persistés tant que pas sauvegardés).
       parts.forEach(p => { if (!primeConfig.rates[p.partner]) primeConfig.rates[p.partner] = primeDefaultRates(p.partner); });
 
-      // Copie de travail depuis le réalisé KPI.
       primeParticipants = parts.map(p => p.partner);
       const factu = kpiData.facturation || null;
       const caFactDefault = factu ? (factu.total || 0) : (kpiData.all && kpiData.all.opere ? kpiData.all.opere.realise : 0);
-      primeState = { realises: {}, caFacture: caFactDefault };
-      // CA de l'année = réalisé Notion par partner : New = Newsale, Repeat = Upsale
-      // (missions rattachées à l'année via leurs factures / "Année final", cf. computeKpi).
-      parts.forEach(p => {
-        primeState.realises[p.partner] = { new: p.newsale.realise || 0, repeat: p.upsale.realise || 0 };
-      });
-
-      const rowsHtml = parts.map((p, i) => {
-        const color = KPI_CHIP_COLORS[i % KPI_CHIP_COLORS.length];
-        const r = primeConfig.rates[p.partner];
-        const st = primeState.realises[p.partner];
-        const key = encodeURIComponent(p.partner);
-        return '<tr>'
-          + '<td><span class="prime-pname"><span class="prime-chip" style="background:' + color + ';">' + primeEsc(kpiInitial(p.partner)) + '</span>' + primeEsc(p.partner) + '</span></td>'
-          + '<td><span class="prime-cellin"><input data-prime-new="' + key + '" type="text" inputmode="numeric" value="' + primeIntFr(st.new) + '"><span class="u">€</span></span></td>'
-          + '<td><span class="prime-cellin"><input data-prime-repeat="' + key + '" type="text" inputmode="numeric" value="' + primeIntFr(st.repeat) + '"><span class="u">€</span></span></td>'
-          + '<td class="prime-ro">' + primeFmtPct(r.txNew) + ' / ' + primeFmtPct(r.txRepeat) + '</td>'
-          + '</tr>';
-      }).join('');
+      // CA signé trimestriel (source Notion, daté à la signature) : base des primes perso (étage 1).
+      primeState = { signedQ: kpiData.signedQuarterly || { byPartner: {}, quarterTotals: [0, 0, 0, 0], total: 0, partners: [] }, caFacture: caFactDefault };
 
       body.innerHTML =
-        '<div class="prime-layers">'
-          + '<div class="prime-layer perso"><p class="prime-ltag">Étage 1 · trimestriel</p><h4>Commission par portefeuille</h4><p>Chacun touche sur le CA qu\'il signe (new &amp; repeat), à son taux.</p></div>'
-          + '<div class="prime-layer coll"><p class="prime-ltag">Étage 2 · annuel</p><h4>Part du résultat, par paliers</h4><p>Selon le CA facturé de l\'année (facturé + à facturer), on partage une part du résultat, à parts égales.</p></div>'
+        '<div id="prime-coverage" style="margin-bottom:0.9rem"></div>'
+        + '<div id="prime-clawback" style="margin-bottom:0.9rem"></div>'
+        + '<div class="prime-panel" style="display:flex;flex-wrap:wrap;align-items:center;gap:0.4rem 0.9rem">'
+          + '<span style="font-size:0.85rem">CA facturé ' + (kpiData.year || '') + ' <span style="color:var(--text-secondary)">(base étage 2)</span> : <span class="prime-cellin"><input id="prime-cafacture-in" type="text" inputmode="numeric" value="' + primeIntFr(primeState.caFacture) + '"><span class="u">€</span></span></span>'
+          + (factu ? '<span style="color:var(--text-secondary);font-size:0.8rem">facturé ' + primeFmtEur(factu.facture) + ' · à facturer ' + primeFmtEur(factu.aFacturer) + '</span>' : '')
+          + '<span style="flex:1"></span>'
+          + '<span style="color:var(--text-secondary);font-size:0.78rem">Taux, paliers et seuil : « Réglages primes »</span>'
         + '</div>'
-        + '<div class="prime-panel">'
-          + '<p class="prime-panel-h">Hypothèses</p>'
-          + '<p class="prime-panel-sub">CA de l\'année = réalisé Notion par partner (New = Newsale, Repeat = Upsale), missions rattachées à l\'année via leurs factures ou le champ « Année final ». Éditable pour simuler : « ↺ Données réelles » restaure. Taux, paliers et résultat se règlent via « Réglages primes ».</p>'
-          + '<table class="prime-inputs"><thead><tr><th>Personne</th><th>New signé</th><th>Repeat signé</th><th>Taux new / repeat</th></tr></thead><tbody>' + rowsHtml + '</tbody></table>'
-          + '<p class="prime-caopere">CA facturé ' + (kpiData.year || '') + ' (base paliers, étage 2) : <span class="prime-cellin"><input id="prime-cafacture-in" type="text" inputmode="numeric" value="' + primeIntFr(primeState.caFacture) + '"><span class="u">€</span></span>'
-            + (factu ? '<span style="color:var(--text-secondary);">facturé ' + primeFmtEur(factu.facture) + ' · à facturer ' + primeFmtEur(factu.aFacturer) + '</span>' : '')
-            + '<b id="prime-casigne-lbl"></b></p>'
-        + '</div>'
-        + '<div class="prime-results" id="kpiPrimeResults"></div>';
+        + '<div class="prime-results" id="kpiPrimeResults" style="margin-top:0.9rem"></div>';
 
-      body.querySelectorAll('input[data-prime-new], input[data-prime-repeat]').forEach(inp => inp.addEventListener('input', onPrimeInput));
       const caIn = document.getElementById('prime-cafacture-in');
       if (caIn) caIn.addEventListener('input', onPrimeInput);
 
       primeRecompute();
+      renderKpiCoverage();
+      renderKpiClawback();
+    }
+
+    // Contrôle de couverture : 100% du CA signé est-il rattaché à un partner ? Sinon, montant + missions.
+    function renderKpiCoverage() {
+      const el = document.getElementById('prime-coverage');
+      if (!el) return;
+      const sq = (kpiData && kpiData.signedQuarterly) || {};
+      const total = sq.total || 0;
+      const un = (sq.unattributed && sq.unattributed.total) || 0;
+      const nb = (sq.unattributed && sq.unattributed.missions) ? sq.unattributed.missions.length : 0;
+      const ok = un <= 0;
+      const col = ok ? 'var(--success)' : 'var(--danger)';
+      const bg = ok ? 'var(--success-bg)' : 'var(--danger-bg)';
+      const pctAttr = total > 0 ? Math.round((total - un) / total * 100) : 100;
+      let html = '<div style="display:inline-flex;flex-wrap:wrap;align-items:center;gap:0.5rem 0.9rem;padding:0.45rem 0.8rem;border-radius:8px;background:' + bg + ';font-size:0.85rem">'
+        + '<span style="width:9px;height:9px;border-radius:50%;background:' + col + ';flex:0 0 auto"></span>'
+        + '<span>CA signé ' + (kpiData.year || '') + ' : <b>' + primeFmtEur(total) + '</b></span>';
+      if (ok) {
+        html += '<span style="color:' + col + ';font-weight:600">100 % rattaché à un partner</span>';
+      } else {
+        html += '<span style="color:' + col + ';font-weight:600;cursor:pointer" onclick="openKpiCoverageDetail()">⚠ ' + primeFmtEur(un) + ' non attribué · ' + nb + ' mission' + (nb > 1 ? 's' : '') + ' (' + pctAttr + ' % couvert) · voir</span>';
+      }
+      el.innerHTML = html + '</div>';
+    }
+    // Liste des missions signées non attribuées (sans partner ou sans type) — réutilise la modale détail KPI.
+    function openKpiCoverageDetail() {
+      const sq = (kpiData && kpiData.signedQuarterly) || {};
+      const miss = (sq.unattributed && sq.unattributed.missions) || [];
+      document.getElementById('kpiDetailTitle').textContent = 'CA signé non attribué';
+      const tot = miss.reduce((s, m) => s + (m.ca || 0), 0);
+      let html = '<p class="kpi-detail-total">' + miss.length + ' mission' + (miss.length > 1 ? 's' : '') + ' · ' + kpiFmtEur(tot) + ' non rattaché' + (miss.length > 1 ? 's' : '') + '</p>';
+      if (!miss.length) { html += '<p style="color:var(--text-secondary);">Tout le CA signé est rattaché à un partner.</p>'; }
+      else {
+        html += miss.map(m =>
+          '<div class="kpi-detail-row"><div><div class="kpi-detail-nom">' + (m.nom || 'Sans nom') + ' <span style="font-size:0.72rem;color:var(--danger)">(' + m.reason + ')</span></div>'
+          + '<div class="kpi-detail-client">' + (m.client || '') + ' · T' + m.quarter + '</div></div>'
+          + '<div class="kpi-detail-montant">' + kpiFmtEur(m.ca) + '</div></div>'
+        ).join('');
+      }
+      document.getElementById('kpiDetailBody').innerHTML = html;
+      document.getElementById('kpiDetailModal').classList.add('active');
+    }
+
+    // Voyant clawback : missions annulées signées sur un trimestre déjà payé -> prime à reprendre (indicatif).
+    function renderKpiClawback() {
+      const el = document.getElementById('prime-clawback');
+      if (!el) return;
+      const cands = (kpiData && kpiData.clawback) || [];
+      if (!cands.length) { el.innerHTML = ''; return; }
+      let totalPrime = 0;
+      const ids = new Set();
+      for (const c of cands) {
+        const r = (primeConfig.rates && primeConfig.rates[c.partner]) || primeDefaultRates(c.partner);
+        const taux = c.type === 'repeat' ? r.txRepeat : r.txNew;
+        totalPrime += c.montant * (taux / 100);
+        ids.add(c.id);
+      }
+      const nb = ids.size;
+      el.innerHTML = '<div style="display:inline-flex;flex-wrap:wrap;align-items:center;gap:0.5rem 0.8rem;padding:0.45rem 0.8rem;border-radius:8px;background:var(--danger-bg);font-size:0.85rem">'
+        + '<span style="width:9px;height:9px;border-radius:50%;background:var(--danger);flex:0 0 auto"></span>'
+        + '<span style="color:var(--danger);font-weight:600;cursor:pointer" onclick="openKpiClawbackDetail()">⚠ Reprise : ' + nb + ' mission' + (nb > 1 ? 's' : '') + ' annulée' + (nb > 1 ? 's' : '') + ' après paiement · ' + primeFmtEur(totalPrime) + ' de prime à déduire · voir</span>'
+        + '</div>';
+    }
+    function openKpiClawbackDetail() {
+      const cands = (kpiData && kpiData.clawback) || [];
+      document.getElementById('kpiDetailTitle').textContent = 'Reprises de prime · deals annulés après paiement';
+      let tot = 0;
+      const rows = cands.map(c => {
+        const r = (primeConfig.rates && primeConfig.rates[c.partner]) || primeDefaultRates(c.partner);
+        const taux = c.type === 'repeat' ? r.txRepeat : r.txNew;
+        const prime = c.montant * (taux / 100);
+        tot += prime;
+        return '<div class="kpi-detail-row"><div><div class="kpi-detail-nom">' + (c.nom || 'Sans nom') + ' <span style="font-size:0.72rem;color:var(--text-secondary)">' + c.partner + ' · T' + c.quarter + ' · ' + (c.type === 'repeat' ? 'Repeat' : 'New') + '</span></div>'
+          + '<div class="kpi-detail-client">CA ' + kpiFmtEur(c.montant) + ' × ' + primeFmtPct(taux) + '</div></div>'
+          + '<div class="kpi-detail-montant" style="color:var(--danger)">-' + kpiFmtEur(prime) + '</div></div>';
+      }).join('');
+      let html = '<p class="kpi-detail-total">' + cands.length + ' ligne' + (cands.length > 1 ? 's' : '') + ' · ' + kpiFmtEur(tot) + ' à reprendre (indicatif)</p>';
+      html += '<p style="color:var(--text-secondary);font-size:0.8rem;margin:0 0 0.6rem">Missions signées sur un trimestre déjà payé et passées « Annulé ». À vérifier avant de déduire : une annulation antérieure au paiement n\'est pas à reprendre.</p>';
+      html += rows || '<p style="color:var(--text-secondary)">Aucune.</p>';
+      document.getElementById('kpiDetailBody').innerHTML = html;
+      document.getElementById('kpiDetailModal').classList.add('active');
     }
 
     function onPrimeInput() {
       if (!primeState) return;
-      document.querySelectorAll('#kpiPrime input[data-prime-new]').forEach(inp => {
-        const name = decodeURIComponent(inp.dataset.primeNew);
-        (primeState.realises[name] = primeState.realises[name] || { new: 0, repeat: 0 }).new = primeParseNum(inp.value);
-      });
-      document.querySelectorAll('#kpiPrime input[data-prime-repeat]').forEach(inp => {
-        const name = decodeURIComponent(inp.dataset.primeRepeat);
-        (primeState.realises[name] = primeState.realises[name] || { new: 0, repeat: 0 }).repeat = primeParseNum(inp.value);
-      });
       const caIn = document.getElementById('prime-cafacture-in');
       if (caIn) primeState.caFacture = primeParseNum(caIn.value);
       primeRecompute();
@@ -10912,13 +11231,25 @@
 
     function primeCompute() {
       const cfg = primeConfig, parts = primeParticipants;
-      const perso = {}; let caSigne = 0, persoSum = 0;
+      const sq = (primeState.signedQ) || { byPartner: {}, quarterTotals: [0, 0, 0, 0], total: 0 };
+      const seuil = Number(cfg.gateTrimestriel) || 0;
+      // Portillon par trimestre : le CA signé TOTAL du trimestre atteint-il le seuil de rentabilité ?
+      const gateOk = sq.quarterTotals.map(t => t >= seuil);
+
+      // Prime perso par personne et par trimestre : 0 si le trimestre est sous le seuil.
+      const persoQ = {}, perso = {}, caSigneQ = {};
+      let persoSum = 0;
       parts.forEach(name => {
         const r = cfg.rates[name] || primeDefaultRates(name);
-        const st = (primeState.realises[name]) || { new: 0, repeat: 0 };
-        perso[name] = st.new * (r.txNew / 100) + st.repeat * (r.txRepeat / 100);
-        caSigne += st.new + st.repeat; persoSum += perso[name];
+        const bp = (sq.byPartner[name]) || { new: [0, 0, 0, 0], repeat: [0, 0, 0, 0] };
+        const q = [0, 1, 2, 3].map(i => gateOk[i] ? (bp.new[i] * (r.txNew / 100) + bp.repeat[i] * (r.txRepeat / 100)) : 0);
+        persoQ[name] = q;
+        perso[name] = q.reduce((s, v) => s + v, 0);
+        caSigneQ[name] = [0, 1, 2, 3].map(i => bp.new[i] + bp.repeat[i]);
+        persoSum += perso[name];
       });
+
+      // Étage 2 collectif (annuel, inchangé) sur le CA facturé.
       const caFacture = Math.max(0, primeState.caFacture || 0);
       const tiersAsc = (cfg.tiers || []).slice().sort((a, b) => a.seuil - b.seuil);
       let tauxColl = 0, activeSeuil = null;
@@ -10928,7 +11259,8 @@
       const total = {}; parts.forEach(n => total[n] = perso[n] + collPart);
       const pool = persoSum + collTotal;
       const ratio = (cfg.resultatAnnuel > 0) ? pool / cfg.resultatAnnuel * 100 : 0;
-      return { perso, caSigne, caFacture, tiersAsc, tauxColl, activeSeuil, collTotal, collPart, total, persoSum, pool, ratio };
+      return { seuil, gateOk, quarterTotals: sq.quarterTotals, persoQ, perso, caSigneQ, persoSum,
+        caFacture, tiersAsc, tauxColl, activeSeuil, collTotal, collPart, total, pool, ratio, caSigneTotal: sq.total || 0 };
     }
 
     function primeRecompute() {
@@ -10937,11 +11269,38 @@
       const parts = primeParticipants;
       const n = parts.length;
 
-      // CA de l'année total dans le panneau
-      const sigLbl = document.getElementById('prime-casigne-lbl');
-      if (sigLbl) sigLbl.textContent = ' · CA de l\'année total : ' + primeFmtEur(R.caSigne);
+      const QL = ['T1', 'T2', 'T3', 'T4'];
 
-      // --- Escalier des paliers ---
+      // --- Tableau unique "Primes par personne" : T1-T4 cliquables (drill-down) + perso + collective + total.
+      // En-tête de chaque trimestre = portillon intégré (total du trimestre vs seuil, vert/rouge/gelé).
+      const headCells = [0, 1, 2, 3].map(i => {
+        const ok = R.gateOk[i];
+        const col = ok ? 'var(--success)' : 'var(--danger)';
+        return '<th style="text-align:right"><div>' + QL[i] + '</div><div style="font-weight:500;font-size:0.68rem;color:' + col + '">' + primeKE(R.quarterTotals[i]) + (ok ? '' : ' · gelé') + '</div></th>';
+      }).join('');
+      let rows = parts.map(name => {
+        const cells = [0, 1, 2, 3].map(i => {
+          const v = R.persoQ[name][i];
+          const clickable = R.caSigneQ && R.caSigneQ[name] && R.caSigneQ[name][i] > 0;
+          const style = 'text-align:right;' + (R.gateOk[i] ? '' : 'color:var(--text-light);') + (clickable ? 'cursor:pointer;text-decoration:underline dotted' : '');
+          return '<td style="' + style + '"' + (clickable ? ' onclick="openPrimeDrilldown(\'' + encodeURIComponent(name) + '\',' + i + ')"' : '') + '>' + primeFmtEur(v) + '</td>';
+        }).join('');
+        return '<tr><td>' + primeEsc(name) + '</td>' + cells
+          + '<td style="text-align:right">' + primeFmtEur(R.perso[name]) + '</td>'
+          + '<td style="text-align:right;color:var(--text-secondary)">' + primeFmtEur(R.collPart) + '</td>'
+          + '<td class="tot" style="text-align:right">' + primeFmtEur(R.total[name]) + '</td></tr>';
+      }).join('');
+      const totQ = [0, 1, 2, 3].map(i => parts.reduce((s, name) => s + R.persoQ[name][i], 0));
+      rows += '<tr class="grand"><td>Total</td>' + totQ.map(v => '<td style="text-align:right">' + primeFmtEur(v) + '</td>').join('')
+        + '<td style="text-align:right">' + primeFmtEur(R.persoSum) + '</td>'
+        + '<td style="text-align:right">' + primeFmtEur(R.collTotal) + '</td>'
+        + '<td class="tot" style="text-align:right">' + primeFmtEur(R.pool) + '</td></tr>';
+      const table = '<div class="prime-card"><p class="prime-card-h">Primes par personne <span style="font-weight:400;color:var(--text-secondary)">· seuil de rentabilité ' + primeFmtEur(R.seuil) + '/trimestre</span></p>'
+        + '<table class="prime-recap"><thead><tr><th style="text-align:left">Personne</th>' + headCells
+        + '<th style="text-align:right">Prime perso</th><th style="text-align:right">Part collective</th><th style="text-align:right">Total</th></tr></thead><tbody>' + rows + '</tbody></table>'
+        + '<p class="prime-stairs-foot" style="margin-top:0.5rem">Clique une case trimestre pour voir les deals qui la composent. Un trimestre sous le seuil (gelé) ne verse pas de prime perso.</p></div>';
+
+      // --- Étage 2 collectif : escalier des paliers ---
       const firstSeuil = R.tiersAsc.length ? R.tiersAsc[0].seuil : 0;
       let stairs = '<div class="prime-step' + (R.activeSeuil === null ? ' active' : '') + '">'
         + '<span class="prime-pc">0 %</span>'
@@ -10955,58 +11314,184 @@
           + '<div class="prime-bar" style="height:' + h + 'px;">' + (act ? '<span class="prime-badge">CA fact. ' + primeKE(R.caFacture) + '</span>' : '') + '</div>'
           + '<div class="prime-sl">≥ ' + primeKE(t.seuil) + '</div></div>';
       }).join('');
-      const stairsCard = '<div class="prime-card"><p class="prime-card-h">Étage 2 — palier collectif atteint</p>'
+      const etage2 = '<div class="prime-card"><p class="prime-card-h">Étage 2 · palier collectif (annuel)</p>'
         + '<div class="prime-stairs">' + stairs + '</div>'
-        + '<p class="prime-stairs-foot">CA de l\'année : <b>' + primeFmtEur(R.caSigne) + '</b> → CA facturé : <b>' + primeFmtEur(R.caFacture) + '</b> → palier <b>' + primeFmtPct(R.tauxColl) + '</b> → prime collective <b>' + primeFmtEur(R.collTotal) + '</b> (<b>' + primeFmtEur(R.collPart) + '</b>/personne).</p></div>';
+        + '<p class="prime-stairs-foot">CA facturé <b>' + primeFmtEur(R.caFacture) + '</b> → palier <b>' + primeFmtPct(R.tauxColl) + '</b> → prime collective <b>' + primeFmtEur(R.collTotal) + '</b> (<b>' + primeFmtEur(R.collPart) + '</b>/personne).</p></div>';
 
-      // --- 3 KPIs ---
-      const kpis = '<div class="prime-kpis">'
-        + '<div class="prime-kpi"><div class="prime-kval">' + primeFmtEur(R.persoSum) + '</div><div class="prime-klab">Primes perso (total)</div><div class="prime-ksub">Commissions des ' + n + '</div></div>'
-        + '<div class="prime-kpi coll"><div class="prime-kval">' + primeFmtEur(R.collTotal) + '</div><div class="prime-klab">Prime collective</div><div class="prime-ksub">Palier ' + primeFmtPct(R.tauxColl) + ' · partagée en ' + n + '</div></div>'
-        + '<div class="prime-kpi pool"><div class="prime-kval">' + primeFmtEur(R.pool) + '</div><div class="prime-klab">Pool total</div><div class="prime-ksub">' + Math.round(R.ratio) + ' % du résultat</div></div>'
+      // --- Soutenabilité : 1 ligne ---
+      const ratio = R.ratio;
+      let gColor, gState;
+      if (ratio < 15) { gColor = 'var(--success)'; gState = 'Maîtrisé'; }
+      else if (ratio < 20) { gColor = 'var(--warning)'; gState = 'Vigilance'; }
+      else { gColor = 'var(--danger)'; gState = 'Tension tréso'; }
+      const soutenabilite = '<div class="prime-card" style="display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem 0.9rem;font-size:0.9rem" title="Repères : 15 % vigilance · 20 % tension trésorerie">'
+        + '<b>Pool total : ' + primeFmtEur(R.pool) + '</b>'
+        + '<span><b>' + Math.round(ratio) + ' %</b> du résultat</span>'
+        + '<span style="display:inline-flex;align-items:center;gap:0.3rem;color:' + gColor + ';font-weight:600"><span style="width:9px;height:9px;border-radius:50%;background:' + gColor + '"></span>' + gState + '</span>'
         + '</div>';
 
-      // --- Tableau récap ---
-      let recapRows = parts.map(name => '<tr><td>' + primeEsc(name) + '</td><td>' + primeFmtEur(R.perso[name]) + '</td><td>' + primeFmtEur(R.collPart) + '</td><td class="tot">' + primeFmtEur(R.total[name]) + '</td></tr>').join('');
-      recapRows += '<tr class="grand"><td>Total</td><td>' + primeFmtEur(R.persoSum) + '</td><td>' + primeFmtEur(R.collTotal) + '</td><td class="tot">' + primeFmtEur(R.pool) + '</td></tr>';
-      const recap = '<div class="prime-card"><p class="prime-card-h">Qui touche quoi</p>'
-        + '<table class="prime-recap"><thead><tr><th>Personne</th><th>Prime perso</th><th>Part collective</th><th>Total</th></tr></thead><tbody>' + recapRows + '</tbody></table></div>';
-
-      // --- Jauge de soutenabilité (échelle 0 → 30 %) ---
-      const ratio = R.ratio;
-      let gColor, gBg, gState, gFoot;
-      if (ratio < 15) {
-        gColor = 'var(--success)'; gBg = 'var(--success-bg)'; gState = 'Maîtrisé';
-        gFoot = '<b>Pool à ' + Math.round(ratio) + ' % du résultat.</b> Confortable. Au palier le plus haut, collectif et commissions montent ensemble — sans plafond global, c\'est à surveiller.';
-      } else if (ratio < 20) {
-        gColor = 'var(--warning)'; gBg = 'var(--warning-bg)'; gState = 'Vigilance';
-        gFoot = '<b>Pool à ' + Math.round(ratio) + ' % du résultat.</b> Zone de vigilance : vérifie que la trésorerie suit, surtout avec un BFR qui monte quand vous signez plus.';
-      } else {
-        gColor = 'var(--danger)'; gBg = 'var(--purple-bg)'; gState = 'Tension tréso';
-        gFoot = '<b>Plus de 20 % du résultat en primes.</b> Tendu : tu ponctionnes le cash nécessaire à l\'IS, au BFR et aux dividendes. Revois les paliers ou les taux.';
-      }
-      const gaugeW = Math.max(0, Math.min(ratio / 30 * 100, 100));
-      const gauge = '<div class="prime-card"><p class="prime-card-h">Soutenabilité — total des primes vs résultat</p>'
-        + '<div class="prime-gauge-top"><div class="prime-gauge-figure">' + Math.round(ratio) + ' %</div>'
-        + '<div class="prime-gauge-state" style="background:' + gBg + ';"><span class="dot" style="background:' + gColor + ';"></span>' + gState + '</div></div>'
-        + '<div class="prime-gauge-track"><div class="prime-gauge-fill" style="width:' + gaugeW + '%;background:' + gColor + ';"></div></div>'
-        + '<p class="prime-gauge-foot">' + gFoot + ' <span style="opacity:.8;">Repères : 15 % vigilance · 20 % tension tréso.</span></p></div>';
-
-      // --- Gate trimestriel (indicateur) ---
-      const avgQ = R.caSigne / 4;
-      const gateOk = avgQ >= (primeConfig.gateTrimestriel || 0);
-      const gate = '<div class="prime-card"><div class="prime-gatecard">'
-        + '<div class="gk-txt">Étage 1 · seuil de rentabilité : <b>' + primeFmtEur(primeConfig.gateTrimestriel) + '</b> de CA / trimestre. CA de l\'année ÷ 4 (moyenne) : <b>' + primeFmtEur(avgQ) + '</b>.</div>'
-        + '<div class="prime-gk-state" style="background:' + (gateOk ? 'var(--success-bg)' : 'var(--warning-bg)') + ';">' + (gateOk ? 'Au-dessus en moyenne' : 'Sous le seuil en moyenne') + '</div>'
-        + '</div></div>';
-
       const results = document.getElementById('kpiPrimeResults');
-      if (results) results.innerHTML = stairsCard + kpis + recap + gauge + gate;
+      if (results) results.innerHTML = table + etage2 + soutenabilite;
+    }
+
+    // Drill-down : quels deals composent la prime d'un partner pour un trimestre (traçabilité).
+    function openPrimeDrilldown(encName, qIdx) {
+      const name = decodeURIComponent(encName);
+      const sq = (kpiData && kpiData.signedQuarterly) || {};
+      const deals = (sq.detailByPartner && sq.detailByPartner[name] && sq.detailByPartner[name][qIdx]) || [];
+      const r = (primeConfig.rates && primeConfig.rates[name]) || primeDefaultRates(name);
+      const R = primeCompute();
+      const primeQ = (R.persoQ[name] && R.persoQ[name][qIdx]) || 0;
+      const gated = !(R.gateOk && R.gateOk[qIdx]);
+      document.getElementById('kpiDetailTitle').textContent = name + ' · T' + (qIdx + 1) + ' · prime ' + primeFmtEur(primeQ) + (gated ? ' (gelée : trimestre sous le seuil)' : '');
+      const caTot = deals.reduce((s, d) => s + (d.montant || 0), 0);
+      let html = '<p class="kpi-detail-total">' + deals.length + ' deal' + (deals.length > 1 ? 's' : '') + ' · ' + kpiFmtEur(caTot) + ' de CA attribué · taux new ' + primeFmtPct(r.txNew) + ' / repeat ' + primeFmtPct(r.txRepeat) + '</p>';
+      if (!deals.length) { html += '<p style="color:var(--text-secondary);">Aucun deal signé ce trimestre pour ce partner.</p>'; }
+      else {
+        html += deals.map(d => {
+          const taux = d.type === 'repeat' ? r.txRepeat : r.txNew;
+          const commission = d.montant * (taux / 100);
+          return '<div class="kpi-detail-row"><div><div class="kpi-detail-nom">' + (d.nom || 'Sans nom') + ' <span style="font-size:0.72rem;color:var(--text-secondary)">' + (d.type === 'repeat' ? 'Repeat' : 'New') + ' · ' + d.pct + ' %</span></div>'
+            + '<div class="kpi-detail-client">' + (d.client || '') + ' · CA ' + kpiFmtEur(d.montant) + ' × ' + primeFmtPct(taux) + '</div></div>'
+            + '<div class="kpi-detail-montant">' + kpiFmtEur(commission) + '</div></div>';
+        }).join('');
+      }
+      document.getElementById('kpiDetailBody').innerHTML = html;
+      document.getElementById('kpiDetailModal').classList.add('active');
     }
 
     function resetPrimeRealises() { renderKpiPrime(); }
 
     // --- Réglages primes (modale) ---
+    // === Réglages pondération (barème de probabilité par étape, depuis la card "Pipeline pondere") ===
+    let ponderationSuggestions = []; // dernières suggestions chargées (pour "Tout appliquer")
+    let lastPonderationConv = null;  // dernier calcul réussi (pour conserver l'affichage si un recalcul échoue)
+
+    async function openPonderationModal() {
+      const modal = document.getElementById('ponderationModal');
+      const body = document.getElementById('ponderationBody');
+      if (!modal || !body) return;
+      body.innerHTML = '<p style="color:var(--text-secondary)">Chargement…</p>';
+      modal.classList.add('active');
+      try {
+        const [data, conv] = await Promise.all([
+          fetch('/api/pipeline-ponderation').then(r => r.json()),
+          fetch('/api/pipeline-conversion').then(r => r.json()).catch(() => ({ available: false })),
+        ]);
+        renderPonderationBody(data.stages || [], conv);
+      } catch (e) {
+        body.innerHTML = '<p style="color:#b91c1c">Erreur de chargement du barème.</p>';
+      }
+    }
+
+    // Construit le contenu du modal : barème éditable + colonne "Suggéré (données)".
+    function renderPonderationBody(stages, conv) {
+      const body = document.getElementById('ponderationBody');
+      const suggByStage = {};
+      const available = conv && conv.available && Array.isArray(conv.stages);
+      if (available) conv.stages.forEach(s => { suggByStage[s.id] = s; });
+      ponderationSuggestions = available ? conv.stages : [];
+      if (available) lastPonderationConv = conv;
+
+      const rows = stages.map(s => {
+        const sg = suggByStage[s.id];
+        let suggCell = '<span style="color:var(--text-secondary)">·</span>';
+        if (sg && sg.confidence === 'none') {
+          suggCell = '<span style="color:var(--text-secondary)">pas assez de données</span>';
+        } else if (sg && sg.suggested != null) {
+          const dot = sg.confidence === 'ok' ? '🟢' : '🟠';
+          const title = 'Intervalle de confiance 95 % : ' + sg.suggested + ' % (entre ' + sg.ciLow + ' % et ' + sg.ciHigh
+            + ' %). Échantillon : ' + sg.resolved + ' deals résolus.'
+            + (sg.confidence === 'low' ? ' Échantillon réduit, à prendre avec prudence.' : '');
+          suggCell = '<span title="' + title + '" style="cursor:help">' + sg.suggested + '% · ' + sg.resolved + ' deals ' + dot + 'ⓘ</span>'
+            + ' <button class="kpi-btn" style="padding:0.1rem 0.5rem;font-size:0.8rem" onclick="applyPonderationSuggestion(\'' + s.id + '\',' + sg.suggested + ')">Appliquer</button>';
+        }
+        return '<tr><td style="padding:0.4rem 0">' + s.label + '</td>'
+          + '<td style="text-align:right"><input class="kpi-num-input" type="number" min="0" max="100" step="1" value="' + s.probability + '" data-stage-id="' + s.id + '"></td>'
+          + '<td style="padding:0.4rem 0 0.4rem 0.8rem;font-size:0.85rem">' + suggCell + '</td></tr>';
+      }).join('');
+
+      const computedTxt = (available && conv.computedAt)
+        ? new Date(conv.computedAt).toLocaleString('fr-FR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })
+        : '';
+      const footer = available
+        ? '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:0.8rem;font-size:0.85rem">'
+          + '<button class="kpi-btn" onclick="applyAllPonderationSuggestions()">Tout appliquer</button>'
+          + '<span style="color:var(--text-secondary)"><a href="#" onclick="recalcPonderationSuggestions();return false" style="color:var(--primary)">&#8635; Recalculer</a>'
+          + (computedTxt ? ' · calculé ' + computedTxt : '') + '</span></div>'
+        : '<p style="font-size:0.8rem;color:var(--text-secondary);margin:0.6rem 0 0">Suggestions indisponibles pour le moment.</p>';
+
+      body.innerHTML =
+        '<p style="font-size:0.82rem;color:var(--text-secondary);margin:0 0 0.9rem">'
+        + 'Probabilité de signature par étape. Elle pilote le pipeline pondéré (montant × %) et les prévisions de trésorerie / EBE qui s\'appuient dessus.</p>'
+        + '<table style="width:100%;border-collapse:collapse;font-size:0.9rem"><thead><tr>'
+        + '<th style="text-align:left;padding:0.3rem 0;color:var(--text-secondary);font-weight:600">Étape</th>'
+        + '<th style="text-align:right;color:var(--text-secondary);font-weight:600">Pondération (%)</th>'
+        + '<th style="text-align:left;padding-left:0.8rem;color:var(--text-secondary);font-weight:600">Suggéré (données)</th></tr></thead><tbody>'
+        + rows + '</tbody></table>' + footer;
+    }
+
+    // Copie la valeur suggérée dans le champ de l'étape (sans sauvegarder).
+    function applyPonderationSuggestion(stageId, value) {
+      const inp = document.querySelector('#ponderationBody input[data-stage-id="' + stageId + '"]');
+      if (inp) inp.value = Math.max(0, Math.min(100, value));
+    }
+
+    function applyAllPonderationSuggestions() {
+      (ponderationSuggestions || []).forEach(s => {
+        if (s.confidence !== 'none' && s.suggested != null) applyPonderationSuggestion(s.id, s.suggested);
+      });
+    }
+
+    // Recalcul forcé, en conservant les valeurs déjà saisies dans les champs.
+    // En cas d'échec du calcul, on garde les suggestions précédentes (lastPonderationConv).
+    async function recalcPonderationSuggestions() {
+      const current = {};
+      document.querySelectorAll('#ponderationBody input[data-stage-id]').forEach(inp => { current[inp.dataset.stageId] = inp.value; });
+      try {
+        const [data, conv] = await Promise.all([
+          fetch('/api/pipeline-ponderation').then(r => r.json()),
+          fetch('/api/pipeline-conversion?refresh=1').then(r => r.json()).catch(() => ({ available: false })),
+        ]);
+        const stages = (data.stages || []).map(s => ({ ...s, probability: current[s.id] != null ? current[s.id] : s.probability }));
+        if (!(conv && conv.available) && lastPonderationConv) {
+          renderPonderationBody(stages, lastPonderationConv); // conserve les suggestions précédentes
+          alert('Recalcul impossible, suggestions précédentes conservées.');
+        } else {
+          renderPonderationBody(stages, conv);
+        }
+      } catch (e) {
+        alert('Recalcul impossible pour le moment.');
+      }
+    }
+
+    function closePonderationModal() {
+      const m = document.getElementById('ponderationModal');
+      if (m) m.classList.remove('active');
+    }
+    async function savePonderation() {
+      const btn = document.getElementById('ponderationSaveBtn');
+      const inputs = document.querySelectorAll('#ponderationBody input[data-stage-id]');
+      const probabilities = {};
+      inputs.forEach(inp => { probabilities[inp.dataset.stageId] = Math.max(0, Math.min(100, parseInt(inp.value, 10) || 0)); });
+      if (btn) { btn.disabled = true; btn.textContent = '…'; }
+      try {
+        const r = await fetch('/api/pipeline-ponderation', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ probabilities }),
+        });
+        if (!r.ok) throw new Error();
+        closePonderationModal();
+        // Rafraîchit la vue courante (le barème a changé côté serveur).
+        if (currentPage === 'cockpit') { if (typeof refreshCockpit === 'function') await refreshCockpit(); }
+        else if (typeof refreshData === 'function') { await refreshData(); }
+      } catch (e) {
+        alert('Erreur lors de l\'enregistrement du barème.');
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Enregistrer'; }
+      }
+    }
+
     function togglePrimeReglages() {
       document.getElementById('primeReglagesModal').classList.add('active');
       renderPrimeReglages();
@@ -11053,6 +11538,7 @@
         + '<div class="prime-rg-grid">'
         + '<div class="prime-rg-field"><label>Résultat annuel avant bonus (€)</label><input class="kpi-num-input" type="number" step="10000" value="' + (primeConfig.resultatAnnuel || 0) + '" data-ref-resultat onchange="onPrimeReglagesChange()"></div>'
         + '<div class="prime-rg-field"><label>Seuil de rentabilité / trimestre (€)</label><input class="kpi-num-input" type="number" step="10000" value="' + (primeConfig.gateTrimestriel || 0) + '" data-ref-gate onchange="onPrimeReglagesChange()"></div>'
+        + '<div class="prime-rg-field"><label>Objectif de CA facturé annuel (€)</label><input class="kpi-num-input" type="number" step="10000" value="' + (primeConfig.objectifFacture || 0) + '" data-ref-objfact onchange="onPrimeReglagesChange()"></div>'
         + '</div>';
 
       body.innerHTML = html;
@@ -11079,11 +11565,15 @@
       primeConfig.tiers = tiers.filter(Boolean);
       const ra = body.querySelector('input[data-ref-resultat]');
       const gt = body.querySelector('input[data-ref-gate]');
+      const of = body.querySelector('input[data-ref-objfact]');
       if (ra) primeConfig.resultatAnnuel = primeParseNum(ra.value);
       if (gt) primeConfig.gateTrimestriel = primeParseNum(gt.value);
-      // Recalcule l'estimateur (les taux affichés en lecture aussi) et sauvegarde (debounce).
+      if (of) primeConfig.objectifFacture = primeParseNum(of.value);
+      // Recalcule l'estimateur (les taux affichés en lecture aussi), rafraîchit les tuiles (avancement
+      // collectif = objectif facturé) et sauvegarde (debounce).
       renderPrimeReadonlyRates();
       primeRecompute();
+      renderKpiOverview();
       schedulePrimeSave();
     }
 
@@ -16978,6 +17468,7 @@
   <div class="deal-sidebar" id="dealSidebar">
     <div class="deal-sidebar-header">
       <div class="deal-sidebar-title" id="sidebarDealName">—</div>
+      <button onclick="renameDeal(currentSidebarDealId)" title="Renommer le deal" style="flex:0 0 auto;background:none;border:none;cursor:pointer;font-size:0.95rem;opacity:0.6;padding:0 0.3rem">&#9998;</button>
       <button class="deal-sidebar-close" onclick="closeDealSidebar()">&times;</button>
     </div>
     <div class="deal-sidebar-body" id="sidebarBody">
@@ -16986,6 +17477,33 @@
     <div class="deal-sidebar-footer">
       <button class="deal-sidebar-won-btn" id="sidebarWonBtn" onclick="markCurrentDeal('closedwon')">&#10003; Marquer Gagné</button>
       <button class="deal-sidebar-lost-btn" id="sidebarLostBtn" onclick="markCurrentDeal('closedlost')">&#10007; Marquer Perdu</button>
+      <button id="sidebarDeleteBtn" onclick="deleteCurrentDeal()" title="Supprimer le deal" style="flex:0 0 auto;background:none;border:1px solid rgba(239,68,68,0.35);color:#b91c1c;border-radius:6px;cursor:pointer;padding:0 0.6rem;font-size:0.9rem">&#128465;</button>
+    </div>
+  </div>
+
+  <!-- Modale Réglages pondération (globale : hors sections de page, pour s'afficher depuis n'importe quel onglet) -->
+  <div class="modal-overlay" id="ponderationModal" onclick="if(event.target===this) closePonderationModal()">
+    <div class="modal kpi-modal">
+      <div class="modal-header" style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+        <h2 style="margin:0;">Réglages pondération</h2>
+        <button class="modal-close-x" onclick="closePonderationModal()" aria-label="Fermer">&times;</button>
+      </div>
+      <div class="modal-body" id="ponderationBody"></div>
+      <div class="modal-footer" style="display:flex;gap:0.6rem;justify-content:flex-end">
+        <button class="kpi-btn" onclick="closePonderationModal()">Annuler</button>
+        <button class="kpi-btn kpi-btn--primary" id="ponderationSaveBtn" onclick="savePonderation()">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modale détail "Pipeline pondéré" (globale : cliquable depuis Cockpit et Commercial) -->
+  <div class="modal-overlay" id="pipelinePondereModal" onclick="if(event.target===this) closePipelinePondereDetail()">
+    <div class="modal kpi-modal">
+      <div class="modal-header" style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+        <h2 style="margin:0;">Pipeline pondéré · détail</h2>
+        <button class="modal-close-x" onclick="closePipelinePondereDetail()" aria-label="Fermer">&times;</button>
+      </div>
+      <div class="modal-body" id="pipelinePondereBody"></div>
     </div>
   </div>
 

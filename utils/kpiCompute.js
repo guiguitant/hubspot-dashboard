@@ -46,6 +46,119 @@ function totalCaAnnee(missions, year) {
   return Math.round(total);
 }
 
+// Trimestre (1-4) d'une date ISO / 'YYYY-MM-DD', sinon null. Slicing (pas de parsing Date) pour
+// rester insensible au fuseau horaire.
+function quarterOfDate(d) {
+  if (!d) return null;
+  const mois = Number(String(d).slice(5, 7));
+  if (!mois || mois < 1 || mois > 12) return null;
+  return Math.ceil(mois / 3);
+}
+
+// Date de signature d'une mission : le champ "Date de signature" s'il est renseigné, sinon la date
+// de création de la ligne Notion (proxy, en attendant le backfill des vraies dates).
+function signatureDate(m) {
+  return m.dateSignature || m.dateCreation || null;
+}
+
+// CA signé (source Notion) ventilé par trimestre pour `year`, DATÉ À LA SIGNATURE.
+// Base des primes commerciales trimestrielles (étage 1). Différent de signedAmountForYear (qui date à
+// la facture) : une mission est signée en un seul événement, donc son CA ENTIER tombe dans le trimestre
+// de signature (pas de découpage acompte/solde).
+//   - byPartner[p] = { new:[q1..q4], repeat:[q1..q4] } : CA classé (Newsale/Upsale) réparti par %.
+//   - quarterTotals[q] : CA signé TOTAL du trimestre (toutes missions non « Annulé », classées ou non),
+//     base du seuil de rentabilité collectif (le portillon trimestriel).
+function signedByQuarter(missions, year, splits) {
+  const splitIndex = {};
+  for (const s of splits || []) {
+    if (!s || s.axis !== 'commercial') continue;
+    (splitIndex[s.mission_id] = splitIndex[s.mission_id] || {})[s.partner] = Number(s.pct) || 0;
+  }
+  const byPartner = {};
+  const detailByPartner = {};                 // [p][q] = [{ id, nom, client, montant, pct, type }] : traçabilité prime -> deals
+  const quarterTotals = [0, 0, 0, 0];
+  const unattributed = [];                     // { id, nom, client, ca, quarter, reason } : signé mais non rattaché à un partner
+  const ensure = (p) => {
+    if (!byPartner[p]) { byPartner[p] = { new: [0, 0, 0, 0], repeat: [0, 0, 0, 0] }; detailByPartner[p] = [[], [], [], []]; }
+    return byPartner[p];
+  };
+
+  for (const m of missions || []) {
+    if (SIGNE_EXCLUDED_STATES.includes(m.etat)) continue;
+    const ca = Number(m.ca) || 0;
+    if (ca <= 0) continue;
+    const sig = signatureDate(m);
+    if (yearOfDate(sig) !== year) continue;
+    const q = quarterOfDate(sig);
+    if (!q) continue;
+    quarterTotals[q - 1] += ca;
+
+    let type = null;
+    if (m.typeCa === 'Newsale') type = 'new';
+    else if (m.typeCa === 'Upsale') type = 'repeat';
+    const partners = m.partnerCommercial || [];
+    // Non attribué : sans partner, ou sans type (Newsale/Upsale). Compté dans quarterTotals mais chez aucun partner.
+    // C'est LA fuite d'attribution : le contrôle de couverture (front) s'appuie là-dessus.
+    if (!partners.length || !type) {
+      unattributed.push({ id: m.id, nom: m.nom, client: m.client, ca: Math.round(ca), quarter: q, reason: !partners.length ? 'sans partner' : 'sans type' });
+      continue;
+    }
+    const shares = splitAmount(ca, partners, splitIndex[m.id]);
+    for (const [p, amt] of Object.entries(shares)) {
+      ensure(p)[type][q - 1] += amt;
+      detailByPartner[p][q - 1].push({ id: m.id, nom: m.nom, client: m.client, montant: Math.round(amt), pct: ca > 0 ? Math.round(amt / ca * 100) : 0, type });
+    }
+  }
+
+  for (const p of Object.keys(byPartner)) {
+    byPartner[p].new = byPartner[p].new.map((v) => Math.round(v));
+    byPartner[p].repeat = byPartner[p].repeat.map((v) => Math.round(v));
+  }
+  return {
+    partners: Object.keys(byPartner).sort(),
+    byPartner,
+    detailByPartner,
+    quarterTotals: quarterTotals.map((v) => Math.round(v)),
+    total: Math.round(quarterTotals.reduce((s, v) => s + v, 0)),
+    unattributed: {
+      total: Math.round(unattributed.reduce((s, x) => s + x.ca, 0)),
+      missions: unattributed,
+    },
+  };
+}
+
+// Candidats au clawback (reprise) : missions « Annulé » signées sur un trimestre DÉJÀ PAYÉ
+// (quarter <= paidThroughQuarter), qui ont donc potentiellement généré une prime déjà versée.
+// Retourne le détail par partner (montant = part après split) ; le taux/la prime sont appliqués côté
+// front (qui a la config). Montant indicatif : on ignore si l'annulation est antérieure ou postérieure
+// au paiement (pas de date d'annulation fiable), d'où la vérification manuelle.
+function clawbackCandidates(missions, year, splits, paidThroughQuarter) {
+  const splitIndex = {};
+  for (const s of splits || []) {
+    if (!s || s.axis !== 'commercial') continue;
+    (splitIndex[s.mission_id] = splitIndex[s.mission_id] || {})[s.partner] = Number(s.pct) || 0;
+  }
+  const out = [];
+  for (const m of missions || []) {
+    if (m.etat !== 'Annulé') continue;
+    const ca = Number(m.ca) || 0;
+    if (ca <= 0) continue;
+    if (yearOfDate(signatureDate(m)) !== year) continue;
+    const q = quarterOfDate(signatureDate(m));
+    if (!q || q > (paidThroughQuarter || 0)) continue; // pas encore payé -> pas un clawback
+    let type = null;
+    if (m.typeCa === 'Newsale') type = 'new';
+    else if (m.typeCa === 'Upsale') type = 'repeat';
+    const partners = m.partnerCommercial || [];
+    if (!type || !partners.length) continue; // n'aurait pas généré de prime perso
+    const shares = splitAmount(ca, partners, splitIndex[m.id]);
+    for (const [p, amt] of Object.entries(shares)) {
+      out.push({ id: m.id, nom: m.nom, client: m.client, quarter: q, partner: p, montant: Math.round(amt), type });
+    }
+  }
+  return out;
+}
+
 // Répartit `ca` entre `partners` selon `overrides` ({partner: pct}) si non vide,
 // sinon à parts égales. Retourne { partner: montant }.
 function splitAmount(ca, partners, overrides) {
@@ -107,9 +220,11 @@ function computeKpi({ missions, objectives, splits, year }) {
 
   for (const m of missions || []) {
     const ca = Number(m.ca) || 0;
-    // CA signé (source Notion) rattaché à `year` : acompte/solde répartis par date d'émission de facture,
-    // repli sur "Année final" si non facturé. 0 si l'état est "Annulé" (exclu du signé).
-    const caSigne = SIGNE_EXCLUDED_STATES.includes(m.etat) ? 0 : signedAmountForYear(m, year);
+    // CA signé (source Notion) daté À LA SIGNATURE, comme signedByQuarter et la prime individuelle :
+    // le CA ENTIER de la mission tombe sur son année de signature (pas de découpage acompte/solde, qui
+    // relève de la facturation). 0 si l'état est "Annulé" (exclu du signé). Le total FACTURÉ de l'année
+    // reste, lui, calculé à la date de facture via caAnnee/signedAmountForYear (base de la prime collective).
+    const caSigne = (SIGNE_EXCLUDED_STATES.includes(m.etat) || yearOfDate(signatureDate(m)) !== year) ? 0 : ca;
     // Opéré : critère d'année inchangé (date de création de la ligne Notion) + CA total de la mission.
     const isOpereYear = yearOf(m.dateCreation) === year && OPERE_STATES.includes(m.etat);
 
@@ -193,4 +308,4 @@ function computeKpi({ missions, objectives, splits, year }) {
   return { year, partners, all, unclassified, missionsForSplit, allDetails: allDetail, caAnnee: totalCaAnnee(missions, year) };
 }
 
-module.exports = { computeKpi, yearOf, yearOfDate, signedAmountForYear, totalCaAnnee, splitAmount, displaySplit, OPERE_STATES, SIGNE_EXCLUDED_STATES };
+module.exports = { computeKpi, yearOf, yearOfDate, signedAmountForYear, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, signatureDate, splitAmount, displaySplit, OPERE_STATES, SIGNE_EXCLUDED_STATES };

@@ -9,7 +9,7 @@ const { authenticator } = require('otplib');
 const { execFile } = require('child_process');
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
-const { computeKpi, totalCaAnnee } = require('./utils/kpiCompute');
+const { computeKpi, totalCaAnnee, signedByQuarter, clawbackCandidates } = require('./utils/kpiCompute');
 const { computeBillingForYear } = require('./utils/billing');
 const { buildSalesNavUrl } = require('./utils/buildSalesNavUrl');
 const multer = require('multer');
@@ -488,6 +488,144 @@ const KANBAN_STAGES = [
   { id: '2077692138', label: 'À relancer plus tard', probability: 20, forecast: false },
 ];
 
+// --- Barème de pondération éditable (persisté, réutilise la table kpi_prime_config, id 'pipeline_ponderation') ---
+// On réutilise la table de config existante pour éviter une migration Supabase. Les % vivent en mémoire
+// dans KANBAN_STAGES (mutés ici) : TOUS les consommateurs du barème (weightPipelineDeals, /api/dashboard,
+// prévision tréso, EBE...) en profitent sans changer leur code. Seuls les stages actifs (forecast) sont éditables.
+const PONDERATION_CONFIG_ID = 'pipeline_ponderation';
+
+// Applique un mapping { stageId: pct } sur KANBAN_STAGES (borné 0-100). Ignore les stages inconnus.
+function applyPonderation(probabilities) {
+  if (!probabilities || typeof probabilities !== 'object') return;
+  for (const stage of KANBAN_STAGES) {
+    const v = probabilities[stage.id];
+    if (v === undefined || v === null) continue;
+    const n = Number(v);
+    if (Number.isFinite(n)) stage.probability = Math.max(0, Math.min(100, Math.round(n)));
+  }
+}
+
+// Charge le barème sauvegardé au démarrage (sinon on garde les défauts codés dans KANBAN_STAGES).
+async function loadPipelineProbabilities() {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('kpi_prime_config').select('config').eq('id', PONDERATION_CONFIG_ID).maybeSingle();
+    if (error) throw error;
+    if (data && data.config && data.config.probabilities) {
+      applyPonderation(data.config.probabilities);
+      console.log('[startup] Barème de pondération chargé depuis la config.');
+    }
+  } catch (e) {
+    console.error('[startup] Chargement du barème de pondération échoué (défauts conservés):', e.message);
+  }
+}
+loadPipelineProbabilities();
+
+// Lecture du barème : les stages actifs (forecast) avec leur % courant.
+app.get('/api/pipeline-ponderation', (req, res) => {
+  const stages = KANBAN_STAGES.filter(s => s.forecast !== false)
+    .map(s => ({ id: s.id, label: s.label, probability: s.probability }));
+  res.json({ stages });
+});
+
+// Enregistrement du barème : body { probabilities: { stageId: pourcentage } }. Persiste + applique à chaud.
+app.post('/api/pipeline-ponderation', async (req, res) => {
+  try {
+    const probabilities = req.body && req.body.probabilities;
+    if (!probabilities || typeof probabilities !== 'object' || Array.isArray(probabilities)) {
+      return res.status(400).json({ error: 'probabilities (objet { stageId: pourcentage }) requis' });
+    }
+    // On ne garde que les stages actifs connus, bornés 0-100.
+    const clean = {};
+    for (const stage of KANBAN_STAGES) {
+      if (stage.forecast === false) continue;
+      const v = probabilities[stage.id];
+      if (v === undefined || v === null) continue;
+      const n = Number(v);
+      if (!Number.isFinite(n)) return res.status(400).json({ error: `Pourcentage invalide pour ${stage.label}` });
+      clean[stage.id] = Math.max(0, Math.min(100, Math.round(n)));
+    }
+    const { error } = await supabaseAdmin
+      .from('kpi_prime_config')
+      .upsert({ id: PONDERATION_CONFIG_ID, config: { probabilities: clean }, updated_at: new Date().toISOString() }, { onConflict: 'id' });
+    if (error) throw error;
+    applyPonderation(clean); // effet immédiat, sans redémarrage
+    invalidatePonderationCaches(); // jette les snapshots figés (deals ouverts + tréso) pour diffuser le nouveau barème
+    res.json({ ok: true, probabilities: clean });
+  } catch (e) {
+    console.error('POST /api/pipeline-ponderation error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// --- Suggestion de pondération : P(gagné | atteint étape X) depuis l'historique dealstage ---
+// Les hs_date_entered_* sont vides sur ce portail ; on reconstruit le parcours via l'historique
+// de la propriété dealstage (batch/read, max 50 ids/lot). Résultat mis en cache 12 h.
+const { analyzeDeal: analyzeDealForConversion, computeStageWinRates } = require('./utils/stageWinRates');
+
+let conversionCache = null;
+let conversionCacheTime = 0;
+const CONVERSION_CACHE_TTL = 12 * 60 * 60 * 1000; // 12 h
+
+// Récupère tous les deals du pipeline "default", lit leur historique dealstage, et les analyse.
+async function fetchDealStageHistories() {
+  const ids = [];
+  let after;
+  while (true) {
+    const body = {
+      filterGroups: [{ filters: [{ propertyName: 'pipeline', operator: 'EQ', value: 'default' }] }],
+      properties: ['createdate'],
+      limit: 100,
+    };
+    if (after) body.after = after;
+    const r = await hubspotSearch(body);
+    if (r.results) ids.push(...r.results.map(d => d.id));
+    if (r.paging && r.paging.next && r.paging.next.after) after = r.paging.next.after;
+    else break;
+  }
+
+  const deals = [];
+  for (let i = 0; i < ids.length; i += 50) { // batch history plafonné à 50 ids
+    const chunk = ids.slice(i, i + 50);
+    const res = await hubspotWrite('POST', '/crm/v3/objects/deals/batch/read', {
+      propertiesWithHistory: ['dealstage'],
+      properties: ['hs_is_closed', 'hs_is_closed_won'],
+      inputs: chunk.map(id => ({ id })),
+    });
+    for (const d of (res.results || [])) {
+      const hist = (d.propertiesWithHistory && d.propertiesWithHistory.dealstage) || [];
+      deals.push(analyzeDealForConversion({
+        historyValues: hist.map(e => e.value),
+        isClosedWon: d.properties.hs_is_closed_won === 'true',
+        isClosed: d.properties.hs_is_closed === 'true',
+      }));
+    }
+  }
+  return deals;
+}
+
+// Calcule (ou renvoie le cache) les suggestions par étape.
+async function computePipelineConversion(forceRefresh) {
+  if (!forceRefresh && conversionCache && (Date.now() - conversionCacheTime) < CONVERSION_CACHE_TTL) {
+    return conversionCache;
+  }
+  const deals = await fetchDealStageHistories();
+  conversionCache = { available: true, computedAt: new Date().toISOString(), stages: computeStageWinRates(deals) };
+  conversionCacheTime = Date.now();
+  return conversionCache;
+}
+
+// GET /api/pipeline-conversion : suggestions de pondération basées sur l'historique réel.
+// ?refresh=1 force le recalcul. En cas d'échec, renvoie { available:false } sans casser le modal.
+app.get('/api/pipeline-conversion', async (req, res) => {
+  try {
+    res.json(await computePipelineConversion(req.query.refresh === '1'));
+  } catch (e) {
+    console.error('GET /api/pipeline-conversion error:', e.message);
+    res.json({ available: false });
+  }
+});
+
 // --- Calcul UNIQUE du pipeline pondéré HubSpot ---
 // Un seul endroit applique le barème KANBAN_STAGES (les stages forecast:false sont exclus).
 // Retourne le détail pondéré par deal (weighted = amount * probability/100 * factor) pour que
@@ -874,6 +1012,15 @@ async function fetchOpenDeals() {
   return pipelineDeals;
 }
 
+// Invalide les caches qui figent le barème de pondération : le snapshot des deals ouverts (la probabilité
+// est figée PAR DEAL dans openDealsCache) ET le résultat tréso calculé (pipeline pondéré). À appeler quand
+// le barème change, sinon /api/dashboard et /api/tresorerie renvoient les anciennes probas jusqu'au TTL (5 min).
+function invalidatePonderationCaches() {
+  openDealsCache = null; openDealsCacheTime = 0;
+  tresorerieCache = null; tresorerieCacheTime = 0;
+  tresorerieCacheWithPrev = null; tresorerieCacheWithPrevTime = 0;
+}
+
 // --- Aggregate revenue by month/year ---
 function aggregateByMonth(deals) {
   const monthly = {};
@@ -1093,11 +1240,17 @@ app.post('/api/deals', async (req, res) => {
 
 app.patch('/api/deals/:id', async (req, res) => {
   const { id } = req.params;
-  const { amount, stage, closedate, description } = req.body;
+  const { amount, stage, closedate, description, name } = req.body;
   const properties = {};
   if (amount !== undefined) properties.amount = String(parseFloat(amount));
   if (closedate !== undefined) properties.closedate = closedate;
   if (description !== undefined) properties.description = description;
+  // Renommage du deal (feature "renommer") : dealname doit rester non vide.
+  if (name !== undefined) {
+    const trimmedName = String(name).trim();
+    if (!trimmedName) return res.status(400).json({ error: 'Le nom du deal ne peut pas être vide' });
+    properties.dealname = trimmedName;
+  }
   if (stage !== undefined) {
     if (stage === 'closedwon' || stage === 'closedlost') {
       properties.dealstage = stage;
@@ -1110,6 +1263,22 @@ app.patch('/api/deals/:id', async (req, res) => {
   if (!Object.keys(properties).length) return res.status(400).json({ error: 'Rien à modifier' });
   try {
     await hubspotWrite('PATCH', `/crm/v3/objects/deals/${id}`, { properties });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Suppression (archivage) d'un deal HubSpot + nettoyage des métadonnées Supabase associées.
+// HubSpot "DELETE" archive le deal (réversible ~90 j côté HubSpot). Action destructive :
+// le front impose une confirmation avant d'appeler cette route.
+app.delete('/api/deals/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await hubspotWrite('DELETE', `/crm/v3/objects/deals/${id}`, {});
+    // Best-effort : on retire aussi la ligne de métadonnées locale (tags, notes, tâches, relances).
+    const { error: delErr } = await supabaseAdmin.from('deal_metadata').delete().eq('deal_id', id);
+    if (delErr) console.error('Suppression deal_metadata échouée pour', id, ':', delErr.message);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1902,6 +2071,9 @@ async function fetchAllNotionMissions() {
     return {
       id: page.id,
       dateCreation: page.created_time || null, // date de création de la ligne Notion ≈ date de signature (base d'année KPI)
+      // Date de signature réelle (propriété Notion "date signature", à backfiller via le rapprochement
+      // HubSpot). Base des primes trimestrielles ; repli sur dateCreation tant qu'elle est vide.
+      dateSignature: props['date signature'] && props['date signature'].date ? props['date signature'].date.start : null,
       nom: props['Nom du projet'] && props['Nom du projet'].title
         ? props['Nom du projet'].title.map(t => t.plain_text).join('') : 'Sans nom',
       client: props['Nom du client'] && props['Nom du client'].rich_text
@@ -6343,6 +6515,15 @@ app.get('/api/kpi', async (req, res) => {
     result.facturation = computeBillingForYear(missions, factOverrides || [], year);
     // CA signé (bandeau + primes étage 1) : 100% Notion, déjà calculé par computeKpi (réalisé par partner/type).
     // Plus aucun appel HubSpot ici : la source unique du CA signé est Notion.
+    // Ventilation trimestrielle du CA signé (datée à la signature) : base des primes trimestrielles étage 1.
+    result.signedQuarterly = signedByQuarter(missions, year, splits || []);
+    // Clawback (voyant) : missions annulées signées sur un trimestre déjà payé. Paiement en début de
+    // trimestre suivant -> les trimestres strictement antérieurs au trimestre courant sont payés.
+    const _now = new Date();
+    const _curQ = Math.ceil((_now.getMonth() + 1) / 3);
+    const _curY = _now.getFullYear();
+    const paidThroughQuarter = year < _curY ? 4 : (year > _curY ? 0 : _curQ - 1);
+    result.clawback = clawbackCandidates(missions, year, splits || [], paidThroughQuarter);
     res.json(result);
   } catch (e) {
     console.error('GET /api/kpi error:', e.message);
@@ -6412,6 +6593,9 @@ const DEFAULT_PRIME_CONFIG = {
   ],
   resultatAnnuel: 150000,
   gateTrimestriel: 120000,
+  // Objectif de CA FACTURÉ annuel (facturé + à facturer) : pilote l'avancement collectif (tuile
+  // « CA <année> HT »). Distinct des objectifs de CA SIGNÉ par associé (table kpi_objectives).
+  objectifFacture: 650000,
 };
 
 app.get('/api/kpi/prime-config', async (req, res) => {
