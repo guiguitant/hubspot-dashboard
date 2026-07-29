@@ -1,7 +1,7 @@
 'use strict';
 const { wilson } = require('./stageWinRates');
 
-describe('wilson — intervalle de confiance à 95 %', () => {
+describe('wilson : intervalle de confiance à 95 %', () => {
   it('n = 0 → bornes nulles', () => {
     expect(wilson(0, 0)).toEqual({ low: null, high: null });
   });
