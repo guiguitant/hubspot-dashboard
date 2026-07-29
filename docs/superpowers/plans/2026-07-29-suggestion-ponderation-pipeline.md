@@ -1,4 +1,4 @@
-# Suggestion de pondération du pipeline — Implementation Plan
+# Suggestion de pondération du pipeline : plan d'implémentation
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -42,7 +42,7 @@ Créer `utils/stageWinRates.test.js` :
 'use strict';
 const { wilson } = require('./stageWinRates');
 
-describe('wilson — intervalle de confiance à 95 %', () => {
+describe('wilson : intervalle de confiance à 95 %', () => {
   it('n = 0 → bornes nulles', () => {
     expect(wilson(0, 0)).toEqual({ low: null, high: null });
   });
@@ -120,7 +120,7 @@ Ajouter à `utils/stageWinRates.test.js` :
 ```js
 const { analyzeDeal } = require('./stageWinRates');
 
-describe('analyzeDeal — reconstruction du parcours', () => {
+describe('analyzeDeal : reconstruction du parcours', () => {
   it('gagné passé par Qualif puis Propale → reached = 1', () => {
     const d = analyzeDeal({ historyValues: ['qualifiedtobuy', 'presentationscheduled', 'closedwon'], isClosedWon: true, isClosed: true });
     expect(d).toEqual({ won: true, lost: false, open: false, reached: 1 });
@@ -395,7 +395,7 @@ async function computePipelineConversion(forceRefresh) {
   return conversionCache;
 }
 
-// GET /api/pipeline-conversion — suggestions de pondération basées sur l'historique réel.
+// GET /api/pipeline-conversion : suggestions de pondération basées sur l'historique réel.
 // ?refresh=1 force le recalcul. En cas d'échec, renvoie { available:false } sans casser le modal.
 app.get('/api/pipeline-conversion', async (req, res) => {
   try {
@@ -475,7 +475,7 @@ Dans `public/pilot.html`, remplacer **entièrement** la fonction `openPonderatio
 
       const rows = stages.map(s => {
         const sg = suggByStage[s.id];
-        let suggCell = '<span style="color:var(--text-secondary)">—</span>';
+        let suggCell = '<span style="color:var(--text-secondary)">·</span>';
         if (sg && sg.confidence === 'none') {
           suggCell = '<span style="color:var(--text-secondary)">pas assez de données</span>';
         } else if (sg && sg.suggested != null) {
