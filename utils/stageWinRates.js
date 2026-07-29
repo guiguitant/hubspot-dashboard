@@ -35,4 +35,31 @@ function analyzeDeal({ historyValues, isClosedWon, isClosed }) {
   return { won, lost, open, reached };
 }
 
-module.exports = { wilson, analyzeDeal, FUNNEL };
+const CONFIDENCE_MIN = 30; // seuil "échantillon solide"
+
+// Pour chaque étape du funnel : P(gagné | a atteint l'étape), sur les deals RÉSOLUS.
+function computeStageWinRates(deals) {
+  const resolved = (deals || []).filter(d => d.won || d.lost);
+  return FUNNEL.map((s, i) => {
+    const reached = resolved.filter(d => d.reached >= i);
+    const n = reached.length;
+    const w = reached.filter(d => d.won).length;
+    const p = n ? w / n : null;
+    const ci = wilson(w, n);
+    let confidence = 'none';
+    if (n >= CONFIDENCE_MIN) confidence = 'ok';
+    else if (n > 0) confidence = 'low';
+    return {
+      id: s.id,
+      label: s.label,
+      won: w,
+      resolved: n,
+      suggested: p == null ? null : Math.round(p * 100),
+      ciLow: ci.low == null ? null : Math.round(ci.low * 100),
+      ciHigh: ci.high == null ? null : Math.round(ci.high * 100),
+      confidence,
+    };
+  });
+}
+
+module.exports = { wilson, analyzeDeal, computeStageWinRates, FUNNEL, CONFIDENCE_MIN };

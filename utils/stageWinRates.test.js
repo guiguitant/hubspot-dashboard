@@ -1,5 +1,15 @@
 'use strict';
-const { wilson, analyzeDeal } = require('./stageWinRates');
+const { wilson, analyzeDeal, computeStageWinRates } = require('./stageWinRates');
+
+// Fabrique n deals résolus ayant atteint l'étape `reached`, dont w gagnés.
+function resolvedDeals(reached, w, total) {
+  const out = [];
+  for (let i = 0; i < total; i++) {
+    const won = i < w;
+    out.push({ won, lost: !won, open: false, reached });
+  }
+  return out;
+}
 
 describe('wilson : intervalle de confiance à 95 %', () => {
   it('n = 0 → bornes nulles', () => {
@@ -39,5 +49,40 @@ describe('analyzeDeal : reconstruction du parcours', () => {
   it('saut d\'étape (Qualif puis Contrat) → reached = 3', () => {
     const d = analyzeDeal({ historyValues: ['qualifiedtobuy', 'contractsent'], isClosedWon: false, isClosed: false });
     expect(d.reached).toBe(3);
+  });
+});
+
+describe('computeStageWinRates', () => {
+  it('renvoie une ligne par étape du funnel', () => {
+    const r = computeStageWinRates([]);
+    expect(r.map(s => s.id)).toEqual(['qualifiedtobuy', 'presentationscheduled', 'decisionmakerboughtin', 'contractsent']);
+  });
+  it('étape sans deal résolu → confidence none, suggested null', () => {
+    const r = computeStageWinRates([]);
+    expect(r[0].confidence).toBe('none');
+    expect(r[0].suggested).toBeNull();
+  });
+  it('tous gagnés à Contrat → 100 % à toutes les étapes atteintes', () => {
+    const deals = resolvedDeals(3, 40, 40); // 40 gagnés, reached = 3 (donc >= toutes les étapes)
+    const r = computeStageWinRates(deals);
+    expect(r[0].suggested).toBe(100);
+    expect(r[3].suggested).toBe(100);
+    expect(r[0].confidence).toBe('ok'); // 40 >= 30
+  });
+  it('confidence low si moins de 30 résolus', () => {
+    const deals = resolvedDeals(0, 5, 10); // 10 résolus atteignant Qualif, 5 gagnés
+    const r = computeStageWinRates(deals);
+    expect(r[0].resolved).toBe(10);
+    expect(r[0].suggested).toBe(50);
+    expect(r[0].confidence).toBe('low');
+  });
+  it('deals ouverts exclus du calcul', () => {
+    const deals = [
+      { won: true, lost: false, open: false, reached: 0 },
+      { won: false, lost: false, open: true, reached: 0 }, // ouvert : ignoré
+    ];
+    const r = computeStageWinRates(deals);
+    expect(r[0].resolved).toBe(1);
+    expect(r[0].suggested).toBe(100);
   });
 });
