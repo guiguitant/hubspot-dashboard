@@ -1,5 +1,5 @@
 'use strict';
-const { wilson } = require('./stageWinRates');
+const { wilson, analyzeDeal } = require('./stageWinRates');
 
 describe('wilson : intervalle de confiance à 95 %', () => {
   it('n = 0 → bornes nulles', () => {
@@ -15,5 +15,29 @@ describe('wilson : intervalle de confiance à 95 %', () => {
     const b = wilson(10, 10);
     expect(a.low).toBeGreaterThanOrEqual(0);
     expect(b.high).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('analyzeDeal : reconstruction du parcours', () => {
+  it('gagné passé par Qualif puis Propale → reached = 1', () => {
+    const d = analyzeDeal({ historyValues: ['qualifiedtobuy', 'presentationscheduled', 'closedwon'], isClosedWon: true, isClosed: true });
+    expect(d).toEqual({ won: true, lost: false, open: false, reached: 1 });
+  });
+  it('perdu monté jusqu\'à Contrat → lost, reached = 3', () => {
+    const d = analyzeDeal({ historyValues: ['decisionmakerboughtin', 'contractsent', 'closedlost'], isClosedWon: false, isClosed: true });
+    expect(d).toEqual({ won: false, lost: true, open: false, reached: 3 });
+  });
+  it('importé direct à gagné (aucune étape funnel) → reached = -1', () => {
+    const d = analyzeDeal({ historyValues: ['closedwon'], isClosedWon: true, isClosed: true });
+    expect(d.reached).toBe(-1);
+    expect(d.won).toBe(true);
+  });
+  it('deal ouvert en Négociation → open, reached = 2', () => {
+    const d = analyzeDeal({ historyValues: ['qualifiedtobuy', 'presentationscheduled', 'decisionmakerboughtin'], isClosedWon: false, isClosed: false });
+    expect(d).toEqual({ won: false, lost: false, open: true, reached: 2 });
+  });
+  it('saut d\'étape (Qualif puis Contrat) → reached = 3', () => {
+    const d = analyzeDeal({ historyValues: ['qualifiedtobuy', 'contractsent'], isClosedWon: false, isClosed: false });
+    expect(d.reached).toBe(3);
   });
 });
