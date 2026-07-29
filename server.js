@@ -983,6 +983,26 @@ async function fetchOpenDeals() {
     }
   }
 
+  // Date d'entrée dans l'étape courante : hs_date_entered_* est vide sur ce portail, on la reconstruit
+  // depuis l'historique de la propriété dealstage (batch/read, 50 ids max par lot). Map { dealId: date ISO }.
+  const stageEnteredMap = {};
+  const openIds = allDeals.filter(d => KANBAN_STAGES.some(s => s.id === d.properties.dealstage)).map(d => d.id);
+  for (let i = 0; i < openIds.length; i += 50) {
+    const chunk = openIds.slice(i, i + 50);
+    const histRes = await hubspotWrite('POST', '/crm/v3/objects/deals/batch/read', {
+      propertiesWithHistory: ['dealstage'],
+      properties: ['dealstage'],
+      inputs: chunk.map(id => ({ id })),
+    });
+    for (const d of (histRes.results || [])) {
+      const cur = d.properties && d.properties.dealstage;
+      const hist = (d.propertiesWithHistory && d.propertiesWithHistory.dealstage) || [];
+      // hist est trié du plus récent au plus ancien : la 1re entrée sur l'étape courante donne la date d'entrée.
+      const entry = hist.find(h => h.value === cur) || hist[0];
+      if (entry) stageEnteredMap[d.id] = entry.timestamp;
+    }
+  }
+
   // Group by stage, only keep target stages
   const pipelineDeals = {};
   for (const stage of KANBAN_STAGES) {
@@ -1002,7 +1022,7 @@ async function fetchOpenDeals() {
       probability: stageInfo.probability,
       createdate: deal.properties.createdate || null,
       closedate: deal.properties.closedate || null,
-      stageEnteredAt: deal.properties[stageEnteredKey] || null,
+      stageEnteredAt: stageEnteredMap[deal.id] || deal.properties[stageEnteredKey] || null,
       description: deal.properties.description || '',
     });
   }
