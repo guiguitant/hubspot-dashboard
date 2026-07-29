@@ -1702,6 +1702,14 @@
       padding: 1rem 1.5rem;
     }
 
+    /* Infobulle maison (rattachée au body → jamais rognée par l'overflow d'une modale) */
+    .ponderation-tip {
+      position: fixed; display: none; z-index: 2000; max-width: 280px;
+      background: rgba(20,20,20,0.94); color: #fff; padding: 0.5rem 0.65rem;
+      border-radius: 8px; font-size: 0.78rem; line-height: 1.45; pointer-events: none;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+    }
+
     .modal-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -4184,6 +4192,19 @@
       .kpi-detail-nom { font-weight:600; font-size:.9rem; color:var(--text); }
       .kpi-detail-client { font-size:.75rem; color:var(--text-secondary); margin-top:1px; }
       .kpi-detail-montant { font-weight:700; font-size:.9rem; color:var(--text); white-space:nowrap; }
+      /* Modale « détail CA signé » : résumé 3 chiffres + sous-tabs Newsale/Upsale */
+      .kpi-signed-summary { display:flex; gap:.6rem; margin:0 0 1rem; }
+      .kpi-signed-sum-cell { flex:1; border:1px solid var(--border); border-radius:10px; padding:.6rem .7rem; }
+      .kpi-signed-sum-cell.is-total { background:color-mix(in srgb, var(--primary) 6%, var(--card)); border-color:color-mix(in srgb, var(--primary) 26%, var(--border)); }
+      .kpi-signed-sum-label { font-size:.68rem; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); font-weight:600; }
+      .kpi-signed-sum-val { font-size:1.05rem; font-weight:750; color:var(--text); margin-top:.15rem; white-space:nowrap; }
+      .kpi-signed-tabs { display:flex; gap:.4rem; border-bottom:1px solid var(--border); margin-bottom:.8rem; }
+      .kpi-signed-tab { padding:.45rem .9rem; border:none; background:none; cursor:pointer; font-family:inherit; font-size:.85rem; font-weight:600; color:var(--text-secondary); border-bottom:2px solid transparent; margin-bottom:-1px; }
+      .kpi-signed-tab:hover { color:var(--text); }
+      .kpi-signed-tab.active { color:var(--primary); border-bottom-color:var(--primary); }
+      .kpi-signed-alloc { font-size:.78rem; color:var(--text-secondary); }
+      .kpi-signed-alloc b { color:var(--text); font-weight:600; }
+      .kpi-signed-dot { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:5px; vertical-align:middle; }
       /* --- Relook page KPI : en-tête, contrôles, overview, séparateurs --- */
       #page-kpi .kpi-head-section { margin-bottom: 1rem; }
       #page-kpi .kpi-page-head { display:flex; align-items:flex-end; justify-content:space-between; gap:1rem 1.5rem; flex-wrap:wrap; }
@@ -4374,6 +4395,24 @@
           <button class="modal-close-x" onclick="closeKpiDetail()" aria-label="Fermer">&times;</button>
         </div>
         <div class="modal-body" id="kpiDetailBody"></div>
+      </div>
+    </div>
+
+    <!-- Modale Détail CA signé (clic sur une carte de graphe : résumé + sous-tabs Newsale/Upsale) -->
+    <div class="modal-overlay" id="kpiSignedModal" onclick="if(event.target===this) closeKpiSignedModal()">
+      <div class="modal kpi-modal">
+        <div class="modal-header" style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+          <div style="display:flex; align-items:center; gap:.6rem;">
+            <div class="kpi-chip" id="kpiSignedChip"></div>
+            <h2 style="margin:0; font-size:1.1rem;" id="kpiSignedTitle">Détail CA signé</h2>
+          </div>
+          <button class="modal-close-x" onclick="closeKpiSignedModal()" aria-label="Fermer">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="kpi-signed-summary" id="kpiSignedSummary"></div>
+          <div class="kpi-signed-tabs" id="kpiSignedTabs"></div>
+          <div id="kpiSignedList"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -10818,8 +10857,6 @@
           options: {
             responsive: true, maintainAspectRatio: false,
             layout: { padding: { top: 20 } },
-            onClick: (evt, els) => { if (els && els.length) openKpiDetail(block, activeTypes[els[0].index].key); },
-            onHover: (evt, els) => { if (evt.native) evt.native.target.style.cursor = (els && els.length) ? 'pointer' : 'default'; },
             scales: {
               y: { beginAtZero: true,
                    max: axisMax,
@@ -10830,7 +10867,7 @@
                    ticks: { color: textCol, font: { size: 11, weight: '600' } } },
             },
             plugins: {
-              legend: { position: 'top', align: 'end',
+              legend: { position: 'top', align: 'end', onClick: () => {},
                         labels: { usePointStyle: true, pointStyle: 'rectRounded', boxWidth: 9, boxHeight: 9, padding: 14, color: mutedCol, font: { size: 11 } } },
               tooltip: { backgroundColor: 'rgba(20,20,20,0.92)', padding: 10, cornerRadius: 8,
                          titleFont: { size: 12 }, bodyFont: { size: 12 }, displayColors: false,
@@ -10839,6 +10876,10 @@
           },
         });
         kpiChartInstances.push(chart);
+
+        // Clic n'importe où sur la carte → modale récap CA signé (résumé + deals par sous-tab).
+        card.style.cursor = 'pointer';
+        card.addEventListener('click', () => openKpiSignedModal(block));
       });
     }
 
@@ -10882,8 +10923,8 @@
 
       const caSigne = (kpiData.signedQuarterly && kpiData.signedQuarterly.total) || 0;
       const subFact = objFact > 0
-        ? ('Objectif ' + kpiFmtEur(objFact) + ' · ' + (factPct == null ? '—' : factPct + ' %') + ' · facturé + à facturer')
-        : 'Facturé + à facturer · pas d\'objectif défini';
+        ? ('Objectif ' + kpiFmtEur(objFact) + ' · ' + (factPct == null ? '—' : factPct + ' %') + ' · CA ' + (kpiData.year || '') + ' HT')
+        : 'CA ' + (kpiData.year || '') + ' HT · pas d\'objectif défini';
       const subSigne = signeObj > 0
         ? ('Objectif ' + kpiFmtEur(signeObj) + ' · ' + (avPct == null ? '—' : avPct + ' %') + ' · base prime indiv')
         : 'Daté signature · base des primes · pas d\'objectif défini';
@@ -10901,9 +10942,9 @@
       const pct = objFact > 0 ? Math.round(caFact / objFact * 100) : null;
       document.getElementById('kpiDetailTitle').textContent = 'CA facturé · avancement collectif';
       let html = '<p class="kpi-detail-total">' + (pct === null ? 'Pas d\'objectif de CA facturé défini' : pct + ' % de l\'objectif de CA facturé') + '</p>';
-      html += '<div class="kpi-detail-row"><div><div class="kpi-detail-nom">CA facturé + à facturer</div><div class="kpi-detail-client">Source Notion · daté à la facture</div></div><div class="kpi-detail-montant">' + kpiFmtEur(caFact) + '</div></div>';
+      html += '<div class="kpi-detail-row"><div><div class="kpi-detail-nom">CA ' + (kpiData.year || '') + ' HT</div><div class="kpi-detail-client">Source Notion · daté à la facture</div></div><div class="kpi-detail-montant">' + kpiFmtEur(caFact) + '</div></div>';
       html += '<div class="kpi-detail-row"><div><div class="kpi-detail-nom">Objectif de CA facturé</div><div class="kpi-detail-client">Réglable via « Réglages primes »</div></div><div class="kpi-detail-montant">' + kpiFmtEur(objFact) + '</div></div>';
-      html += '<p style="color:var(--text-secondary);font-size:0.82rem;margin-top:0.6rem">Avancement collectif = CA facturé + à facturer ÷ objectif de CA facturé. C\'est la base de la prime collective (paliers, étage 2). Distinct de l\'avancement individuel, qui porte sur le CA signé.</p>';
+      html += '<p style="color:var(--text-secondary);font-size:0.82rem;margin-top:0.6rem">Avancement collectif = CA ' + (kpiData.year || '') + ' HT ÷ objectif de CA facturé. C\'est la base de la prime collective (paliers, étage 2). Distinct de l\'avancement individuel, qui porte sur le CA signé.</p>';
       document.getElementById('kpiDetailBody').innerHTML = html;
       document.getElementById('kpiDetailModal').classList.add('active');
     }
@@ -10920,7 +10961,7 @@
       let html = '<p class="kpi-detail-total">' + (pct === null ? 'Pas d\'objectif de CA signé défini' : pct + ' % de l\'objectif de CA signé') + '</p>';
       html += '<div class="kpi-detail-row"><div><div class="kpi-detail-nom">Réalisé signé</div><div class="kpi-detail-client">Newsale ' + kpiFmtEur(newR) + ' + Upsale ' + kpiFmtEur(upR) + '</div></div><div class="kpi-detail-montant">' + kpiFmtEur(real) + '</div></div>';
       html += '<div class="kpi-detail-row"><div><div class="kpi-detail-nom">Objectif de CA signé</div><div class="kpi-detail-client">Newsale ' + kpiFmtEur(newO) + ' + Upsale ' + kpiFmtEur(upO) + '</div></div><div class="kpi-detail-montant">' + kpiFmtEur(obj) + '</div></div>';
-      html += '<p style="color:var(--text-secondary);font-size:0.82rem;margin-top:0.6rem">Avancement individuel = Réalisé signé ÷ Objectif de CA signé. Le réalisé = missions Notion classées Newsale/Upsale, datées à leur signature (base de la prime individuelle). Clique une barre de partner (graphes ci-dessous) pour le détail mission par mission.</p>';
+      html += '<p style="color:var(--text-secondary);font-size:0.82rem;margin-top:0.6rem">Avancement individuel = Réalisé signé ÷ Objectif de CA signé. Le réalisé = missions Notion classées Newsale/Upsale, datées à leur signature (base de la prime individuelle). Clique une carte de graphe (ci-dessous) pour le détail des deals signés.</p>';
       document.getElementById('kpiDetailBody').innerHTML = html;
       document.getElementById('kpiDetailModal').classList.add('active');
     }
@@ -10992,24 +11033,125 @@
     }
 
     // Détail = pop-up des missions composant une barre (partner/All + type).
-    function openKpiDetail(block, typeKey) {
-      const typeLabel = (KPI_TYPES.find(t => t.key === typeKey) || {}).label || typeKey;
-      const list = (block.details && block.details[typeKey]) || [];
-      const total = list.reduce((s, x) => s + (x.montant || 0), 0);
-      document.getElementById('kpiDetailTitle').textContent = block.partner + ' · ' + typeLabel;
-      let html = '<p class="kpi-detail-total">' + list.length + ' mission' + (list.length > 1 ? 's' : '') + ' · ' + kpiFmtEur(total) +
-        (block.all ? '' : ' attribué' + (list.length > 1 ? 's' : '')) + '</p>';
-      if (list.length === 0) {
-        html += '<p style="color:var(--text-secondary);">Aucune mission pour cet axe cette année.</p>';
-      } else {
-        html += list.map(m =>
-          '<div class="kpi-detail-row"><div><div class="kpi-detail-nom">' + (m.nom || 'Sans nom') + '</div>' +
-          '<div class="kpi-detail-client">' + (m.client || '') + '</div></div>' +
-          '<div class="kpi-detail-montant">' + kpiFmtEur(m.montant) + '</div></div>'
-        ).join('');
+    // Modale « détail CA signé » : ouverte au clic sur une carte de graphe (partner ou « Tous »).
+    // Résumé Newsale/Upsale/Total, puis deals détaillés dans deux sous-tabs. 100 % front : tout est
+    // déjà dans kpiData (block.details = part du partner ; kpiData.allDetails = CA plein par deal).
+    let kpiSignedBlock = null;    // bloc affiché (un partner ou le bloc « Tous »)
+    let kpiSignedTab = 'newsale'; // sous-tab actif
+
+    function openKpiSignedModal(block) {
+      kpiSignedBlock = block;
+      kpiSignedTab = 'newsale';
+      const accent = block.all ? kpiCssVar('--primary', '#003D2E') : block.accent;
+      const chip = document.getElementById('kpiSignedChip');
+      chip.style.background = accent;
+      chip.textContent = block.all ? '∑' : kpiInitial(block.partner);
+      document.getElementById('kpiSignedTitle').textContent = block.partner + ' · CA signé';
+      // Résumé : réalisé signé Newsale, Upsale, Total (= Newsale + Upsale).
+      const newR = (block.data.newsale && block.data.newsale.realise) || 0;
+      const upR  = (block.data.upsale  && block.data.upsale.realise)  || 0;
+      document.getElementById('kpiSignedSummary').innerHTML =
+        kpiSignedSumCell('Newsale', newR, false) +
+        kpiSignedSumCell('Upsale', upR, false) +
+        kpiSignedSumCell('Total', newR + upR, true);
+      renderKpiSignedTabs();
+      renderKpiSignedTab();
+      document.getElementById('kpiSignedModal').classList.add('active');
+    }
+
+    function kpiSignedSumCell(label, val, isTotal) {
+      return '<div class="kpi-signed-sum-cell' + (isTotal ? ' is-total' : '') + '">' +
+        '<div class="kpi-signed-sum-label">' + label + '</div>' +
+        '<div class="kpi-signed-sum-val">' + kpiFmtEur(val) + '</div></div>';
+    }
+
+    function renderKpiSignedTabs() {
+      document.getElementById('kpiSignedTabs').innerHTML = ['newsale', 'upsale'].map(t =>
+        '<button class="kpi-signed-tab' + (t === kpiSignedTab ? ' active' : '') +
+        '" onclick="switchKpiSignedTab(\'' + t + '\')">' + (t === 'newsale' ? 'Newsale' : 'Upsale') + '</button>'
+      ).join('');
+    }
+
+    function switchKpiSignedTab(t) {
+      kpiSignedTab = t;
+      renderKpiSignedTabs();
+      renderKpiSignedTab();
+    }
+
+    // Rendu du sous-tab actif. Deux modes :
+    //  - partner : chaque deal montre la part de CE partner (montant + % d'allocation), sans les co-partners.
+    //  - « Tous » : chaque deal montre le CA plein + la contribution de chaque associé (montant + %).
+    function renderKpiSignedTab() {
+      const type = kpiSignedTab;
+      const block = kpiSignedBlock;
+      const listEl = document.getElementById('kpiSignedList');
+
+      if (block.all) {
+        const deals = buildKpiSignedAllDeals(type);
+        listEl.innerHTML = deals.length ? deals.map(kpiSignedAllRow).join('') : kpiSignedEmpty(type);
+        return;
       }
-      document.getElementById('kpiDetailBody').innerHTML = html;
-      document.getElementById('kpiDetailModal').classList.add('active');
+
+      // Mode partner : CA plein par deal (kpiData.allDetails) pour calculer le % d'allocation.
+      const fullById = {};
+      ((kpiData.allDetails && kpiData.allDetails[type]) || []).forEach(d => { fullById[d.id] = d.montant; });
+      const list = (block.details && block.details[type]) || [];
+      if (!list.length) { listEl.innerHTML = kpiSignedEmpty(type); return; }
+      listEl.innerHTML = list.map(d => {
+        const full = fullById[d.id];
+        const pct = full > 0 ? Math.round(d.montant / full * 100) : 100;
+        return '<div class="kpi-detail-row"><div><div class="kpi-detail-nom">' + (d.nom || 'Sans nom') + '</div>' +
+          '<div class="kpi-detail-client">' + (d.client || '') + '</div></div>' +
+          '<div class="kpi-detail-montant">' + kpiFmtEur(d.montant) + ' · ' + pct + ' %</div></div>';
+      }).join('');
+    }
+
+    function kpiSignedEmpty(type) {
+      return '<p style="color:var(--text-secondary); padding:.5rem .15rem;">Aucun deal ' +
+        (type === 'newsale' ? 'Newsale' : 'Upsale') + ' cette année.</p>';
+    }
+
+    // « Tous les partners » : reconstitue chaque deal (CA plein via allDetails) + contribution par
+    // associé, en croisant les details de chaque partner (part après split) par id de deal.
+    function buildKpiSignedAllDeals(type) {
+      const byId = {};
+      ((kpiData.allDetails && kpiData.allDetails[type]) || []).forEach(d => {
+        byId[d.id] = { id: d.id, nom: d.nom, client: d.client, montant: d.montant, contribs: [] };
+      });
+      (kpiData.partners || []).forEach((p, i) => {
+        const accent = KPI_CHIP_COLORS[i % KPI_CHIP_COLORS.length];
+        ((p.details && p.details[type]) || []).forEach(d => {
+          const deal = byId[d.id];
+          if (!deal) return;
+          deal.contribs.push({
+            partner: p.partner, montant: d.montant, accent,
+            pct: deal.montant > 0 ? Math.round(d.montant / deal.montant * 100) : 0,
+          });
+        });
+      });
+      const deals = Object.keys(byId).map(k => byId[k]);
+      deals.sort((a, b) => b.montant - a.montant);
+      deals.forEach(d => d.contribs.sort((a, b) => b.montant - a.montant));
+      return deals;
+    }
+
+    function kpiSignedAllRow(deal) {
+      const contribs = deal.contribs.length
+        ? deal.contribs.map(c =>
+            '<span class="kpi-signed-alloc"><span class="kpi-signed-dot" style="background:' + c.accent + ';"></span>' +
+            '<b>' + c.partner + '</b> ' + kpiFmtEur(c.montant) + ' · ' + c.pct + ' %</span>'
+          ).join('<br>')
+        : '<span class="kpi-signed-alloc" style="color:var(--danger);">non attribué</span>';
+      return '<div class="kpi-detail-row" style="flex-direction:column; align-items:stretch; gap:.35rem;">' +
+        '<div style="display:flex; justify-content:space-between; gap:1rem; align-items:baseline;">' +
+          '<div><div class="kpi-detail-nom">' + (deal.nom || 'Sans nom') + '</div>' +
+          '<div class="kpi-detail-client">' + (deal.client || '') + '</div></div>' +
+          '<div class="kpi-detail-montant">' + kpiFmtEur(deal.montant) + '</div></div>' +
+        '<div>' + contribs + '</div></div>';
+    }
+
+    function closeKpiSignedModal() {
+      document.getElementById('kpiSignedModal').classList.remove('active');
     }
     function closeKpiDetail() {
       document.getElementById('kpiDetailModal').classList.remove('active');
@@ -11055,7 +11197,6 @@
     let _primeSaveTimer = null;
 
     function primeFmtEur(n) { return (Math.round(n) || 0).toLocaleString('fr-FR') + ' €'; }
-    function primeIntFr(n) { return (Math.round(n) || 0).toLocaleString('fr-FR'); }
     function primeFmtPct(n) { return (Math.round((Number(n) || 0) * 100) / 100).toString().replace('.', ',') + ' %'; }
     function primeKE(n) { return Math.round((Number(n) || 0) / 1000) + 'k'; }
     function primeParseNum(s) {
@@ -11125,16 +11266,7 @@
       body.innerHTML =
         '<div id="prime-coverage" style="margin-bottom:0.9rem"></div>'
         + '<div id="prime-clawback" style="margin-bottom:0.9rem"></div>'
-        + '<div class="prime-panel" style="display:flex;flex-wrap:wrap;align-items:center;gap:0.4rem 0.9rem">'
-          + '<span style="font-size:0.85rem">CA facturé ' + (kpiData.year || '') + ' <span style="color:var(--text-secondary)">(base étage 2)</span> : <span class="prime-cellin"><input id="prime-cafacture-in" type="text" inputmode="numeric" value="' + primeIntFr(primeState.caFacture) + '"><span class="u">€</span></span></span>'
-          + (factu ? '<span style="color:var(--text-secondary);font-size:0.8rem">facturé ' + primeFmtEur(factu.facture) + ' · à facturer ' + primeFmtEur(factu.aFacturer) + '</span>' : '')
-          + '<span style="flex:1"></span>'
-          + '<span style="color:var(--text-secondary);font-size:0.78rem">Taux, paliers et seuil : « Réglages primes »</span>'
-        + '</div>'
         + '<div class="prime-results" id="kpiPrimeResults" style="margin-top:0.9rem"></div>';
-
-      const caIn = document.getElementById('prime-cafacture-in');
-      if (caIn) caIn.addEventListener('input', onPrimeInput);
 
       primeRecompute();
       renderKpiCoverage();
@@ -11220,13 +11352,6 @@
       html += rows || '<p style="color:var(--text-secondary)">Aucune.</p>';
       document.getElementById('kpiDetailBody').innerHTML = html;
       document.getElementById('kpiDetailModal').classList.add('active');
-    }
-
-    function onPrimeInput() {
-      if (!primeState) return;
-      const caIn = document.getElementById('prime-cafacture-in');
-      if (caIn) primeState.caFacture = primeParseNum(caIn.value);
-      primeRecompute();
     }
 
     function primeCompute() {
@@ -11403,7 +11528,8 @@
           const title = 'Intervalle de confiance 95 % : ' + sg.suggested + ' % (entre ' + sg.ciLow + ' % et ' + sg.ciHigh
             + ' %). Échantillon : ' + sg.resolved + ' deals résolus.'
             + (sg.confidence === 'low' ? ' Échantillon réduit, à prendre avec prudence.' : '');
-          suggCell = '<span title="' + title + '" style="cursor:help">' + sg.suggested + '% · ' + sg.resolved + ' deals ' + dot + 'ⓘ</span>'
+          // Infobulle maison (le title HTML natif ne s'affichait pas de façon fiable dans la modale).
+          suggCell = '<span data-tip="' + title.replace(/"/g, '&quot;') + '" onmouseenter="showPonderationTip(event,this)" onmousemove="movePonderationTip(event)" onmouseleave="hidePonderationTip()" style="cursor:help;text-decoration:underline dotted;text-underline-offset:2px">' + sg.suggested + '% · ' + sg.resolved + ' deals ' + dot + 'ⓘ</span>'
             + ' <button class="kpi-btn" style="padding:0.1rem 0.5rem;font-size:0.8rem" onclick="applyPonderationSuggestion(\'' + s.id + '\',' + sg.suggested + ')">Appliquer</button>';
         }
         return '<tr><td style="padding:0.4rem 0">' + s.label + '</td>'
@@ -11429,6 +11555,35 @@
         + '<th style="text-align:right;color:var(--text-secondary);font-weight:600">Pondération (%)</th>'
         + '<th style="text-align:left;padding-left:0.8rem;color:var(--text-secondary);font-weight:600">Suggéré (données)</th></tr></thead><tbody>'
         + rows + '</tbody></table>' + footer;
+    }
+
+    // Infobulle maison des cellules « Suggéré » : un seul élément réutilisé, rattaché au body,
+    // positionné à côté du curseur (donc jamais rogné par l'overflow de la modale).
+    let _ponderationTipEl = null;
+    function showPonderationTip(evt, el) {
+      const txt = el.getAttribute('data-tip');
+      if (!txt) return;
+      if (!_ponderationTipEl) {
+        _ponderationTipEl = document.createElement('div');
+        _ponderationTipEl.className = 'ponderation-tip';
+        document.body.appendChild(_ponderationTipEl);
+      }
+      _ponderationTipEl.textContent = txt;
+      _ponderationTipEl.style.display = 'block';
+      movePonderationTip(evt);
+    }
+    function movePonderationTip(evt) {
+      if (!_ponderationTipEl || _ponderationTipEl.style.display === 'none') return;
+      const pad = 14;
+      const w = _ponderationTipEl.offsetWidth, h = _ponderationTipEl.offsetHeight;
+      let x = evt.clientX + pad, y = evt.clientY + pad;
+      if (x + w > window.innerWidth - 8) x = evt.clientX - w - pad;
+      if (y + h > window.innerHeight - 8) y = evt.clientY - h - pad;
+      _ponderationTipEl.style.left = Math.max(8, x) + 'px';
+      _ponderationTipEl.style.top = Math.max(8, y) + 'px';
+    }
+    function hidePonderationTip() {
+      if (_ponderationTipEl) _ponderationTipEl.style.display = 'none';
     }
 
     // Copie la valeur suggérée dans le champ de l'étape (sans sauvegarder).
@@ -11468,6 +11623,7 @@
     function closePonderationModal() {
       const m = document.getElementById('ponderationModal');
       if (m) m.classList.remove('active');
+      hidePonderationTip();
     }
     async function savePonderation() {
       const btn = document.getElementById('ponderationSaveBtn');
