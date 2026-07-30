@@ -13542,6 +13542,9 @@
       if (d.masseSalarialeAnnuelle != null) {
         html += subRow('dont masse salariale (deja dans les charges)', '(' + formatEuro(d.masseSalarialeAnnuelle) + ')');
       }
+      if (d.charges && d.charges.primesCommerciales) {
+        html += subRow('dont primes commerciales (deja dans les charges)', '(' + formatEuro(d.charges.primesCommerciales) + ')');
+      }
       if (d.financements.totalSubv) html += row('Subventions', d.financements.totalSubv, { plus: true, onclick: "openCrDetailModal('subventions')" });
       if (d.financements.totalAide) html += row('Aides', d.financements.totalAide, { plus: true, onclick: "openCrDetailModal('aides')" });
       html += row("= Excedent brut d'exploitation (EBE)", ebe, { total: true });
@@ -13587,6 +13590,7 @@
         body = '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.6rem">Reel Qonto (mois clos) + previsionnel CR_Prev (mois a venir). La masse salariale est comprise dans ce total.</div>';
         body += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid var(--border)"><span>Total charges</span><strong>' + formatEuro(d.charges.total) + '</strong></div>';
         if (d.masseSalarialeAnnuelle != null) body += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;color:var(--text-secondary)"><span>dont masse salariale</span><span>' + formatEuro(d.masseSalarialeAnnuelle) + '</span></div>';
+        if (d.charges && d.charges.primesCommerciales) body += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;color:var(--text-secondary)"><span>dont primes commerciales</span><span>' + formatEuro(d.charges.primesCommerciales) + '</span></div>';
       } else if (kind === 'subventions' || kind === 'aides') {
         const list = kind === 'subventions' ? d.financements.subventions : d.financements.aides;
         title = (kind === 'subventions' ? 'Subventions' : 'Aides') + ' ' + d.year;
