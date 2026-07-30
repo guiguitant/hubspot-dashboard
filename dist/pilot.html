@@ -3316,7 +3316,11 @@
     .alloc-comp-people{display:flex;flex-wrap:wrap;gap:12px;}
     .alloc-comp-people label{font-size:13px;display:flex;align-items:center;gap:4px;cursor:pointer;}
     .alloc-result{margin-top:8px;}
-    .alloc-result-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(128,128,128,.25);font-size:14px;}
+    .alloc-result-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(128,128,128,.25);font-size:14px;}
+    .alloc-pct{width:64px;padding:4px 6px;border:1px solid rgba(128,128,128,.4);border-radius:6px;background:transparent;color:inherit;box-sizing:border-box;}
+    .alloc-save-row{margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+    .alloc-save-btn{padding:8px 12px;background:#003d2e;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;}
+    .alloc-save-msg{font-size:12px;}
 
   </style>
 </head>
@@ -11122,14 +11126,43 @@
       const shares = allocComputeShares(type, assignments);
       const res = document.getElementById('allocResult-' + i);
       if (!res) return;
-      const entries = Object.entries(shares).sort(function (a, b) { return b[1] - a[1]; });
-      if (!entries.length) { res.innerHTML = ''; return; }
+      if (!Object.keys(shares).length) { res.innerHTML = ''; return; }
       const commercial = m.commercial || [];
-      res.innerHTML = '<div style="font-weight:600;margin:6px 0;">Repartition suggeree</div>' +
-        entries.map(function (e) {
-          const hint = commercial.indexOf(e[0]) === -1 ? ' <span style="font-size:11px;opacity:.6;">(a ajouter en partner commercial pour etre paye)</span>' : '';
-          return '<div class="alloc-result-row"><span>' + allocEsc(e[0]) + hint + '</span><strong>' + e[1] + '%</strong></div>';
-        }).join('');
+      // Personnes editables : les partners commerciaux (toujours) + toute personne creditee (ex. l'ope).
+      const persons = Array.from(new Set(commercial.concat(Object.keys(shares))));
+      persons.sort(function (a, b) { return (shares[b] || 0) - (shares[a] || 0); });
+      res.innerHTML = '<div style="font-weight:600;margin:6px 0;">Repartition suggeree (modifiable)</div>' +
+        persons.map(function (p) {
+          const pct = shares[p] || 0;
+          const hint = commercial.indexOf(p) === -1 ? ' <span style="font-size:11px;opacity:.6;">(operationnel, credite a l\'enregistrement)</span>' : '';
+          return '<div class="alloc-result-row"><span>' + allocEsc(p) + hint + '</span>' +
+            '<span><input type="number" min="0" max="100" class="alloc-pct" data-mid="' + i + '" data-partner="' + allocEsc(p) + '" value="' + pct + '"> %</span></div>';
+        }).join('') +
+        '<div class="alloc-save-row"><button type="button" class="alloc-save-btn" onclick="allocSave(' + i + ')">Enregistrer la repartition commerciale</button><span id="allocSaveMsg-' + i + '" class="alloc-save-msg"></span></div>';
+    }
+    // Enregistre la repartition commerciale de la mission (axe commercial) : elle fait foi pour KPI/primes.
+    function allocSave(i) {
+      const m = allocMissions()[i];
+      if (!m) return;
+      const inputs = document.querySelectorAll('#allocMissions input.alloc-pct[data-mid="' + i + '"]');
+      const splits = Array.prototype.slice.call(inputs)
+        .map(function (inp) { return { partner: inp.getAttribute('data-partner'), pct: Number(inp.value) || 0 }; })
+        .filter(function (s) { return s.partner && s.pct > 0; });
+      if (!splits.length) { alert('Renseigne au moins une part.'); return; }
+      const sum = splits.reduce(function (s, x) { return s + x.pct; }, 0);
+      if (Math.round(sum) !== 100 && !confirm('La somme fait ' + sum + ' %, pas 100 %. Les montants seront normalises. Continuer ?')) return;
+      const msg = document.getElementById('allocSaveMsg-' + i);
+      fetch('/api/kpi/split', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mission_id: m.id, axis: 'commercial', splits: splits }),
+      })
+        .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(function () {
+          if (msg) { msg.textContent = ' Enregistre.'; msg.style.color = '#2e7d32'; }
+          if (typeof initKpi === 'function') initKpi();
+        })
+        .catch(function (e) { if (msg) { msg.textContent = ' Echec : ' + e.message; msg.style.color = '#c62828'; } });
     }
 
     function renderKpiReglages() {
@@ -11154,23 +11187,24 @@
         html += '</tbody></table>';
       }
 
-      // --- B. Répartition CA : missions à 2+ partners ---
-      html += '<div class="kpi-rg-h" style="margin-top:1.5rem;">Répartition du CA <span class="kpi-rg-badge">missions à 2+ partners</span></div>';
-      if (kpiData.missionsForSplit.length === 0) {
-        html += '<p style="color:var(--text-secondary);">Aucune mission à plusieurs partners cette année.</p>';
+      // --- B. Répartition opérationnelle (opéré) : missions à 2+ partners opérationnels ---
+      // La répartition COMMERCIALE se règle désormais dans le « Calculateur d'allocation » (bouton dédié),
+      // qui fait foi. Ici, seul l'axe opérationnel (indicateur opéré) reste ajustable.
+      html += '<div class="kpi-rg-h" style="margin-top:1.5rem;">Répartition opérationnelle (opéré) <span class="kpi-rg-badge">missions à 2+ partners opé</span></div>';
+      const splitOpe = kpiData.missionsForSplit.filter(m => (m.operationnel || []).length >= 2);
+      if (splitOpe.length === 0) {
+        html += '<p style="color:var(--text-secondary);">Aucune mission à 2+ partners opérationnels cette année.</p>';
       }
-      kpiData.missionsForSplit.forEach((m, mi) => {
+      splitOpe.forEach((m, mi) => {
         html += '<div class="kpi-split-card"><div class="kpi-split-title"><span>' + m.nom + '</span><span style="color:var(--text-secondary);">' + kpiFmtEur(m.ca) + '</span></div>';
-        [['commercial', m.commercial, m.splitCommercial], ['operationnel', m.operationnel, m.splitOperationnel]].forEach(([axis, plist, smap]) => {
-          if (!plist || plist.length < 2) return;
-          const inputId = 'split_' + mi + '_' + axis;
-          html += '<div class="kpi-split-axis"><span class="kpi-split-axis-label">' + axis + '</span>' +
-            plist.map(pn =>
-              pn + ' <input class="kpi-pct-input" type="number" data-partner="' + pn + '" value="' + (smap[pn] || 0) + '">%'
-            ).join(' ') +
-            ' <button class="kpi-btn" onclick="saveKpiSplit(\'' + m.id + '\', \'' + axis + '\', \'' + inputId + '\')">OK</button>' +
-            '<span id="' + inputId + '"></span></div>';
-        });
+        const axis = 'operationnel', plist = m.operationnel, smap = m.splitOperationnel;
+        const inputId = 'split_' + mi + '_' + axis;
+        html += '<div class="kpi-split-axis"><span class="kpi-split-axis-label">' + axis + '</span>' +
+          plist.map(pn =>
+            pn + ' <input class="kpi-pct-input" type="number" data-partner="' + pn + '" value="' + (smap[pn] || 0) + '">%'
+          ).join(' ') +
+          ' <button class="kpi-btn" onclick="saveKpiSplit(\'' + m.id + '\', \'' + axis + '\', \'' + inputId + '\')">OK</button>' +
+          '<span id="' + inputId + '"></span></div>';
         html += '</div>';
       });
 
