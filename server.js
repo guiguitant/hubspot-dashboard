@@ -9,7 +9,7 @@ const { authenticator } = require('otplib');
 const { execFile } = require('child_process');
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
-const { computeKpi, totalCaAnnee, signedByQuarter, clawbackCandidates } = require('./utils/kpiCompute');
+const { computeKpi, totalCaAnnee, signedByQuarter, clawbackCandidates, computePrimePool } = require('./utils/kpiCompute');
 const { computeBillingForYear } = require('./utils/billing');
 const { buildSalesNavUrl } = require('./utils/buildSalesNavUrl');
 const multer = require('multer');
@@ -8257,6 +8257,24 @@ app.get('/api/ebe', async (req, res) => {
     const chargesData = await computeChargesHybride(start, end);
     const totalCharges = Math.round(chargesData.totalCharges || 0);
 
+    // Primes commerciales (pool KPI) : charge d'exploitation (compte 622), ajoutee AVANT l'EBE.
+    // Meme source que l'onglet KPI : config sauvegardee + missions Notion + splits d'attribution.
+    let primesCommerciales = 0;
+    try {
+      const [cfgRow, splitRows] = await Promise.all([
+        supabase.from('kpi_prime_config').select('config').eq('id', 'default').maybeSingle(),
+        supabase.from('kpi_ca_split').select('*'),
+      ]);
+      const primeCfg = cfgRow && cfgRow.data ? cfgRow.data.config : null;
+      const splits = (splitRows && splitRows.data) ? splitRows.data : [];
+      const poolRes = computePrimePool({ missions, splits, config: primeCfg, year: yearParam, caFacture });
+      primesCommerciales = poolRes.pool;
+    } catch (e) {
+      console.error('Erreur calcul primes /api/ebe:', e.message);
+      primesCommerciales = 0; // ne jamais bloquer le compte de resultat
+    }
+    const totalChargesAvecPrimes = totalCharges + primesCommerciales;
+
     // 3) Financements (Subv + Aide) de l'année depuis GSheet Plan_TRE_Prév
     const financements = await fetchFinancementsForYear(yearParam);
     const totalSubv = financements.subventions.reduce((s, f) => s + f.montant, 0);
@@ -8266,9 +8284,9 @@ app.get('/api/ebe', async (req, res) => {
     const pipelinePondere = isCurrentYear ? await computePipelinePondere() : 0;
 
     // 5) EBE factuel (CA Facturé) et projeté (CA Facturé + Pipeline pondéré)
-    const ebeFactuel = caFacture - totalCharges + totalSubv + totalAide;
+    const ebeFactuel = caFacture - totalChargesAvecPrimes + totalSubv + totalAide;
     const caProjete  = caFacture + pipelinePondere;
-    const ebeProjete = caProjete - totalCharges + totalSubv + totalAide;
+    const ebeProjete = caProjete - totalChargesAvecPrimes + totalSubv + totalAide;
 
     // 5b) Masse salariale de l'année — INFO uniquement (déjà comprise dans totalCharges via "Frais de personnel").
     // Affichée en sous-ligne du Compte de résultat SANS être resoustraite (évite le double comptage).
@@ -8302,7 +8320,7 @@ app.get('/api/ebe', async (req, res) => {
     res.json({
       year: yearParam,
       ca: { facture: caFacture, pipelinePondere, projete: caProjete },
-      charges: { total: totalCharges },
+      charges: { total: totalChargesAvecPrimes, primesCommerciales },
       masseSalarialeAnnuelle,
       financements: {
         subventions: financements.subventions,
