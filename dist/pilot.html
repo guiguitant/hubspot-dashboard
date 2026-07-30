@@ -3305,19 +3305,17 @@
 
     /* (Styles gamification supprimés) */
 
-    /* Calculateur d'allocation (v1) */
-    .alloc-type{display:flex;gap:8px;margin-bottom:12px;}
-    .alloc-type-btn{flex:1;padding:8px;border:1px solid rgba(128,128,128,.4);border-radius:8px;background:transparent;color:inherit;cursor:pointer;font-size:13px;}
-    .alloc-type-btn.active{background:#003d2e;color:#fff;border-color:#003d2e;}
-    .alloc-label{display:block;font-size:13px;margin:8px 0 4px;}
-    .alloc-input{width:100%;padding:8px;border:1px solid rgba(128,128,128,.4);border-radius:8px;box-sizing:border-box;background:transparent;color:inherit;}
-    .alloc-components{margin:12px 0;}
+    /* Calculateur d'allocation */
+    .alloc-intro{font-size:13px;opacity:.75;margin:0 0 12px;}
+    .alloc-missions{display:flex;flex-direction:column;gap:16px;}
+    .alloc-mission{border:1px solid rgba(128,128,128,.3);border-radius:10px;padding:12px;}
+    .alloc-mission-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;}
+    .alloc-badge{font-size:11px;padding:2px 8px;border-radius:999px;background:rgba(0,61,46,.15);white-space:nowrap;}
     .alloc-comp{padding:8px 0;border-bottom:1px solid rgba(128,128,128,.25);}
     .alloc-comp-title{font-size:13px;font-weight:600;margin-bottom:4px;}
     .alloc-comp-people{display:flex;flex-wrap:wrap;gap:12px;}
     .alloc-comp-people label{font-size:13px;display:flex;align-items:center;gap:4px;cursor:pointer;}
-    .alloc-calc-btn{width:100%;padding:10px;background:#003d2e;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;}
-    .alloc-result{margin-top:14px;}
+    .alloc-result{margin-top:8px;}
     .alloc-result-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(128,128,128,.25);font-size:14px;}
 
   </style>
@@ -4411,15 +4409,8 @@
           <button class="modal-close-x" onclick="closeAllocCalc()" aria-label="Fermer">&times;</button>
         </div>
         <div class="modal-body">
-          <div class="alloc-type">
-            <button type="button" id="allocTypeNewsale" class="alloc-type-btn active" onclick="allocSetType('newsale')">Nouveau client (newsale)</button>
-            <button type="button" id="allocTypeUpsale" class="alloc-type-btn" onclick="allocSetType('upsale')">Client qui revient (upsale)</button>
-          </div>
-          <label class="alloc-label" for="allocPeople">Personnes impliquées (séparées par des virgules)</label>
-          <input id="allocPeople" class="alloc-input" type="text" placeholder="ex. Nathan, Guillaume" oninput="allocRenderComponents()">
-          <div id="allocComponents" class="alloc-components"></div>
-          <button type="button" class="alloc-calc-btn" onclick="allocRun()">Calculer la répartition</button>
-          <div id="allocResult" class="alloc-result"></div>
+          <p class="alloc-intro">Missions de l'année avec au moins 2 partners commerciaux. Coche qui a assuré chaque étape : la répartition suggérée se calcule automatiquement. Aucun enregistrement, c'est une aide à la décision.</p>
+          <div id="allocMissions" class="alloc-missions"></div>
         </div>
       </div>
     </div>
@@ -11024,7 +11015,7 @@
       document.getElementById('kpiReglagesModal').classList.remove('active');
     }
 
-    // --- Calculateur d'allocation (v1 autonome) ---
+    // --- Calculateur d'allocation (pilote par les missions, affichage seulement) ---
     // MIROIR de utils/allocationGrid.js (source de verite, testee par Jest). Garder synchronise.
     const ALLOC_GRIDS = {
       newsale: [
@@ -11040,16 +11031,10 @@
         { key: 'prez', label: 'Redaction prez / proposition', weight: 15 },
       ],
     };
-    let allocType = 'newsale';
     function allocEsc(s) {
       return String(s).replace(/[&<>"']/g, function (c) {
         return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
       });
-    }
-    function allocGetPeople() {
-      const raw = (document.getElementById('allocPeople').value || '')
-        .split(',').map(function (s) { return s.trim(); }).filter(Boolean);
-      return Array.from(new Set(raw));
     }
     function allocRoundTo100(w) {
       const persons = Object.keys(w);
@@ -11077,52 +11062,74 @@
       }
       return allocRoundTo100(w);
     }
+    // Missions candidates : celles de kpiData a >= 2 partners commerciaux.
+    function allocMissions() {
+      const all = (typeof kpiData !== 'undefined' && kpiData && kpiData.missionsForSplit) ? kpiData.missionsForSplit : [];
+      return all.filter(function (m) { return (m.commercial || []).length >= 2; });
+    }
+    // Personnes assignables a une composante : "operationnel" (retention, upsale) parmi les partners
+    // operationnels ; toutes les autres parmi les partners commerciaux.
+    function allocPeopleForComponent(mission, compKey) {
+      return compKey === 'operationnel' ? (mission.operationnel || []) : (mission.commercial || []);
+    }
+    function allocGridType(m) {
+      return (m.type === 'upsale' || m.type === 'newsale') ? m.type : 'newsale';
+    }
     function openAllocCalc() {
       document.getElementById('allocCalcModal').classList.add('active');
-      allocSetType('newsale');
+      allocRenderMissions();
     }
     function closeAllocCalc() {
       document.getElementById('allocCalcModal').classList.remove('active');
     }
-    function allocSetType(t) {
-      allocType = t;
-      document.getElementById('allocTypeNewsale').classList.toggle('active', t === 'newsale');
-      document.getElementById('allocTypeUpsale').classList.toggle('active', t === 'upsale');
-      document.getElementById('allocResult').innerHTML = '';
-      allocRenderComponents();
-    }
-    function allocRenderComponents() {
-      const people = allocGetPeople();
-      const wrap = document.getElementById('allocComponents');
-      if (!people.length) { wrap.innerHTML = '<p style="font-size:13px;opacity:.7;">Entre au moins une personne ci-dessus.</p>'; return; }
-      const grid = ALLOC_GRIDS[allocType];
-      wrap.innerHTML = grid.map(function (c) {
-        const boxes = people.map(function (p) {
-          return '<label><input type="checkbox" data-comp="' + c.key + '" value="' + allocEsc(p) + '"> ' + allocEsc(p) + '</label>';
+    function allocRenderMissions() {
+      const wrap = document.getElementById('allocMissions');
+      if (!wrap) return;
+      const missions = allocMissions();
+      if (!missions.length) {
+        wrap.innerHTML = '<p style="font-size:13px;opacity:.7;">Aucune mission a 2+ partners commerciaux sur l\'annee selectionnee.</p>';
+        return;
+      }
+      wrap.innerHTML = missions.map(function (m, i) {
+        const type = allocGridType(m);
+        const typeLabel = m.type === 'upsale' ? 'Upsale' : (m.type === 'newsale' ? 'Newsale' : 'Type non defini (grille newsale)');
+        const comps = ALLOC_GRIDS[type].map(function (c) {
+          const people = allocPeopleForComponent(m, c.key);
+          const boxes = people.length
+            ? people.map(function (p) {
+                return '<label><input type="checkbox" data-mid="' + i + '" data-comp="' + c.key + '" value="' + allocEsc(p) + '" onchange="allocComputeMission(' + i + ')"> ' + allocEsc(p) + '</label>';
+              }).join('')
+            : '<span style="font-size:12px;opacity:.6;">aucun partner ' + (c.key === 'operationnel' ? 'operationnel' : 'commercial') + ' sur cette mission</span>';
+          return '<div class="alloc-comp"><div class="alloc-comp-title">' + allocEsc(c.label) +
+            ' <span style="opacity:.6;">(' + c.weight + '%)</span></div><div class="alloc-comp-people">' + boxes + '</div></div>';
         }).join('');
-        return '<div class="alloc-comp"><div class="alloc-comp-title">' + allocEsc(c.label) +
-          ' <span style="opacity:.6;">(' + c.weight + '%)</span></div><div class="alloc-comp-people">' + boxes + '</div></div>';
+        return '<div class="alloc-mission">' +
+          '<div class="alloc-mission-head"><strong>' + allocEsc(m.nom || 'Mission') + '</strong>' +
+          '<span class="alloc-badge">' + allocEsc(typeLabel) + '</span></div>' +
+          comps +
+          '<div class="alloc-result" id="allocResult-' + i + '"></div></div>';
       }).join('');
     }
-    function allocRun() {
-      const grid = ALLOC_GRIDS[allocType];
+    function allocComputeMission(i) {
+      const m = allocMissions()[i];
+      if (!m) return;
+      const type = allocGridType(m);
       const assignments = {};
-      for (const c of grid) {
-        const boxes = document.querySelectorAll('#allocComponents input[data-comp="' + c.key + '"]:checked');
+      for (const c of ALLOC_GRIDS[type]) {
+        const boxes = document.querySelectorAll('#allocMissions input[data-mid="' + i + '"][data-comp="' + c.key + '"]:checked');
         assignments[c.key] = Array.prototype.slice.call(boxes).map(function (b) { return b.value; });
       }
-      const shares = allocComputeShares(allocType, assignments);
-      const res = document.getElementById('allocResult');
+      const shares = allocComputeShares(type, assignments);
+      const res = document.getElementById('allocResult-' + i);
+      if (!res) return;
       const entries = Object.entries(shares).sort(function (a, b) { return b[1] - a[1]; });
-      if (!entries.length) { res.innerHTML = '<p style="font-size:13px;opacity:.7;">Coche au moins une composante.</p>'; return; }
-      res.innerHTML = '<div style="font-weight:600;margin-bottom:6px;">Repartition suggeree</div>' +
-        entries.map(function (e) { return '<div class="alloc-result-row"><span>' + allocEsc(e[0]) + '</span><strong>' + e[1] + '%</strong></div>'; }).join('') +
-        '<button type="button" class="alloc-calc-btn" style="margin-top:10px;background:#555;" onclick="allocCopy()">Copier</button>';
-      res.dataset.copy = entries.map(function (e) { return e[0] + ': ' + e[1] + '%'; }).join('\n');
-    }
-    function allocCopy() {
-      const txt = (document.getElementById('allocResult').dataset.copy) || '';
-      if (navigator.clipboard) navigator.clipboard.writeText(txt);
+      if (!entries.length) { res.innerHTML = ''; return; }
+      const commercial = m.commercial || [];
+      res.innerHTML = '<div style="font-weight:600;margin:6px 0;">Repartition suggeree</div>' +
+        entries.map(function (e) {
+          const hint = commercial.indexOf(e[0]) === -1 ? ' <span style="font-size:11px;opacity:.6;">(a ajouter en partner commercial pour etre paye)</span>' : '';
+          return '<div class="alloc-result-row"><span>' + allocEsc(e[0]) + hint + '</span><strong>' + e[1] + '%</strong></div>';
+        }).join('');
     }
 
     function renderKpiReglages() {
