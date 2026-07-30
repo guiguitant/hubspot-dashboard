@@ -319,4 +319,57 @@ function computeKpi({ missions, objectives, splits, year }) {
   return { year, partners, all, unclassified, missionsForSplit, allDetails: allDetail, caAnnee: totalCaAnnee(missions, year) };
 }
 
-module.exports = { computeKpi, yearOf, yearOfDate, signedAmountForYear, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, signatureDate, splitAmount, displaySplit, OPERE_STATES, SIGNE_EXCLUDED_STATES };
+// Taux par defaut Releaf : l'objectif de Guillaume est le double, donc son taux est la moitie.
+function primeDefaultRates(name) {
+  if (/guillaume/i.test(name || '')) return { txNew: 2.25, txRepeat: 1.25 };
+  return { txNew: 4.5, txRepeat: 2.5 };
+}
+
+// Applique les memes defauts que le panneau KPI (front ensurePrimeConfig), pour que le compte de
+// resultat affiche exactement le meme pool que l'onglet KPI meme si la config sauvegardee est partielle.
+function normalizePrimeConfig(config) {
+  const c = (config && typeof config === 'object') ? config : {};
+  const tiers = (Array.isArray(c.tiers) && c.tiers.length)
+    ? c.tiers
+    : [{ seuil: 650000, taux: 7 }, { seuil: 600000, taux: 5 }, { seuil: 550000, taux: 3 }];
+  return {
+    rates: (c.rates && typeof c.rates === 'object') ? c.rates : {},
+    tiers,
+    resultatAnnuel: typeof c.resultatAnnuel === 'number' ? c.resultatAnnuel : 150000,
+    gateTrimestriel: typeof c.gateTrimestriel === 'number' ? c.gateTrimestriel : 120000,
+  };
+}
+
+// Pool de primes de l'annee = etage 1 (perso trimestriel, avec portillon) + etage 2 (collectif annuel).
+// Reproduit primeCompute() du front. Le pool est independant de la liste des participants : on itere
+// sur les partners porteurs de CA signe (cles de byPartner) ; un partner sans signe ajoute 0.
+function computePrimePool({ missions, splits, config, year, caFacture }) {
+  const cfg = normalizePrimeConfig(config);
+  const sq = signedByQuarter(missions || [], year, splits || []);
+  const gateOk = sq.quarterTotals.map((t) => t >= cfg.gateTrimestriel);
+
+  let etage1 = 0;
+  for (const name of Object.keys(sq.byPartner || {})) {
+    const r = cfg.rates[name] || primeDefaultRates(name);
+    const bp = sq.byPartner[name];
+    for (let i = 0; i < 4; i++) {
+      if (!gateOk[i]) continue;
+      etage1 += (bp.new[i] || 0) * (r.txNew / 100) + (bp.repeat[i] || 0) * (r.txRepeat / 100);
+    }
+  }
+
+  const caF = Math.max(0, Number(caFacture) || 0);
+  const tiersAsc = cfg.tiers.slice().sort((a, b) => a.seuil - b.seuil);
+  let tauxColl = 0;
+  for (const t of tiersAsc) { if (caF >= t.seuil) tauxColl = t.taux; }
+  const etage2 = (tauxColl / 100) * cfg.resultatAnnuel;
+
+  return {
+    etage1: Math.round(etage1),
+    etage2: Math.round(etage2),
+    pool: Math.round(etage1 + etage2),
+    tauxColl,
+  };
+}
+
+module.exports = { computeKpi, yearOf, yearOfDate, signedAmountForYear, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, signatureDate, splitAmount, displaySplit, OPERE_STATES, SIGNE_EXCLUDED_STATES, primeDefaultRates, normalizePrimeConfig, computePrimePool };

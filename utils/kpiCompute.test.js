@@ -1,5 +1,5 @@
 'use strict';
-const { computeKpi, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, OPERE_STATES, SIGNE_EXCLUDED_STATES } = require('./kpiCompute');
+const { computeKpi, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, OPERE_STATES, SIGNE_EXCLUDED_STATES, computePrimePool, primeDefaultRates } = require('./kpiCompute');
 
 // Helper : fabrique une mission avec des valeurs par défaut raisonnables.
 // Par défaut : signée le 2026-03-01 (via dateCreation, faute de dateSignature) → tout le CA est
@@ -443,5 +443,50 @@ describe('clawbackCandidates : reprises sur deals annulés après paiement', () 
   it('split respecté sur un clawback', () => {
     const r = clawbackCandidates([mission({ id: 'x', etat: 'Annulé', dateSignature: '2026-02-10', partnerCommercial: ['Vincent', 'Nathan'], ca: 10000 })], 2026, [], 2);
     expect(r.map(c => c.montant)).toEqual([5000, 5000]);
+  });
+});
+
+describe('computePrimePool : pool de primes pour le compte de resultat', () => {
+  // Config minimale explicite (pas de defauts a deviner dans les asserts).
+  const cfg = {
+    rates: { Vincent: { txNew: 4.5, txRepeat: 2.5 } },
+    tiers: [{ seuil: 650000, taux: 7 }, { seuil: 600000, taux: 5 }, { seuil: 550000, taux: 3 }],
+    resultatAnnuel: 150000,
+    gateTrimestriel: 120000,
+  };
+
+  it('taux par defaut : Guillaume a la moitie', () => {
+    expect(primeDefaultRates('Guillaume Dupont')).toEqual({ txNew: 2.25, txRepeat: 1.25 });
+    expect(primeDefaultRates('Vincent')).toEqual({ txNew: 4.5, txRepeat: 2.5 });
+  });
+
+  it('etage 1 : un trimestre au-dessus du seuil verse la prime perso', () => {
+    // Vincent signe 200000 de Newsale en T1 (>= seuil 120000).
+    const m = mission({ id: 'a', typeCa: 'Newsale', dateSignature: '2026-02-01', partnerCommercial: ['Vincent'], ca: 200000, etat: 'Signé' });
+    const r = computePrimePool({ missions: [m], splits: [], config: cfg, year: 2026, caFacture: 0 });
+    expect(r.etage1).toBe(9000);   // 200000 * 4.5%
+    expect(r.etage2).toBe(0);      // caFacture 0 < premier palier
+    expect(r.pool).toBe(9000);
+  });
+
+  it('portillon : un trimestre sous le seuil ne verse rien', () => {
+    const m = mission({ id: 'b', typeCa: 'Newsale', dateSignature: '2026-02-01', partnerCommercial: ['Vincent'], ca: 100000, etat: 'Signé' });
+    const r = computePrimePool({ missions: [m], splits: [], config: cfg, year: 2026, caFacture: 0 });
+    expect(r.etage1).toBe(0);      // 100000 < 120000 -> gele
+    expect(r.pool).toBe(0);
+  });
+
+  it('etage 2 : palier selon caFacture', () => {
+    const r = computePrimePool({ missions: [], splits: [], config: cfg, year: 2026, caFacture: 620000 });
+    expect(r.tauxColl).toBe(5);          // 620000 >= 600000
+    expect(r.etage2).toBe(7500);         // 5% * 150000
+    expect(r.pool).toBe(7500);
+  });
+
+  it('config absente : applique les defauts (memes que le panneau KPI)', () => {
+    const m = mission({ id: 'c', typeCa: 'Newsale', dateSignature: '2026-02-01', partnerCommercial: ['Vincent'], ca: 200000, etat: 'Signé' });
+    const r = computePrimePool({ missions: [m], splits: [], config: null, year: 2026, caFacture: 660000 });
+    // etage1 : 200000 * 4.5% (defaut) = 9000 ; etage2 : palier 660000 -> 7% * 150000 = 10500.
+    expect(r.pool).toBe(19500);
   });
 });
