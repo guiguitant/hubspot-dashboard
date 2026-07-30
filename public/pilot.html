@@ -15073,10 +15073,16 @@
             }
             html += accordion(cat, chargesPlanTreDetail[cat], 'rgba(217,115,13,0.7)', '&#9679;', lineTable);
           }
-          // Sanity check : afficher écart si breakdown ne matche pas le total
+          // Primes commerciales (versements KPI) : incluses dans decaissementsTRE mais absentes du détail
+          // Plan TRE (source distincte). On les affiche en ligne dédiée et on les exclut de l'écart ci-dessous.
+          const primesVersees = Math.round(mois.primesCommercialesVersees || 0);
+          if (primesVersees) {
+            html += accordion('Primes commerciales', primesVersees, 'rgba(217,115,13,0.7)', '&#9679;', '');
+          }
+          // Sanity check : afficher écart si breakdown ne matche pas le total (hors primes, déjà isolées)
           const breakdownSum = planCats.reduce((s, c) => s + chargesPlanTreDetail[c], 0);
           const decaissementsTreOnly = (mois.decaissementsTRE || 0);
-          const ecart = decaissementsTreOnly - breakdownSum;
+          const ecart = decaissementsTreOnly - breakdownSum - primesVersees;
           if (Math.abs(ecart) > 1) {
             html += '<div style="font-size:0.7rem;color:var(--text-secondary);font-style:italic;margin:0.3rem 0.4rem">Note : écart de ' + formatEuro(ecart) + ' entre total Plan TRE TTC et somme du détail (lignes non catégorisées dans le sheet).</div>';
           }
