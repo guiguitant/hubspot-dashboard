@@ -11164,27 +11164,26 @@
         .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
         .then(function () {
           if (msg) { msg.textContent = ' Enregistre.'; msg.style.color = '#2e7d32'; }
-          allocSaved[i] = { splits: splits, client: m.client, id: m.id, commercial: m.commercial || [] };
+          allocSaved[i] = { splits: splits, client: m.client, id: m.id, commercial: m.commercial || [], type: m.type };
           allocProposeClient(i);
           if (typeof initKpi === 'function') initKpi();
         })
         .catch(function (e) { if (msg) { msg.textContent = ' Echec : ' + e.message; msg.style.color = '#c62828'; } });
     }
-    // Deals du meme client (a 2+ partners commerciaux) autres que la mission source.
-    const allocSaved = {};
+    const allocSaved = {};                 // allocSaved[i] = { splits, client, id, commercial, type } de la mission enregistree
     function allocPartnerKey(arr) {
       return (arr || []).slice().sort().join('|');
     }
-    function allocSameClientOthers(sourceId, client) {
-      if (!client) return [];
-      return allocMissions().filter(function (x) { return x.id !== sourceId && x.client === client; });
-    }
     // Apres enregistrement : propose d'appliquer la meme repartition aux autres deals du client.
+    // UNIQUEMENT pour les repeats (upsale) : les criteres new/upsale different, on ne propage pas un newsale.
     function allocProposeClient(i) {
       const s = allocSaved[i];
       const cont = document.getElementById('allocPropose-' + i);
       if (!s || !cont) return;
-      const others = allocSameClientOthers(s.id, s.client);
+      if (s.type !== 'upsale') { cont.innerHTML = ''; return; }
+      const others = allocMissions().filter(function (x) {
+        return x.id !== s.id && x.client && x.client === s.client && x.type === 'upsale';
+      });
       if (!others.length) { cont.innerHTML = ''; return; }
       const srcSet = allocPartnerKey(s.commercial);
       cont.innerHTML = '<div class="alloc-propose">' +
