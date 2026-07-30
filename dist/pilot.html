@@ -3305,6 +3305,21 @@
 
     /* (Styles gamification supprimés) */
 
+    /* Calculateur d'allocation (v1) */
+    .alloc-type{display:flex;gap:8px;margin-bottom:12px;}
+    .alloc-type-btn{flex:1;padding:8px;border:1px solid rgba(128,128,128,.4);border-radius:8px;background:transparent;color:inherit;cursor:pointer;font-size:13px;}
+    .alloc-type-btn.active{background:#003d2e;color:#fff;border-color:#003d2e;}
+    .alloc-label{display:block;font-size:13px;margin:8px 0 4px;}
+    .alloc-input{width:100%;padding:8px;border:1px solid rgba(128,128,128,.4);border-radius:8px;box-sizing:border-box;background:transparent;color:inherit;}
+    .alloc-components{margin:12px 0;}
+    .alloc-comp{padding:8px 0;border-bottom:1px solid rgba(128,128,128,.25);}
+    .alloc-comp-title{font-size:13px;font-weight:600;margin-bottom:4px;}
+    .alloc-comp-people{display:flex;flex-wrap:wrap;gap:12px;}
+    .alloc-comp-people label{font-size:13px;display:flex;align-items:center;gap:4px;cursor:pointer;}
+    .alloc-calc-btn{width:100%;padding:10px;background:#003d2e;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;}
+    .alloc-result{margin-top:14px;}
+    .alloc-result-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(128,128,128,.25);font-size:14px;}
+
   </style>
 </head>
 <body>
@@ -4245,6 +4260,7 @@
         <div class="kpi-controls">
           <span class="kpi-year-wrap"><label for="kpiYear">Année</label><select id="kpiYear" onchange="initKpi()"></select></span>
           <button class="analytics-tab" onclick="toggleKpiReglages()" id="kpiReglagesBtn">Réglages</button>
+          <button class="analytics-tab" onclick="openAllocCalc()" id="allocCalcBtn">Calculateur d'allocation</button>
         </div>
       </div>
     </div>
@@ -4383,6 +4399,27 @@
         <div class="modal-body" id="kpiReglagesBody"></div>
         <div class="modal-footer">
           <button class="kpi-btn kpi-btn--primary" onclick="closeKpiReglages()">Fermer</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Calculateur d'allocation (v1 autonome, aucun impact KPI/primes) -->
+    <div class="modal-overlay" id="allocCalcModal" onclick="if(event.target===this) closeAllocCalc()">
+      <div class="modal kpi-modal">
+        <div class="modal-header" style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+          <h2 style="margin:0;">Calculateur d'allocation</h2>
+          <button class="modal-close-x" onclick="closeAllocCalc()" aria-label="Fermer">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="alloc-type">
+            <button type="button" id="allocTypeNewsale" class="alloc-type-btn active" onclick="allocSetType('newsale')">Nouveau client (newsale)</button>
+            <button type="button" id="allocTypeUpsale" class="alloc-type-btn" onclick="allocSetType('upsale')">Client qui revient (upsale)</button>
+          </div>
+          <label class="alloc-label" for="allocPeople">Personnes impliquées (séparées par des virgules)</label>
+          <input id="allocPeople" class="alloc-input" type="text" placeholder="ex. Nathan, Guillaume" oninput="allocRenderComponents()">
+          <div id="allocComponents" class="alloc-components"></div>
+          <button type="button" class="alloc-calc-btn" onclick="allocRun()">Calculer la répartition</button>
+          <div id="allocResult" class="alloc-result"></div>
         </div>
       </div>
     </div>
@@ -10985,6 +11022,107 @@
     }
     function closeKpiReglages() {
       document.getElementById('kpiReglagesModal').classList.remove('active');
+    }
+
+    // --- Calculateur d'allocation (v1 autonome) ---
+    // MIROIR de utils/allocationGrid.js (source de verite, testee par Jest). Garder synchronise.
+    const ALLOC_GRIDS = {
+      newsale: [
+        { key: 'sourcing', label: 'Sourcing du prospect', weight: 30 },
+        { key: 'rdv_nego', label: 'RDV + negociation', weight: 30 },
+        { key: 'prez', label: 'Redaction prez / proposition', weight: 20 },
+        { key: 'relance', label: 'Relance + closing', weight: 20 },
+      ],
+      upsale: [
+        { key: 'sourcing', label: "Sourcing / apporteur d'origine", weight: 30 },
+        { key: 'operationnel', label: 'Aspect operationnel (retention)', weight: 35 },
+        { key: 'rdv_nego', label: 'RDV + negociation', weight: 20 },
+        { key: 'prez', label: 'Redaction prez / proposition', weight: 15 },
+      ],
+    };
+    let allocType = 'newsale';
+    function allocEsc(s) {
+      return String(s).replace(/[&<>"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+      });
+    }
+    function allocGetPeople() {
+      const raw = (document.getElementById('allocPeople').value || '')
+        .split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+      return Array.from(new Set(raw));
+    }
+    function allocRoundTo100(w) {
+      const persons = Object.keys(w);
+      const total = persons.reduce(function (s, p) { return s + w[p]; }, 0);
+      if (total <= 0) return {};
+      const exact = {}, floored = {};
+      let sumFloor = 0;
+      for (const p of persons) { exact[p] = (w[p] / total) * 100; floored[p] = Math.floor(exact[p]); sumFloor += floored[p]; }
+      const rem = 100 - sumFloor;
+      const byFrac = persons.slice().sort(function (a, b) { return (exact[b] - floored[b]) - (exact[a] - floored[a]); });
+      const out = Object.assign({}, floored);
+      for (let i = 0; i < rem; i++) out[byFrac[i % byFrac.length]] += 1;
+      return out;
+    }
+    function allocComputeShares(type, assignments) {
+      const grid = ALLOC_GRIDS[type];
+      if (!grid) return {};
+      const w = {};
+      for (const comp of grid) {
+        const raw = assignments[comp.key];
+        const people = Array.isArray(raw) ? raw.filter(Boolean) : [];
+        if (people.length === 0) continue;
+        const share = comp.weight / people.length;
+        for (const p of people) w[p] = (w[p] || 0) + share;
+      }
+      return allocRoundTo100(w);
+    }
+    function openAllocCalc() {
+      document.getElementById('allocCalcModal').classList.add('active');
+      allocSetType('newsale');
+    }
+    function closeAllocCalc() {
+      document.getElementById('allocCalcModal').classList.remove('active');
+    }
+    function allocSetType(t) {
+      allocType = t;
+      document.getElementById('allocTypeNewsale').classList.toggle('active', t === 'newsale');
+      document.getElementById('allocTypeUpsale').classList.toggle('active', t === 'upsale');
+      document.getElementById('allocResult').innerHTML = '';
+      allocRenderComponents();
+    }
+    function allocRenderComponents() {
+      const people = allocGetPeople();
+      const wrap = document.getElementById('allocComponents');
+      if (!people.length) { wrap.innerHTML = '<p style="font-size:13px;opacity:.7;">Entre au moins une personne ci-dessus.</p>'; return; }
+      const grid = ALLOC_GRIDS[allocType];
+      wrap.innerHTML = grid.map(function (c) {
+        const boxes = people.map(function (p) {
+          return '<label><input type="checkbox" data-comp="' + c.key + '" value="' + allocEsc(p) + '"> ' + allocEsc(p) + '</label>';
+        }).join('');
+        return '<div class="alloc-comp"><div class="alloc-comp-title">' + allocEsc(c.label) +
+          ' <span style="opacity:.6;">(' + c.weight + '%)</span></div><div class="alloc-comp-people">' + boxes + '</div></div>';
+      }).join('');
+    }
+    function allocRun() {
+      const grid = ALLOC_GRIDS[allocType];
+      const assignments = {};
+      for (const c of grid) {
+        const boxes = document.querySelectorAll('#allocComponents input[data-comp="' + c.key + '"]:checked');
+        assignments[c.key] = Array.prototype.slice.call(boxes).map(function (b) { return b.value; });
+      }
+      const shares = allocComputeShares(allocType, assignments);
+      const res = document.getElementById('allocResult');
+      const entries = Object.entries(shares).sort(function (a, b) { return b[1] - a[1]; });
+      if (!entries.length) { res.innerHTML = '<p style="font-size:13px;opacity:.7;">Coche au moins une composante.</p>'; return; }
+      res.innerHTML = '<div style="font-weight:600;margin-bottom:6px;">Repartition suggeree</div>' +
+        entries.map(function (e) { return '<div class="alloc-result-row"><span>' + allocEsc(e[0]) + '</span><strong>' + e[1] + '%</strong></div>'; }).join('') +
+        '<button type="button" class="alloc-calc-btn" style="margin-top:10px;background:#555;" onclick="allocCopy()">Copier</button>';
+      res.dataset.copy = entries.map(function (e) { return e[0] + ': ' + e[1] + '%'; }).join('\n');
+    }
+    function allocCopy() {
+      const txt = (document.getElementById('allocResult').dataset.copy) || '';
+      if (navigator.clipboard) navigator.clipboard.writeText(txt);
     }
 
     function renderKpiReglages() {
