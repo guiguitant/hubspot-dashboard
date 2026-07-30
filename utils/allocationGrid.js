@@ -7,10 +7,9 @@
 
 const GRIDS = {
   newsale: [
-    { key: 'sourcing', label: 'Sourcing du prospect', weight: 30 },
+    { key: 'sourcing', label: 'Sourcing du prospect', weight: 40 },
     { key: 'rdv_nego', label: 'RDV + negociation', weight: 30 },
-    { key: 'prez', label: 'Redaction prez / proposition', weight: 20 },
-    { key: 'relance', label: 'Relance + closing', weight: 20 },
+    { key: 'prez', label: 'Redaction prez / proposition', weight: 30 },
   ],
   upsale: [
     { key: 'sourcing', label: "Sourcing / apporteur d'origine", weight: 30 },
