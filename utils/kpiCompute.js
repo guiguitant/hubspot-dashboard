@@ -265,6 +265,9 @@ function computeKpi({ missions, objectives, splits, year }) {
           id: m.id, nom: m.nom, client: m.client || null, ca,
           // type de deal (grille d'allocation à appliquer côté front) : 'newsale' | 'upsale' | null.
           type: m.typeCa === 'Newsale' ? 'newsale' : (m.typeCa === 'Upsale' ? 'upsale' : null),
+          // true si une répartition commerciale a déjà été enregistrée pour cette mission (au moins
+          // une ligne kpi_ca_split axis=commercial). Sert au badge « Enregistré » persistant du calculateur.
+          commercialSaved: !!((splitIndex[m.id] || {}).commercial && Object.keys((splitIndex[m.id] || {}).commercial).length),
           commercial: com, operationnel: ope,
           splitCommercial: displaySplit(com, (splitIndex[m.id] || {}).commercial),
           splitOperationnel: displaySplit(ope, (splitIndex[m.id] || {}).operationnel),

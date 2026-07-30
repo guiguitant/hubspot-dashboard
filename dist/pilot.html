@@ -11113,7 +11113,9 @@
         }).join('');
         return '<div class="alloc-mission" data-mission-id="' + allocEsc(m.id) + '">' +
           '<div class="alloc-mission-head"><strong>' + allocEsc(m.nom || 'Mission') + '</strong>' +
-          '<span class="alloc-head-right"><span class="alloc-badge">' + allocEsc(typeLabel) + '</span></span></div>' +
+          '<span class="alloc-head-right"><span class="alloc-badge">' + allocEsc(typeLabel) + '</span>' +
+          (m.commercialSaved ? '<span class="alloc-saved-badge">✓ Enregistre</span>' : '') +
+          '</span></div>' +
           comps +
           '<div class="alloc-result" id="allocResult-' + i + '"></div></div>';
       }).join('');

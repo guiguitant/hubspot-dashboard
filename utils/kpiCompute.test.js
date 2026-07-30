@@ -197,6 +197,17 @@ describe('computeKpi — missionsForSplit', () => {
     expect(r.missionsForSplit).toEqual([]);
   });
 
+  it('commercialSaved = true si un split commercial existe, false sinon', () => {
+    const missions = [mission({ id: 'mS', partnerCommercial: ['Vincent', 'Nathan'] })];
+    const withSplit = computeKpi({
+      missions, objectives: [], year: 2026,
+      splits: [{ mission_id: 'mS', axis: 'commercial', partner: 'Vincent', pct: 60 }],
+    });
+    expect(withSplit.missionsForSplit[0].commercialSaved).toBe(true);
+    const without = computeKpi({ missions, objectives: [], splits: [], year: 2026 });
+    expect(without.missionsForSplit[0].commercialSaved).toBe(false);
+  });
+
   it('type = upsale pour une mission Upsale', () => {
     const r = computeKpi({
       missions: [mission({ id: 'mU', typeCa: 'Upsale', partnerCommercial: ['Vincent', 'Nathan'] })],
