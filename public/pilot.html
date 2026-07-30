@@ -11238,15 +11238,19 @@
         html += '<p style="color:var(--text-secondary);">Aucun partner détecté cette année.</p>';
       } else {
         html += '<table class="kpi-obj-table"><thead><tr><th>Partner</th><th>Newsale</th><th>Upsale</th><th>Opéré</th></tr></thead><tbody>';
+        const totObj = { newsale: 0, upsale: 0, opere: 0 };
         kpiData.partners.forEach((p, i) => {
           const accent = KPI_CHIP_COLORS[i % KPI_CHIP_COLORS.length];
+          ['newsale', 'upsale', 'opere'].forEach(t => { totObj[t] += Number(p[t].objectif) || 0; });
           html += '<tr><td><div class="kpi-obj-name"><span class="kpi-mini-chip" style="background:' + accent + ';">' + kpiInitial(p.partner) + '</span>' + p.partner + '</div></td>' +
             ['newsale', 'upsale', 'opere'].map(t =>
               '<td style="text-align:right;"><input class="kpi-num-input" type="number" value="' + p[t].objectif + '" ' +
               'onchange="saveKpiObjective(\'' + p.partner + '\', ' + year + ', \'' + t + '\', this.value)"></td>'
             ).join('') + '</tr>';
         });
-        html += '</tbody></table>';
+        html += '</tbody><tfoot><tr><td><strong>Total</strong></td>' +
+          ['newsale', 'upsale', 'opere'].map(t => '<td style="text-align:right;"><strong>' + kpiFmtEur(totObj[t]) + '</strong></td>').join('') +
+          '</tr></tfoot></table>';
       }
       html += '</div>';
 
