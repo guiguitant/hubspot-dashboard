@@ -3324,6 +3324,8 @@
     .alloc-propose{margin-top:12px;padding-top:10px;border-top:1px dashed rgba(128,128,128,.35);}
     .alloc-propose-head{font-size:13px;font-weight:600;margin-bottom:6px;}
     .alloc-propose-row{display:flex;align-items:center;gap:6px;font-size:13px;padding:3px 0;cursor:pointer;}
+    .alloc-head-right{display:flex;align-items:center;gap:6px;}
+    .alloc-saved-badge{font-size:11px;padding:2px 8px;border-radius:999px;background:#2e7d32;color:#fff;white-space:nowrap;}
 
   </style>
 </head>
@@ -11109,9 +11111,9 @@
           return '<div class="alloc-comp"><div class="alloc-comp-title">' + allocEsc(c.label) +
             ' <span style="opacity:.6;">(' + c.weight + '%)</span></div><div class="alloc-comp-people">' + boxes + '</div></div>';
         }).join('');
-        return '<div class="alloc-mission">' +
+        return '<div class="alloc-mission" data-mission-id="' + allocEsc(m.id) + '">' +
           '<div class="alloc-mission-head"><strong>' + allocEsc(m.nom || 'Mission') + '</strong>' +
-          '<span class="alloc-badge">' + allocEsc(typeLabel) + '</span></div>' +
+          '<span class="alloc-head-right"><span class="alloc-badge">' + allocEsc(typeLabel) + '</span></span></div>' +
           comps +
           '<div class="alloc-result" id="allocResult-' + i + '"></div></div>';
       }).join('');
@@ -11164,6 +11166,7 @@
         .then(function () {
           if (msg) { msg.textContent = ' Enregistre.'; msg.style.color = '#2e7d32'; }
           allocSaved[i] = { splits: splits, client: m.client, id: m.id, commercial: m.commercial || [], type: m.type };
+          allocMarkSaved(m.id);
           allocProposeClient(i);
           if (typeof initKpi === 'function') initKpi();
         })
@@ -11209,8 +11212,20 @@
           body: JSON.stringify({ mission_id: id, axis: 'commercial', splits: s.splits }),
         }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); });
       }))
-        .then(function () { if (msg) { msg.textContent = ' Applique a ' + ids.length + ' deal(s).'; msg.style.color = '#2e7d32'; } if (typeof initKpi === 'function') initKpi(); })
+        .then(function () { ids.forEach(allocMarkSaved); if (msg) { msg.textContent = ' Applique a ' + ids.length + ' deal(s).'; msg.style.color = '#2e7d32'; } if (typeof initKpi === 'function') initKpi(); })
         .catch(function (e) { if (msg) { msg.textContent = ' Echec : ' + e.message; msg.style.color = '#c62828'; } });
+    }
+    // Ajoute un badge "Enregistre" sur le bloc mission (source ou deal auquel on a applique la repartition).
+    function allocMarkSaved(missionId) {
+      if (!missionId) return;
+      const block = document.querySelector('.alloc-mission[data-mission-id="' + missionId + '"]');
+      if (!block) return;
+      const right = block.querySelector('.alloc-head-right');
+      if (!right || right.querySelector('.alloc-saved-badge')) return;
+      const badge = document.createElement('span');
+      badge.className = 'alloc-saved-badge';
+      badge.textContent = '✓ Enregistre';
+      right.appendChild(badge);
     }
 
     function renderKpiReglages() {
