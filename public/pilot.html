@@ -15960,6 +15960,7 @@
       if (delta)            html += row('Delta masse salariale (override)', delta, { sign: '−' });
       if (tvaReversement)   html += row('Reversement TVA M+1 (overrides)', tvaReversement, { sign: '−', color: 'var(--warning, #d9730d)' });
       if (rembAvance)       html += row('Remb. Avance remboursable BPI', rembAvance, { sign: '−' });
+      if (m.primesCommercialesVersees) html += row('Primes commerciales', m.primesCommercialesVersees, { sign: '−' });
       html += row('Total charges', decTotal, { bold: true, showZero: true, sign: '−', color: 'var(--danger)', subtotal: true });
 
       // === TVA overrides (debug, si flux TVA non nul) ===
