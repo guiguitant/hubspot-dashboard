@@ -337,6 +337,7 @@ function normalizePrimeConfig(config) {
     tiers,
     resultatAnnuel: typeof c.resultatAnnuel === 'number' ? c.resultatAnnuel : 150000,
     gateTrimestriel: typeof c.gateTrimestriel === 'number' ? c.gateTrimestriel : 120000,
+    versementEtage2Mois: c.versementEtage2Mois != null ? String(c.versementEtage2Mois).padStart(2, '0') : '03',
   };
 }
 
@@ -394,7 +395,7 @@ function monthAfterDate(d) {
 // Etage 1 deal par deal (conditionne a la facturation de l'acompte, avec portillon trimestriel),
 // etage 2 en N+1. `versements` = validations Phase 3 (couples deja verses, exclus). `now` = date
 // courante ('YYYY-MM-DD' ou ISO) pour le rattrapage. Les cles zero-paddees se comparent lexicalement.
-function computePrimePayments({ missions, splits, config, year, caFacture, versements = [], now, versementEtage2Mois }) {
+function computePrimePayments({ missions, splits, config, year, caFacture, versements = [], now, versementEtage2Mois, pastPolicy = 'rattrapage' }) {
   const cfg = normalizePrimeConfig(config);
   const sq = signedByQuarter(missions || [], year, splits || []);
   const gateOk = sq.quarterTotals.map((t) => t >= cfg.gateTrimestriel);
@@ -434,9 +435,12 @@ function computePrimePayments({ missions, splits, config, year, caFacture, verse
         let mk = monthAfterQuarterClose(year, q + 1);
         const mkFact = monthAfterDate(acompte);
         if (mkFact && mkFact > mk) mk = mkFact;      // le plus tardif des deux
-        const rattrapage = mk < nowKey;
-        if (rattrapage) mk = nowKey;
-        add(mk, montant, { etage: 1, deal: deal.id, nom: deal.nom, partner: p, montant, rattrapage });
+        const isPast = mk < nowKey;
+        if (isPast) {
+          if (pastPolicy === 'drop') continue; // paiement passe non repris (annee N-1 : gere via validation Phase 3)
+          mk = nowKey;                          // rattrapage : mois courant
+        }
+        add(mk, montant, { etage: 1, deal: deal.id, nom: deal.nom, partner: p, montant, rattrapage: isPast });
       }
     }
   }
@@ -451,9 +455,11 @@ function computePrimePayments({ missions, splits, config, year, caFacture, verse
   if (collTotal > 0) {
     const moisE2 = String(versementEtage2Mois || cfg.versementEtage2Mois || '03').padStart(2, '0');
     let mk = (year + 1) + '-' + moisE2;
-    const rattrapage = mk < nowKey;
-    if (rattrapage) mk = nowKey;
-    add(mk, collTotal, { etage: 2, montant: collTotal, rattrapage });
+    const isPast = mk < nowKey;
+    if (!(isPast && pastPolicy === 'drop')) {
+      if (isPast) mk = nowKey;
+      add(mk, collTotal, { etage: 2, montant: collTotal, rattrapage: isPast });
+    }
   }
 
   return { byMonth, detail, enAttente, verse };

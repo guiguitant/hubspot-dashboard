@@ -544,4 +544,25 @@ describe('computePrimePayments : echeancier des versements de primes', () => {
     expect(Object.keys(r.byMonth).length).toBe(0);
     expect(r.verse).toBe(9000);
   });
+
+  it('pastPolicy "drop" : un versement passe est omis (pas de rattrapage)', () => {
+    const r = computePrimePayments({ missions: [dealT1()], splits: [], config: cfg, year: 2026, caFacture: 0, versements: [], now: '2026-07-15', pastPolicy: 'drop' });
+    expect(Object.keys(r.byMonth).length).toBe(0);
+  });
+
+  it('deal T4 : versement en janvier N+1', () => {
+    const dealT4 = mission({ id: 'd4', typeCa: 'Newsale', dateSignature: '2026-11-05', partnerCommercial: ['Vincent'], ca: 200000, etat: 'Signé', dateFactureAcompte: '2026-12-10' });
+    const r = computePrimePayments({ missions: [dealT4], splits: [], config: cfg, year: 2026, caFacture: 0, versements: [], now: '2026-12-15' });
+    expect(r.byMonth['2027-01']).toBe(9000);
+  });
+
+  it('etage 2 : mois de versement configurable via la config', () => {
+    const r = computePrimePayments({ missions: [], splits: [], config: { ...cfg, versementEtage2Mois: '06' }, year: 2026, caFacture: 660000, versements: [], now: '2026-07-15' });
+    expect(r.byMonth['2027-06']).toBe(10500);
+  });
+
+  it('etage 2 en N+1 deja passe : rattrapage sur le mois courant', () => {
+    const r = computePrimePayments({ missions: [], splits: [], config: cfg, year: 2025, caFacture: 660000, versements: [], now: '2026-07-15' });
+    expect(r.byMonth['2026-07']).toBe(10500);
+  });
 });

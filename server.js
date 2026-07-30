@@ -6393,7 +6393,8 @@ app.get('/api/tresorerie', async (req, res) => {
       const currentYear = new Date().getFullYear();
       for (const y of [currentYear - 1, currentYear]) {
         const caFactureY = computeBillingForYear(notionMissions, factOverrides, y).total;
-        const pay = computePrimePayments({ missions: notionMissions, splits, config: primeCfg, year: y, caFacture: caFactureY, versements: [], now: nowIso });
+        const pastPolicy = (y < currentYear) ? 'drop' : 'rattrapage';
+        const pay = computePrimePayments({ missions: notionMissions, splits, config: primeCfg, year: y, caFacture: caFactureY, versements: [], now: nowIso, pastPolicy });
         for (const [mk, amt] of Object.entries(pay.byMonth)) {
           primePaymentsByMonth[mk] = (primePaymentsByMonth[mk] || 0) + amt;
         }
