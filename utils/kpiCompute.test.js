@@ -1,5 +1,5 @@
 'use strict';
-const { computeKpi, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, OPERE_STATES, SIGNE_EXCLUDED_STATES, computePrimePool, primeDefaultRates } = require('./kpiCompute');
+const { computeKpi, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, OPERE_STATES, SIGNE_EXCLUDED_STATES, computePrimePool, primeDefaultRates, computePrimePayments } = require('./kpiCompute');
 
 // Helper : fabrique une mission avec des valeurs par défaut raisonnables.
 // Par défaut : signée le 2026-03-01 (via dateCreation, faute de dateSignature) → tout le CA est
@@ -488,5 +488,60 @@ describe('computePrimePool : pool de primes pour le compte de resultat', () => {
     const r = computePrimePool({ missions: [m], splits: [], config: null, year: 2026, caFacture: 660000 });
     // etage1 : 200000 * 4.5% (defaut) = 9000 ; etage2 : palier 660000 -> 7% * 150000 = 10500.
     expect(r.pool).toBe(19500);
+  });
+});
+
+describe('computePrimePayments : echeancier des versements de primes', () => {
+  const cfg = {
+    rates: { Vincent: { txNew: 4.5, txRepeat: 2.5 } },
+    tiers: [{ seuil: 650000, taux: 7 }, { seuil: 600000, taux: 5 }, { seuil: 550000, taux: 3 }],
+    resultatAnnuel: 150000,
+    gateTrimestriel: 120000,
+  };
+  // Deal T1 (signe fevrier), Newsale, Vincent, 200000, acompte facture le 15/03/2026.
+  const dealT1 = (over = {}) => mission({
+    id: 'a', typeCa: 'Newsale', dateSignature: '2026-02-01', partnerCommercial: ['Vincent'],
+    ca: 200000, etat: 'Signé', dateFactureAcompte: '2026-03-15', ...over,
+  });
+
+  it('deal facture a temps : versement planifie au mois suivant la cloture (avril)', () => {
+    const r = computePrimePayments({ missions: [dealT1()], splits: [], config: cfg, year: 2026, caFacture: 0, versements: [], now: '2026-02-10' });
+    expect(r.byMonth['2026-04']).toBe(9000); // 200000 * 4.5%
+    expect(r.enAttente).toBe(0);
+  });
+
+  it('deal facture en retard : versement glisse au mois suivant la facturation', () => {
+    const r = computePrimePayments({ missions: [dealT1({ dateFactureAcompte: '2026-08-20' })], splits: [], config: cfg, year: 2026, caFacture: 0, versements: [], now: '2026-02-10' });
+    expect(r.byMonth['2026-09']).toBe(9000);
+    expect(r.byMonth['2026-04']).toBeUndefined();
+  });
+
+  it('mois de versement deja passe : rattrapage sur le mois courant', () => {
+    const r = computePrimePayments({ missions: [dealT1()], splits: [], config: cfg, year: 2026, caFacture: 0, versements: [], now: '2026-07-15' });
+    expect(r.byMonth['2026-07']).toBe(9000);
+    expect(r.detail['2026-07'][0].rattrapage).toBe(true);
+  });
+
+  it('acompte non facture : en attente, aucun versement', () => {
+    const r = computePrimePayments({ missions: [dealT1({ dateFactureAcompte: null })], splits: [], config: cfg, year: 2026, caFacture: 0, versements: [], now: '2026-02-10' });
+    expect(r.enAttente).toBe(9000);
+    expect(Object.keys(r.byMonth).length).toBe(0);
+  });
+
+  it('trimestre sous le seuil (gele) : rien', () => {
+    const r = computePrimePayments({ missions: [dealT1({ ca: 100000 })], splits: [], config: cfg, year: 2026, caFacture: 0, versements: [], now: '2026-02-10' });
+    expect(Object.keys(r.byMonth).length).toBe(0);
+    expect(r.enAttente).toBe(0);
+  });
+
+  it('etage 2 : verse au mois configure en N+1 (defaut mars)', () => {
+    const r = computePrimePayments({ missions: [], splits: [], config: cfg, year: 2026, caFacture: 660000, versements: [], now: '2026-07-15' });
+    expect(r.byMonth['2027-03']).toBe(10500); // 7% * 150000
+  });
+
+  it('versement deja valide : exclu du byMonth, compte dans verse', () => {
+    const r = computePrimePayments({ missions: [dealT1()], splits: [], config: cfg, year: 2026, caFacture: 0, versements: [{ etage: 1, mission_id: 'a', partner: 'Vincent' }], now: '2026-02-10' });
+    expect(Object.keys(r.byMonth).length).toBe(0);
+    expect(r.verse).toBe(9000);
   });
 });

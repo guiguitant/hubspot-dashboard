@@ -372,4 +372,91 @@ function computePrimePool({ missions, splits, config, year, caFacture }) {
   };
 }
 
-module.exports = { computeKpi, yearOf, yearOfDate, signedAmountForYear, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, signatureDate, splitAmount, displaySplit, OPERE_STATES, SIGNE_EXCLUDED_STATES, primeDefaultRates, normalizePrimeConfig, computePrimePool };
+// Cle 'YYYY-MM' du mois qui suit la cloture du trimestre q (1-4) de l'annee y.
+// Cloture T1=mars, T2=juin, T3=sept, T4=dec ; "mois suivant" = avril, juillet, octobre, janvier(N+1).
+function monthAfterQuarterClose(y, q) {
+  let m = q * 3 + 1, yy = y;
+  if (m > 12) { m = 1; yy = y + 1; }
+  return yy + '-' + String(m).padStart(2, '0');
+}
+
+// Cle 'YYYY-MM' du mois qui suit une date 'YYYY-MM-DD' (ou ISO). Null si date absente/invalide.
+function monthAfterDate(d) {
+  if (!d) return null;
+  const y = Number(String(d).slice(0, 4)), m = Number(String(d).slice(5, 7));
+  if (!y || !m) return null;
+  let mm = m + 1, yy = y;
+  if (mm > 12) { mm = 1; yy = y + 1; }
+  return yy + '-' + String(mm).padStart(2, '0');
+}
+
+// Echeancier des versements de primes de l'annee `year` : map { 'YYYY-MM': montant } + detail.
+// Etage 1 deal par deal (conditionne a la facturation de l'acompte, avec portillon trimestriel),
+// etage 2 en N+1. `versements` = validations Phase 3 (couples deja verses, exclus). `now` = date
+// courante ('YYYY-MM-DD' ou ISO) pour le rattrapage. Les cles zero-paddees se comparent lexicalement.
+function computePrimePayments({ missions, splits, config, year, caFacture, versements = [], now, versementEtage2Mois }) {
+  const cfg = normalizePrimeConfig(config);
+  const sq = signedByQuarter(missions || [], year, splits || []);
+  const gateOk = sq.quarterTotals.map((t) => t >= cfg.gateTrimestriel);
+  const nowKey = String(now || '').slice(0, 7);
+
+  // Index des validations (Phase 3) : etage 1 -> 'E1|mission|partner' ; etage 2 -> 'E2|partner'.
+  const verseKeys = new Set();
+  for (const v of versements || []) {
+    if (Number(v.etage) === 2) verseKeys.add('E2|' + v.partner);
+    else verseKeys.add('E1|' + v.mission_id + '|' + v.partner);
+  }
+
+  // Date de facturation de l'acompte par mission.
+  const acompteByMission = {};
+  for (const m of (missions || [])) acompteByMission[m.id] = m.dateFactureAcompte || null;
+
+  const byMonth = {};
+  const detail = {};
+  let enAttente = 0, verse = 0;
+  const add = (mk, amount, info) => {
+    byMonth[mk] = (byMonth[mk] || 0) + amount;
+    (detail[mk] = detail[mk] || []).push(info);
+  };
+
+  // --- Etage 1 : deal par deal, par partner ---
+  for (const p of Object.keys(sq.detailByPartner || {})) {
+    const rate = cfg.rates[p] || primeDefaultRates(p);
+    for (let q = 0; q < 4; q++) {
+      if (!gateOk[q]) continue;
+      for (const deal of (sq.detailByPartner[p][q] || [])) {
+        const taux = deal.type === 'new' ? rate.txNew : rate.txRepeat;
+        const montant = Math.round(deal.montant * (taux / 100));
+        if (montant <= 0) continue;
+        if (verseKeys.has('E1|' + deal.id + '|' + p)) { verse += montant; continue; }
+        const acompte = acompteByMission[deal.id];
+        if (!acompte) { enAttente += montant; continue; }
+        let mk = monthAfterQuarterClose(year, q + 1);
+        const mkFact = monthAfterDate(acompte);
+        if (mkFact && mkFact > mk) mk = mkFact;      // le plus tardif des deux
+        const rattrapage = mk < nowKey;
+        if (rattrapage) mk = nowKey;
+        add(mk, montant, { etage: 1, deal: deal.id, nom: deal.nom, partner: p, montant, rattrapage });
+      }
+    }
+  }
+
+  // --- Etage 2 : collectif, verse en N+1 ---
+  const caF = Math.max(0, Number(caFacture) || 0);
+  const tiersAsc = cfg.tiers.slice().sort((a, b) => a.seuil - b.seuil);
+  let tauxColl = 0;
+  for (const t of tiersAsc) { if (caF >= t.seuil) tauxColl = t.taux; }
+  const collTotal = Math.round((tauxColl / 100) * cfg.resultatAnnuel);
+  // Etage 2 verse en une ligne (total collectif). L'exclusion par partner valide arrive en Phase 3.
+  if (collTotal > 0) {
+    const moisE2 = String(versementEtage2Mois || cfg.versementEtage2Mois || '03').padStart(2, '0');
+    let mk = (year + 1) + '-' + moisE2;
+    const rattrapage = mk < nowKey;
+    if (rattrapage) mk = nowKey;
+    add(mk, collTotal, { etage: 2, montant: collTotal, rattrapage });
+  }
+
+  return { byMonth, detail, enAttente, verse };
+}
+
+module.exports = { computeKpi, yearOf, yearOfDate, signedAmountForYear, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, signatureDate, splitAmount, displaySplit, OPERE_STATES, SIGNE_EXCLUDED_STATES, primeDefaultRates, normalizePrimeConfig, computePrimePool, computePrimePayments };
