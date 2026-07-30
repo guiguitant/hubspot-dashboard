@@ -8179,6 +8179,27 @@ async function computePipelinePondere() {
   return Math.round(total);
 }
 
+// Pool de primes commerciales (KPI) d'une annee. Charge d'exploitation (compte 622) ajoutee au
+// compte de resultat. Source unique partagee par /api/ebe et son miroir computeResultatFactuelForYear,
+// pour que les deux cascades restent alignees. Tolerant : 0 si config/splits indisponibles ou erreur DB
+// (une erreur reelle est loggee ; l'absence de ligne de config -> defauts, comme l'onglet KPI).
+async function computePrimesCommercialesForYear(year, missions, caFacture) {
+  try {
+    const [cfgRow, splitRows] = await Promise.all([
+      supabase.from('kpi_prime_config').select('config').eq('id', 'default').maybeSingle(),
+      supabase.from('kpi_ca_split').select('*'),
+    ]);
+    if (cfgRow && cfgRow.error) throw cfgRow.error;
+    if (splitRows && splitRows.error) throw splitRows.error;
+    const primeCfg = cfgRow && cfgRow.data ? cfgRow.data.config : null;
+    const splits = (splitRows && splitRows.data) ? splitRows.data : [];
+    return computePrimePool({ missions, splits, config: primeCfg, year, caFacture }).pool;
+  } catch (e) {
+    console.error('Erreur calcul primes commerciales (year ' + year + '):', e.message);
+    return 0;
+  }
+}
+
 // Cascade "factuelle" (CA facturé -> résultat -> IS -> crédit -> impôt net) d'une année.
 // Miroir de la branche factuelle de /api/ebe (mêmes formules, mêmes briques), extrait pour être
 // réutilisé par la trésorerie (remboursement du crédit d'impôt en N+1). Si /api/ebe évolue, garder aligné.
@@ -8211,9 +8232,11 @@ async function computeResultatFactuelForYear(year) {
   }
   caFacture = Math.round(caFacture);
   const totalCharges = Math.round(chargesData.totalCharges || 0);
+  const primesCommerciales = await computePrimesCommercialesForYear(year, missions, caFacture);
+  const totalChargesAvecPrimes = totalCharges + primesCommerciales;
   const totalSubv = financements.subventions.reduce((s, f) => s + f.montant, 0);
   const totalAide = financements.aides.reduce((s, f) => s + f.montant, 0);
-  const ebe = caFacture - totalCharges + totalSubv + totalAide;
+  const ebe = caFacture - totalChargesAvecPrimes + totalSubv + totalAide;
   const resExploit = Math.round(ebe) - amortissements;
   const isBrut = computeIS(resExploit);
   const creditTotal = creditImpot.total;
@@ -8258,21 +8281,8 @@ app.get('/api/ebe', async (req, res) => {
     const totalCharges = Math.round(chargesData.totalCharges || 0);
 
     // Primes commerciales (pool KPI) : charge d'exploitation (compte 622), ajoutee AVANT l'EBE.
-    // Meme source que l'onglet KPI : config sauvegardee + missions Notion + splits d'attribution.
-    let primesCommerciales = 0;
-    try {
-      const [cfgRow, splitRows] = await Promise.all([
-        supabase.from('kpi_prime_config').select('config').eq('id', 'default').maybeSingle(),
-        supabase.from('kpi_ca_split').select('*'),
-      ]);
-      const primeCfg = cfgRow && cfgRow.data ? cfgRow.data.config : null;
-      const splits = (splitRows && splitRows.data) ? splitRows.data : [];
-      const poolRes = computePrimePool({ missions, splits, config: primeCfg, year: yearParam, caFacture });
-      primesCommerciales = poolRes.pool;
-    } catch (e) {
-      console.error('Erreur calcul primes /api/ebe:', e.message);
-      primesCommerciales = 0; // ne jamais bloquer le compte de resultat
-    }
+    // Helper partage avec computeResultatFactuelForYear pour garder les deux cascades alignees.
+    const primesCommerciales = await computePrimesCommercialesForYear(yearParam, missions, caFacture);
     const totalChargesAvecPrimes = totalCharges + primesCommerciales;
 
     // 3) Financements (Subv + Aide) de l'année depuis GSheet Plan_TRE_Prév
