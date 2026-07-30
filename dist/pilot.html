@@ -3326,6 +3326,9 @@
     .alloc-propose-row{display:flex;align-items:center;gap:6px;font-size:13px;padding:3px 0;cursor:pointer;}
     .alloc-head-right{display:flex;align-items:center;gap:6px;}
     .alloc-saved-badge{font-size:11px;padding:2px 8px;border-radius:999px;background:#2e7d32;color:#fff;white-space:nowrap;}
+    .kpi-rg-tabs{display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid rgba(128,128,128,.25);flex-wrap:wrap;}
+    .kpi-rg-tab{padding:8px 12px;border:none;background:transparent;color:inherit;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent;opacity:.6;}
+    .kpi-rg-tab.active{opacity:1;border-bottom-color:#003d2e;}
 
   </style>
 </head>
@@ -4267,7 +4270,6 @@
         <div class="kpi-controls">
           <span class="kpi-year-wrap"><label for="kpiYear">Année</label><select id="kpiYear" onchange="initKpi()"></select></span>
           <button class="analytics-tab" onclick="toggleKpiReglages()" id="kpiReglagesBtn">Réglages</button>
-          <button class="analytics-tab" onclick="openAllocCalc()" id="allocCalcBtn">Calculateur d'allocation</button>
         </div>
       </div>
     </div>
@@ -4406,20 +4408,6 @@
         <div class="modal-body" id="kpiReglagesBody"></div>
         <div class="modal-footer">
           <button class="kpi-btn kpi-btn--primary" onclick="closeKpiReglages()">Fermer</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Calculateur d'allocation (v1 autonome, aucun impact KPI/primes) -->
-    <div class="modal-overlay" id="allocCalcModal" onclick="if(event.target===this) closeAllocCalc()">
-      <div class="modal kpi-modal">
-        <div class="modal-header" style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
-          <h2 style="margin:0;">Calculateur d'allocation</h2>
-          <button class="modal-close-x" onclick="closeAllocCalc()" aria-label="Fermer">&times;</button>
-        </div>
-        <div class="modal-body">
-          <p class="alloc-intro">Missions de l'année avec au moins 2 partners commerciaux. Coche qui a assuré chaque étape : la répartition suggérée se calcule automatiquement. Aucun enregistrement, c'est une aide à la décision.</p>
-          <div id="allocMissions" class="alloc-missions"></div>
         </div>
       </div>
     </div>
@@ -11022,6 +11010,7 @@
     }
     function closeKpiReglages() {
       document.getElementById('kpiReglagesModal').classList.remove('active');
+      if (typeof initKpi === 'function') initKpi();  // rafraichit les graphes avec les repartitions enregistrees
     }
 
     // --- Calculateur d'allocation (pilote par les missions, affichage seulement) ---
@@ -11082,13 +11071,6 @@
     }
     function allocGridType(m) {
       return (m.type === 'upsale' || m.type === 'newsale') ? m.type : 'newsale';
-    }
-    function openAllocCalc() {
-      document.getElementById('allocCalcModal').classList.add('active');
-      allocRenderMissions();
-    }
-    function closeAllocCalc() {
-      document.getElementById('allocCalcModal').classList.remove('active');
     }
     function allocRenderMissions() {
       const wrap = document.getElementById('allocMissions');
@@ -11170,7 +11152,6 @@
           allocSaved[i] = { splits: splits, client: m.client, id: m.id, commercial: m.commercial || [], type: m.type };
           allocMarkSaved(m.id);
           allocProposeClient(i);
-          if (typeof initKpi === 'function') initKpi();
         })
         .catch(function (e) { if (msg) { msg.textContent = ' Echec : ' + e.message; msg.style.color = '#c62828'; } });
     }
@@ -11214,7 +11195,7 @@
           body: JSON.stringify({ mission_id: id, axis: 'commercial', splits: s.splits }),
         }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); });
       }))
-        .then(function () { ids.forEach(allocMarkSaved); if (msg) { msg.textContent = ' Applique a ' + ids.length + ' deal(s).'; msg.style.color = '#2e7d32'; } if (typeof initKpi === 'function') initKpi(); })
+        .then(function () { ids.forEach(allocMarkSaved); if (msg) { msg.textContent = ' Applique a ' + ids.length + ' deal(s).'; msg.style.color = '#2e7d32'; } })
         .catch(function (e) { if (msg) { msg.textContent = ' Echec : ' + e.message; msg.style.color = '#c62828'; } });
     }
     // Ajoute un badge "Enregistre" sur le bloc mission (source ou deal auquel on a applique la repartition).
@@ -11230,13 +11211,29 @@
       right.appendChild(badge);
     }
 
+    let kpiReglagesTab = 'objectifs';  // sous-tab actif de la modale Reglages (preserve entre re-renders)
+    function switchKpiReglagesTab(tab) {
+      kpiReglagesTab = tab;
+      const body = document.getElementById('kpiReglagesBody');
+      if (!body) return;
+      body.querySelectorAll('.kpi-rg-tab').forEach(function (b) { b.classList.toggle('active', b.dataset.rgtab === tab); });
+      body.querySelectorAll('.kpi-rg-panel').forEach(function (p) { p.style.display = p.dataset.rgpanel === tab ? '' : 'none'; });
+    }
     function renderKpiReglages() {
       if (!kpiData) return;
       const body = document.getElementById('kpiReglagesBody');
       const year = document.getElementById('kpiYear').value;
 
-      // --- A. Objectifs : une ligne par partner, 3 champs ---
-      let html = '<div class="kpi-rg-h">Objectifs de CA signé ' + year + ' <span class="kpi-rg-badge">€ par associé · Newsale + Upsale = base avancement indiv</span></div>';
+      // Barre de sous-tabs
+      let html = '<div class="kpi-rg-tabs">' +
+        '<button type="button" class="kpi-rg-tab" data-rgtab="objectifs" onclick="switchKpiReglagesTab(\'objectifs\')">Objectifs CA signé</button>' +
+        '<button type="button" class="kpi-rg-tab" data-rgtab="alloc" onclick="switchKpiReglagesTab(\'alloc\')">Calculateur d\'allocation</button>' +
+        '<button type="button" class="kpi-rg-tab" data-rgtab="opere" onclick="switchKpiReglagesTab(\'opere\')">CA opéré</button>' +
+        '</div>';
+
+      // --- Sous-tab A. Objectifs : une ligne par partner, 3 champs ---
+      html += '<div class="kpi-rg-panel" data-rgpanel="objectifs">';
+      html += '<div class="kpi-rg-h">Objectifs de CA signé ' + year + ' <span class="kpi-rg-badge">€ par associé · Newsale + Upsale = base avancement indiv</span></div>';
       if (kpiData.partners.length === 0) {
         html += '<p style="color:var(--text-secondary);">Aucun partner détecté cette année.</p>';
       } else {
@@ -11251,11 +11248,16 @@
         });
         html += '</tbody></table>';
       }
+      html += '</div>';
 
-      // --- B. Répartition opérationnelle (opéré) : missions à 2+ partners opérationnels ---
-      // La répartition COMMERCIALE se règle désormais dans le « Calculateur d'allocation » (bouton dédié),
-      // qui fait foi. Ici, seul l'axe opérationnel (indicateur opéré) reste ajustable.
-      html += '<div class="kpi-rg-h" style="margin-top:1.5rem;">Répartition opérationnelle (opéré) <span class="kpi-rg-badge">missions à 2+ partners opé</span></div>';
+      // --- Sous-tab B. Calculateur d'allocation (repartition commerciale, fait foi) ---
+      html += '<div class="kpi-rg-panel" data-rgpanel="alloc">' +
+        '<p class="alloc-intro">Missions de l\'année avec au moins 2 partners commerciaux. Coche qui a assuré chaque étape : la répartition suggérée se calcule automatiquement, tu peux l\'ajuster, puis l\'enregistrer (elle fait foi pour les KPI et les primes).</p>' +
+        '<div id="allocMissions" class="alloc-missions"></div></div>';
+
+      // --- Sous-tab C. Repartition operationnelle (opere) : missions a 2+ partners operationnels ---
+      html += '<div class="kpi-rg-panel" data-rgpanel="opere">';
+      html += '<div class="kpi-rg-h">Répartition opérationnelle (opéré) <span class="kpi-rg-badge">missions à 2+ partners opé</span></div>';
       const splitOpe = kpiData.missionsForSplit.filter(m => (m.operationnel || []).length >= 2);
       if (splitOpe.length === 0) {
         html += '<p style="color:var(--text-secondary);">Aucune mission à 2+ partners opérationnels cette année.</p>';
@@ -11272,8 +11274,11 @@
           '<span id="' + inputId + '"></span></div>';
         html += '</div>';
       });
+      html += '</div>';
 
       body.innerHTML = html;
+      allocRenderMissions();                // remplit le sous-tab calculateur
+      switchKpiReglagesTab(kpiReglagesTab); // applique le sous-tab actif (barre + affichage)
     }
 
     // Détail = pop-up des missions composant une barre (partner/All + type).
