@@ -186,6 +186,7 @@ describe('computeKpi — missionsForSplit', () => {
     expect(r.missionsForSplit).toHaveLength(1);
     const m = r.missionsForSplit[0];
     expect(m.id).toBe('mY');
+    expect(m.type).toBe('newsale');
     expect(m.splitCommercial).toEqual({ Vincent: 50, Nathan: 50 });
     expect(m.splitOperationnel).toEqual({ Guillaume: 100 });
   });
@@ -193,6 +194,22 @@ describe('computeKpi — missionsForSplit', () => {
   it('mission à 1 seul partner par axe → pas listée', () => {
     const r = computeKpi({ missions: [mission()], objectives: [], splits: [], year: 2026 });
     expect(r.missionsForSplit).toEqual([]);
+  });
+
+  it('type = upsale pour une mission Upsale', () => {
+    const r = computeKpi({
+      missions: [mission({ id: 'mU', typeCa: 'Upsale', partnerCommercial: ['Vincent', 'Nathan'] })],
+      objectives: [], splits: [], year: 2026,
+    });
+    expect(r.missionsForSplit[0].type).toBe('upsale');
+  });
+
+  it('type = null pour une mission sans type_ca défini', () => {
+    const r = computeKpi({
+      missions: [mission({ id: 'mN', typeCa: 'Non défini', partnerCommercial: ['Vincent', 'Nathan'] })],
+      objectives: [], splits: [], year: 2026,
+    });
+    expect(r.missionsForSplit[0].type).toBeNull();
   });
 });
 

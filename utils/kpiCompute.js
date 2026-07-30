@@ -257,6 +257,8 @@ function computeKpi({ missions, objectives, splits, year }) {
       if (com.length >= 2 || ope.length >= 2) {
         missionsForSplit.push({
           id: m.id, nom: m.nom, ca,
+          // type de deal (grille d'allocation à appliquer côté front) : 'newsale' | 'upsale' | null.
+          type: m.typeCa === 'Newsale' ? 'newsale' : (m.typeCa === 'Upsale' ? 'upsale' : null),
           commercial: com, operationnel: ope,
           splitCommercial: displaySplit(com, (splitIndex[m.id] || {}).commercial),
           splitOperationnel: displaySplit(ope, (splitIndex[m.id] || {}).operationnel),
