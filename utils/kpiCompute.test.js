@@ -186,6 +186,7 @@ describe('computeKpi — missionsForSplit', () => {
     expect(r.missionsForSplit).toHaveLength(1);
     const m = r.missionsForSplit[0];
     expect(m.id).toBe('mY');
+    expect(m.client).toBe('Client');
     expect(m.type).toBe('newsale');
     expect(m.splitCommercial).toEqual({ Vincent: 50, Nathan: 50 });
     expect(m.splitOperationnel).toEqual({ Guillaume: 100 });

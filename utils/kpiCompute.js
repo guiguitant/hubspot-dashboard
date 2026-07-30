@@ -262,7 +262,7 @@ function computeKpi({ missions, objectives, splits, year }) {
       const ope = m.partnerOperationnel || [];
       if (com.length >= 2 || ope.length >= 2) {
         missionsForSplit.push({
-          id: m.id, nom: m.nom, ca,
+          id: m.id, nom: m.nom, client: m.client || null, ca,
           // type de deal (grille d'allocation à appliquer côté front) : 'newsale' | 'upsale' | null.
           type: m.typeCa === 'Newsale' ? 'newsale' : (m.typeCa === 'Upsale' ? 'upsale' : null),
           commercial: com, operationnel: ope,

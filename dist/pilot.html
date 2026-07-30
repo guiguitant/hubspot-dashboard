@@ -3321,6 +3321,9 @@
     .alloc-save-row{margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
     .alloc-save-btn{padding:8px 12px;background:#003d2e;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;}
     .alloc-save-msg{font-size:12px;}
+    .alloc-propose{margin-top:12px;padding-top:10px;border-top:1px dashed rgba(128,128,128,.35);}
+    .alloc-propose-head{font-size:13px;font-weight:600;margin-bottom:6px;}
+    .alloc-propose-row{display:flex;align-items:center;gap:6px;font-size:13px;padding:3px 0;cursor:pointer;}
 
   </style>
 </head>
@@ -11138,7 +11141,8 @@
           return '<div class="alloc-result-row"><span>' + allocEsc(p) + hint + '</span>' +
             '<span><input type="number" min="0" max="100" class="alloc-pct" data-mid="' + i + '" data-partner="' + allocEsc(p) + '" value="' + pct + '"> %</span></div>';
         }).join('') +
-        '<div class="alloc-save-row"><button type="button" class="alloc-save-btn" onclick="allocSave(' + i + ')">Enregistrer la repartition commerciale</button><span id="allocSaveMsg-' + i + '" class="alloc-save-msg"></span></div>';
+        '<div class="alloc-save-row"><button type="button" class="alloc-save-btn" onclick="allocSave(' + i + ')">Enregistrer la repartition commerciale</button><span id="allocSaveMsg-' + i + '" class="alloc-save-msg"></span></div>' +
+        '<div id="allocPropose-' + i + '"></div>';
     }
     // Enregistre la repartition commerciale de la mission (axe commercial) : elle fait foi pour KPI/primes.
     function allocSave(i) {
@@ -11160,8 +11164,54 @@
         .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
         .then(function () {
           if (msg) { msg.textContent = ' Enregistre.'; msg.style.color = '#2e7d32'; }
+          allocSaved[i] = { splits: splits, client: m.client, id: m.id, commercial: m.commercial || [] };
+          allocProposeClient(i);
           if (typeof initKpi === 'function') initKpi();
         })
+        .catch(function (e) { if (msg) { msg.textContent = ' Echec : ' + e.message; msg.style.color = '#c62828'; } });
+    }
+    // Deals du meme client (a 2+ partners commerciaux) autres que la mission source.
+    const allocSaved = {};
+    function allocPartnerKey(arr) {
+      return (arr || []).slice().sort().join('|');
+    }
+    function allocSameClientOthers(sourceId, client) {
+      if (!client) return [];
+      return allocMissions().filter(function (x) { return x.id !== sourceId && x.client === client; });
+    }
+    // Apres enregistrement : propose d'appliquer la meme repartition aux autres deals du client.
+    function allocProposeClient(i) {
+      const s = allocSaved[i];
+      const cont = document.getElementById('allocPropose-' + i);
+      if (!s || !cont) return;
+      const others = allocSameClientOthers(s.id, s.client);
+      if (!others.length) { cont.innerHTML = ''; return; }
+      const srcSet = allocPartnerKey(s.commercial);
+      cont.innerHTML = '<div class="alloc-propose">' +
+        '<div class="alloc-propose-head">Ce client (' + allocEsc(s.client) + ') a ' + others.length + ' autre(s) deal(s) a repartir. Appliquer la meme repartition ?</div>' +
+        others.map(function (o) {
+          const same = allocPartnerKey(o.commercial || []) === srcSet;
+          const parts = (o.commercial || []).join(', ');
+          return '<label class="alloc-propose-row"><input type="checkbox" data-oid="' + allocEsc(o.id) + '"' + (same ? ' checked' : '') + '> ' +
+            allocEsc(o.nom || 'Mission') + ' <span style="opacity:.6;font-size:12px;">[' + allocEsc(o.type || 'newsale') + ' · ' + allocEsc(parts) + ']' + (same ? '' : ' (partners differents)') + '</span></label>';
+        }).join('') +
+        '<div class="alloc-save-row"><button type="button" class="alloc-save-btn" onclick="allocApplyToOthers(' + i + ')">Appliquer aux selectionnes</button><span id="allocApplyMsg-' + i + '" class="alloc-save-msg"></span></div>' +
+        '</div>';
+    }
+    function allocApplyToOthers(i) {
+      const s = allocSaved[i];
+      if (!s) return;
+      const boxes = document.querySelectorAll('#allocPropose-' + i + ' input[type="checkbox"]:checked');
+      const ids = Array.prototype.slice.call(boxes).map(function (b) { return b.getAttribute('data-oid'); });
+      if (!ids.length) { alert('Selectionne au moins un deal.'); return; }
+      const msg = document.getElementById('allocApplyMsg-' + i);
+      Promise.all(ids.map(function (id) {
+        return fetch('/api/kpi/split', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mission_id: id, axis: 'commercial', splits: s.splits }),
+        }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); });
+      }))
+        .then(function () { if (msg) { msg.textContent = ' Applique a ' + ids.length + ' deal(s).'; msg.style.color = '#2e7d32'; } if (typeof initKpi === 'function') initKpi(); })
         .catch(function (e) { if (msg) { msg.textContent = ' Echec : ' + e.message; msg.style.color = '#c62828'; } });
     }
 
