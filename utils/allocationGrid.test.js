@@ -26,14 +26,14 @@ describe('computeAllocation', () => {
     expect(computeAllocation('newsale', a)).toEqual({ A: 80, B: 20 });
   });
 
-  it('upsale, A apporteur / C operationnel / B rdv+prez -> 30 / 35 / 35', () => {
+  it('upsale, A apporteur / C operationnel / B rdv+prez -> 35 / 35 / 30', () => {
     const a = { sourcing: ['A'], operationnel: ['C'], rdv_nego: ['B'], prez: ['B'] };
-    expect(computeAllocation('upsale', a)).toEqual({ A: 30, C: 35, B: 35 });
+    expect(computeAllocation('upsale', a)).toEqual({ A: 35, C: 35, B: 30 });
   });
 
   it('composante non assuree -> poids redistribue (normalisation)', () => {
     const a = { sourcing: ['A'], rdv_nego: ['B'], prez: ['B'] };
-    expect(computeAllocation('upsale', a)).toEqual({ A: 46, B: 54 });
+    expect(computeAllocation('upsale', a)).toEqual({ A: 54, B: 46 });
   });
 
   it('somme toujours exactement 100', () => {

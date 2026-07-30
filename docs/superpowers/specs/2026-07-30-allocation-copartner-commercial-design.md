@@ -48,28 +48,28 @@ distinctes**. La classification Newsale / Upsale reste celle de Notion (`type_ca
 
 | Composante | Poids |
 |---|---|
-| Sourcing du prospect | 30 % |
+| Sourcing du prospect | 40 % |
 | RDV + négociation | 30 % |
-| Rédaction prez / proposition | 20 % |
-| Relance + closing | 20 % |
+| Rédaction prez / proposition | 30 % |
 
-Lecture : sourcing 30 % / gestion 70 %.
+Lecture : sourcing 40 % (en tête) / gestion 60 %. La composante « relance + closing » a été
+retirée (rare sur un newsale) ; ses points sont reversés au sourcing et à l'exécution.
 
 ## 5. Grille Upsale (total 100 %)
 
 | Composante | Poids |
 |---|---|
-| Sourcing / apporteur d'origine (rente à taux plein) | 30 % |
+| Sourcing / apporteur d'origine (rente à taux plein) | 35 % |
 | Aspect opérationnel (rétention) | 35 % |
-| RDV + négociation | 20 % |
+| RDV + négociation | 15 % |
 | Rédaction prez / proposition | 15 % |
 
 Pas de composante « relance + closing » sur un upsale : le client est déjà en relation,
 le closing vient naturellement, en faire une composante créerait une ligne « gratuite »
 que tout le monde cocherait.
 
-Lecture : capital relationnel (qui l'a amené 30 % + qui l'a bien livré 35 %) = 65 % ;
-exécution de la revente (chaude, plus facile qu'un newsale) = 35 %.
+Lecture : capital relationnel (qui l'a amené 35 % + qui l'a bien livré 35 %) = 70 % ;
+exécution de la revente (chaude, plus facile qu'un newsale) = 30 %.
 
 ## 6. Règles d'affectation des composantes
 
@@ -115,10 +115,10 @@ explicitement pour ne pas classer au feeling à chaque fois.
   sinon parts égales.
 - **Plusieurs apporteurs / plusieurs opé d'origine** → la part de la composante concernée
   se répartit entre eux (au prorata de leur propre split d'origine, ou à parts égales).
-- **Apporteur = opé** (fréquent en petite structure) : il cumule sourcing 30 % + opé 35 %
-  = 65 % du repeat. Assumé : c'est récompenser le partner qui possède le compte de bout en
-  bout. À garder en tête si un 3ᵉ partner est sollicité pour la seule négo (il ne touche
-  que 35 %).
+- **Apporteur = opé** (fréquent en petite structure) : il cumule sourcing 35 % + opé 35 %
+  = 70 % du repeat. Assumé : c'est récompenser le partner qui possède le compte de bout en
+  bout. À garder en tête si un 3ᵉ partner est sollicité pour la seule exécution (il ne touche
+  que 30 %).
 
 ## 8. Découplage KPI vs prime
 
@@ -128,19 +128,19 @@ comme aujourd'hui. Simplicité privilégiée.
 
 ## 9. Exemples chiffrés
 
-**Newsale 20 000 €** — A source + relance ; B fait RDV/négo + prez.
-- A = 30 + 20 = 50 % → 10 000 €
-- B = 30 + 20 = 50 % → 10 000 €
+**Newsale 20 000 €** — A source ; B fait RDV/négo + prez.
+- A = 40 % → 8 000 €
+- B = 30 + 30 = 60 % → 12 000 €
 
 **Upsale 12 000 € (test → scale)** — client apporté par A, mission test livrée par C,
 grosse mission négociée et rédigée par B.
-- A (apporteur d'origine, sourcing 30 %) → 3 600 €
+- A (apporteur d'origine, sourcing 35 %) → 4 200 €
 - C (opé rétention 35 %) → 4 200 €
-- B (RDV/négo 20 % + prez 15 % = 35 %) → 4 200 €
+- B (RDV/négo 15 % + prez 15 % = 30 %) → 3 600 €
 
 **Upsale, apporteur = opé** — A a amené ET livré le client ; B négocie le repeat.
-- A (sourcing 30 % + opé 35 % = 65 %) → 65 %
-- B (négo 20 % + prez 15 % = 35 %) → 35 %
+- A (sourcing 35 % + opé 35 % = 70 %) → 70 %
+- B (négo 15 % + prez 15 % = 30 %) → 30 %
 
 ## 10. Ce qui change par rapport à aujourd'hui
 
