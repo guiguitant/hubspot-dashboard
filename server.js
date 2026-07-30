@@ -9,7 +9,7 @@ const { authenticator } = require('otplib');
 const { execFile } = require('child_process');
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
-const { computeKpi, totalCaAnnee, signedByQuarter, clawbackCandidates, computePrimePool } = require('./utils/kpiCompute');
+const { computeKpi, totalCaAnnee, signedByQuarter, clawbackCandidates, computePrimePool, computePrimePayments } = require('./utils/kpiCompute');
 const { computeBillingForYear } = require('./utils/billing');
 const { buildSalesNavUrl } = require('./utils/buildSalesNavUrl');
 const multer = require('multer');
@@ -5322,7 +5322,7 @@ function masseSalarialeMois(annee, mois, masseSalarialeData, masseOverrides = {}
 //   'previ'          → mois clos : charges CR_Prev HT + subv/aides Plan_TRE_Prév (vue 100% budget annuel,
 //                      aligne avec les lignes cumulées de CR_Prev). Le soldeDebutFirstMonth reste ancré Qonto,
 //                      mais le cumul intermédiaire projette le budget au lieu de la réalité bancaire.
-async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, masseSalarialeData, masseOverrides = {}, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals, crPrevData, caEstimatif, customerInvoices = [], caSource = 'factures', pastMode = 'real', includeGSheet = true, includePipeline = true, includeCaNotion = true, includeSalariesBaseline = true, revenusRecurrentsExtras = [], subventionsAnnoncees = [], gsheetOverrides = [], remboursementCreditByMonth = {} }) {
+async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, masseSalarialeData, masseOverrides = {}, revenus, chargesFixesExtras, pipelineFactor, fictionalDeals, crPrevData, caEstimatif, customerInvoices = [], caSource = 'factures', pastMode = 'real', includeGSheet = true, includePipeline = true, includeCaNotion = true, includeSalariesBaseline = true, revenusRecurrentsExtras = [], subventionsAnnoncees = [], gsheetOverrides = [], remboursementCreditByMonth = {}, primePaymentsByMonth = {} }) {
   // --- A encaisser : deux sources ---
   // 1) Factures ÉMISES depuis Pennylane (source de vérité pour late/upcoming, avec deadline et remaining_amount réels)
   // 2) Factures PRÉVISIONNELLES depuis Notion (missions dont la facture n'est pas encore émise)
@@ -6051,6 +6051,7 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
       ? masseSalarialeMois(mois.annee, mois.mois, masseSalarialeData, {}, includeSalariesBaseline)
       : masseSalarialeMois(mois.annee, mois.mois, masseSalarialeData, masseOverrides, includeSalariesBaseline);
     const chargesFixesExtra = isClos ? 0 : Math.round(chargesFixesParMois[mKey] || 0);
+    const primesCommercialesVersees = isClos ? 0 : Math.round(primePaymentsByMonth[mKey] || 0);
 
     // --- Décaissements ---
     // pastMode='real' (défaut) : mois clos → Qonto réel, mois non-clos → CR_Prev HT
@@ -6227,7 +6228,7 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
       // decaissementsTRE : base TTC + chargesFixesExtra (overrides) + masseDelta (overrides, HT).
       encaissementsTRE,
       encaissementsTRESource, // 'plan-tre' | 'qonto' | 'ca-estimatif'
-      decaissementsTRE: decaissementsTREBase + chargesFixesExtra + masseDelta + tvaReversementM1,
+      decaissementsTRE: decaissementsTREBase + chargesFixesExtra + masseDelta + tvaReversementM1 + primesCommercialesVersees,
       decaissementsTREBase,
       decaissementsTRESource, // 'plan-tre' | 'qonto'
       // Phase 2 UX : breakdown TTC par grands postes Plan TRE Prév (utilisé par modale Tréso au lieu du HT CR_Prév).
@@ -6253,6 +6254,7 @@ async function buildPrevisionnel({ qontoData, pipelineDeals, notionMissions, mas
       // Remboursement du crédit d'impôt CIR/CII (part non imputée sur l'IS d'un exercice N, restituée en N+1) :
       // encaissement pur, mois non clos uniquement. Alimenté par remboursementCreditByMonth (clé 'YYYY-MM').
       remboursementCreditImpot: isClos ? 0 : Math.round(remboursementCreditByMonth[mKey] || 0),
+      primesCommercialesVersees,
       // Détail lignes par catégorie (pour expansion accordéon dans modale)
       chargesPlanTreLines: (() => {
         const l = { ...(planTreDecLinesByMonth[mKey] || {}) };
@@ -6371,6 +6373,35 @@ app.get('/api/tresorerie', async (req, res) => {
       console.error('Erreur calcul remboursement credit CIR/CII:', e.message);
     }
 
+    // Versements de primes commerciales (echeancier KPI) : decaissements dates dans le previsionnel.
+    // Tolerant : un echec ne fait pas tomber la treso. On calcule pour l'annee courante ET l'annee
+    // precedente (etage 2 verse en N+1, etage 1 de T4 verse en janvier N+1) puis on fusionne par mois.
+    const primePaymentsByMonth = {};
+    try {
+      const [cfgRow, splitRows, factRows] = await Promise.all([
+        supabase.from('kpi_prime_config').select('config').eq('id', 'default').maybeSingle(),
+        supabase.from('kpi_ca_split').select('*'),
+        supabase.from('facture_overrides').select('*'),
+      ]);
+      if (cfgRow && cfgRow.error) throw cfgRow.error;
+      if (splitRows && splitRows.error) throw splitRows.error;
+      if (factRows && factRows.error) throw factRows.error;
+      const primeCfg = cfgRow && cfgRow.data ? cfgRow.data.config : null;
+      const splits = (splitRows && splitRows.data) ? splitRows.data : [];
+      const factOverrides = (factRows && factRows.data) ? factRows.data : [];
+      const nowIso = new Date().toISOString();
+      const currentYear = new Date().getFullYear();
+      for (const y of [currentYear - 1, currentYear]) {
+        const caFactureY = computeBillingForYear(notionMissions, factOverrides, y).total;
+        const pay = computePrimePayments({ missions: notionMissions, splits, config: primeCfg, year: y, caFacture: caFactureY, versements: [], now: nowIso });
+        for (const [mk, amt] of Object.entries(pay.byMonth)) {
+          primePaymentsByMonth[mk] = (primePaymentsByMonth[mk] || 0) + amt;
+        }
+      }
+    } catch (e) {
+      console.error('Erreur calcul versements primes:', e.message);
+    }
+
     const result = await buildPrevisionnel({
       qontoData, pipelineDeals, notionMissions,
       masseSalarialeData, masseOverrides: {}, revenus,
@@ -6379,6 +6410,7 @@ app.get('/api/tresorerie', async (req, res) => {
       customerInvoices,
       includePipeline,
       remboursementCreditByMonth,
+      primePaymentsByMonth,
     });
 
     // Trésorerie nette de dette (photo instant T) = solde Qonto tous comptes − Σ(engagements fermes).
