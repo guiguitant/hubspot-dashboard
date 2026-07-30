@@ -159,21 +159,27 @@ function clawbackCandidates(missions, year, splits, paidThroughQuarter) {
   return out;
 }
 
-// Répartit `ca` entre `partners` selon `overrides` ({partner: pct}) si non vide,
-// sinon à parts égales. Retourne { partner: montant }.
+// Répartit `ca` entre les partners selon `overrides` ({partner: pct}) si non vide, sinon à parts
+// égales. Retourne { partner: montant }.
+// Ensemble effectif = partners Notion de l'axe ∪ partners présents dans l'override. Ainsi un partner
+// ajouté via un split enregistré (ex. l'opérationnel qui touche sa part de rétention sur un upsale)
+// est bien crédité, même s'il n'est pas dans la liste Notion de l'axe. Sans override, seul le socle
+// Notion compte (parts égales).
 function splitAmount(ca, partners, overrides) {
   const out = {};
-  if (!partners || partners.length === 0) return out;
+  const base = Array.isArray(partners) ? partners : [];
   const hasOverride = overrides && Object.keys(overrides).length > 0;
+  const all = hasOverride ? Array.from(new Set([...base, ...Object.keys(overrides)])) : base;
+  if (all.length === 0) return out;
   if (hasOverride) {
-    const totalPct = partners.reduce((s, p) => s + (Number(overrides[p]) || 0), 0);
-    for (const p of partners) {
+    const totalPct = all.reduce((s, p) => s + (Number(overrides[p]) || 0), 0);
+    for (const p of all) {
       const pct = Number(overrides[p]) || 0;
-      out[p] = totalPct > 0 ? ca * (pct / totalPct) : ca / partners.length;
+      out[p] = totalPct > 0 ? ca * (pct / totalPct) : ca / all.length;
     }
   } else {
-    const share = ca / partners.length;
-    for (const p of partners) out[p] = share;
+    const share = ca / all.length;
+    for (const p of all) out[p] = share;
   }
   return out;
 }

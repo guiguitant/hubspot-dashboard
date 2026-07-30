@@ -213,6 +213,43 @@ describe('computeKpi — missionsForSplit', () => {
   });
 });
 
+describe('splitAmount — crédite aussi les partners ajoutés via un override (moteur v2)', () => {
+  it('computeKpi : un partner hors partnerCommercial mais présent dans le split est crédité', () => {
+    const missions = [mission({ id: 'mX', typeCa: 'Upsale', ca: 10000, partnerCommercial: ['Vincent', 'Nathan'], partnerOperationnel: ['Guillaume'] })];
+    const splits = [
+      { mission_id: 'mX', axis: 'commercial', partner: 'Vincent', pct: 40 },
+      { mission_id: 'mX', axis: 'commercial', partner: 'Nathan', pct: 25 },
+      { mission_id: 'mX', axis: 'commercial', partner: 'Guillaume', pct: 35 },
+    ];
+    const r = computeKpi({ missions, objectives: [], splits, year: 2026 });
+    const byName = Object.fromEntries(r.partners.map((p) => [p.partner, p]));
+    expect(byName.Vincent.upsale.realise).toBe(4000);
+    expect(byName.Nathan.upsale.realise).toBe(2500);
+    expect(byName.Guillaume.upsale.realise).toBe(3500); // opérationnel crédité via le split commercial
+  });
+
+  it('signedByQuarter : le partner ajouté touche sa part de prime', () => {
+    const missions = [mission({ id: 'mX', typeCa: 'Upsale', ca: 10000, dateSignature: '2026-02-10', partnerCommercial: ['Vincent', 'Nathan'], partnerOperationnel: ['Guillaume'] })];
+    const splits = [
+      { mission_id: 'mX', axis: 'commercial', partner: 'Vincent', pct: 40 },
+      { mission_id: 'mX', axis: 'commercial', partner: 'Nathan', pct: 25 },
+      { mission_id: 'mX', axis: 'commercial', partner: 'Guillaume', pct: 35 },
+    ];
+    const r = signedByQuarter(missions, 2026, splits);
+    expect(r.byPartner.Guillaume.repeat[0]).toBe(3500); // Q1, upsale = repeat
+  });
+
+  it('sans override, comportement inchangé (parts égales sur le socle Notion)', () => {
+    const r = computeKpi({
+      missions: [mission({ id: 'mE', typeCa: 'Newsale', ca: 10000, partnerCommercial: ['Vincent', 'Nathan'] })],
+      objectives: [], splits: [], year: 2026,
+    });
+    const byName = Object.fromEntries(r.partners.map((p) => [p.partner, p]));
+    expect(byName.Vincent.newsale.realise).toBe(5000);
+    expect(byName.Nathan.newsale.realise).toBe(5000);
+  });
+});
+
 describe('CA de l\'année (caAnnee) : total « CA 2026 HT » partagé', () => {
   it('caAnnee = CA rattaché à l\'année, toutes missions non « Annulé »', () => {
     const r = computeKpi({ missions: [mission()], objectives: [], splits: [], year: 2026 });
