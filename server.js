@@ -4417,7 +4417,12 @@ async function buildTresorerieFromQonto(horizonMonths = 12, { includePreviousMon
 
     if (tx.side === 'debit') {
       chargesParMois[mKey] = (chargesParMois[mKey] || 0) + tx.amount;
-      const cat = tx.category || 'Non catégorisé';
+      // Catégorie Qonto : on privilégie la sous-catégorie cashflow (ex. "Salaires", "Sous-traitance & prestations",
+      // celle affichée dans la colonne "Catégorie" de la liste des transactions Qonto), puis la catégorie
+      // parente (cashflow_category), puis le slug brut. tx.category seul est trop grossier (tout en other_expense).
+      const cat = (tx.cashflow_subcategory && tx.cashflow_subcategory.name)
+        || (tx.cashflow_category && tx.cashflow_category.name)
+        || tx.category || 'Non catégorisé';
       if (!chargesParCategorie[cat]) chargesParCategorie[cat] = 0;
       chargesParCategorie[cat] += tx.amount;
       // Detail par mois/categorie

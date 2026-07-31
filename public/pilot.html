@@ -15147,7 +15147,7 @@
       salary: 'Salaires', logistics: 'Logistique', legal_and_accounting: 'Juridique / comptable',
     };
     function chargesQontoCatLabel(cat) {
-      if (!cat || cat === 'null' || cat === 'uncategorized' || /sans.?cat/i.test(cat)) return 'Non catégorisée';
+      if (!cat || cat === 'null' || cat === 'uncategorized' || /(non|sans)[ -]?cat/i.test(cat)) return 'Non catégorisée';
       return QONTO_CAT_LABELS[cat] || cat;
     }
 
