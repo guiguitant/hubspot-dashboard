@@ -884,5 +884,6 @@ git commit -m "fix(pilot) EBE : primes comptees une seule fois via .Primes -> CR
 
 - **Ordre impératif** : Task 6 (écriture réelle de `.Primes`) et vérification de la formule CR_Prev **avant** Task 9 (retrait du fold), sinon fenêtre de sous-compte ou de double compte.
 - **Impact trésorerie** (Task 1) : la règle de date modifie aussi les dates de décaissement des primes dans le plan de trésorerie (moteur partagé). Après Task 1, vérifier le plan de trésorerie sur un cas de deal facturé en retard.
+- **Primes décaissées dans le réel Qonto** (soulevé par Nathan, parking lot) : pour les mois clos, `computeChargesHybride` prend le réel Qonto, qui contient les primes déjà décaissées, tandis que les mois futurs prennent CR_Prev (`.Primes`). À la Task 9, analyser si ces primes décaissées gonflent indûment les charges réelles (double compte, ou incohérence cash vs charge du CR) et, le cas échéant, les neutraliser dans les charges réelles pour rester aligné avec le traitement `.Primes` des mois futurs.
 - **Backfill initial** (hors plan, décision de démarrage) : si les mois déjà écoulés de l'année doivent être remplis, le faire en one-shot (ex. abaisser temporairement `nowKey`) après validation ; le régime courant fige le passé.
 - **Secrets** : ne jamais committer `.env`. Les creds Google y sont déjà.
