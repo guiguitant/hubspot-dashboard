@@ -8290,7 +8290,20 @@ async function computePrimesByPartnerMonth(years, nowIso) {
       for (const [mk, amt] of Object.entries(months)) dst[mk] = (dst[mk] || 0) + amt;
     }
   }
-  return { byPartnerMonth, participants };
+
+  // Rapprochement (annee courante) avec l'onglet KPI : gagne = debloque (acompte facture) + en attente.
+  // Appel dedie sans 'drop' pour compter TOUS les versements de l'annee (y compris passes), afin que
+  // gagne corresponde a ce que Pilot affiche (prime perso + part collective, aux arrondis pres).
+  const yr = years[years.length - 1];
+  const caR = computeBillingForYear(missions, factOverrides, yr).total;
+  const payR = computePrimePayments({ missions, splits, config, year: yr, caFacture: caR, versements: [], now: nowIso, participants });
+  const reconciliation = {};
+  for (const p of participants) {
+    const debloque = Math.round(Object.values(payR.byPartnerMonth[p] || {}).reduce((s, v) => s + v, 0));
+    const attente = Math.round((payR.enAttenteByPartner || {})[p] || 0);
+    reconciliation[p] = { debloque, enAttente: attente, gagne: debloque + attente };
+  }
+  return { byPartnerMonth, participants, reconciliation };
 }
 
 // Etat de synchro (horodatage) persiste en base. Tolerant : un echec ne fait pas tomber la synchro.
@@ -8308,7 +8321,7 @@ async function syncPrimesToSheet() {
   const currentYear = new Date().getFullYear();
   const years = [currentYear - 1, currentYear];
   try {
-    const { byPartnerMonth, participants } = await computePrimesByPartnerMonth(years, nowIso);
+    const { byPartnerMonth, participants, reconciliation } = await computePrimesByPartnerMonth(years, nowIso);
     const grid = await gsheets.readGrid(GOOGLE_SHEET_ID, MASSE_TAB, 'A1:BZ300');
     const layout = primesMap.discoverLayout(grid, { labelCol: 2, partnerNames: participants });
     primesMap.assertPartners(layout, participants);
@@ -8319,7 +8332,7 @@ async function syncPrimesToSheet() {
     const summary = { updated, cells: updates.length, participants, dry };
     await writePrimesSyncState({ last_run_at: nowIso, ok: true, summary });
     console.log(`[primes-sync] ok : ${updates.length} cellules, ${updated} ecrites${dry ? ' (dry-run)' : ''}`);
-    return { ok: true, ...summary, byPartnerMonth };
+    return { ok: true, ...summary, byPartnerMonth, reconciliation };
   } catch (e) {
     console.error('[primes-sync] echec :', e.message);
     await writePrimesSyncState({ last_run_at: nowIso, ok: false, summary: { error: e.message } });

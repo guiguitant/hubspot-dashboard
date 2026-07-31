@@ -416,6 +416,7 @@ function computePrimePayments({ missions, splits, config, year, caFacture, verse
   const byPartnerMonth = {};
   const detail = {};
   let enAttente = 0, verse = 0;
+  const enAttenteByPartner = {};
   const add = (mk, amount, info) => {
     byMonth[mk] = (byMonth[mk] || 0) + amount;
     (detail[mk] = detail[mk] || []).push(info);
@@ -437,7 +438,7 @@ function computePrimePayments({ missions, splits, config, year, caFacture, verse
         if (montant <= 0) continue;
         if (verseKeys.has('E1|' + deal.id + '|' + p)) { verse += montant; continue; }
         const acompte = acompteByMission[deal.id];
-        if (!acompte) { enAttente += montant; continue; }
+        if (!acompte) { enAttente += montant; enAttenteByPartner[p] = (enAttenteByPartner[p] || 0) + montant; continue; }
         // Regle unifiee : versement a M+1 de la cloture du trimestre OU l'acompte est facture.
         // Le trimestre de signature (q) ne sert qu'au portillon (gateOk) et au montant.
         const qFact = quarterOfDate(acompte);
@@ -477,7 +478,7 @@ function computePrimePayments({ missions, splits, config, year, caFacture, verse
     }
   }
 
-  return { byMonth, byPartnerMonth, detail, enAttente, verse };
+  return { byMonth, byPartnerMonth, detail, enAttente, enAttenteByPartner, verse };
 }
 
 module.exports = { computeKpi, yearOf, yearOfDate, signedAmountForYear, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, signatureDate, splitAmount, displaySplit, OPERE_STATES, SIGNE_EXCLUDED_STATES, primeDefaultRates, normalizePrimeConfig, computePrimePool, computePrimePayments };

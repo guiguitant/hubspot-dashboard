@@ -586,4 +586,10 @@ describe('computePrimePayments : echeancier des versements de primes', () => {
     expect(r.byPartnerMonth.Nathan['2027-03']).toBe(3500);
     expect(r.byMonth['2027-03']).toBe(10500);
   });
+
+  it('enAttenteByPartner : ventile les primes en attente (acompte non facture) par associe', () => {
+    const r = computePrimePayments({ missions: [dealT1({ dateFactureAcompte: null })], splits: [], config: cfg, year: 2026, caFacture: 0, versements: [], now: '2026-02-10' });
+    expect(r.enAttente).toBe(9000);
+    expect(r.enAttenteByPartner.Vincent).toBe(9000);
+  });
 });
