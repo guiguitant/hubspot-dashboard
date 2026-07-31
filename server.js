@@ -19,6 +19,7 @@ const { lineExpectedTTC, computeEcart } = require('./utils/facturationCoherence'
 const { computeDepenses } = require('./utils/depensesCompute');
 const gsheets = require('./utils/googleSheets');
 const primesMap = require('./utils/primesSheetMap');
+const cron = require('node-cron');
 const MASSE_TAB = 'Masse_salariale';
 // Premiere echeance de decaissement des primes (fixe). Les primes dont l'echeance theorique est
 // anterieure y sont regroupees ; les autres restent a leur echeance. Fixe => pas de glissement.
@@ -11938,5 +11939,15 @@ app.listen(PORT, async () => {
     console.log(`[startup] sales_nav_url regeneration done: ${updated} updated out of ${(campaigns || []).length}`);
   } catch (err) {
     console.error('[startup] Failed to regenerate sales_nav_url:', err.message);
+  }
+
+  // Synchro quotidienne des primes vers le GSheet (1x/nuit a 03:00). Idempotent (reecrit present + futur).
+  try {
+    cron.schedule('0 3 * * *', () => {
+      syncPrimesToSheet().catch(e => console.error('[primes-sync cron] echec :', e.message));
+    });
+    console.log('[startup] cron primes -> GSheet planifie (0 3 * * *)');
+  } catch (e) {
+    console.error('[startup] cron primes non planifie :', e.message);
   }
 });
