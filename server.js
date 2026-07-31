@@ -17,6 +17,9 @@ const { parse: parseCsv } = require('csv-parse/sync');
 const { cleanEmeliaRows } = require('./utils/emeliaCleaner');
 const { lineExpectedTTC, computeEcart } = require('./utils/facturationCoherence');
 const { computeDepenses } = require('./utils/depensesCompute');
+const gsheets = require('./utils/googleSheets');
+const primesMap = require('./utils/primesSheetMap');
+const MASSE_TAB = 'Masse_salariale';
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
@@ -8247,6 +8250,96 @@ async function computePrimesCommercialesForYear(year, missions) {
     return 0;
   }
 }
+
+// --- Write-back des primes vers le GSheet (onglet Masse_salariale, categorie .Primes) ---
+
+// Liste des participants au collectif = meme regle que le front (primeCommercialPartners) :
+// partners KPI ayant un signal newsale/upsale (realise ou objectif), sinon tous les partners.
+function primeParticipantsForYear(kpi) {
+  const parts = (kpi.partners || []).filter(p =>
+    (p.newsale && (p.newsale.realise || p.newsale.objectif)) ||
+    (p.upsale && (p.upsale.realise || p.upsale.objectif)));
+  return (parts.length ? parts : (kpi.partners || [])).map(p => p.partner);
+}
+
+// Primes par associe et par mois, fusionnees sur `years`. versements:[] = charge totale (independante
+// des validations Phase 3) ; pastPolicy:'drop' = figement du passe (aucun mois passe produit).
+async function computePrimesByPartnerMonth(years, nowIso) {
+  const [cfgRow, splitRows, factRows, objRows] = await Promise.all([
+    supabase.from('kpi_prime_config').select('config').eq('id', 'default').maybeSingle(),
+    supabase.from('kpi_ca_split').select('*'),
+    supabase.from('facture_overrides').select('*'),
+    supabase.from('kpi_objectives').select('*'),
+  ]);
+  const config = cfgRow && cfgRow.data ? cfgRow.data.config : null;
+  const splits = (splitRows && splitRows.data) || [];
+  const factOverrides = (factRows && factRows.data) || [];
+  const objectives = (objRows && objRows.data) || [];
+  const missions = await fetchAllNotionMissions();
+
+  // Participants : calcules sur l'annee courante (derniere de la liste).
+  const kpiRef = computeKpi({ missions, objectives, splits, year: years[years.length - 1] });
+  const participants = primeParticipantsForYear(kpiRef);
+
+  const byPartnerMonth = {};
+  for (const y of years) {
+    const caFacture = computeBillingForYear(missions, factOverrides, y).total;
+    const pay = computePrimePayments({ missions, splits, config, year: y, caFacture, versements: [], now: nowIso, pastPolicy: 'drop', participants });
+    for (const [partner, months] of Object.entries(pay.byPartnerMonth || {})) {
+      const dst = byPartnerMonth[partner] = byPartnerMonth[partner] || {};
+      for (const [mk, amt] of Object.entries(months)) dst[mk] = (dst[mk] || 0) + amt;
+    }
+  }
+  return { byPartnerMonth, participants };
+}
+
+// Etat de synchro (horodatage) persiste en base. Tolerant : un echec ne fait pas tomber la synchro.
+async function writePrimesSyncState(state) {
+  try {
+    await supabase.from('primes_sheet_sync').upsert({ id: 'default', updated_at: new Date().toISOString(), ...state });
+  } catch (e) { console.error('[primes-sync] etat non persiste:', e.message); }
+}
+
+// Un run complet : calcule -> lit le sheet -> decouvre -> ecrit -> persiste. Tolerant (jamais throw).
+// PRIMES_SYNC_DRYRUN=1 : lit et decouvre mais n'ecrit pas (validation avant premiere ecriture reelle).
+async function syncPrimesToSheet() {
+  const nowIso = new Date().toISOString();
+  const nowKey = nowIso.slice(0, 7);
+  const currentYear = new Date().getFullYear();
+  const years = [currentYear - 1, currentYear];
+  try {
+    const { byPartnerMonth, participants } = await computePrimesByPartnerMonth(years, nowIso);
+    const grid = await gsheets.readGrid(GOOGLE_SHEET_ID, MASSE_TAB, 'A1:BZ300');
+    const layout = primesMap.discoverLayout(grid, { labelCol: 2, partnerNames: participants });
+    primesMap.assertPartners(layout, participants);
+    const { updates } = primesMap.buildUpdates(layout, byPartnerMonth, MASSE_TAB, nowKey);
+    const dry = process.env.PRIMES_SYNC_DRYRUN === '1';
+    let updated = 0;
+    if (!dry) ({ updated } = await gsheets.batchWrite(GOOGLE_SHEET_ID, updates));
+    const summary = { updated, cells: updates.length, participants, dry };
+    await writePrimesSyncState({ last_run_at: nowIso, ok: true, summary });
+    console.log(`[primes-sync] ok : ${updates.length} cellules, ${updated} ecrites${dry ? ' (dry-run)' : ''}`);
+    return { ok: true, ...summary, byPartnerMonth };
+  } catch (e) {
+    console.error('[primes-sync] echec :', e.message);
+    await writePrimesSyncState({ last_run_at: nowIso, ok: false, summary: { error: e.message } });
+    return { ok: false, error: e.message };
+  }
+}
+
+// Declenche une synchronisation des primes vers le GSheet (protege par dashboardGate global).
+app.post('/api/primes/sync-gsheet', async (_req, res) => {
+  const r = await syncPrimesToSheet();
+  res.status(r.ok ? 200 : 500).json(r);
+});
+
+// Etat de la derniere synchro (pour l'affichage "derniere synchro" dans Pilot).
+app.get('/api/primes/sync-status', async (_req, res) => {
+  try {
+    const { data } = await supabase.from('primes_sheet_sync').select('*').eq('id', 'default').maybeSingle();
+    res.json(data || {});
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // Cascade "factuelle" (CA facturé -> résultat -> IS -> crédit -> impôt net) d'une année.
 // Miroir de la branche factuelle de /api/ebe (mêmes formules, mêmes briques), extrait pour être

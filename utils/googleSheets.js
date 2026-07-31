@@ -15,9 +15,9 @@ function sheetsClient() {
 }
 
 // Lit une plage 'A1:BZ300' d'un onglet. Retourne un tableau 2D (lignes), valeurs affichees.
-async function readGrid(tabName, range) {
+async function readGrid(spreadsheetId, tabName, range) {
   const res = await sheetsClient().spreadsheets.values.get({
-    spreadsheetId: process.env.GOOGLE_SHEET_ID,
+    spreadsheetId,
     range: `${tabName}!${range}`,
     valueRenderOption: 'FORMATTED_VALUE',
     majorDimension: 'ROWS',
@@ -26,10 +26,10 @@ async function readGrid(tabName, range) {
 }
 
 // Ecrit une liste de cellules en un seul appel. updates = [{ range:'Onglet!J7', value:3500 }].
-async function batchWrite(updates) {
+async function batchWrite(spreadsheetId, updates) {
   if (!updates || !updates.length) return { updated: 0 };
   const res = await sheetsClient().spreadsheets.values.batchUpdate({
-    spreadsheetId: process.env.GOOGLE_SHEET_ID,
+    spreadsheetId,
     requestBody: {
       valueInputOption: 'RAW',
       data: updates.map(u => ({ range: u.range, values: [[u.value]] })),
