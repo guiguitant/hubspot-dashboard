@@ -1,0 +1,83 @@
+'use strict';
+
+// Index colonne 0-based -> lettre A1 (0->A, 25->Z, 26->AA).
+function colToLetter(idx) {
+  let n = idx, s = '';
+  do { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; } while (n >= 0);
+  return s;
+}
+
+// Libelle d'en-tete -> cle 'YYYY-MM' (gere 'MM/YYYY', 'M/YYYY', 'YYYY-MM...'), sinon null.
+function parseMonthHeader(v) {
+  if (v == null) return null;
+  const s = String(v).trim();
+  let m = s.match(/^(\d{1,2})\/(\d{4})$/);
+  if (m) return m[2] + '-' + m[1].padStart(2, '0');
+  m = s.match(/^(\d{4})-(\d{2})/);
+  if (m) return m[1] + '-' + m[2];
+  return null;
+}
+
+// Decouvre la structure de la grille (tableau 2D de lignes du sheet).
+// labelCol = index 0-based de la colonne des libelles (defaut 2 = colonne C).
+// partnerNames (optionnel) = ne retenir comme sous-lignes que ces noms.
+function discoverLayout(grid, opts = {}) {
+  const labelCol = opts.labelCol != null ? opts.labelCol : 2;
+  const partnerNames = opts.partnerNames || null;
+
+  // 1) Ligne d'en-tete = celle qui contient le plus de cellules 'mois'.
+  let headerRow = -1, monthCols = {}, best = 0;
+  for (let r = 0; r < grid.length; r++) {
+    const row = grid[r] || [];
+    const found = {};
+    for (let c = 0; c < row.length; c++) {
+      const mk = parseMonthHeader(row[c]);
+      if (mk && found[mk] == null) found[mk] = c;
+    }
+    if (Object.keys(found).length > best) { best = Object.keys(found).length; headerRow = r; monthCols = found; }
+  }
+  if (headerRow < 0 || best === 0) throw new Error('Ligne d\'en-tete des mois introuvable');
+
+  // 2) Categorie .Primes dans la colonne des libelles.
+  let primesRow = -1;
+  for (let r = 0; r < grid.length; r++) {
+    const label = String((grid[r] || [])[labelCol] || '').trim();
+    if (/^\.\s*primes\b/i.test(label)) { primesRow = r; break; }
+  }
+  if (primesRow < 0) throw new Error('Categorie .Primes introuvable');
+
+  // 3) Sous-lignes = lignes suivantes sans prefixe de categorie ('.'/'cm.') jusqu'a la prochaine.
+  const partnerRows = {};
+  for (let r = primesRow + 1; r < grid.length; r++) {
+    const label = String((grid[r] || [])[labelCol] || '').trim();
+    if (!label) continue;
+    if (/^(\.|cm\.)/i.test(label)) break;
+    if (partnerNames && !partnerNames.includes(label)) continue;
+    if (partnerRows[label] == null) partnerRows[label] = r;
+  }
+  return { headerRow, primesRow, monthCols, partnerRows };
+}
+
+// Throw si un participant attendu n'a pas de ligne (garde-fou : ne rien ecrire au mauvais endroit).
+function assertPartners(layout, expected) {
+  const missing = (expected || []).filter(p => layout.partnerRows[p] == null);
+  if (missing.length) throw new Error('Associe(s) introuvable(s) dans .Primes : ' + missing.join(', '));
+}
+
+// Construit les ecritures. Pour chaque associe (ligne connue) et chaque mois present dans la grille
+// avec mk >= nowKey (figement du passe), ecrit la valeur de byPartnerMonth ou 0 (remise a zero des
+// primes obsoletes). Retourne { updates: [{ range, value }] }.
+function buildUpdates(layout, byPartnerMonth, tabName, nowKey) {
+  const updates = [];
+  for (const [partner, rowIdx] of Object.entries(layout.partnerRows)) {
+    for (const [mk, colIdx] of Object.entries(layout.monthCols)) {
+      if (mk < nowKey) continue; // figement : on ne touche pas le passe
+      const src = byPartnerMonth[partner] || {};
+      const value = Math.round(src[mk] || 0);
+      updates.push({ range: tabName + '!' + colToLetter(colIdx) + (rowIdx + 1), value });
+    }
+  }
+  return { updates };
+}
+
+module.exports = { colToLetter, parseMonthHeader, discoverLayout, assertPartners, buildUpdates };
