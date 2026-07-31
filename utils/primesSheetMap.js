@@ -80,4 +80,20 @@ function buildUpdates(layout, byPartnerMonth, tabName, nowKey) {
   return { updates };
 }
 
-module.exports = { colToLetter, parseMonthHeader, discoverLayout, assertPartners, buildUpdates };
+// Arrondit un dict { cle: float } en entiers, en preservant le total = round(somme).
+// Methode du plus grand reste (largest remainder) : evite l'ecart d'arrondi cellule par cellule,
+// pour que le total par associe colle a l'euro a ce que Pilot affiche.
+function roundPreservingSum(values) {
+  const entries = Object.entries(values || {});
+  if (!entries.length) return {};
+  const target = Math.round(entries.reduce((s, [, v]) => s + (v || 0), 0));
+  const parts = entries.map(([k, v]) => { const f = Math.floor(v || 0); return { k, base: f, frac: (v || 0) - f }; });
+  let rest = target - parts.reduce((s, p) => s + p.base, 0);
+  parts.sort((a, b) => b.frac - a.frac);
+  for (let i = 0; i < parts.length && rest > 0; i++, rest--) parts[i].base += 1;
+  const out = {};
+  for (const p of parts) out[p.k] = p.base;
+  return out;
+}
+
+module.exports = { colToLetter, parseMonthHeader, discoverLayout, assertPartners, buildUpdates, roundPreservingSum };

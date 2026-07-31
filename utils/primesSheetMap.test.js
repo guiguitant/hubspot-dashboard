@@ -1,5 +1,5 @@
 'use strict';
-const { colToLetter, parseMonthHeader, discoverLayout, assertPartners, buildUpdates } = require('./primesSheetMap');
+const { colToLetter, parseMonthHeader, discoverLayout, assertPartners, buildUpdates, roundPreservingSum } = require('./primesSheetMap');
 
 // Grille type : 2 lignes vides en tete (gerees), en-tete mois en ligne 3 (index 2),
 // colonne C (index 2) = libelles, colonnes mois espacees de 2.
@@ -48,6 +48,12 @@ describe('primesSheetMap', () => {
   it('discoverLayout throw si .Primes absente', () => {
     const g = grid().filter(row => String(row[2]) !== '.Primes');
     expect(() => discoverLayout(g)).toThrow(/Primes/);
+  });
+
+  it('roundPreservingSum : arrondit les cellules en preservant le total', () => {
+    const r = roundPreservingSum({ a: 3194.4, b: 1656.3, c: 281.3 });
+    expect(Object.values(r).reduce((s, v) => s + v, 0)).toBe(5132); // total round(5132.0)
+    expect(r.a).toBe(3195); // le plus grand reste (.4) recoit l'unite
   });
 
   it('buildUpdates : mois passes figes, mois >= nowKey ecrits (valeur ou 0)', () => {

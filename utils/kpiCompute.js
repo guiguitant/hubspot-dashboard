@@ -427,14 +427,22 @@ function computePrimePayments({ missions, splits, config, year, caFacture, verse
     (byPartnerMonth[partner] = byPartnerMonth[partner] || {})[mk] = (byPartnerMonth[partner][mk] || 0) + amount;
   };
 
-  // --- Etage 1 : deal par deal, par partner ---
+  // --- Etage 1 : prime trimestrielle calculee comme l'onglet KPI (sur le CA agrege bp),
+  // repartie sur les deals au prorata de leur montant (pour garder l'echeance + le garde-fou
+  // par deal). On n'arrondit PAS ici : l'arrondi final, en preservant le total par associe,
+  // se fait a l'ecriture. Ainsi le Sheet colle a l'euro pres a ce que Pilot affiche.
   for (const p of Object.keys(sq.detailByPartner || {})) {
     const rate = cfg.rates[p] || primeDefaultRates(p);
+    const bp = (sq.byPartner && sq.byPartner[p]) || { new: [0, 0, 0, 0], repeat: [0, 0, 0, 0] };
     for (let q = 0; q < 4; q++) {
       if (!gateOk[q]) continue;
-      for (const deal of (sq.detailByPartner[p][q] || [])) {
-        const taux = deal.type === 'new' ? rate.txNew : rate.txRepeat;
-        const montant = Math.round(deal.montant * (taux / 100));
+      const deals = sq.detailByPartner[p][q] || [];
+      if (!deals.length) continue;
+      const primeTrim = (bp.new[q] * rate.txNew + bp.repeat[q] * rate.txRepeat) / 100;
+      if (primeTrim <= 0) continue;
+      const totalPart = deals.reduce((s, d) => s + (d.montant || 0), 0) || 1;
+      for (const deal of deals) {
+        const montant = primeTrim * ((deal.montant || 0) / totalPart); // part du deal (float)
         if (montant <= 0) continue;
         if (verseKeys.has('E1|' + deal.id + '|' + p)) { verse += montant; continue; }
         const acompte = acompteByMission[deal.id];
@@ -460,7 +468,7 @@ function computePrimePayments({ missions, splits, config, year, caFacture, verse
   const tiersAsc = cfg.tiers.slice().sort((a, b) => a.seuil - b.seuil);
   let tauxColl = 0;
   for (const t of tiersAsc) { if (caF >= t.seuil) tauxColl = t.taux; }
-  const collTotal = Math.round((tauxColl / 100) * cfg.resultatAnnuel);
+  const collTotal = tauxColl * cfg.resultatAnnuel / 100; // float (ordre stable), arrondi a l'ecriture
   // Etage 2 verse en une ligne (total collectif). L'exclusion par partner valide arrive en Phase 3.
   if (collTotal > 0) {
     const moisE2 = String(versementEtage2Mois || cfg.versementEtage2Mois || '03').padStart(2, '0');
@@ -472,7 +480,7 @@ function computePrimePayments({ missions, splits, config, year, caFacture, verse
       // Collectif reparti a parts egales sur les participants (meme regle que le front : collTotal / N).
       const parts = (participants && participants.length) ? participants : Object.keys(sq.detailByPartner || {});
       if (parts.length) {
-        const share = Math.round(collTotal / parts.length);
+        const share = collTotal / parts.length; // float, arrondi a l'ecriture
         for (const p of parts) addPM(p, mk, share);
       }
     }

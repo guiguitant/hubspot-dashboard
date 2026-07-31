@@ -20,6 +20,9 @@ const { computeDepenses } = require('./utils/depensesCompute');
 const gsheets = require('./utils/googleSheets');
 const primesMap = require('./utils/primesSheetMap');
 const MASSE_TAB = 'Masse_salariale';
+// Premiere echeance de decaissement des primes (fixe). Les primes dont l'echeance theorique est
+// anterieure y sont regroupees ; les autres restent a leur echeance. Fixe => pas de glissement.
+const PRIMES_PLANCHER = '2026-10';
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
@@ -8281,22 +8284,34 @@ async function computePrimesByPartnerMonth(years, nowIso) {
   const kpiRef = computeKpi({ missions, objectives, splits, year: years[years.length - 1] });
   const participants = primeParticipantsForYear(kpiRef);
 
-  const byPartnerMonth = {};
+  // Echeances REELLES (now tres ancien => aucun rattrapage ni drop). Le plancher (report des retards
+  // sur PRIMES_PLANCHER) ne s'applique qu'a l'EXERCICE COURANT : les primes des exercices anterieurs
+  // gardent leur vraie echeance (passee => figee a l'ecriture), pour ne pas melanger les exercices.
+  const OLD = '1970-01-01';
+  const currentY = years[years.length - 1];
+  const floatByPartnerMonth = {};
   for (const y of years) {
     const caFacture = computeBillingForYear(missions, factOverrides, y).total;
-    const pay = computePrimePayments({ missions, splits, config, year: y, caFacture, versements: [], now: nowIso, pastPolicy: 'drop', participants });
+    const pay = computePrimePayments({ missions, splits, config, year: y, caFacture, versements: [], now: OLD, participants });
     for (const [partner, months] of Object.entries(pay.byPartnerMonth || {})) {
-      const dst = byPartnerMonth[partner] = byPartnerMonth[partner] || {};
-      for (const [mk, amt] of Object.entries(months)) dst[mk] = (dst[mk] || 0) + amt;
+      const dst = floatByPartnerMonth[partner] = floatByPartnerMonth[partner] || {};
+      for (const [mk, amt] of Object.entries(months)) {
+        const target = (y === currentY && mk < PRIMES_PLANCHER) ? PRIMES_PLANCHER : mk;
+        dst[target] = (dst[target] || 0) + amt;
+      }
     }
   }
 
+  // Arrondi entier en preservant le total par associe (colle a l'euro a ce que Pilot affiche).
+  const byPartnerMonth = {};
+  for (const [partner, months] of Object.entries(floatByPartnerMonth)) {
+    byPartnerMonth[partner] = primesMap.roundPreservingSum(months);
+  }
+
   // Rapprochement (annee courante) avec l'onglet KPI : gagne = debloque (acompte facture) + en attente.
-  // Appel dedie sans 'drop' pour compter TOUS les versements de l'annee (y compris passes), afin que
-  // gagne corresponde a ce que Pilot affiche (prime perso + part collective, aux arrondis pres).
   const yr = years[years.length - 1];
   const caR = computeBillingForYear(missions, factOverrides, yr).total;
-  const payR = computePrimePayments({ missions, splits, config, year: yr, caFacture: caR, versements: [], now: nowIso, participants });
+  const payR = computePrimePayments({ missions, splits, config, year: yr, caFacture: caR, versements: [], now: OLD, participants });
   const reconciliation = {};
   for (const p of participants) {
     const debloque = Math.round(Object.values(payR.byPartnerMonth[p] || {}).reduce((s, v) => s + v, 0));
@@ -8319,7 +8334,9 @@ async function syncPrimesToSheet() {
   const nowIso = new Date().toISOString();
   const nowKey = nowIso.slice(0, 7);
   const currentYear = new Date().getFullYear();
-  const years = [currentYear - 1, currentYear];
+  // Exercice courant uniquement : ses primes couvrent deja octobre N -> avril N+1 (debordement inclus).
+  // Le plancher regroupe les retards ; N-1 (exercice clos) n'est pas reecrit (backfill separe si besoin).
+  const years = [currentYear];
   try {
     const { byPartnerMonth, participants, reconciliation } = await computePrimesByPartnerMonth(years, nowIso);
     const grid = await gsheets.readGrid(GOOGLE_SHEET_ID, MASSE_TAB, 'A1:BZ300');
