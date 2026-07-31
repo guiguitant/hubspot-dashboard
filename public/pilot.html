@@ -3893,7 +3893,7 @@
         <div class="kpi-sub" id="tresoKpiAEncaisserSub"></div>
       </div>
       <div class="kpi-block" onclick="openChargesMoisDetailModal()" style="cursor:pointer">
-        <div class="kpi-label">Charges du mois <span class="kpi-unit">TTC</span></div>
+        <div class="kpi-label">Décaissement du mois <span class="kpi-unit">TTC</span></div>
         <div class="kpi-value" id="tresoKpiCharges">--</div>
         <div class="kpi-sub" id="tresoKpiChargesSub"></div>
       </div>
@@ -15161,7 +15161,7 @@
       const total = Math.round(td.chargesMoisCourant || 0);
       const [y, m] = mKey.split('-').map(Number);
       const dateLabel = new Date(y, m - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
-      document.getElementById('tresoMoisDetailTitle').textContent = 'Charges du mois · ' + dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1) + ' (réel Qonto TTC)';
+      document.getElementById('tresoMoisDetailTitle').textContent = 'Décaissement du mois · ' + dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1) + ' (réel Qonto TTC)';
 
       // Regroupe par libellé de catégorie (les slugs mappés sur "Non catégorisée" fusionnent).
       const groups = {};
@@ -15174,7 +15174,7 @@
       })).sort((a, b) => b.total - a.total);
 
       let html = '<div style="display:flex;justify-content:space-between;padding:0.4rem 0.8rem;font-weight:700;font-size:0.95rem;margin-bottom:0.8rem;border-bottom:2px solid var(--text)">'
-        + '<span>Total charges du mois (réel Qonto)</span><span style="color:var(--warning,#d9730d)">-' + formatEuro(total) + '</span></div>';
+        + '<span>Total décaissements du mois (réel Qonto)</span><span style="color:var(--warning,#d9730d)">-' + formatEuro(total) + '</span></div>';
       if (!cats.length) {
         html += '<p style="color:var(--text-secondary);padding:1rem">Aucune dépense Qonto pour ce mois.</p>';
       }
