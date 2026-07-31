@@ -572,4 +572,18 @@ describe('computePrimePayments : echeancier des versements de primes', () => {
     const r = computePrimePayments({ missions: [], splits: [], config: cfg, year: 2025, caFacture: 660000, versements: [], now: '2026-07-15' });
     expect(r.byMonth['2026-07']).toBe(10500);
   });
+
+  it('byPartnerMonth : etage 1 ventile par associe au bon mois', () => {
+    const r = computePrimePayments({ missions: [dealT1()], splits: [], config: cfg, year: 2026, caFacture: 0, versements: [], now: '2026-02-10', participants: ['Vincent', 'Guillaume', 'Nathan'] });
+    expect(r.byPartnerMonth.Vincent['2026-04']).toBe(9000);
+    expect(r.byPartnerMonth.Guillaume).toBeUndefined();
+  });
+
+  it('byPartnerMonth : etage 2 reparti a parts egales en N+1, byMonth garde le total', () => {
+    const r = computePrimePayments({ missions: [], splits: [], config: cfg, year: 2026, caFacture: 660000, versements: [], now: '2026-02-10', participants: ['Vincent', 'Guillaume', 'Nathan'] });
+    expect(r.byPartnerMonth.Vincent['2027-03']).toBe(3500);
+    expect(r.byPartnerMonth.Guillaume['2027-03']).toBe(3500);
+    expect(r.byPartnerMonth.Nathan['2027-03']).toBe(3500);
+    expect(r.byMonth['2027-03']).toBe(10500);
+  });
 });

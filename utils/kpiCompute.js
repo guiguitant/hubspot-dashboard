@@ -395,7 +395,7 @@ function monthAfterDate(d) {
 // Etage 1 deal par deal (conditionne a la facturation de l'acompte, avec portillon trimestriel),
 // etage 2 en N+1. `versements` = validations Phase 3 (couples deja verses, exclus). `now` = date
 // courante ('YYYY-MM-DD' ou ISO) pour le rattrapage. Les cles zero-paddees se comparent lexicalement.
-function computePrimePayments({ missions, splits, config, year, caFacture, versements = [], now, versementEtage2Mois, pastPolicy = 'rattrapage' }) {
+function computePrimePayments({ missions, splits, config, year, caFacture, versements = [], now, versementEtage2Mois, pastPolicy = 'rattrapage', participants = null }) {
   const cfg = normalizePrimeConfig(config);
   const sq = signedByQuarter(missions || [], year, splits || []);
   const gateOk = sq.quarterTotals.map((t) => t >= cfg.gateTrimestriel);
@@ -413,11 +413,17 @@ function computePrimePayments({ missions, splits, config, year, caFacture, verse
   for (const m of (missions || [])) acompteByMission[m.id] = m.dateFactureAcompte || null;
 
   const byMonth = {};
+  const byPartnerMonth = {};
   const detail = {};
   let enAttente = 0, verse = 0;
   const add = (mk, amount, info) => {
     byMonth[mk] = (byMonth[mk] || 0) + amount;
     (detail[mk] = detail[mk] || []).push(info);
+  };
+  // Accumulateur par associe et par mois (pour l'ecriture GSheet). Ne casse pas byMonth (agrege).
+  const addPM = (partner, mk, amount) => {
+    if (!partner) return;
+    (byPartnerMonth[partner] = byPartnerMonth[partner] || {})[mk] = (byPartnerMonth[partner][mk] || 0) + amount;
   };
 
   // --- Etage 1 : deal par deal, par partner ---
@@ -443,6 +449,7 @@ function computePrimePayments({ missions, splits, config, year, caFacture, verse
           mk = nowKey;                          // rattrapage : mois courant
         }
         add(mk, montant, { etage: 1, deal: deal.id, nom: deal.nom, partner: p, montant, rattrapage: isPast });
+        addPM(p, mk, montant);
       }
     }
   }
@@ -461,10 +468,16 @@ function computePrimePayments({ missions, splits, config, year, caFacture, verse
     if (!(isPast && pastPolicy === 'drop')) {
       if (isPast) mk = nowKey;
       add(mk, collTotal, { etage: 2, montant: collTotal, rattrapage: isPast });
+      // Collectif reparti a parts egales sur les participants (meme regle que le front : collTotal / N).
+      const parts = (participants && participants.length) ? participants : Object.keys(sq.detailByPartner || {});
+      if (parts.length) {
+        const share = Math.round(collTotal / parts.length);
+        for (const p of parts) addPM(p, mk, share);
+      }
     }
   }
 
-  return { byMonth, detail, enAttente, verse };
+  return { byMonth, byPartnerMonth, detail, enAttente, verse };
 }
 
 module.exports = { computeKpi, yearOf, yearOfDate, signedAmountForYear, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, signatureDate, splitAmount, displaySplit, OPERE_STATES, SIGNE_EXCLUDED_STATES, primeDefaultRates, normalizePrimeConfig, computePrimePool, computePrimePayments };
