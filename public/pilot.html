@@ -14862,6 +14862,14 @@
       html += '<div style="font-size:1.1rem;font-weight:700">' + formatEuro(mois.soldeFin) + '</div></div>';
       html += '</div>';
 
+      // Source des données du mois : compte réel (Qonto) si mois clos, sinon prévisionnel (Plan TRE Prév).
+      const cmSourceReel = isClos;
+      const cmSourceLabel = cmSourceReel ? 'Compte au réel (Qonto)' : 'Prévisionnel (Plan TRE Prév)';
+      const cmSourceColor = cmSourceReel ? 'var(--success,#0f7b6c)' : 'var(--warning,#d9730d)';
+      const cmSourceBg = cmSourceReel ? 'rgba(15,123,108,0.12)' : 'rgba(217,115,13,0.12)';
+      html += '<div style="margin:-0.6rem 0 1rem;font-size:0.72rem;color:var(--text-secondary)">Source : '
+        + '<span style="background:' + cmSourceBg + ';color:' + cmSourceColor + ';padding:0.12rem 0.45rem;border-radius:4px;font-weight:600">' + cmSourceLabel + '</span></div>';
+
       // --- Helper : section accordeon ---
       let accordionId = 0;
       function accordion(label, montant, color, icon, detailHtml) {
@@ -15173,8 +15181,11 @@
         label, txs: groups[label], total: groups[label].reduce((s, t) => s + (t.amount || 0), 0),
       })).sort((a, b) => b.total - a.total);
 
-      let html = '<div style="display:flex;justify-content:space-between;padding:0.4rem 0.8rem;font-weight:700;font-size:0.95rem;margin-bottom:0.8rem;border-bottom:2px solid var(--text)">'
-        + '<span>Total décaissements du mois (réel Qonto)</span><span style="color:var(--warning,#d9730d)">-' + formatEuro(total) + '</span></div>';
+      let html = '<div style="display:flex;justify-content:space-between;padding:0.4rem 0.8rem;font-weight:700;font-size:0.95rem;border-bottom:2px solid var(--text)">'
+        + '<span>Total décaissements du mois</span><span style="color:var(--warning,#d9730d)">-' + formatEuro(total) + '</span></div>';
+      // Source : ce détail vient du compte bancaire réel (Qonto), mois en cours, cumulé depuis le 1er.
+      html += '<div style="padding:0.4rem 0.8rem 0.8rem;font-size:0.72rem;color:var(--text-secondary)">Source : '
+        + '<span style="background:rgba(15,123,108,0.12);color:var(--success,#0f7b6c);padding:0.12rem 0.45rem;border-radius:4px;font-weight:600">Compte au réel (Qonto)</span></div>';
       if (!cats.length) {
         html += '<p style="color:var(--text-secondary);padding:1rem">Aucune dépense Qonto pour ce mois.</p>';
       }
