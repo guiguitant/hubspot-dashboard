@@ -4711,17 +4711,21 @@ function parseMasseSalariale(csvText) {
     const label = (row[2] || '').trim();
     if (!label) continue;
 
-    // Check if this is a category header (Salaires nets, Charges soci., etc.)
-    const isCategoryHeader = [
-      'Salaires nets', 'Charges soci. + patr.', 'Rémunération dirigeants',
-      'Primes', 'Aide apprentissage', 'Gratification de stage'
-    ].some(cat => label.startsWith(cat));
+    // Entete de categorie : nouvelle convention GSheet = prefixe "." (ex ".Salaires nets", ".Primes").
+    // Compat ascendante : ancien prefixe "cm." et anciens noms bruts sans prefixe. On stocke le nom
+    // SANS prefixe car le mapping typeKey en aval (fetchAndParseMasseSalarialeDetailed) compare a
+    // "salaires nets", "primes", "rémunération", etc.
+    const KNOWN_CATS = ['Salaires nets', 'Charges soci. + patr.', 'Rémunération dirigeants',
+      'Primes', 'Aide apprentissage', 'Gratification de stage'];
+    const isCategoryHeader = label.startsWith('.') || label.toLowerCase().startsWith('cm.')
+      || KNOWN_CATS.some(cat => label.startsWith(cat));
+    const cleanLabel = label.replace(/^(cm\.|\.)\s*/i, '');
 
     const values = months.map(m => parseFrenchNumber(row[m.col] || ''));
     const hasValues = values.some(v => v !== 0);
 
     if (isCategoryHeader) {
-      currentCategory = { name: label, total: values, items: [] };
+      currentCategory = { name: cleanLabel, total: values, items: [] };
       categories.push(currentCategory);
     } else if (currentCategory && hasValues) {
       currentCategory.items.push({ name: label, values });
