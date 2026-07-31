@@ -432,9 +432,11 @@ function computePrimePayments({ missions, splits, config, year, caFacture, verse
         if (verseKeys.has('E1|' + deal.id + '|' + p)) { verse += montant; continue; }
         const acompte = acompteByMission[deal.id];
         if (!acompte) { enAttente += montant; continue; }
-        let mk = monthAfterQuarterClose(year, q + 1);
-        const mkFact = monthAfterDate(acompte);
-        if (mkFact && mkFact > mk) mk = mkFact;      // le plus tardif des deux
+        // Regle unifiee : versement a M+1 de la cloture du trimestre OU l'acompte est facture.
+        // Le trimestre de signature (q) ne sert qu'au portillon (gateOk) et au montant.
+        const qFact = quarterOfDate(acompte);
+        const yFact = yearOfDate(acompte);
+        let mk = (qFact && yFact) ? monthAfterQuarterClose(yFact, qFact) : monthAfterQuarterClose(year, q + 1);
         const isPast = mk < nowKey;
         if (isPast) {
           if (pastPolicy === 'drop') continue; // paiement passe non repris (annee N-1 : gere via validation Phase 3)

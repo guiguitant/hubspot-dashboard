@@ -510,9 +510,16 @@ describe('computePrimePayments : echeancier des versements de primes', () => {
     expect(r.enAttente).toBe(0);
   });
 
-  it('deal facture en retard : versement glisse au mois suivant la facturation', () => {
+  it('deal facture au trimestre suivant (T3) : versement a M+1 de la cloture du T3 (octobre)', () => {
     const r = computePrimePayments({ missions: [dealT1({ dateFactureAcompte: '2026-08-20' })], splits: [], config: cfg, year: 2026, caFacture: 0, versements: [], now: '2026-02-10' });
-    expect(r.byMonth['2026-09']).toBe(9000);
+    expect(r.byMonth['2026-10']).toBe(9000);
+    expect(r.byMonth['2026-04']).toBeUndefined();
+    expect(r.byMonth['2026-09']).toBeUndefined();
+  });
+
+  it('deal signe T1 facture au T2 : versement en juillet (M+1 cloture T2)', () => {
+    const r = computePrimePayments({ missions: [dealT1({ dateFactureAcompte: '2026-05-15' })], splits: [], config: cfg, year: 2026, caFacture: 0, versements: [], now: '2026-02-10' });
+    expect(r.byMonth['2026-07']).toBe(9000);
     expect(r.byMonth['2026-04']).toBeUndefined();
   });
 
