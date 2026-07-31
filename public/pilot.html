@@ -4087,22 +4087,22 @@
       <!-- Cards instantanees, toujours actuelles, independantes de la periode selectionnee -->
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:2rem">
         <div class="kpi-block">
-          <div class="kpi-label">Charges annuelles <span class="kpi-unit">TTC</span></div>
+          <div class="kpi-label">Charges annuelles <span class="kpi-unit">HT</span></div>
           <div class="kpi-value" id="chargesAnnuellesValue">--</div>
-          <div class="kpi-sub" id="chargesAnnuellesSub">Qonto (réel) + prévi · année en cours</div>
+          <div class="kpi-sub" id="chargesAnnuellesSub">CR prévisionnel · année en cours</div>
         </div>
         <div class="kpi-block">
-          <div class="kpi-label">Sorties ce mois <span class="kpi-unit">TTC</span></div>
+          <div class="kpi-label">Charges du mois <span class="kpi-unit">HT</span></div>
           <div class="kpi-value" id="depKpiSorties">--</div>
-          <div class="kpi-sub" id="depKpiSortiesSub"></div>
+          <div class="kpi-sub" id="depKpiSortiesSub">CR prévisionnel · mois en cours</div>
         </div>
         <div class="kpi-block">
-          <div class="kpi-label">Moyenne mensuelle <span class="kpi-unit">6 mois</span></div>
+          <div class="kpi-label">Moyenne mensuelle <span class="kpi-unit">HT</span></div>
           <div class="kpi-value" id="depKpiMoyenne">--</div>
-          <div class="kpi-sub" id="depKpiMoyenneSub"></div>
+          <div class="kpi-sub" id="depKpiMoyenneSub">CR prévisionnel · charges /mois</div>
         </div>
         <div class="kpi-block">
-          <div class="kpi-label">Dépenses récurrentes</div>
+          <div class="kpi-label">Dépenses récurrentes <span class="kpi-unit">TTC</span></div>
           <div class="kpi-value" id="depKpiAbos">--</div>
           <div class="kpi-sub" id="depKpiAbosSub"></div>
         </div>
@@ -4115,7 +4115,7 @@
       <div class="section">
         <div style="display:flex;align-items:baseline;justify-content:space-between;gap:1rem;margin-bottom:0.75rem;flex-wrap:wrap">
           <div class="section-title" style="margin-bottom:0">Charges N vs N-1 (par mois)</div>
-          <span style="font-size:0.72rem;color:var(--text-secondary)">Source : Qonto (réel) + GSheet (prévisionnel, mois hachurés)</span>
+          <span style="font-size:0.72rem;color:var(--text-secondary)">Source : CR prévisionnel · HT (compte de résultat)</span>
         </div>
         <div style="position:relative;height:300px"><canvas id="analyticsChargesComparaison"></canvas></div>
       </div>
@@ -4123,16 +4123,12 @@
       <!-- Bloc Detail des depenses : Pennylane (saisie comptable), pilote par la periode -->
       <div style="display:flex;align-items:baseline;gap:0.6rem;margin:2.5rem 0 0.75rem;flex-wrap:wrap">
         <h2 style="font-size:1.05rem;font-weight:600;margin:0">Détail des dépenses</h2>
-        <span style="font-size:0.72rem;color:var(--text-secondary)">Source : Pennylane (saisie comptable) · sur la période sélectionnée</span>
-      </div>
-
-      <div class="section">
-        <div class="section-title">Sorties par mois</div>
-        <div style="position:relative;height:350px"><canvas id="depensesChart"></canvas></div>
+        <span style="font-size:0.72rem;color:var(--text-secondary)">Source : Pennylane · TTC · décaissement · sur la période sélectionnée</span>
       </div>
 
       <div class="section">
         <div class="section-title">Répartition par catégorie</div>
+        <p style="color:var(--text-secondary);font-size:0.8rem;margin:-0.4rem 0 0.75rem">Source : Pennylane · TTC · décaissement.</p>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;align-items:start">
           <div style="position:relative;height:500px"><canvas id="analyticsChargesChart"></canvas></div>
           <div id="depensesTableCategories"><p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p></div>
@@ -4140,14 +4136,14 @@
       </div>
 
       <div class="section">
-        <div class="section-title">Top 15 fournisseurs</div>
-        <p style="color:var(--text-secondary);font-size:0.8rem;margin:-0.4rem 0 0.75rem">Hors salaires, TVA, impots et virements internes.</p>
+        <div class="section-title">Top 10 fournisseurs</div>
+        <p style="color:var(--text-secondary);font-size:0.8rem;margin:-0.4rem 0 0.75rem">Source : Pennylane · TTC. Hors salaires, TVA, impots et virements internes.</p>
         <div id="depensesTableVendors"><p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p></div>
       </div>
 
       <div class="section">
         <div class="section-title">Dépenses récurrentes détectées (présentes 4 mois ou plus)</div>
-        <p style="color:var(--text-secondary);font-size:0.8rem;margin:-0.4rem 0 0.75rem">Fournisseurs presents sur au moins 4 mois distincts. Cout mensuel estime = total / nombre de mois de presence.</p>
+        <p style="color:var(--text-secondary);font-size:0.8rem;margin:-0.4rem 0 0.75rem">Source : Pennylane · TTC. Fournisseurs presents sur au moins 4 mois distincts. Cout mensuel estime = total / nombre de mois de presence.</p>
         <div id="depensesSubscriptions"><p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p></div>
       </div>
     </div>
@@ -10172,7 +10168,7 @@
 
     let analyticsChargesPrev = true; // previsionnel toujours integre : passe = Qonto reel, mois courant + futurs = GSheet
     let analyticsChargesData = null;
-    let chargesAnnuellesCache = null; // total charges annuelles (annee en cours), garde en memoire pour eviter un refetch Qonto a chaque changement de periode
+    let chargesCardsCache = null; // reponse /api/previsionnel-charges (annee en cours, HT), gardee pour eviter un refetch a chaque changement de periode
 
     async function renderAnalyticsChargesChart() {
       const start = analyticsCurrentStart;
@@ -10185,13 +10181,13 @@
       tabCharges.style.visibility = 'hidden';
 
       try {
-        // Comparatif N vs N-1 : Qonto reel + previsionnel GSheet (hybride, toujours integre)
-        const cRes = await fetch(`/api/charges-hybride?start=${start}&end=${end}`);
+        // Charges du compte de resultat : CR_Prev (HT), pilote par la periode pour le graphe N vs N-1
+        const cRes = await fetch(`/api/previsionnel-charges?start=${start.slice(0,7)}&end=${end.slice(0,7)}`);
         analyticsChargesData = await cRes.json();
         if (analyticsChargesData && analyticsChargesData.comparaison) renderChargesComparaison(analyticsChargesData.comparaison);
-        renderChargesAnnuelles(); // card "Charges annuelles" (annee en cours, figee) : reutilise ces donnees si periode = annee, sinon appel dedie
+        renderChargesCards(); // 3 cartes HT (annee en cours, independantes de la periode) : source CR_Prev
 
-        // Detail des depenses : Pennylane, pilote par la periode selectionnee
+        // Detail des depenses : Pennylane (TTC, decaissement), pilote par la periode selectionnee
         const dRes = await fetch(`/api/depenses?start=${start}&end=${end}`);
         depensesData = await dRes.json();
         const warnEl = document.getElementById('depensesPennylaneWarning');
@@ -10202,7 +10198,6 @@
           } else warnEl.style.display = 'none';
         }
         renderDepensesKpis();
-        renderDepensesChart();
         renderDepensesCategoriesPie();
         renderDepensesCategories();
         renderDepensesVendors();
@@ -10215,25 +10210,34 @@
       }
     }
 
-    // Card "Charges annuelles" : total de l'annee civile en cours = Qonto reel (mois passes) + previsionnel GSheet (mois courant et futurs).
-    // Figee sur l'annee, independante du filtre de periode. Si la periode selectionnee EST deja l'annee en cours, on reutilise les donnees
-    // deja chargees (aucun appel en plus) ; sinon on fait un appel dedie une seule fois, garde en memoire (Qonto est lent).
-    async function renderChargesAnnuelles() {
-      const el = document.getElementById('chargesAnnuellesValue');
-      if (!el) return;
-      const year = new Date().getFullYear();
-      if (analyticsChargesData && analyticsCurrentStart === `${year}-01-01` && analyticsCurrentEnd === `${year}-12-31`) {
-        el.textContent = formatEuro(analyticsChargesData.totalCharges || 0);
-        return;
-      }
-      if (chargesAnnuellesCache != null) { el.textContent = formatEuro(chargesAnnuellesCache); return; }
+    // Cartes HT du compte de resultat (CR_Prev), annee civile en cours, independantes du filtre de periode :
+    // "Charges annuelles" (total), "Charges du mois" (mois en cours) et "Moyenne mensuelle" (total / nb mois).
+    // Une seule source (CR_Prev, HT) pour rester coherent avec le compte de resultat ; reponse gardee en cache.
+    async function renderChargesCards() {
+      const elAnnuel = document.getElementById('chargesAnnuellesValue');
+      const elMois   = document.getElementById('depKpiSorties');
+      const elMoy    = document.getElementById('depKpiMoyenne');
+      const fill = (d) => {
+        if (!d) return;
+        if (elAnnuel) elAnnuel.textContent = formatEuro(d.totalCharges || 0);
+        if (elMoy)    elMoy.textContent    = formatEuro(d.moyenneMensuelle || 0);
+        if (elMois) {
+          const now = new Date();
+          const mk = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+          const mois = (d.comparaison && d.comparaison.mois) || [];
+          const idx = mois.indexOf(mk);
+          elMois.textContent = formatEuro(idx >= 0 ? (d.comparaison.N[idx] || 0) : 0);
+        }
+      };
+      if (chargesCardsCache) { fill(chargesCardsCache); return; }
       try {
-        const r = await fetch(`/api/charges-hybride?start=${year}-01-01&end=${year}-12-31`);
+        const year = new Date().getFullYear();
+        const r = await fetch(`/api/previsionnel-charges?start=${year}-01&end=${year}-12`);
         const d = await r.json();
-        chargesAnnuellesCache = d.totalCharges || 0;
-        el.textContent = formatEuro(chargesAnnuellesCache);
+        chargesCardsCache = d;
+        fill(d);
       } catch (e) {
-        console.error('Erreur Charges annuelles:', e);
+        console.error('Erreur cartes charges HT:', e);
       }
     }
 
@@ -10317,9 +10321,8 @@
         // Même source que le graphique : en mode prévisionnel, un mois futur n'a pas de charges
         // réelles Qonto (l'endpoint /api/charges renverrait du vide) — il faut la version hybride
         // qui inclut le prévisionnel GSheet, sinon la modale affiche "Aucune charge" à tort.
-        const endpoint = analyticsChargesPrev
-          ? `/api/charges-hybride?start=${start}&end=${end}`
-          : `/api/charges?start=${start}&end=${end}`;
+        // Meme source que le graphe : CR_Prev (HT, compte de resultat). Format YYYY-MM.
+        const endpoint = `/api/previsionnel-charges?start=${start.slice(0,7)}&end=${end.slice(0,7)}`;
         const res = await fetch(endpoint);
         const data = await res.json();
         const charges = data.ventilationCharges || [];
@@ -15245,103 +15248,15 @@
     let depensesChart = null;
 
     function renderDepensesKpis() {
-      // Cards "instantanees" : toujours la fenetre glissante (snapshot), independant de la periode selectionnee.
+      // Seule la carte "Depenses recurrentes" reste alimentee par Pennylane (TTC, fenetre glissante).
+      // "Charges du mois" et "Moyenne mensuelle" sont desormais HT (CR_Prev), remplies par renderChargesCards().
       const s = (depensesData && depensesData.snapshot) || {};
       const hasError = !!(depensesData && depensesData.pennylaneError);
-      document.getElementById('depKpiSorties').textContent = hasError ? '--' : formatEuro(s.sortiesMoisCourant);
-      document.getElementById('depKpiSortiesSub').textContent = hasError ? '' : (s.pctVsMoyenne6m == null ? 'Pas assez d\'historique' : formatPercent(s.pctVsMoyenne6m) + ' vs moyenne 6 mois');
-      document.getElementById('depKpiMoyenne').textContent = hasError ? '--' : formatEuro(s.moyenne6m);
-      document.getElementById('depKpiMoyenneSub').textContent = hasError ? '' : 'Hors virements internes';
       document.getElementById('depKpiAbos').textContent = hasError ? '--' : formatEuro(s.abonnementsMensuels) + '/mois';
-      document.getElementById('depKpiAbosSub').textContent = hasError ? '' : 'abonnements detectes (6 mois glissants)';
+      document.getElementById('depKpiAbosSub').textContent = hasError ? '' : 'abonnements detectes · Pennylane (TTC)';
     }
 
-    function renderDepensesChart() {
-      // Pennylane en erreur : pas de graphe a zeros trompeurs (meme regle que les tableaux)
-      const chartCanvas = document.getElementById('depensesChart');
-      if (depensesData && depensesData.pennylaneError) {
-        if (depensesChart) { depensesChart.destroy(); depensesChart = null; }
-        chartCanvas.style.display = 'none';
-        const wrap = chartCanvas.parentElement;
-        if (wrap && !wrap.querySelector('.dep-chart-unavailable')) {
-          const msg = document.createElement('div');
-          msg.className = 'dep-chart-unavailable';
-          msg.innerHTML = DEPENSES_UNAVAILABLE_HTML;
-          wrap.appendChild(msg);
-        }
-        return;
-      }
-      chartCanvas.style.display = '';
-      const staleMsg = chartCanvas.parentElement.querySelector('.dep-chart-unavailable');
-      if (staleMsg) staleMsg.remove();
-      const byMonth = (depensesData && depensesData.byMonth) || [];
-      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-      const labels = byMonth.map(m => {
-        const parts = m.month.split('-');
-        return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1)
-          .toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
-      });
-
-      if (depensesChart) depensesChart.destroy();
-      depensesChart = new Chart(document.getElementById('depensesChart'), {
-        type: 'bar',
-        data: {
-          labels,
-          datasets: [
-            {
-              label: 'Salaires + impots',
-              data: byMonth.map(m => m.fixed),
-              backgroundColor: isDark ? 'rgba(105,64,165,0.7)' : 'rgba(105,64,165,0.55)',
-              hoverBackgroundColor: isDark ? 'rgba(105,64,165,0.9)' : 'rgba(105,64,165,0.75)',
-              stack: 'sorties',
-              barPercentage: 0.7,
-              categoryPercentage: 0.75,
-            },
-            {
-              label: 'Charges pilotables',
-              data: byMonth.map(m => m.pilotable),
-              backgroundColor: isDark ? 'rgba(35,131,226,0.7)' : 'rgba(35,131,226,0.55)',
-              hoverBackgroundColor: isDark ? 'rgba(35,131,226,0.9)' : 'rgba(35,131,226,0.75)',
-              stack: 'sorties',
-              borderRadius: { topLeft: 6, topRight: 6 },
-              borderSkipped: false,
-              barPercentage: 0.7,
-              categoryPercentage: 0.75,
-            },
-          ],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { labels: { color: isDark ? '#999' : '#787774', boxWidth: 12 } },
-            tooltip: {
-              backgroundColor: isDark ? '#252525' : '#fff',
-              titleColor: isDark ? '#e9e9e7' : '#37352f',
-              bodyColor: isDark ? '#999' : '#787774',
-              borderColor: isDark ? '#2e2e2e' : '#e9e9e1',
-              borderWidth: 1,
-              callbacks: {
-                label: (ctx) => ctx.dataset.label + ' : ' + formatEuro(ctx.parsed.y),
-                footer: (items) => 'Total : ' + formatEuro(items.reduce((s, it) => s + it.parsed.y, 0)),
-              },
-            },
-          },
-          scales: {
-            x: {
-              stacked: true,
-              ticks: { color: isDark ? '#999' : '#787774' },
-              grid: { display: false },
-            },
-            y: {
-              stacked: true,
-              ticks: { color: isDark ? '#999' : '#787774', callback: v => Math.round(v / 1000) + 'k' },
-              grid: { color: isDark ? 'rgba(46,46,46,0.5)' : 'rgba(233,233,231,0.7)' },
-            },
-          },
-        },
-      });
-    }
+    // Graphe "Sorties par mois" (Pennylane) supprime : Analytics ne traite plus le decaissement.
 
     // Camembert des categories (source Pennylane, sur la periode) : reutilise renderPieChart.
     function renderDepensesCategoriesPie() {
@@ -15376,7 +15291,7 @@
     function renderDepensesVendors() {
       const el = document.getElementById('depensesTableVendors');
       if (depensesData.pennylaneError) { el.innerHTML = DEPENSES_UNAVAILABLE_HTML; return; }
-      const rows = depensesData.topVendors || [];
+      const rows = (depensesData.topVendors || []).slice(0, 10); // top 10 (le backend en renvoie 15)
       if (!rows.length) {
         el.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Aucun fournisseur sur les 12 derniers mois.</p>';
         return;
