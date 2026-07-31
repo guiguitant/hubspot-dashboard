@@ -8404,17 +8404,17 @@ async function computeResultatFactuelForYear(year) {
   }
   caFacture = Math.round(caFacture);
   const totalCharges = Math.round(chargesData.totalCharges || 0);
-  const primesCommerciales = await computePrimesCommercialesForYear(year, missions);
-  const totalChargesAvecPrimes = totalCharges + primesCommerciales;
+  // Primes : plus de fold ici. Elles entrent dans totalCharges via la formule .Primes -> CR_Prev
+  // (onglet Masse_salariale ecrit par la synchro, agrege dans les Frais de personnel de CR_Prev).
   const totalSubv = financements.subventions.reduce((s, f) => s + f.montant, 0);
   const totalAide = financements.aides.reduce((s, f) => s + f.montant, 0);
-  const ebe = caFacture - totalChargesAvecPrimes + totalSubv + totalAide;
+  const ebe = caFacture - totalCharges + totalSubv + totalAide;
   const resExploit = Math.round(ebe) - amortissements;
   const isBrut = computeIS(resExploit);
   const creditTotal = creditImpot.total;
   const impotNet = isBrut - creditTotal;
   const remboursementCredit = Math.max(0, creditTotal - isBrut);
-  return { year, caFacture, totalCharges: totalChargesAvecPrimes, primesCommerciales, resExploit, isBrut, creditTotal, impotNet, remboursementCredit };
+  return { year, caFacture, totalCharges, resExploit, isBrut, creditTotal, impotNet, remboursementCredit };
 }
 
 app.get('/api/ebe', async (req, res) => {
@@ -8452,10 +8452,8 @@ app.get('/api/ebe', async (req, res) => {
     const chargesData = await computeChargesHybride(start, end);
     const totalCharges = Math.round(chargesData.totalCharges || 0);
 
-    // Primes commerciales (pool KPI) : charge d'exploitation (compte 622), ajoutee AVANT l'EBE.
-    // Helper partage avec computeResultatFactuelForYear pour garder les deux cascades alignees.
-    const primesCommerciales = await computePrimesCommercialesForYear(yearParam, missions);
-    const totalChargesAvecPrimes = totalCharges + primesCommerciales;
+    // Primes commerciales : plus de fold. Elles entrent dans totalCharges via la formule .Primes ->
+    // CR_Prev (onglet Masse_salariale ecrit par la synchro), pour eviter le double compte.
 
     // 3) Financements (Subv + Aide) de l'année depuis GSheet Plan_TRE_Prév
     const financements = await fetchFinancementsForYear(yearParam);
@@ -8466,9 +8464,9 @@ app.get('/api/ebe', async (req, res) => {
     const pipelinePondere = isCurrentYear ? await computePipelinePondere() : 0;
 
     // 5) EBE factuel (CA Facturé) et projeté (CA Facturé + Pipeline pondéré)
-    const ebeFactuel = caFacture - totalChargesAvecPrimes + totalSubv + totalAide;
+    const ebeFactuel = caFacture - totalCharges + totalSubv + totalAide;
     const caProjete  = caFacture + pipelinePondere;
-    const ebeProjete = caProjete - totalChargesAvecPrimes + totalSubv + totalAide;
+    const ebeProjete = caProjete - totalCharges + totalSubv + totalAide;
 
     // 5b) Masse salariale de l'année — INFO uniquement (déjà comprise dans totalCharges via "Frais de personnel").
     // Affichée en sous-ligne du Compte de résultat SANS être resoustraite (évite le double comptage).
@@ -8502,7 +8500,7 @@ app.get('/api/ebe', async (req, res) => {
     res.json({
       year: yearParam,
       ca: { facture: caFacture, pipelinePondere, projete: caProjete },
-      charges: { total: totalChargesAvecPrimes, primesCommerciales },
+      charges: { total: totalCharges },
       masseSalarialeAnnuelle,
       financements: {
         subventions: financements.subventions,
