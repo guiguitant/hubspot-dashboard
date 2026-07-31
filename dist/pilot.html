@@ -4375,6 +4375,8 @@
         <div class="prime-actions">
           <button class="analytics-tab" onclick="resetPrimeRealises()" title="Réinitialiser new/repeat et CA facturé aux données KPI">↺ Données réelles</button>
           <button class="analytics-tab" onclick="togglePrimeReglages()">Réglages primes</button>
+          <button class="analytics-tab" onclick="syncPrimesGsheet(this)" title="Ecrire les primes calculees dans le Google Sheet (onglet Masse_salariale, ligne .Primes)">⇪ Synchroniser le GSheet</button>
+          <span id="primesSyncStatus" class="prime-ro" style="align-self:center"></span>
         </div>
       </div>
       <div id="kpiPrimeBody"></div>
@@ -11498,6 +11500,34 @@
       return withSignal.length ? withSignal : kpiData.partners;
     }
 
+    async function syncPrimesGsheet(btn) {
+      const old = btn.textContent;
+      btn.disabled = true; btn.textContent = 'Synchro…';
+      try {
+        const res = await fetch('/api/primes/sync-gsheet', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'echec');
+        btn.textContent = '✓ ' + (data.updated || 0) + ' cellules';
+        loadPrimesSyncStatus();
+      } catch (e) {
+        btn.textContent = '✗ ' + (e.message || 'erreur');
+      } finally {
+        setTimeout(() => { btn.disabled = false; btn.textContent = old; }, 4000);
+      }
+    }
+
+    async function loadPrimesSyncStatus() {
+      try {
+        const res = await fetch('/api/primes/sync-status');
+        const s = await res.json();
+        const el = document.getElementById('primesSyncStatus');
+        if (el && s && s.last_run_at) {
+          const d = new Date(s.last_run_at);
+          el.textContent = 'Derniere synchro : ' + d.toLocaleString('fr-FR') + (s.ok === false ? ' (echec)' : '');
+        }
+      } catch (e) { /* silencieux */ }
+    }
+
     function renderKpiPrime() {
       const section = document.getElementById('kpiPrime');
       const body = document.getElementById('kpiPrimeBody');
@@ -11505,6 +11535,7 @@
       if (!kpiData) { section.style.display = 'none'; return; }
       const parts = primeCommercialPartners();
       section.style.display = '';
+      loadPrimesSyncStatus();
       if (parts.length === 0) {
         body.innerHTML = '<div class="prime-card"><p style="margin:0;color:var(--text-secondary);">Aucun partner commercial pour cette année. Ajoute des objectifs ou des missions signées.</p></div>';
         return;
