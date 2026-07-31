@@ -3892,7 +3892,7 @@
         <div class="kpi-value" id="tresoKpiAEncaisser">--</div>
         <div class="kpi-sub" id="tresoKpiAEncaisserSub"></div>
       </div>
-      <div class="kpi-block">
+      <div class="kpi-block" onclick="openChargesMoisDetailModal()" style="cursor:pointer">
         <div class="kpi-label">Charges du mois <span class="kpi-unit">TTC</span></div>
         <div class="kpi-value" id="tresoKpiCharges">--</div>
         <div class="kpi-sub" id="tresoKpiChargesSub"></div>
@@ -15135,6 +15135,73 @@
           }
         });
       });
+    }
+
+    // Libellés FR des catégories Qonto (slug -> label lisible). Fallback : slug brut ; vide/inconnu -> "Non catégorisée".
+    const QONTO_CAT_LABELS = {
+      other_expense: 'Autres dépenses', other_service: 'Autres services', food_and_grocery: 'Alimentation / courses',
+      tax: 'Impôts et taxes', marketing: 'Marketing', gas_station: 'Carburant',
+      it_and_electronics: 'Informatique / électronique', online_service: 'Services en ligne', transport: 'Transport',
+      insurance: 'Assurance', fees: 'Frais bancaires', restaurant_and_bar: 'Restaurant / bar',
+      hotel_and_lodging: 'Hôtel / hébergement', utility: 'Énergie / services', subscription: 'Abonnements',
+      salary: 'Salaires', logistics: 'Logistique', legal_and_accounting: 'Juridique / comptable',
+    };
+    function chargesQontoCatLabel(cat) {
+      if (!cat || cat === 'null' || cat === 'uncategorized' || /sans.?cat/i.test(cat)) return 'Non catégorisée';
+      return QONTO_CAT_LABELS[cat] || cat;
+    }
+
+    // Détail des "Charges du mois" (réel Qonto TTC du mois courant) par catégorie Qonto, ouvert depuis la carte KPI.
+    // Source : tresoData.chargesDetailParMois[moisCourant]. Les dépenses sans catégorie Qonto tombent dans
+    // "Non catégorisée" (à terme catégorisées côté Qonto).
+    function openChargesMoisDetailModal() {
+      const td = tresoData || {};
+      const mKey = td.moisCourantKey || (function () { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); })();
+      const detail = (td.chargesDetailParMois || {})[mKey] || {};
+      const total = Math.round(td.chargesMoisCourant || 0);
+      const [y, m] = mKey.split('-').map(Number);
+      const dateLabel = new Date(y, m - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+      document.getElementById('tresoMoisDetailTitle').textContent = 'Charges du mois · ' + dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1) + ' (réel Qonto TTC)';
+
+      // Regroupe par libellé de catégorie (les slugs mappés sur "Non catégorisée" fusionnent).
+      const groups = {};
+      for (const [cat, txs] of Object.entries(detail)) {
+        const label = chargesQontoCatLabel(cat);
+        (groups[label] = groups[label] || []).push(...(txs || []));
+      }
+      const cats = Object.keys(groups).map(label => ({
+        label, txs: groups[label], total: groups[label].reduce((s, t) => s + (t.amount || 0), 0),
+      })).sort((a, b) => b.total - a.total);
+
+      let html = '<div style="display:flex;justify-content:space-between;padding:0.4rem 0.8rem;font-weight:700;font-size:0.95rem;margin-bottom:0.8rem;border-bottom:2px solid var(--text)">'
+        + '<span>Total charges du mois (réel Qonto)</span><span style="color:var(--warning,#d9730d)">-' + formatEuro(total) + '</span></div>';
+      if (!cats.length) {
+        html += '<p style="color:var(--text-secondary);padding:1rem">Aucune dépense Qonto pour ce mois.</p>';
+      }
+      let accId = 0;
+      for (const c of cats) {
+        const id = 'chmois-acc-' + (accId++);
+        let txTable = '<table style="width:100%;border-collapse:collapse;font-size:0.8rem">';
+        for (const tx of c.txs.slice().sort((a, b) => (b.amount || 0) - (a.amount || 0))) {
+          const dt = tx.date ? new Date(tx.date).toLocaleDateString('fr-FR') : '';
+          txTable += '<tr style="border-bottom:1px solid var(--border)">'
+            + '<td style="padding:0.3rem 0.8rem;color:var(--text-secondary);white-space:nowrap;width:70px">' + dt + '</td>'
+            + '<td style="padding:0.3rem 0.5rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px">' + escapeHtml(tx.label || '-') + '</td>'
+            + '<td style="padding:0.3rem 0.8rem;text-align:right;font-weight:600;white-space:nowrap">' + formatEuro(tx.amount || 0) + '</td></tr>';
+        }
+        txTable += '</table>';
+        html += '<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:0.5rem;overflow:hidden">'
+          + '<div onclick="toggleTresoAccordion(\'' + id + '\',this)" style="display:flex;align-items:center;padding:0.6rem 0.8rem;gap:0.5rem;cursor:pointer;user-select:none">'
+          + '<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(217,115,13,0.7);flex-shrink:0"></span>'
+          + '<span style="font-size:0.85rem;font-weight:600">' + escapeHtml(c.label) + ' <span style="color:var(--text-secondary);font-weight:400">(' + c.txs.length + ')</span></span>'
+          + '<span style="font-size:0.85rem;font-weight:700;margin-left:auto;color:rgba(217,115,13,0.9)">' + formatEuro(c.total) + '</span>'
+          + '<span class="treso-chevron" style="margin-left:0.5rem;font-size:0.7rem;transition:transform 0.2s;color:var(--text-secondary)">&#9654;</span>'
+          + '</div>'
+          + '<div id="' + id + '" style="display:none;border-top:1px solid var(--border);padding:0.4rem 0;max-height:250px;overflow-y:auto">' + txTable + '</div>'
+          + '</div>';
+      }
+      document.getElementById('tresoMoisDetailBody').innerHTML = html;
+      document.getElementById('tresoMoisDetailModalOverlay').classList.add('active');
     }
 
     function toggleTresoAccordion(id, headerEl) {
