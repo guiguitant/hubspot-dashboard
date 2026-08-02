@@ -8372,18 +8372,26 @@ async function computePrimesChargeSchedule(nowIso) {
     byPartnerMonthCharge[partner] = primesMap.roundPreservingSum(months);
   }
 
-  // Reconciliation par statut (source : detailCharge). total = verse + du + aVenir + provisoire.
-  const reconciliation = {};
-  for (const p of participants) reconciliation[p] = { verse: 0, du: 0, aVenir: 0, provisoire: 0, total: 0 };
+  // Reconciliation par statut (source : detailCharge). Accumulation en FLOATS sur les 4 buckets
+  // uniquement (total n'est jamais accumule separement en float : Math.round(a)+Math.round(b) peut
+  // differer de Math.round(a+b)). Arrondi des 4 buckets ENSEMBLE via roundPreservingSum (meme regle
+  // que byPartnerMonthCharge), puis total derive des valeurs DEJA arrondies : l'invariant
+  // total = verse + du + aVenir + provisoire est ainsi garanti a l'euro.
+  const floatReconciliation = {};
+  for (const p of participants) floatReconciliation[p] = { verse: 0, du: 0, aVenir: 0, provisoire: 0 };
   const bucket = { verse: 'verse', du: 'du', a_venir: 'aVenir', provisoire: 'provisoire' };
   for (const e of detailCharge) {
-    if (!reconciliation[e.partner]) reconciliation[e.partner] = { verse: 0, du: 0, aVenir: 0, provisoire: 0, total: 0 };
+    if (!floatReconciliation[e.partner]) floatReconciliation[e.partner] = { verse: 0, du: 0, aVenir: 0, provisoire: 0 };
     const k = bucket[e.statut];
-    if (k) { reconciliation[e.partner][k] += e.montant; reconciliation[e.partner].total += e.montant; }
+    if (k) floatReconciliation[e.partner][k] += e.montant;
   }
-  for (const p of Object.keys(reconciliation)) {
-    const r = reconciliation[p];
-    for (const k of ['verse', 'du', 'aVenir', 'provisoire', 'total']) r[k] = Math.round(r[k]);
+  const reconciliation = {};
+  for (const [p, buckets] of Object.entries(floatReconciliation)) {
+    const r = primesMap.roundPreservingSum(buckets);
+    reconciliation[p] = {
+      verse: r.verse || 0, du: r.du || 0, aVenir: r.aVenir || 0, provisoire: r.provisoire || 0,
+      total: (r.verse || 0) + (r.du || 0) + (r.aVenir || 0) + (r.provisoire || 0),
+    };
   }
 
   return { byPartnerMonthCharge, detailCharge, participants, reconciliation };
