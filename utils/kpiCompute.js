@@ -467,7 +467,15 @@ function computePrimePayments({ missions, splits, config, year, caFacture, verse
         if (montant <= 0) continue;
         if (verseKeys.has('E1|' + deal.id + '|' + p)) { verse += montant; continue; }
         const acompte = acompteByMission[deal.id];
-        if (!acompte) { enAttente += montant; enAttenteByPartner[p] = (enAttenteByPartner[p] || 0) + montant; continue; }
+        if (!acompte) {
+          // Provision : pas d'acompte facture => aucun decaissement date, mais on POSE une charge
+          // probable au dernier mois du trimestre courant ouvert (glisse a chaque recalcul).
+          enAttente += montant;
+          enAttenteByPartner[p] = (enAttenteByPartner[p] || 0) + montant;
+          addCharge(p, floorChargeKey, montant);
+          detailCharge.push({ etage: 1, deal: deal.id, nom: deal.nom, partner: p, montant, dateCharge: floorChargeKey, dateDecaissement: null, statut: 'provisoire' });
+          continue;
+        }
         // Regle unifiee : versement a M+1 de la cloture du trimestre OU l'acompte est facture.
         // Le trimestre de signature (q) ne sert qu'au portillon (gateOk) et au montant.
         // Decaissement (inchange) : M+1 de la cloture du trimestre de facturation.

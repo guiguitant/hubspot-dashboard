@@ -639,4 +639,14 @@ describe('computePrimePayments : echeancier des versements de primes', () => {
     expect(r.byPartnerMonthCharge.Vincent['2026-04']).toBe(9000);
     expect(r.byMonthCharge['2026-04']).toBe(9000);
   });
+
+  it('provision : deal non facture pose une charge au trimestre courant ouvert (statut provisoire)', () => {
+    const r = computePrimePayments({ missions: [dealT1({ dateFactureAcompte: null })], splits: [], config: cfg, year: 2026, caFacture: 0, versements: [], now: '2026-08-10', participants: ['Vincent'] });
+    expect(r.byPartnerMonthCharge.Vincent['2026-09']).toBe(9000); // T3 courant -> sept
+    expect(r.enAttente).toBe(9000);                                 // conserve
+    const e = r.detailCharge.find(d => d.deal === 'a');
+    expect(e.statut).toBe('provisoire');
+    expect(e.dateDecaissement).toBeNull();
+    expect(r.byMonth['2026-09']).toBeUndefined();                   // aucun decaissement
+  });
 });
