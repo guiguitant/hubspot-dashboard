@@ -529,6 +529,13 @@ function computePrimePayments({ missions, splits, config, year, caFacture, verse
       if (parts.length) {
         const share = collTotal / parts.length; // float, arrondi a l'ecriture
         for (const p of parts) addPM(p, mk, share);
+
+        // Charge collective : rattachee a l'exercice N (decembre N), provisoire tant que N n'est pas clos.
+        const chargeMkE2 = year + '-12';
+        for (const p of parts) {
+          addCharge(p, chargeMkE2, share);
+          detailCharge.push({ etage: 2, deal: null, nom: 'Prime collective', partner: p, montant: share, dateCharge: chargeMkE2, dateDecaissement: mk, statut: 'provisoire' });
+        }
       }
     }
   }

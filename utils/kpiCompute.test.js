@@ -649,4 +649,14 @@ describe('computePrimePayments : echeancier des versements de primes', () => {
     expect(e.dateDecaissement).toBeNull();
     expect(r.byMonth['2026-09']).toBeUndefined();                   // aucun decaissement
   });
+
+  it('charge etage 2 : datee en decembre N (provisoire), decaissement en mars N+1', () => {
+    const r = computePrimePayments({ missions: [], splits: [], config: cfg, year: 2026, caFacture: 660000, versements: [], now: '2026-07-15', participants: ['Vincent', 'Guillaume', 'Nathan'] });
+    expect(r.byMonthCharge['2026-12']).toBe(10500);              // charge dec N
+    expect(r.byMonth['2027-03']).toBe(10500);                    // decaissement inchange (N+1)
+    expect(r.byPartnerMonthCharge.Vincent['2026-12']).toBe(3500);
+    const e2 = r.detailCharge.find(d => d.etage === 2 && d.partner === 'Vincent');
+    expect(e2.dateCharge).toBe('2026-12');
+    expect(e2.statut).toBe('provisoire');
+  });
 });
