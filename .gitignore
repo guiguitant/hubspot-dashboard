@@ -10,3 +10,6 @@ node_modules/
 
 # Scratch / secrets (QR 2FA, scripts de génération)
 tmp/
+
+# Scratch subagent-driven-development
+.superpowers/
