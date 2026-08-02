@@ -520,22 +520,28 @@ function computePrimePayments({ missions, splits, config, year, caFacture, verse
   if (collTotal > 0) {
     const moisE2 = String(versementEtage2Mois || cfg.versementEtage2Mois || '03').padStart(2, '0');
     let mk = (year + 1) + '-' + moisE2;
+    const decaissementMk = mk; // memorise avant rattrapage decaissement (symetrie etage 1)
     const isPast = mk < nowKey;
+    // Collectif reparti a parts egales sur les participants (meme regle que le front : collTotal / N).
+    // Calcule avant le garde decaissement : R5, la charge ne depend pas du sort du decaissement.
+    const parts = (participants && participants.length) ? participants : Object.keys(sq.detailByPartner || {});
+    const share = parts.length ? collTotal / parts.length : 0; // float, arrondi a l'ecriture
     if (!(isPast && pastPolicy === 'drop')) {
       if (isPast) mk = nowKey;
       add(mk, collTotal, { etage: 2, montant: collTotal, rattrapage: isPast });
-      // Collectif reparti a parts egales sur les participants (meme regle que le front : collTotal / N).
-      const parts = (participants && participants.length) ? participants : Object.keys(sq.detailByPartner || {});
       if (parts.length) {
-        const share = collTotal / parts.length; // float, arrondi a l'ecriture
         for (const p of parts) addPM(p, mk, share);
+      }
+    }
 
-        // Charge collective : rattachee a l'exercice N (decembre N), provisoire tant que N n'est pas clos.
-        const chargeMkE2 = year + '-12';
-        for (const p of parts) {
-          addCharge(p, chargeMkE2, share);
-          detailCharge.push({ etage: 2, deal: null, nom: 'Prime collective', partner: p, montant: share, dateCharge: chargeMkE2, dateDecaissement: mk, statut: 'provisoire' });
-        }
+    // Charge collective (R5) : rattachee a l'exercice N (decembre N), provisoire tant que N n'est pas
+    // clos. Toujours posee, meme si le decaissement est rattrape ou abandonne (pastPolicy 'drop') :
+    // le rattrapage/drop ne s'applique qu'au decaissement, jamais a la charge (comme l'etage 1).
+    if (parts.length) {
+      const chargeMkE2 = year + '-12';
+      for (const p of parts) {
+        addCharge(p, chargeMkE2, share);
+        detailCharge.push({ etage: 2, deal: null, nom: 'Prime collective', partner: p, montant: share, dateCharge: chargeMkE2, dateDecaissement: decaissementMk, statut: 'provisoire' });
       }
     }
   }

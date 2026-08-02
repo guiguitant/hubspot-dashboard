@@ -659,4 +659,16 @@ describe('computePrimePayments : echeancier des versements de primes', () => {
     expect(e2.dateCharge).toBe('2026-12');
     expect(e2.statut).toBe('provisoire');
   });
+
+  it('R5 : pastPolicy "drop" abandonne le decaissement etage 2 mais la charge decembre N reste posee', () => {
+    // Decaissement theorique 2026-03 (annee+1 par defaut) < now 2026-07 -> passe -> drop l'abandonne.
+    // La charge (rattachee a l'exercice N=2025, donc 2025-12) ne doit pas dependre de ce drop.
+    const r = computePrimePayments({ missions: [], splits: [], config: cfg, year: 2025, caFacture: 660000, versements: [], now: '2026-07-15', pastPolicy: 'drop', participants: ['Vincent', 'Guillaume', 'Nathan'] });
+    expect(r.byMonthCharge['2025-12']).toBe(10500);               // charge dec N toujours posee
+    expect(Object.keys(r.byMonth).length).toBe(0);                // decaissement abandonne (drop)
+    expect(r.byPartnerMonthCharge.Vincent['2025-12']).toBe(3500);
+    const e2 = r.detailCharge.find(d => d.etage === 2 && d.partner === 'Vincent');
+    expect(e2.statut).toBe('provisoire');
+    expect(e2.dateDecaissement).toBe('2026-03');                  // decaissement theorique (avant rattrapage/drop)
+  });
 });
