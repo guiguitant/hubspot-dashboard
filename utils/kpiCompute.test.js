@@ -1,5 +1,15 @@
 'use strict';
 const { computeKpi, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, OPERE_STATES, SIGNE_EXCLUDED_STATES, computePrimePool, primeDefaultRates, computePrimePayments } = require('./kpiCompute');
+const { lastMonthOfQuarter } = require('./kpiCompute');
+
+describe('lastMonthOfQuarter : dernier mois du trimestre (date de charge)', () => {
+  it('T1->03, T2->06, T3->09, T4->12', () => {
+    expect(lastMonthOfQuarter(2026, 1)).toBe('2026-03');
+    expect(lastMonthOfQuarter(2026, 2)).toBe('2026-06');
+    expect(lastMonthOfQuarter(2026, 3)).toBe('2026-09');
+    expect(lastMonthOfQuarter(2026, 4)).toBe('2026-12');
+  });
+});
 
 // Helper : fabrique une mission avec des valeurs par défaut raisonnables.
 // Par défaut : signée le 2026-03-01 (via dateCreation, faute de dateSignature) → tout le CA est

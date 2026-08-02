@@ -381,6 +381,13 @@ function monthAfterQuarterClose(y, q) {
   return yy + '-' + String(m).padStart(2, '0');
 }
 
+// Cle 'YYYY-MM' du dernier mois du trimestre q (1-4) de l'annee y = mois de cloture.
+// T1=mars(03), T2=juin(06), T3=sept(09), T4=dec(12). C'est la date de CHARGE (rattachement),
+// pendant de monthAfterQuarterClose qui donne le mois de DECAISSEMENT.
+function lastMonthOfQuarter(y, q) {
+  return y + '-' + String(q * 3).padStart(2, '0');
+}
+
 // Cle 'YYYY-MM' du mois qui suit une date 'YYYY-MM-DD' (ou ISO). Null si date absente/invalide.
 function monthAfterDate(d) {
   if (!d) return null;
@@ -489,4 +496,4 @@ function computePrimePayments({ missions, splits, config, year, caFacture, verse
   return { byMonth, byPartnerMonth, detail, enAttente, enAttenteByPartner, verse };
 }
 
-module.exports = { computeKpi, yearOf, yearOfDate, signedAmountForYear, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, signatureDate, splitAmount, displaySplit, OPERE_STATES, SIGNE_EXCLUDED_STATES, primeDefaultRates, normalizePrimeConfig, computePrimePool, computePrimePayments };
+module.exports = { computeKpi, yearOf, yearOfDate, signedAmountForYear, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, signatureDate, splitAmount, displaySplit, OPERE_STATES, SIGNE_EXCLUDED_STATES, primeDefaultRates, normalizePrimeConfig, computePrimePool, computePrimePayments, lastMonthOfQuarter };
