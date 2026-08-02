@@ -42,8 +42,8 @@ Pour chaque entrée de charge d'un deal (étage 1) :
 - `'provisoire'` : acompte non facturé (provision).
 
 `detailCharge` = liste plate d'objets `{ etage, deal, nom, partner, montant, dateCharge, dateDecaissement, statut }`.
-- `dateCharge` = clé `'YYYY-MM'` où la charge est écrite dans le prévisionnel, ou `null` si la charge est déjà portée par le réel Qonto (cas `'du'` dont le décaissement est clos : cf. R4).
-- Seules les entrées à `dateCharge` non `null` alimentent `byMonthCharge` / `byPartnerMonthCharge` (ce qui est écrit dans le GSheet). `detailCharge` contient TOUTES les entrées (source de l'écran d'avancement et de la réconciliation).
+- `dateCharge` = clé `'YYYY-MM'` où la charge est écrite dans le prévisionnel. **RÉVISION 2026-08-02 (post dry-run) : `dateCharge` n'est JAMAIS `null`.** Une prime facturée non versée est une charge à payer, toujours écrite ; si son mois théorique est clos ET dans l'exercice courant, elle est reportée au dernier mois du trimestre courant ouvert (`floorChargeKey`), statut `'du'` conservé. La règle initiale « `dateCharge = null` si versement passé » est ABANDONNÉE (elle faisait disparaître ~5 253 € de primes dues du résultat ; cf. spec R4 révisée). Les blocs de code des Tâches 2/3 mentionnant `dateCharge = null` sont donc remplacés par ce report, et leurs tests asserent le report (pas `null`).
+- `byMonthCharge` / `byPartnerMonthCharge` sont alimentés par toutes les entrées écrites. `detailCharge` contient toutes les entrées (source de l'écran d'avancement et de la réconciliation).
 
 ---
 
