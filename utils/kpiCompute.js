@@ -407,6 +407,10 @@ function computePrimePayments({ missions, splits, config, year, caFacture, verse
   const sq = signedByQuarter(missions || [], year, splits || []);
   const gateOk = sq.quarterTotals.map((t) => t >= cfg.gateTrimestriel);
   const nowKey = String(now || '').slice(0, 7);
+  // Dernier mois du trimestre courant ouvert (plancher de charge dynamique, R3/R4).
+  const nowQuarter = quarterOfDate(now) || quarterOfDate((now || '') + '-01') || 1;
+  const nowYear = yearOfDate(now) || year;
+  const floorChargeKey = lastMonthOfQuarter(nowYear, nowQuarter);
 
   // Index des validations (Phase 3) : etage 1 -> 'E1|mission|partner' ; etage 2 -> 'E2|partner'.
   const verseKeys = new Set();
@@ -434,6 +438,16 @@ function computePrimePayments({ missions, splits, config, year, caFacture, verse
     (byPartnerMonth[partner] = byPartnerMonth[partner] || {})[mk] = (byPartnerMonth[partner][mk] || 0) + amount;
   };
 
+  const byMonthCharge = {};
+  const byPartnerMonthCharge = {};
+  const detailCharge = [];
+  const addCharge = (partner, mk, amount) => {
+    if (!partner || !mk) return;
+    byMonthCharge[mk] = (byMonthCharge[mk] || 0) + amount;
+    (byPartnerMonthCharge[partner] = byPartnerMonthCharge[partner] || {})[mk] =
+      (byPartnerMonthCharge[partner][mk] || 0) + amount;
+  };
+
   // --- Etage 1 : prime trimestrielle calculee comme l'onglet KPI (sur le CA agrege bp),
   // repartie sur les deals au prorata de leur montant (pour garder l'echeance + le garde-fou
   // par deal). On n'arrondit PAS ici : l'arrondi final, en preservant le total par associe,
@@ -456,16 +470,34 @@ function computePrimePayments({ missions, splits, config, year, caFacture, verse
         if (!acompte) { enAttente += montant; enAttenteByPartner[p] = (enAttenteByPartner[p] || 0) + montant; continue; }
         // Regle unifiee : versement a M+1 de la cloture du trimestre OU l'acompte est facture.
         // Le trimestre de signature (q) ne sert qu'au portillon (gateOk) et au montant.
+        // Decaissement (inchange) : M+1 de la cloture du trimestre de facturation.
         const qFact = quarterOfDate(acompte);
         const yFact = yearOfDate(acompte);
         let mk = (qFact && yFact) ? monthAfterQuarterClose(yFact, qFact) : monthAfterQuarterClose(year, q + 1);
+        const decaissementMk = mk; // memorise avant rattrapage decaissement
         const isPast = mk < nowKey;
         if (isPast) {
-          if (pastPolicy === 'drop') continue; // paiement passe non repris (annee N-1 : gere via validation Phase 3)
-          mk = nowKey;                          // rattrapage : mois courant
+          if (pastPolicy === 'drop') { /* decaissement passe non repris (byMonth) */ }
+          else mk = nowKey;
         }
-        add(mk, montant, { etage: 1, deal: deal.id, nom: deal.nom, partner: p, montant, rattrapage: isPast });
-        addPM(p, mk, montant);
+        if (!(isPast && pastPolicy === 'drop')) {
+          add(mk, montant, { etage: 1, deal: deal.id, nom: deal.nom, partner: p, montant, rattrapage: isPast });
+          addPM(p, mk, montant);
+        }
+
+        // Charge (nouveau) : dernier mois du trimestre de facturation. Statut selon le decaissement.
+        const chargeMkTheorique = (qFact && yFact) ? lastMonthOfQuarter(yFact, qFact) : lastMonthOfQuarter(year, q + 1);
+        const statut = decaissementMk < nowKey ? 'du' : 'a_venir';
+        let chargeMk = chargeMkTheorique;
+        if (chargeMk < nowKey) {
+          // Mois de charge deja clos (R4). Si le decaissement est clos aussi, la charge est
+          // deja portee par le reel Qonto (Option B) : ne pas l'ecrire (dateCharge=null).
+          // Sinon, reporter au dernier mois du trimestre courant ouvert, sans depasser le decaissement.
+          if (decaissementMk < nowKey) chargeMk = null;
+          else chargeMk = floorChargeKey <= decaissementMk ? floorChargeKey : decaissementMk;
+        }
+        addCharge(p, chargeMk, montant);
+        detailCharge.push({ etage: 1, deal: deal.id, nom: deal.nom, partner: p, montant, dateCharge: chargeMk, dateDecaissement: decaissementMk, statut });
       }
     }
   }
@@ -493,7 +525,7 @@ function computePrimePayments({ missions, splits, config, year, caFacture, verse
     }
   }
 
-  return { byMonth, byPartnerMonth, detail, enAttente, enAttenteByPartner, verse };
+  return { byMonth, byPartnerMonth, detail, enAttente, enAttenteByPartner, verse, byMonthCharge, byPartnerMonthCharge, detailCharge };
 }
 
 module.exports = { computeKpi, yearOf, yearOfDate, signedAmountForYear, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, signatureDate, splitAmount, displaySplit, OPERE_STATES, SIGNE_EXCLUDED_STATES, primeDefaultRates, normalizePrimeConfig, computePrimePool, computePrimePayments, lastMonthOfQuarter };

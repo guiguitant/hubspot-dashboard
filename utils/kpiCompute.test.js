@@ -602,4 +602,19 @@ describe('computePrimePayments : echeancier des versements de primes', () => {
     expect(r.enAttente).toBe(9000);
     expect(r.enAttenteByPartner.Vincent).toBe(9000);
   });
+
+  it('charge etage 1 : datee au dernier mois du trimestre de facturation (mars), decaissement en avril', () => {
+    const r = computePrimePayments({ missions: [dealT1()], splits: [], config: cfg, year: 2026, caFacture: 0, versements: [], now: '2026-02-10', participants: ['Vincent'] });
+    expect(r.byPartnerMonthCharge.Vincent['2026-03']).toBe(9000); // charge = cloture T1
+    expect(r.byPartnerMonth.Vincent['2026-04']).toBe(9000);       // decaissement inchange
+    expect(r.byMonthCharge['2026-03']).toBe(9000);
+  });
+
+  it('charge etage 1 : statut a_venir quand le decaissement est futur', () => {
+    const r = computePrimePayments({ missions: [dealT1()], splits: [], config: cfg, year: 2026, caFacture: 0, versements: [], now: '2026-02-10', participants: ['Vincent'] });
+    const e = r.detailCharge.find(d => d.deal === 'a');
+    expect(e.dateCharge).toBe('2026-03');
+    expect(e.dateDecaissement).toBe('2026-04');
+    expect(e.statut).toBe('a_venir');
+  });
 });
