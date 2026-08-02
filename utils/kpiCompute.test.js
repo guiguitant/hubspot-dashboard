@@ -642,6 +642,23 @@ describe('computePrimePayments : echeancier des versements de primes', () => {
     expect(r.byMonthCharge['2026-06']).toBe(9000);
   });
 
+  it('charge a payer (R4) : garde-fou exercice, une charge d\'un exercice antérieur clos n\'est PAS reportée dans l\'exercice courant', () => {
+    // Deal facture au T3 2026 (charge theorique = dernier mois du T3 = septembre, decaissement = octobre).
+    // now = 2027-02-15 : on calcule encore l'exercice 2026 (year: 2026, comme le fait le multi-exercice
+    // de server.js) mais "aujourd'hui" est deja dans l'exercice 2027. Le report au plancher (floorChargeKey)
+    // ne doit jamais faire franchir la frontiere d'exercice : dateCharge doit rester dans l'annee de la
+    // charge theorique (2026), pas glisser vers le plancher de l'exercice courant reel (2027-03).
+    const r = computePrimePayments({ missions: [dealT1({ dateFactureAcompte: '2026-08-20' })], splits: [], config: cfg, year: 2026, caFacture: 0, versements: [], now: '2027-02-15', participants: ['Vincent'] });
+    const e = r.detailCharge.find(d => d.deal === 'a');
+    expect(e.dateCharge).toBe('2026-09'); // pas '2027-03' (floorChargeKey de l'exercice 2027) : pas de report
+    expect(e.statut).toBe('du');
+    expect(e.dateDecaissement).toBe('2026-10');
+    expect(r.byPartnerMonthCharge.Vincent['2026-09']).toBe(9000);
+    expect(r.byMonthCharge['2026-09']).toBe(9000);
+    // Aucune cle 2027 : le report ne franchit jamais la frontiere d'exercice.
+    expect(Object.keys(r.byPartnerMonthCharge.Vincent).some(mk => mk.startsWith('2027-'))).toBe(false);
+  });
+
   it('provision : deal non facture pose une charge au trimestre courant ouvert (statut provisoire)', () => {
     const r = computePrimePayments({ missions: [dealT1({ dateFactureAcompte: null })], splits: [], config: cfg, year: 2026, caFacture: 0, versements: [], now: '2026-08-10', participants: ['Vincent'] });
     expect(r.byPartnerMonthCharge.Vincent['2026-09']).toBe(9000); // T3 courant -> sept

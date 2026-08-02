@@ -498,6 +498,9 @@ function computePrimePayments({ missions, splits, config, year, caFacture, verse
         const statut = decaissementMk < nowKey ? 'du' : 'a_venir';
         // Charge a payer : toujours ecrite. Si le mois de charge est clos ET dans l'exercice courant,
         // report au dernier mois du trimestre courant ouvert (jamais null, jamais hors exercice).
+        // Note : une charge ainsi reportee peut avoir une dateCharge POSTERIEURE a dateDecaissement
+        // (le versement theorique est deja passe, mais la charge due est reportee sur un mois encore
+        // ouvert) : ce n'est pas un bug, la charge et le decaissement restent des dates independantes.
         let chargeMk = chargeMkTheorique;
         if (chargeMk < nowKey && yearOfDate(chargeMk) === nowYear) chargeMk = floorChargeKey;
         addCharge(p, chargeMk, montant);
