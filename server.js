@@ -8322,6 +8322,73 @@ async function computePrimesByPartnerMonth(years, nowIso) {
   return { byPartnerMonth, participants, reconciliation };
 }
 
+// Echeancier de CHARGE des primes de l'exercice courant, par associe et par mois, + reconciliation
+// par statut. Enumere plusieurs annees de SIGNATURE (une charge peut etre facturee l'annee suivant
+// la signature) et ne garde que les charges datees dans l'exercice courant. `now` REEL (provisions +
+// plancher). Partage par le write-back et par l'endpoint d'avancement (une seule verite).
+async function computePrimesChargeSchedule(nowIso) {
+  const [cfgRow, splitRows, factRows, objRows] = await Promise.all([
+    supabase.from('kpi_prime_config').select('config').eq('id', 'default').maybeSingle(),
+    supabase.from('kpi_ca_split').select('*'),
+    supabase.from('facture_overrides').select('*'),
+    supabase.from('kpi_objectives').select('*'),
+  ]);
+  const config = cfgRow && cfgRow.data ? cfgRow.data.config : null;
+  const splits = (splitRows && splitRows.data) || [];
+  const factOverrides = (factRows && factRows.data) || [];
+  const objectives = (objRows && objRows.data) || [];
+  const missions = await fetchAllNotionMissions();
+
+  const currentYear = new Date(nowIso).getFullYear();
+  const currentPrefix = String(currentYear) + '-';
+  const kpiRef = computeKpi({ missions, objectives, splits, year: currentYear });
+  const participants = primeParticipantsForYear(kpiRef);
+
+  // Enumeration multi-exercice : deal signe en N-2..N, charge potentiellement en N.
+  const floatByPartnerMonth = {};
+  const detailCharge = [];
+  for (const y of [currentYear - 2, currentYear - 1, currentYear]) {
+    const caFacture = computeBillingForYear(missions, factOverrides, y).total;
+    const pay = computePrimePayments({ missions, splits, config, year: y, caFacture, versements: [], now: nowIso, participants });
+    // Charges ECRITES (dateCharge non null) tombant dans l'exercice courant -> byPartnerMonthCharge.
+    for (const [partner, months] of Object.entries(pay.byPartnerMonthCharge || {})) {
+      const dst = floatByPartnerMonth[partner] = floatByPartnerMonth[partner] || {};
+      for (const [mk, amt] of Object.entries(months)) {
+        if (!mk.startsWith(currentPrefix)) continue;
+        dst[mk] = (dst[mk] || 0) + amt;
+      }
+    }
+    // Detail par deal (toutes entrees, y compris provisions et 'du') dont la charge concerne N.
+    for (const e of pay.detailCharge || []) {
+      const inYear = (e.dateCharge && e.dateCharge.startsWith(currentPrefix))
+        || (!e.dateCharge && e.dateDecaissement && e.dateDecaissement.startsWith(currentPrefix));
+      if (inYear) detailCharge.push(e);
+    }
+  }
+
+  // Arrondi entier en preservant le total par associe (aligne a l'euro avec Pilot).
+  const byPartnerMonthCharge = {};
+  for (const [partner, months] of Object.entries(floatByPartnerMonth)) {
+    byPartnerMonthCharge[partner] = primesMap.roundPreservingSum(months);
+  }
+
+  // Reconciliation par statut (source : detailCharge). total = verse + du + aVenir + provisoire.
+  const reconciliation = {};
+  for (const p of participants) reconciliation[p] = { verse: 0, du: 0, aVenir: 0, provisoire: 0, total: 0 };
+  const bucket = { verse: 'verse', du: 'du', a_venir: 'aVenir', provisoire: 'provisoire' };
+  for (const e of detailCharge) {
+    if (!reconciliation[e.partner]) reconciliation[e.partner] = { verse: 0, du: 0, aVenir: 0, provisoire: 0, total: 0 };
+    const k = bucket[e.statut];
+    if (k) { reconciliation[e.partner][k] += e.montant; reconciliation[e.partner].total += e.montant; }
+  }
+  for (const p of Object.keys(reconciliation)) {
+    const r = reconciliation[p];
+    for (const k of ['verse', 'du', 'aVenir', 'provisoire', 'total']) r[k] = Math.round(r[k]);
+  }
+
+  return { byPartnerMonthCharge, detailCharge, participants, reconciliation };
+}
+
 // Etat de synchro (horodatage) persiste en base. Tolerant : un echec ne fait pas tomber la synchro.
 async function writePrimesSyncState(state) {
   try {
