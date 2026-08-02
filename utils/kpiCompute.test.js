@@ -617,4 +617,26 @@ describe('computePrimePayments : echeancier des versements de primes', () => {
     expect(e.dateDecaissement).toBe('2026-04');
     expect(e.statut).toBe('a_venir');
   });
+
+  it('anti double-comptage : charge ET decaissement clos -> dateCharge null, statut "du", absente du byMonthCharge (deja portee par le reel Qonto)', () => {
+    // dealT1() : charge theorique 2026-03, decaissement 2026-04. now = juillet -> les deux sont clos.
+    const r = computePrimePayments({ missions: [dealT1()], splits: [], config: cfg, year: 2026, caFacture: 0, versements: [], now: '2026-07-15', participants: ['Vincent'] });
+    const e = r.detailCharge.find(d => d.deal === 'a');
+    expect(e.dateCharge).toBeNull();
+    expect(e.statut).toBe('du');
+    expect(e.dateDecaissement).toBe('2026-04');
+    expect(r.byPartnerMonthCharge.Vincent).toBeUndefined();
+    expect(r.byMonthCharge['2026-03']).toBeUndefined();
+  });
+
+  it('anti double-comptage : charge close mais decaissement au mois courant -> repli de la charge sur le mois de decaissement, statut a_venir', () => {
+    // dealT1() : charge theorique 2026-03 (close), decaissement 2026-04 = mois courant (pas encore clos).
+    const r = computePrimePayments({ missions: [dealT1()], splits: [], config: cfg, year: 2026, caFacture: 0, versements: [], now: '2026-04-10', participants: ['Vincent'] });
+    const e = r.detailCharge.find(d => d.deal === 'a');
+    expect(e.dateCharge).toBe('2026-04');
+    expect(e.dateDecaissement).toBe('2026-04');
+    expect(e.statut).toBe('a_venir');
+    expect(r.byPartnerMonthCharge.Vincent['2026-04']).toBe(9000);
+    expect(r.byMonthCharge['2026-04']).toBe(9000);
+  });
 });
