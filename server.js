@@ -8300,9 +8300,9 @@ async function computePrimesChargeSchedule(nowIso) {
       }
     }
     // Detail par deal (toutes entrees, y compris provisions et 'du') dont la charge concerne N.
+    // dateCharge n'est plus jamais null (R4) : le filtre porte uniquement sur son prefixe d'annee.
     for (const e of pay.detailCharge || []) {
-      const inYear = (e.dateCharge && e.dateCharge.startsWith(currentPrefix))
-        || (!e.dateCharge && e.dateDecaissement && e.dateDecaissement.startsWith(currentPrefix));
+      const inYear = e.dateCharge && e.dateCharge.startsWith(currentPrefix);
       if (inYear) detailCharge.push(e);
     }
   }

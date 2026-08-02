@@ -618,26 +618,28 @@ describe('computePrimePayments : echeancier des versements de primes', () => {
     expect(e.statut).toBe('a_venir');
   });
 
-  it('anti double-comptage : charge ET decaissement clos -> dateCharge null, statut "du", absente du byMonthCharge (deja portee par le reel Qonto)', () => {
+  it('charge a payer (R4) : charge ET decaissement clos -> report au plancher du trimestre courant (T3), statut "du", charge due ECRITE (jamais null/absente)', () => {
     // dealT1() : charge theorique 2026-03, decaissement 2026-04. now = juillet -> les deux sont clos.
+    // Decision 2026-08-02 : une prime facturee non versee est une charge a payer, toujours ecrite au
+    // previsionnel ; ici report au dernier mois du T3 courant (septembre), jamais mise a null.
     const r = computePrimePayments({ missions: [dealT1()], splits: [], config: cfg, year: 2026, caFacture: 0, versements: [], now: '2026-07-15', participants: ['Vincent'] });
     const e = r.detailCharge.find(d => d.deal === 'a');
-    expect(e.dateCharge).toBeNull();
+    expect(e.dateCharge).toBe('2026-09');
     expect(e.statut).toBe('du');
     expect(e.dateDecaissement).toBe('2026-04');
-    expect(r.byPartnerMonthCharge.Vincent).toBeUndefined();
-    expect(r.byMonthCharge['2026-03']).toBeUndefined();
+    expect(r.byPartnerMonthCharge.Vincent['2026-09']).toBe(9000);
+    expect(r.byMonthCharge['2026-09']).toBe(9000);
   });
 
-  it('anti double-comptage : charge close mais decaissement au mois courant -> repli de la charge sur le mois de decaissement, statut a_venir', () => {
+  it('charge a payer (R4) : charge close mais decaissement au mois courant -> report au plancher du trimestre courant (T2), statut a_venir', () => {
     // dealT1() : charge theorique 2026-03 (close), decaissement 2026-04 = mois courant (pas encore clos).
     const r = computePrimePayments({ missions: [dealT1()], splits: [], config: cfg, year: 2026, caFacture: 0, versements: [], now: '2026-04-10', participants: ['Vincent'] });
     const e = r.detailCharge.find(d => d.deal === 'a');
-    expect(e.dateCharge).toBe('2026-04');
+    expect(e.dateCharge).toBe('2026-06');
     expect(e.dateDecaissement).toBe('2026-04');
     expect(e.statut).toBe('a_venir');
-    expect(r.byPartnerMonthCharge.Vincent['2026-04']).toBe(9000);
-    expect(r.byMonthCharge['2026-04']).toBe(9000);
+    expect(r.byPartnerMonthCharge.Vincent['2026-06']).toBe(9000);
+    expect(r.byMonthCharge['2026-06']).toBe(9000);
   });
 
   it('provision : deal non facture pose une charge au trimestre courant ouvert (statut provisoire)', () => {

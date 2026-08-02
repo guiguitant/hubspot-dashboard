@@ -496,14 +496,10 @@ function computePrimePayments({ missions, splits, config, year, caFacture, verse
         // Charge (nouveau) : dernier mois du trimestre de facturation. Statut selon le decaissement.
         const chargeMkTheorique = (qFact && yFact) ? lastMonthOfQuarter(yFact, qFact) : lastMonthOfQuarter(year, q + 1);
         const statut = decaissementMk < nowKey ? 'du' : 'a_venir';
+        // Charge a payer : toujours ecrite. Si le mois de charge est clos ET dans l'exercice courant,
+        // report au dernier mois du trimestre courant ouvert (jamais null, jamais hors exercice).
         let chargeMk = chargeMkTheorique;
-        if (chargeMk < nowKey) {
-          // Mois de charge deja clos (R4). Si le decaissement est clos aussi, la charge est
-          // deja portee par le reel Qonto (Option B) : ne pas l'ecrire (dateCharge=null).
-          // Sinon, reporter au dernier mois du trimestre courant ouvert, sans depasser le decaissement.
-          if (decaissementMk < nowKey) chargeMk = null;
-          else chargeMk = floorChargeKey <= decaissementMk ? floorChargeKey : decaissementMk;
-        }
+        if (chargeMk < nowKey && yearOfDate(chargeMk) === nowYear) chargeMk = floorChargeKey;
         addCharge(p, chargeMk, montant);
         detailCharge.push({ etage: 1, deal: deal.id, nom: deal.nom, partner: p, montant, dateCharge: chargeMk, dateDecaissement: decaissementMk, statut });
       }
