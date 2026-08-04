@@ -8389,6 +8389,21 @@ app.get('/api/primes/sync-status', async (_req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Etat d'avancement des primes (charge) : par associe, par deal, total, avec statuts. Lecture seule.
+app.get('/api/primes/avancement', async (_req, res) => {
+  try {
+    const nowIso = new Date().toISOString();
+    const { detailCharge, participants, reconciliation } = await computePrimesChargeSchedule(nowIso);
+    const total = { verse: 0, du: 0, aVenir: 0, provisoire: 0, total: 0 };
+    for (const p of Object.keys(reconciliation)) {
+      for (const k of ['verse', 'du', 'aVenir', 'provisoire', 'total']) total[k] += reconciliation[p][k];
+    }
+    res.json({ parAssocie: reconciliation, parDeal: detailCharge, total, participants });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Cascade "factuelle" (CA facturé -> résultat -> IS -> crédit -> impôt net) d'une année.
 // Miroir de la branche factuelle de /api/ebe (mêmes formules, mêmes briques), extrait pour être
 // réutilisé par la trésorerie (remboursement du crédit d'impôt en N+1). Si /api/ebe évolue, garder aligné.
