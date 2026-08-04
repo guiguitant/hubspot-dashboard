@@ -21,6 +21,10 @@ const gsheets = require('./utils/googleSheets');
 const primesMap = require('./utils/primesSheetMap');
 const cron = require('node-cron');
 const MASSE_TAB = 'Masse_salariale';
+// Sous-categorie Qonto dediee aux virements de primes commerciales (a categoriser dans Qonto).
+// Les transactions de cette sous-categorie sont retirees du reel : la charge des primes vient
+// toujours du calcul (mois de charge), jamais du mois de decaissement bancaire.
+const PRIMES_QONTO_SUBCAT = process.env.PRIMES_QONTO_SUBCAT || 'Primes commerciales';
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
@@ -8003,8 +8007,9 @@ async function computeChargesHybride(start, end) {
       const catMap = {};
       const subCatMap = {};
       for (const tx of txsN) {
-        const cat = (tx.cashflow_category && tx.cashflow_category.name) || tx.category || 'Non catégorisé';
         const sousCat = (tx.cashflow_subcategory && tx.cashflow_subcategory.name) || null;
+        if (sousCat === PRIMES_QONTO_SUBCAT) continue; // primes retirees du reel (portees par le calcul)
+        const cat = (tx.cashflow_category && tx.cashflow_category.name) || tx.category || 'Non catégorisé';
         catMap[cat] = (catMap[cat] || 0) + tx.amount;
         const subKey = sousCat ? `${cat}||${sousCat}` : `${cat}||`;
         if (!subCatMap[subKey]) subCatMap[subKey] = { categorie: cat, sousCat, montant: 0 };
