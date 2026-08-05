@@ -1,5 +1,7 @@
 # Spec · Write-back des primes vers Google Sheets
 
+> REMPLACÉ le 2026-08-02 par `2026-08-02-primes-charge-decaissement-decouplage-design.md` (découplage charge/décaissement, réel figé, état d'avancement). Conservé pour historique.
+
 **Date** : 2026-07-31
 **Statut** : **LIVRÉ** (branche `feat/prime-kpi-cr-tresorerie`)
 **Amont** : suite des phases primes (`2026-07-30-prime-kpi-compte-resultat-design.md`,
