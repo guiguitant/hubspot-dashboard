@@ -669,6 +669,31 @@ describe('computePrimePayments : echeancier des versements de primes', () => {
     expect(r.byMonth['2026-09']).toBeUndefined();                   // aucun decaissement
   });
 
+  it('provision : la meme provision (deal jamais facture) glisse avec `now`, quelle que soit l\'annee de signature -> l\'appelant DOIT filtrer par exercice courant', () => {
+    // Deal signe en 2025, jamais facture. computePrimePayments EST appele avec year: 2025 (l'annee de
+    // signature, comme le fait la boucle multi-exercice de server.js::computePrimesChargeSchedule), mais
+    // le plancher de charge (floorChargeKey) est calcule depuis `now`, pas depuis `year`. Consequence :
+    // si on rejoue ce meme calcul chaque annee (exercice 2026 puis 2027) sans filtrer sur l'annee de
+    // signature, la MEME provision retombe a chaque fois dans le prefixe de l'exercice courant -> elle
+    // serait chargee plusieurs fois. C'est exactement pourquoi server.js ne retient les entrees
+    // 'provisoire' que pour y === currentYear (les millesimes N-2/N-1 sont ecartes).
+    const deal = dealT1({ dateSignature: '2025-02-01', dateFactureAcompte: null });
+    const rExercice2026 = computePrimePayments({ missions: [deal], splits: [], config: cfg, year: 2025, caFacture: 0, versements: [], now: '2026-08-10', participants: ['Vincent'] });
+    const eExercice2026 = rExercice2026.detailCharge.find(d => d.deal === 'a');
+    expect(eExercice2026.statut).toBe('provisoire');
+    expect(eExercice2026.dateCharge).toBe('2026-09'); // plancher T3 de l'exercice 2026 (now)
+
+    const rExercice2027 = computePrimePayments({ missions: [deal], splits: [], config: cfg, year: 2025, caFacture: 0, versements: [], now: '2027-08-10', participants: ['Vincent'] });
+    const eExercice2027 = rExercice2027.detailCharge.find(d => d.deal === 'a');
+    expect(eExercice2027.statut).toBe('provisoire');
+    expect(eExercice2027.dateCharge).toBe('2027-09'); // plancher T3 de l'exercice 2027 (now) : re-provisionnee
+
+    // La meme provision (meme deal, jamais facture) est donc "chargee" dans les deux exercices si rien
+    // ne filtre sur l'annee de signature : preuve que le filtre vit forcement chez l'appelant.
+    expect(rExercice2026.byPartnerMonthCharge.Vincent['2026-09']).toBe(9000);
+    expect(rExercice2027.byPartnerMonthCharge.Vincent['2027-09']).toBe(9000);
+  });
+
   it('charge etage 2 : datee en decembre N (provisoire), decaissement en mars N+1', () => {
     const r = computePrimePayments({ missions: [], splits: [], config: cfg, year: 2026, caFacture: 660000, versements: [], now: '2026-07-15', participants: ['Vincent', 'Guillaume', 'Nathan'] });
     expect(r.byMonthCharge['2026-12']).toBe(10500);              // charge dec N

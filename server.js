@@ -8042,6 +8042,27 @@ async function computeChargesHybride(start, end) {
     // charges, on continue avec une réinjection nulle.
     if (hasReal) {
       try {
+        // La catégorie GSheet .Primes porte AUSSI les primes des CDI (Arthur, Thomas, Evane...), à côté
+        // des trois associés (Vincent, Guillaume, Nathan). Qonto n'exclut du réel que la sous-catégorie
+        // "Primes commerciales" (PRIMES_QONTO_SUBCAT) : une prime CDI reste donc dans le réel bancaire.
+        // Si on réinjectait TOUTE la catégorie .Primes ici, la prime d'un CDI serait comptée deux fois
+        // dès la clôture du mois qui la porte (une fois par la banque, une fois par cette réinjection).
+        // On ne réinjecte donc QUE les lignes des associés, c'est-à-dire exactement celles qu'écrit le
+        // write-back (syncPrimesToSheet) : même règle de participants (primeParticipantsForYear), pour
+        // que "ce qui est réinjecté" reste toujours aligné avec "ce que le write-back a écrit".
+        const [splitRowsReinj, objRowsReinj] = await Promise.all([
+          supabase.from('kpi_ca_split').select('*'),
+          supabase.from('kpi_objectives').select('*'),
+        ]);
+        const missionsReinj = await fetchAllNotionMissions();
+        const kpiRefReinj = computeKpi({
+          missions: missionsReinj,
+          objectives: (objRowsReinj && objRowsReinj.data) || [],
+          splits: (splitRowsReinj && splitRowsReinj.data) || [],
+          year: now.getFullYear(),
+        });
+        const primesParticipants = primeParticipantsForYear(kpiRefReinj);
+
         const masse = await fetchAndParseMasseSalarialeDetailed();
         let primesReinjectionTotal = 0;
         for (const [mKey, slot] of Object.entries(masse.byMonth || {})) {
@@ -8053,7 +8074,10 @@ async function computeChargesHybride(start, end) {
           // mais la condition est écrite explicitement ici plutôt que supposée.
           if (mKey < startKey || mKey > realEndKey) continue;
           let primeMois = 0;
-          for (const emp of (slot.detail || [])) primeMois += (emp.prime || 0);
+          for (const emp of (slot.detail || [])) {
+            if (!primesParticipants.includes(emp.nom)) continue; // exclut les primes CDI
+            primeMois += (emp.prime || 0);
+          }
           if (primeMois === 0) continue;
           chargesParMoisN[mKey] = (chargesParMoisN[mKey] || 0) + primeMois;
           primesReinjectionTotal += primeMois;
@@ -8343,19 +8367,26 @@ async function computePrimesChargeSchedule(nowIso) {
   for (const y of [currentYear - 2, currentYear - 1, currentYear]) {
     const caFacture = computeBillingForYear(missions, factOverrides, y).total;
     const pay = computePrimePayments({ missions, splits, config, year: y, caFacture, versements: [], now: nowIso, participants });
-    // Charges ECRITES (dateCharge non null) tombant dans l'exercice courant -> byPartnerMonthCharge.
-    for (const [partner, months] of Object.entries(pay.byPartnerMonthCharge || {})) {
-      const dst = floatByPartnerMonth[partner] = floatByPartnerMonth[partner] || {};
-      for (const [mk, amt] of Object.entries(months)) {
-        if (!mk.startsWith(currentPrefix)) continue;
-        dst[mk] = (dst[mk] || 0) + amt;
-      }
-    }
     // Detail par deal (toutes entrees, y compris provisions et 'du') dont la charge concerne N.
     // dateCharge n'est plus jamais null (R4) : le filtre porte uniquement sur son prefixe d'annee.
+    // Provisions (statut 'provisoire') : la charge est posee au plancher de l'exercice COURANT REEL
+    // (floorChargeKey derive de `now`, pas de l'annee de signature y) -> a chaque appel ulterieur de
+    // cette fonction (annee suivante), la meme provision retomberait a nouveau dans currentPrefix pour
+    // le millesime de signature y = currentYear-2/-1, la comptant plusieurs fois (une fois par exercice
+    // tant que le deal reste non facture). On ne retient donc les provisions QUE pour le millesime de
+    // signature correspondant a l'exercice courant (y === currentYear) : une prime dont le deal n'est
+    // toujours pas facture apres la cloture de son exercice de signature sera chargee le jour de sa
+    // facturation (statut 'du'/'a_venir', regle R2), jamais reprovisionnee dans les exercices suivants.
+    // byPartnerMonthCharge est reconstruit A PARTIR de detailCharge (et non de pay.byPartnerMonthCharge)
+    // pour garantir que les deux restent exactement coherents (chaque entree detailCharge correspond a
+    // un seul addCharge dans computePrimePayments, cf kpiCompute.js).
     for (const e of pay.detailCharge || []) {
       const inYear = e.dateCharge && e.dateCharge.startsWith(currentPrefix);
-      if (inYear) detailCharge.push(e);
+      if (!inYear) continue;
+      if (e.statut === 'provisoire' && y !== currentYear) continue;
+      detailCharge.push(e);
+      const dst = floatByPartnerMonth[e.partner] = floatByPartnerMonth[e.partner] || {};
+      dst[e.dateCharge] = (dst[e.dateCharge] || 0) + e.montant;
     }
   }
 
@@ -8448,11 +8479,22 @@ app.get('/api/primes/avancement', async (_req, res) => {
     for (const p of Object.keys(reconciliation)) {
       for (const k of ['verse', 'du', 'aVenir', 'provisoire', 'total']) total[k] += reconciliation[p][k];
     }
-    // Arrondi a l'entier pour l'affichage uniquement (parAssocie/total sont deja des entiers
-    // reconcilies) : ne modifie pas detailCharge en amont, qui reste la source de verite flottante
-    // utilisee pour la reconciliation (evite un ecart d'1 euro visible entre le detail par deal et
-    // les totaux par associe sur l'ecran de suivi).
-    const parDeal = detailCharge.map(e => ({ ...e, montant: Math.round(e.montant) }));
+    // Arrondi a l'entier pour l'affichage uniquement, EN PRESERVANT LA SOMME PAR ASSOCIE (meme methode,
+    // primesMap.roundPreservingSum, que celle utilisee pour parAssocie/byPartnerMonthCharge) : un
+    // Math.round ligne par ligne (ancien code) desynchronise la somme du detail par rapport au total
+    // reconcilie (mesure : Guillaume 3323 en detail vs 3322 en total). Cles uniques par ligne (l'index
+    // dans detailCharge) regroupees par associe, pour que la somme des lignes d'un associe tombe
+    // exactement sur son total affiche. Ne modifie pas detailCharge en amont, qui reste la source de
+    // verite flottante utilisee pour la reconciliation.
+    const floatsByPartner = {};
+    detailCharge.forEach((e, i) => {
+      (floatsByPartner[e.partner] = floatsByPartner[e.partner] || {})[i] = e.montant;
+    });
+    const roundedByIndex = {};
+    for (const floats of Object.values(floatsByPartner)) {
+      Object.assign(roundedByIndex, primesMap.roundPreservingSum(floats));
+    }
+    const parDeal = detailCharge.map((e, i) => ({ ...e, montant: roundedByIndex[i] }));
     res.json({ parAssocie: reconciliation, parDeal, total, participants });
   } catch (e) {
     res.status(500).json({ error: e.message });
