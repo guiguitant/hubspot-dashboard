@@ -64,6 +64,17 @@ function assertPartners(layout, expected) {
   if (missing.length) throw new Error('Associe(s) introuvable(s) dans .Primes : ' + missing.join(', '));
 }
 
+// Clef plancher 'YYYY-01' du DEBUT DE L'EXERCICE de nowIso (pas le mois courant). Pourquoi : le
+// plancher de charge (floorChargeKey, cf kpiCompute.js) glisse de trimestre en trimestre ; si on
+// figeait au mois courant, la cellule du trimestre precedent garderait sa valeur obsolete (jamais
+// remise a 0) pendant que la meme charge est reecrite au trimestre suivant, d'ou un double compte.
+// Derive l'annee de la meme facon que l'appelant (server.js::syncPrimesToSheet) : ne change rien au
+// comportement, rend seulement la derivation testable independamment de server.js.
+function primesFloorKey(nowIso) {
+  const currentYear = new Date(nowIso).getFullYear();
+  return currentYear + '-01';
+}
+
 // Construit les ecritures. Pour chaque associe (ligne connue) et chaque mois present dans la grille
 // avec mk >= floorKey, ecrit la valeur de byPartnerMonth ou 0 (remise a zero des primes obsoletes).
 // floorKey = DEBUT DE L'EXERCICE COURANT ('YYYY-01'), pas le mois courant. Pourquoi : le plancher de
@@ -102,4 +113,4 @@ function roundPreservingSum(values) {
   return out;
 }
 
-module.exports = { colToLetter, parseMonthHeader, discoverLayout, assertPartners, buildUpdates, roundPreservingSum };
+module.exports = { colToLetter, parseMonthHeader, discoverLayout, assertPartners, buildUpdates, roundPreservingSum, primesFloorKey };

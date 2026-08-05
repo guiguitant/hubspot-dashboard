@@ -8402,11 +8402,9 @@ async function writePrimesSyncState(state) {
 // PRIMES_SYNC_DRYRUN=1 : lit et decouvre mais n'ecrit pas (validation avant premiere ecriture reelle).
 async function syncPrimesToSheet() {
   const nowIso = new Date().toISOString();
-  // Figement au debut de l'exercice courant (pas au mois courant) : le plancher de charge glisse de
-  // trimestre en trimestre, donc TOUS les mois de l'exercice doivent etre reecrits a chaque run pour
-  // remettre a 0 la cellule du trimestre precedent (sinon double compte, cf C1 / commentaire buildUpdates).
-  const currentYear = new Date(nowIso).getFullYear();
-  const floorKey = currentYear + '-01';
+  // Figement au debut de l'exercice courant (pas au mois courant), cf primesMap.primesFloorKey pour
+  // le pourquoi (plancher de charge glissant de trimestre en trimestre -> double compte sinon, C1).
+  const floorKey = primesMap.primesFloorKey(nowIso);
   try {
     const { byPartnerMonthCharge, participants, reconciliation } = await computePrimesChargeSchedule(nowIso);
     const grid = await gsheets.readGrid(GOOGLE_SHEET_ID, MASSE_TAB, 'A1:BZ300');
