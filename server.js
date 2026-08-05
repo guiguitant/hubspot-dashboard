@@ -8031,6 +8031,51 @@ async function computeChargesHybride(start, end) {
       realTotal = realVentilation.reduce((s, v) => s + v.montant, 0);
     }
 
+    // --- Réinjection de la charge des primes (fenêtre RÉELLE uniquement) ---
+    // Qonto exclut désormais les virements de primes du réel (Option B, PRIMES_QONTO_SUBCAT, cf boucles
+    // ci-dessus) : cette charge n'y figure plus. Pour les mois clos, on la relit depuis le GSheet
+    // Masse_salariale (catégorie .Primes) : c'est la vérité historique figée au bon mois de rattachement,
+    // celle-là même qu'écrit le write-back et que la formule tableur .Primes -> CR_Prev utilise pour les
+    // mois ouverts (fenêtre prévisionnelle). Sans cette réinjection, un exercice ENTIÈREMENT clos (aucun
+    // mois prévisionnel, CR_Prev jamais lu) perdrait totalement la charge des primes.
+    // Tolérance : un échec de lecture du Sheet (réseau, credentials) ne fait pas tomber le calcul des
+    // charges, on continue avec une réinjection nulle.
+    if (hasReal) {
+      try {
+        const masse = await fetchAndParseMasseSalarialeDetailed();
+        let primesReinjectionTotal = 0;
+        for (const [mKey, slot] of Object.entries(masse.byMonth || {})) {
+          // Garde-fou anti-double-compte (le point critique de cette tâche) : on ne réinjecte QUE pour
+          // les mois de la fenêtre RÉELLE (mk >= startKey && mk <= realEndKey). Les mois de la fenêtre
+          // PRÉVISIONNELLE (mk >= prevStartKey && mk <= endKey) reçoivent DÉJÀ la charge des primes via
+          // CR_Prev (formule .Primes -> CR_Prev) : les réinjecter là aussi compterait la charge deux
+          // fois. Les deux fenêtres ne se chevauchent jamais par construction (realEndKey < prevStartKey),
+          // mais la condition est écrite explicitement ici plutôt que supposée.
+          if (mKey < startKey || mKey > realEndKey) continue;
+          let primeMois = 0;
+          for (const emp of (slot.detail || [])) primeMois += (emp.prime || 0);
+          if (primeMois === 0) continue;
+          chargesParMoisN[mKey] = (chargesParMoisN[mKey] || 0) + primeMois;
+          primesReinjectionTotal += primeMois;
+        }
+        if (primesReinjectionTotal > 0) {
+          realTotal += primesReinjectionTotal;
+          // Rattachées aux "Frais de personnel" (même catégorie mère que Salaires nets / Charges soci.),
+          // cohérent avec CR_Prev qui les y range déjà (cf fetchAndParseCRPrev, sous-catégorie "Primes").
+          const feEntry = realVentilation.find(v => v.categorie === 'Frais de personnel');
+          if (feEntry) feEntry.montant += primesReinjectionTotal;
+          else realVentilation.push({ categorie: 'Frais de personnel', montant: primesReinjectionTotal });
+
+          const primeSubEntry = realSubVentilation.find(v => v.categorie === 'Frais de personnel' && v.sousCat === 'Primes');
+          if (primeSubEntry) primeSubEntry.montant += primesReinjectionTotal;
+          else realSubVentilation.push({ categorie: 'Frais de personnel', sousCat: 'Primes', montant: primesReinjectionTotal });
+        }
+      } catch (e) {
+        console.error('[charges-hybride] échec lecture GSheet Masse_salariale pour réinjection primes :', e.message);
+        // Tolérance : réinjection nulle (aucun ajout), le calcul des charges continue normalement.
+      }
+    }
+
     // --- Partie prévisionnelle (GSheet) ---
     let prevTotal = 0;
     let chargesGSheetParMois = {};
