@@ -4344,6 +4344,40 @@
       #kpiPrime table.prime-recap td:first-child { text-align:left; font-weight:600; }
       #kpiPrime table.prime-recap td.tot { font-weight:750; }
       #kpiPrime table.prime-recap tr.grand td { border-top:2px solid var(--border); font-weight:750; }
+      /* État d'avancement (décaissements de primes) : bandeau récap, badges de statut, filtres/tri "Par deal" */
+      #kpiPrime .prime-adv-total { display:flex; align-items:baseline; gap:.6rem; flex-wrap:wrap; margin-bottom:.9rem; }
+      #kpiPrime .prime-adv-total-val { font-size:2.1rem; font-weight:800; color:var(--text); line-height:1; }
+      #kpiPrime .prime-adv-total-lab { font-size:.82rem; color:var(--text-secondary); }
+      #kpiPrime .prime-adv-bar { display:flex; height:14px; border-radius:999px; overflow:hidden; background:var(--hover); margin-bottom:.9rem; }
+      #kpiPrime .prime-adv-bar-seg { height:100%; transition:width .25s ease; }
+      #kpiPrime .prime-adv-bar-seg + .prime-adv-bar-seg { border-left:2px solid var(--card); }
+      #kpiPrime .prime-adv-bar-seg.verse { background:var(--success); }
+      #kpiPrime .prime-adv-bar-seg.du { background:var(--warning); }
+      #kpiPrime .prime-adv-bar-seg.aVenir { background:var(--text-secondary); }
+      #kpiPrime .prime-adv-bar-seg.provisoire { background:var(--text-light); }
+      #kpiPrime .prime-adv-legend { display:flex; flex-wrap:wrap; gap:.6rem 1.4rem; }
+      #kpiPrime .prime-adv-legend-item { display:flex; align-items:baseline; gap:.45rem; }
+      #kpiPrime .prime-adv-dot { width:9px; height:9px; border-radius:50%; flex:0 0 auto; display:inline-block; }
+      #kpiPrime .prime-adv-dot.verse { background:var(--success); }
+      #kpiPrime .prime-adv-dot.du { background:var(--warning); }
+      #kpiPrime .prime-adv-dot.aVenir { background:var(--text-secondary); }
+      #kpiPrime .prime-adv-dot.provisoire { background:var(--text-light); }
+      #kpiPrime .prime-adv-legend-lab { font-size:.78rem; color:var(--text-secondary); }
+      #kpiPrime .prime-adv-legend-val { font-size:.92rem; font-weight:700; color:var(--text); }
+      #kpiPrime .prime-adv-legend-pct { font-size:.72rem; color:var(--text-light); }
+      #kpiPrime .prime-adv-foot { margin:.9rem 0 0; font-size:.8rem; color:var(--text-secondary); line-height:1.5; }
+      #kpiPrime .prime-adv-badge { display:inline-block; padding:.14rem .5rem; border-radius:var(--radius); font-size:.72rem; font-weight:650; white-space:nowrap; }
+      #kpiPrime .prime-adv-badge.verse { background:var(--success-bg); color:var(--success); }
+      #kpiPrime .prime-adv-badge.du { background:var(--warning-bg); color:var(--warning); }
+      #kpiPrime .prime-adv-badge.aVenir { background:var(--hover); color:var(--text-secondary); }
+      #kpiPrime .prime-adv-badge.provisoire { background:var(--bg-secondary); color:var(--text-light); border:1px dashed var(--border); font-style:italic; }
+      #kpiPrime .prime-adv-filters { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; margin-bottom:.8rem; }
+      #kpiPrime .prime-adv-filters input[type="text"] { padding:.3rem .55rem; border:1px solid var(--border); border-radius:var(--radius); background:var(--bg); color:var(--text); font-family:inherit; font-size:.8rem; outline:none; min-width:170px; }
+      #kpiPrime .prime-adv-filters input[type="text"]:focus { border-color:var(--primary); }
+      #kpiPrime .prime-adv-count { font-size:.78rem; color:var(--text-secondary); margin-left:auto; white-space:nowrap; }
+      #kpiPrime table.prime-recap th.sortable { cursor:pointer; user-select:none; }
+      #kpiPrime table.prime-recap th.sortable:hover { color:var(--text); }
+      #kpiPrime table.prime-recap th.sorted { color:var(--primary); }
       /* Jauge */
       #kpiPrime .prime-gauge-top { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:.7rem; }
       #kpiPrime .prime-gauge-figure { font-size:1.5rem; font-weight:750; color:var(--text); }
@@ -11454,6 +11488,10 @@
     let primeParticipants = [];          // noms des partners commerciaux pris en compte
     let primeView = 'table';             // 'table' | 'advancement' : sous-onglet actif de la section KPI primes
     let _primeSaveTimer = null;
+    // --- Vue "État d'avancement" (décaissements) : état de filtres/tri, survit au re-rendu de la section ---
+    let primeAdvData = null;                                   // dernière réponse de /api/primes/avancement, en cache mémoire (filtrage/tri sans refetch réseau)
+    let primeAdvFilters = { partner: '', statut: '', q: '' };  // '' = "Tous" / pas de recherche texte
+    let primeAdvSort = { col: null, dir: 'asc' };               // colonne triée du tableau "Par deal" ; col=null → ordre reçu de l'API
 
     function primeFmtEur(n) { return (Math.round(n) || 0).toLocaleString('fr-FR') + ' €'; }
     function primeFmtPct(n) { return (Math.round((Number(n) || 0) * 100) / 100).toString().replace('.', ',') + ' %'; }
@@ -11465,6 +11503,21 @@
     }
     function primeEsc(s) {
       return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+    // Identité visuelle stable des 4 statuts de décaissement de prime, réutilisée partout (bandeau récap,
+    // table "Par associé", badges "Par deal") : versé = déjà payé (succès) · dû = charge passée mais pas
+    // encore décaissée, en retard (alerte) · à venir = décaissement futur déjà planifié (neutre) · provisoire
+    // = estimation non figée (atténué). Les classes CSS associées (.prime-adv-*) sont dans le <style> du bloc.
+    const PRIME_STATUT_META = {
+      verse: { label: 'Versé' }, du: { label: 'Dû' }, aVenir: { label: 'À venir' }, provisoire: { label: 'Provisoire' },
+    };
+    const PRIME_STATUT_ORDER = ['verse', 'du', 'aVenir', 'provisoire'];
+    // Normalise la clé de statut d'un deal ('a_venir', snake_case côté API pour cette seule valeur) vers la clé camelCase commune ci-dessus.
+    function primeStatutKey(s) { return s === 'a_venir' ? 'aVenir' : s; }
+    function primeStatutBadge(s) {
+      const key = primeStatutKey(s);
+      const m = PRIME_STATUT_META[key];
+      return '<span class="prime-adv-badge ' + (m ? key : '') + '">' + (m ? m.label : primeEsc(s)) + '</span>';
     }
     // Clé de rapprochement par prénom normalisé (minuscule, sans accent, 1er token).
     function primeNameKey(s) {
@@ -11586,54 +11639,192 @@
     }
 
     // Vue « État d'avancement » : suivi des décaissements de primes (versé / dû / à venir / provisoire).
+    // Le fetch alimente le cache mémoire primeAdvData ; tout le filtrage/tri se fait ensuite en local (primeAdvRenderAll / primeAdvRenderDealTable).
     async function renderPrimeAdvancement() {
       const el = document.getElementById('kpiPrimeAdvancement');
       if (!el) return;
       el.innerHTML = '<div class="prime-card"><p style="margin:0;color:var(--text-secondary)">Chargement…</p></div>';
-      let data;
       try {
         const res = await fetch('/api/primes/avancement');
         if (!res.ok) throw new Error('HTTP ' + res.status);
-        data = await res.json();
+        primeAdvData = await res.json();
       } catch (e) {
+        primeAdvData = null;
         el.innerHTML = '<div class="prime-card"><p style="margin:0;color:var(--danger)">Erreur de chargement du suivi.</p></div>';
         return;
       }
-      const deals = (data && data.parDeal) || [];
+      primeAdvRenderAll();
+    }
+
+    // Colonnes du tableau "Par deal" : source unique pour l'alignement (même text-align sur <th> et <td>) et pour le tri par colonne.
+    const PRIME_ADV_DEAL_COLUMNS = [
+      { key: 'nom',              label: 'Deal',         align: 'left',  sort: d => (d.nom || (d.etage === 2 ? 'Prime collective' : 'Sans nom')).toLowerCase() },
+      { key: 'partner',          label: 'Associé',      align: 'left',  sort: d => (d.partner || '').toLowerCase() },
+      { key: 'montant',          label: 'Montant',      align: 'right', sort: d => Number(d.montant) || 0 },
+      { key: 'dateCharge',       label: 'Charge',       align: 'right', sort: d => d.dateCharge || '' },
+      { key: 'dateDecaissement', label: 'Décaissement', align: 'right', sort: d => d.dateDecaissement || '' },
+      { key: 'statut',           label: 'Statut',       align: 'left',  sort: d => primeStatutKey(d.statut) },
+    ];
+
+    // Reconstruit les 3 blocs (bandeau récap, "Par associé", "Par deal") depuis le cache primeAdvData.
+    // Appelé après chaque fetch. Les filtres/tri en cours (variables de module) sont ré-appliqués automatiquement.
+    function primeAdvRenderAll() {
+      const el = document.getElementById('kpiPrimeAdvancement');
+      if (!el || !primeAdvData) return;
+      const deals = primeAdvData.parDeal || [];
       if (!deals.length) {
         el.innerHTML = '<div class="prime-card"><p style="margin:0;color:var(--text-secondary)">Aucune prime à suivre pour cette année.</p></div>';
         return;
       }
-      const LABELS = { verse: 'Versé', du: 'Dû', aVenir: 'À venir', provisoire: 'Provisoire' };
-      // Total (bandeau)
-      const t = data.total || { verse: 0, du: 0, aVenir: 0, provisoire: 0, total: 0 };
-      let html = '<div class="prime-card"><p class="prime-card-h">Suivi des décaissements de primes</p>'
-        + '<div style="display:flex;flex-wrap:wrap;gap:0.8rem">'
-        + ['verse', 'du', 'aVenir', 'provisoire'].map(k =>
-            '<div><div style="font-size:0.72rem;color:var(--text-secondary)">' + LABELS[k] + '</div><div style="font-weight:700">' + primeFmtEur(t[k]) + '</div></div>'
-          ).join('')
-        + '<div><div style="font-size:0.72rem;color:var(--text-secondary)">Total</div><div style="font-weight:700">' + primeFmtEur(t.total) + '</div></div>'
-        + '</div></div>';
-      // Par associé
-      const pa = data.parAssocie || {};
+
+      // --- Bandeau "Suivi des décaissements" : total dominant + barre de répartition segmentée + légende + explication ---
+      const t = primeAdvData.total || { verse: 0, du: 0, aVenir: 0, provisoire: 0, total: 0 };
+      const totalAll = t.total || (t.verse + t.du + t.aVenir + t.provisoire) || 0;
+      const pct = k => totalAll > 0 ? Math.round((t[k] || 0) / totalAll * 100) : 0;
+      const bar = PRIME_STATUT_ORDER.filter(k => (t[k] || 0) > 0).map(k =>
+          '<span class="prime-adv-bar-seg ' + k + '" style="width:' + pct(k) + '%" title="' + PRIME_STATUT_META[k].label + ' · ' + pct(k) + ' %"></span>'
+        ).join('') || '<span class="prime-adv-bar-seg aVenir" style="width:100%"></span>';
+      const legend = PRIME_STATUT_ORDER.map(k =>
+        '<div class="prime-adv-legend-item">'
+        + '<span class="prime-adv-dot ' + k + '"></span>'
+        + '<span class="prime-adv-legend-lab">' + PRIME_STATUT_META[k].label + '</span>'
+        + '<span class="prime-adv-legend-val">' + primeFmtEur(t[k]) + '</span>'
+        + '<span class="prime-adv-legend-pct">' + pct(k) + ' %</span>'
+        + '</div>'
+      ).join('');
+      let html = '<div class="prime-card">'
+        + '<p class="prime-card-h">Suivi des décaissements de primes</p>'
+        + '<div class="prime-adv-total"><div class="prime-adv-total-val">' + primeFmtEur(totalAll) + '</div><div class="prime-adv-total-lab">Total des primes de l\'exercice</div></div>'
+        + '<div class="prime-adv-bar">' + bar + '</div>'
+        + '<div class="prime-adv-legend">' + legend + '</div>'
+        + '<p class="prime-adv-foot">Versé : déjà payé. Dû : la charge est passée mais pas encore décaissée (retard de versement). À venir : décaissement déjà planifié. Provisoire : estimation, montant pas encore figé.</p>'
+        + '</div>';
+
+      // --- Par associé (mêmes couleurs de statut que le bandeau, via un point avant chaque en-tête) ---
+      const pa = primeAdvData.parAssocie || {};
       html += '<div class="prime-card"><p class="prime-card-h">Par associé</p><table class="prime-recap"><thead><tr>'
-        + '<th style="text-align:left">Associé</th><th style="text-align:right">Versé</th><th style="text-align:right">Dû</th><th style="text-align:right">À venir</th><th style="text-align:right">Provisoire</th><th style="text-align:right">Total</th></tr></thead><tbody>'
+        + '<th style="text-align:left">Associé</th>'
+        + PRIME_STATUT_ORDER.map(k => '<th style="text-align:right"><span class="prime-adv-dot ' + k + '" style="margin-right:.35rem"></span>' + PRIME_STATUT_META[k].label + '</th>').join('')
+        + '<th style="text-align:right">Total</th></tr></thead><tbody>'
         + Object.keys(pa).map(p => {
             const r = pa[p];
-            return '<tr><td>' + primeEsc(p) + '</td><td style="text-align:right">' + primeFmtEur(r.verse) + '</td><td style="text-align:right">' + primeFmtEur(r.du) + '</td><td style="text-align:right">' + primeFmtEur(r.aVenir) + '</td><td style="text-align:right">' + primeFmtEur(r.provisoire) + '</td><td class="tot" style="text-align:right">' + primeFmtEur(r.total) + '</td></tr>';
+            return '<tr><td style="text-align:left">' + primeEsc(p) + '</td>'
+              + PRIME_STATUT_ORDER.map(k => '<td style="text-align:right">' + primeFmtEur(r[k]) + '</td>').join('')
+              + '<td class="tot" style="text-align:right">' + primeFmtEur(r.total) + '</td></tr>';
           }).join('')
         + '</tbody></table></div>';
-      // Par deal
-      html += '<div class="prime-card"><p class="prime-card-h">Par deal</p><table class="prime-recap"><thead><tr>'
-        + '<th style="text-align:left">Deal</th><th style="text-align:left">Associé</th><th style="text-align:right">Montant</th><th style="text-align:left">Charge</th><th style="text-align:left">Décaissement</th><th style="text-align:left">Statut</th></tr></thead><tbody>'
-        + deals.map(d =>
-            '<tr><td>' + primeEsc(d.nom || (d.etage === 2 ? 'Prime collective' : 'Sans nom')) + '</td><td>' + primeEsc(d.partner) + '</td>'
-            + '<td style="text-align:right">' + primeFmtEur(d.montant) + '</td>'
-            + '<td>' + d.dateCharge + '</td><td>' + (d.dateDecaissement || '-') + '</td>'
-            + '<td>' + (LABELS[d.statut === 'a_venir' ? 'aVenir' : d.statut] || d.statut) + '</td></tr>'
-          ).join('')
-        + '</tbody></table></div>';
+
+      // --- Par deal : carte + barre de filtres (rendue une fois) + zone tableau (re-rendue seule sur filtre/tri, sans refetch) ---
+      const partnerOpts = (primeAdvData.participants && primeAdvData.participants.length)
+        ? primeAdvData.participants
+        : Array.from(new Set(deals.map(d => d.partner).filter(Boolean)));
+      html += '<div class="prime-card"><p class="prime-card-h">Par deal</p>'
+        + '<div class="prime-adv-filters">'
+        + '<select class="notion-select" id="primeAdvFilterPartner" onchange="primeAdvSetFilter(\'partner\', this.value)">'
+        +   '<option value="">Tous les associés</option>'
+        +   partnerOpts.map(p => '<option value="' + primeEsc(p) + '"' + (primeAdvFilters.partner === p ? ' selected' : '') + '>' + primeEsc(p) + '</option>').join('')
+        + '</select>'
+        + '<select class="notion-select" id="primeAdvFilterStatut" onchange="primeAdvSetFilter(\'statut\', this.value)">'
+        +   '<option value="">Tous les statuts</option>'
+        +   PRIME_STATUT_ORDER.map(k => '<option value="' + k + '"' + (primeAdvFilters.statut === k ? ' selected' : '') + '>' + PRIME_STATUT_META[k].label + '</option>').join('')
+        + '</select>'
+        + '<input type="text" id="primeAdvFilterSearch" placeholder="Rechercher un deal…" value="' + primeEsc(primeAdvFilters.q) + '" oninput="primeAdvSetFilter(\'q\', this.value)">'
+        + '<span class="prime-adv-count" id="primeAdvCount"></span>'
+        + '</div>'
+        + '<div id="primeAdvDealWrap"></div>'
+        + '</div>';
+
       el.innerHTML = html;
+      primeAdvRenderDealTable();
+    }
+
+    // Applique filtres (associé / statut / recherche texte) + tri en mémoire sur primeAdvData.parDeal. Aucun appel réseau.
+    function primeAdvFilteredDeals() {
+      const deals = (primeAdvData && primeAdvData.parDeal) || [];
+      const { partner, statut, q } = primeAdvFilters;
+      const needle = (q || '').trim().toLowerCase();
+      let rows = deals.filter(d => {
+        if (partner && d.partner !== partner) return false;
+        if (statut && primeStatutKey(d.statut) !== statut) return false;
+        if (needle) {
+          const nom = (d.nom || (d.etage === 2 ? 'Prime collective' : 'Sans nom')).toLowerCase();
+          if (!nom.includes(needle)) return false;
+        }
+        return true;
+      });
+      if (primeAdvSort.col) {
+        const col = PRIME_ADV_DEAL_COLUMNS.find(c => c.key === primeAdvSort.col);
+        if (col) {
+          rows = rows.slice().sort((a, b) => {
+            const va = col.sort(a), vb = col.sort(b);
+            return va < vb ? -1 : va > vb ? 1 : 0;
+          });
+          if (primeAdvSort.dir === 'desc') rows.reverse();
+        }
+      }
+      return rows;
+    }
+
+    // Change un filtre du tableau "Par deal" ; ne re-rend QUE la zone du tableau (les <select>/<input> ne sont jamais
+    // recréés pendant la frappe → pas de perte de focus dans le champ de recherche).
+    function primeAdvSetFilter(field, value) {
+      primeAdvFilters[field] = value;
+      primeAdvRenderDealTable();
+    }
+
+    // Tri par colonne au clic sur l'en-tête : 1er clic = ascendant, 2e clic (même colonne) = descendant, clic sur une autre colonne = ascendant.
+    function primeAdvToggleSort(key) {
+      if (primeAdvSort.col === key) primeAdvSort.dir = (primeAdvSort.dir === 'asc') ? 'desc' : 'asc';
+      else { primeAdvSort.col = key; primeAdvSort.dir = 'asc'; }
+      primeAdvRenderDealTable();
+    }
+
+    function primeAdvResetFilters() {
+      primeAdvFilters = { partner: '', statut: '', q: '' };
+      const selP = document.getElementById('primeAdvFilterPartner'); if (selP) selP.value = '';
+      const selS = document.getElementById('primeAdvFilterStatut'); if (selS) selS.value = '';
+      const inpQ = document.getElementById('primeAdvFilterSearch'); if (inpQ) inpQ.value = '';
+      primeAdvRenderDealTable();
+    }
+
+    // Rend uniquement le tableau "Par deal" (en-tête triable + lignes filtrées + compteur) dans #primeAdvDealWrap.
+    function primeAdvRenderDealTable() {
+      const wrap = document.getElementById('primeAdvDealWrap');
+      const countEl = document.getElementById('primeAdvCount');
+      if (!wrap || !primeAdvData) return;
+      const all = primeAdvData.parDeal || [];
+      const rows = primeAdvFilteredDeals();
+
+      if (countEl) {
+        const totalMontant = rows.reduce((s, d) => s + (Number(d.montant) || 0), 0);
+        countEl.textContent = rows.length + ' / ' + all.length + ' ligne' + (all.length > 1 ? 's' : '') + ' · ' + primeFmtEur(totalMontant);
+      }
+
+      if (!rows.length) {
+        wrap.innerHTML = '<p style="color:var(--text-secondary);font-size:.85rem;padding:.6rem 0 0">Aucun résultat pour ces filtres. '
+          + '<a href="#" onclick="primeAdvResetFilters();return false" style="color:var(--primary)">Réinitialiser les filtres</a></p>';
+        return;
+      }
+
+      const head = '<tr>' + PRIME_ADV_DEAL_COLUMNS.map(c => {
+        const sorted = primeAdvSort.col === c.key;
+        const arrow = sorted ? (primeAdvSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+        return '<th class="sortable' + (sorted ? ' sorted' : '') + '" style="text-align:' + c.align + '" onclick="primeAdvToggleSort(\'' + c.key + '\')">' + c.label + arrow + '</th>';
+      }).join('') + '</tr>';
+
+      const body = rows.map(d => {
+        const nom = d.nom || (d.etage === 2 ? 'Prime collective' : 'Sans nom');
+        return '<tr>'
+          + '<td style="text-align:left">' + primeEsc(nom) + '</td>'
+          + '<td style="text-align:left">' + primeEsc(d.partner) + '</td>'
+          + '<td style="text-align:right">' + primeFmtEur(d.montant) + '</td>'
+          + '<td style="text-align:right">' + primeEsc(d.dateCharge) + '</td>'
+          + '<td style="text-align:right">' + primeEsc(d.dateDecaissement || '-') + '</td>'
+          + '<td style="text-align:left">' + primeStatutBadge(d.statut) + '</td>'
+          + '</tr>';
+      }).join('');
+
+      wrap.innerHTML = '<table class="prime-recap"><thead>' + head + '</thead><tbody>' + body + '</tbody></table>';
     }
 
     // Contrôle de couverture : 100% du CA signé est-il rattaché à un partner ? Sinon, montant + missions.
