@@ -11593,6 +11593,7 @@
       let data;
       try {
         const res = await fetch('/api/primes/avancement');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
         data = await res.json();
       } catch (e) {
         el.innerHTML = '<div class="prime-card"><p style="margin:0;color:var(--danger)">Erreur de chargement du suivi.</p></div>';
@@ -11628,7 +11629,7 @@
         + deals.map(d =>
             '<tr><td>' + primeEsc(d.nom || (d.etage === 2 ? 'Prime collective' : 'Sans nom')) + '</td><td>' + primeEsc(d.partner) + '</td>'
             + '<td style="text-align:right">' + primeFmtEur(d.montant) + '</td>'
-            + '<td>' + (d.dateCharge || 'réel') + '</td><td>' + (d.dateDecaissement || '-') + '</td>'
+            + '<td>' + d.dateCharge + '</td><td>' + (d.dateDecaissement || '-') + '</td>'
             + '<td>' + (LABELS[d.statut === 'a_venir' ? 'aVenir' : d.statut] || d.statut) + '</td></tr>'
           ).join('')
         + '</tbody></table></div>';

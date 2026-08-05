@@ -65,13 +65,19 @@ function assertPartners(layout, expected) {
 }
 
 // Construit les ecritures. Pour chaque associe (ligne connue) et chaque mois present dans la grille
-// avec mk >= nowKey (figement du passe), ecrit la valeur de byPartnerMonth ou 0 (remise a zero des
-// primes obsoletes). Retourne { updates: [{ range, value }] }.
-function buildUpdates(layout, byPartnerMonth, tabName, nowKey) {
+// avec mk >= floorKey, ecrit la valeur de byPartnerMonth ou 0 (remise a zero des primes obsoletes).
+// floorKey = DEBUT DE L'EXERCICE COURANT ('YYYY-01'), pas le mois courant. Pourquoi : le plancher de
+// charge (floorChargeKey, cf kpiCompute.js) glisse d'un trimestre a l'autre ; si on figeait au mois
+// courant, la cellule du trimestre precedent (qui portait la charge avant le glissement) ne serait
+// plus jamais reecrite et garderait sa vieille valeur, doublant la charge comptee par CR_Prev a
+// chaque changement de trimestre. En figeant au debut de l'exercice, TOUS les mois de l'exercice
+// courant sont reecrits (valeur ou 0) a chaque run ; seuls les exercices anterieurs restent figes
+// (decembre N-1 protege au passage d'annee). Retourne { updates: [{ range, value }] }.
+function buildUpdates(layout, byPartnerMonth, tabName, floorKey) {
   const updates = [];
   for (const [partner, rowIdx] of Object.entries(layout.partnerRows)) {
     for (const [mk, colIdx] of Object.entries(layout.monthCols)) {
-      if (mk < nowKey) continue; // figement : on ne touche pas le passe
+      if (mk < floorKey) continue; // figement : on ne touche pas les exercices anterieurs
       const src = byPartnerMonth[partner] || {};
       const value = Math.round(src[mk] || 0);
       updates.push({ range: tabName + '!' + colToLetter(colIdx) + (rowIdx + 1), value });

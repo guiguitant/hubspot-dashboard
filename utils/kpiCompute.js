@@ -465,8 +465,25 @@ function computePrimePayments({ missions, splits, config, year, caFacture, verse
       for (const deal of deals) {
         const montant = primeTrim * ((deal.montant || 0) / totalPart); // part du deal (float)
         if (montant <= 0) continue;
-        if (verseKeys.has('E1|' + deal.id + '|' + p)) { verse += montant; continue; }
         const acompte = acompteByMission[deal.id];
+        if (verseKeys.has('E1|' + deal.id + '|' + p)) {
+          // Prime deja validee (Phase 3, versements). Le decaissement est deja fait (donc pas de
+          // add/addPM : on ne touche pas byMonth/byPartnerMonth ci-dessous), mais la CHARGE reste due
+          // et doit etre reclassee en statut 'verse', pas disparaitre : sinon, des que la Phase 3 sera
+          // branchee, chaque prime validee sortirait silencieusement de byPartnerMonthCharge (donc de
+          // la cellule GSheet .Primes) et du total de reconciliation de l'exercice, sous-comptant la
+          // charge reelle. Meme calcul de dates que la prime facturee ci-dessous (charge et
+          // decaissement restent des dates independantes, cf note plus bas).
+          verse += montant;
+          const qFactV = quarterOfDate(acompte);
+          const yFactV = yearOfDate(acompte);
+          const decaissementMkV = (qFactV && yFactV) ? monthAfterQuarterClose(yFactV, qFactV) : monthAfterQuarterClose(year, q + 1);
+          let chargeMkV = (qFactV && yFactV) ? lastMonthOfQuarter(yFactV, qFactV) : lastMonthOfQuarter(year, q + 1);
+          if (chargeMkV < nowKey && yearOfDate(chargeMkV) === nowYear) chargeMkV = floorChargeKey;
+          addCharge(p, chargeMkV, montant);
+          detailCharge.push({ etage: 1, deal: deal.id, nom: deal.nom, partner: p, montant, dateCharge: chargeMkV, dateDecaissement: decaissementMkV, statut: 'verse' });
+          continue;
+        }
         if (!acompte) {
           // Provision : pas d'acompte facture => aucun decaissement date, mais on POSE une charge
           // probable au dernier mois du trimestre courant ouvert (glisse a chaque recalcul).

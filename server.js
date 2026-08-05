@@ -8019,6 +8019,8 @@ async function computeChargesHybride(start, end) {
         chargesParMoisN[key] = (chargesParMoisN[key] || 0) + tx.amount;
       }
       for (const tx of txsNm1) {
+        const sousCatNm1 = (tx.cashflow_subcategory && tx.cashflow_subcategory.name) || null;
+        if (sousCatNm1 === PRIMES_QONTO_SUBCAT) continue; // meme exclusion que la boucle N (primes portees par le calcul)
         const d = new Date(tx.settled_at);
         const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
         chargesParMoisNm1[key] = (chargesParMoisNm1[key] || 0) + tx.amount;
@@ -8330,6 +8332,7 @@ async function computePrimesChargeSchedule(nowIso) {
     if (!floatReconciliation[e.partner]) floatReconciliation[e.partner] = { verse: 0, du: 0, aVenir: 0, provisoire: 0 };
     const k = bucket[e.statut];
     if (k) floatReconciliation[e.partner][k] += e.montant;
+    else console.warn('[primes] statut inattendu ignore dans la reconciliation :', e.statut, '(deal ' + e.deal + ', partner ' + e.partner + ')');
   }
   const reconciliation = {};
   for (const [p, buckets] of Object.entries(floatReconciliation)) {
@@ -8354,13 +8357,17 @@ async function writePrimesSyncState(state) {
 // PRIMES_SYNC_DRYRUN=1 : lit et decouvre mais n'ecrit pas (validation avant premiere ecriture reelle).
 async function syncPrimesToSheet() {
   const nowIso = new Date().toISOString();
-  const nowKey = nowIso.slice(0, 7);
+  // Figement au debut de l'exercice courant (pas au mois courant) : le plancher de charge glisse de
+  // trimestre en trimestre, donc TOUS les mois de l'exercice doivent etre reecrits a chaque run pour
+  // remettre a 0 la cellule du trimestre precedent (sinon double compte, cf C1 / commentaire buildUpdates).
+  const currentYear = new Date(nowIso).getFullYear();
+  const floorKey = currentYear + '-01';
   try {
     const { byPartnerMonthCharge, participants, reconciliation } = await computePrimesChargeSchedule(nowIso);
     const grid = await gsheets.readGrid(GOOGLE_SHEET_ID, MASSE_TAB, 'A1:BZ300');
     const layout = primesMap.discoverLayout(grid, { labelCol: 2, partnerNames: participants });
     primesMap.assertPartners(layout, participants);
-    const { updates } = primesMap.buildUpdates(layout, byPartnerMonthCharge, MASSE_TAB, nowKey);
+    const { updates } = primesMap.buildUpdates(layout, byPartnerMonthCharge, MASSE_TAB, floorKey);
     const dry = process.env.PRIMES_SYNC_DRYRUN === '1';
     let updated = 0;
     if (!dry) ({ updated } = await gsheets.batchWrite(GOOGLE_SHEET_ID, updates));
@@ -8398,7 +8405,12 @@ app.get('/api/primes/avancement', async (_req, res) => {
     for (const p of Object.keys(reconciliation)) {
       for (const k of ['verse', 'du', 'aVenir', 'provisoire', 'total']) total[k] += reconciliation[p][k];
     }
-    res.json({ parAssocie: reconciliation, parDeal: detailCharge, total, participants });
+    // Arrondi a l'entier pour l'affichage uniquement (parAssocie/total sont deja des entiers
+    // reconcilies) : ne modifie pas detailCharge en amont, qui reste la source de verite flottante
+    // utilisee pour la reconciliation (evite un ecart d'1 euro visible entre le detail par deal et
+    // les totaux par associe sur l'ecran de suivi).
+    const parDeal = detailCharge.map(e => ({ ...e, montant: Math.round(e.montant) }));
+    res.json({ parAssocie: reconciliation, parDeal, total, participants });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
