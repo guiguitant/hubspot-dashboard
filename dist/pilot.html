@@ -11452,6 +11452,7 @@
     let primeConfig = null;              // { rates:{[p]:{txNew,txRepeat}}, tiers:[{seuil,taux}], resultatAnnuel, gateTrimestriel }
     let primeState = null;               // { realises:{[p]:{new,repeat}}, caFacture } — copie de travail (simulation)
     let primeParticipants = [];          // noms des partners commerciaux pris en compte
+    let primeView = 'table';             // 'table' | 'advancement' : sous-onglet actif de la section KPI primes
     let _primeSaveTimer = null;
 
     function primeFmtEur(n) { return (Math.round(n) || 0).toLocaleString('fr-FR') + ' €'; }
@@ -11553,11 +11554,85 @@
       body.innerHTML =
         '<div id="prime-coverage" style="margin-bottom:0.9rem"></div>'
         + '<div id="prime-clawback" style="margin-bottom:0.9rem"></div>'
-        + '<div class="prime-results" id="kpiPrimeResults" style="margin-top:0.9rem"></div>';
+        + '<div class="kpi-signed-tabs" id="primeViewTabs" style="margin-top:1rem"></div>'
+        + '<div class="prime-results" id="kpiPrimeResults" style="margin-top:0.9rem"></div>'
+        + '<div id="kpiPrimeAdvancement" style="margin-top:0.9rem;display:none"></div>';
 
       primeRecompute();
       renderKpiCoverage();
       renderKpiClawback();
+      renderPrimeViewTabs();
+      switchPrimeView(primeView);
+    }
+
+    // Sous-onglets de la section KPI primes : « Tableau des primes » (existant) / « État d'avancement » (décaissements).
+    function renderPrimeViewTabs() {
+      const el = document.getElementById('primeViewTabs');
+      if (!el) return;
+      const tabs = [['table', 'Tableau des primes'], ['advancement', 'État d\'avancement']];
+      el.innerHTML = tabs.map(([k, label]) =>
+        '<button class="kpi-signed-tab' + (primeView === k ? ' active' : '') + '" onclick="switchPrimeView(\'' + k + '\')">' + label + '</button>'
+      ).join('');
+    }
+
+    function switchPrimeView(view) {
+      primeView = view;
+      const tab = document.getElementById('kpiPrimeResults');
+      const adv = document.getElementById('kpiPrimeAdvancement');
+      if (tab) tab.style.display = (view === 'table') ? '' : 'none';
+      if (adv) adv.style.display = (view === 'advancement') ? '' : 'none';
+      renderPrimeViewTabs();
+      if (view === 'advancement') renderPrimeAdvancement();
+    }
+
+    // Vue « État d'avancement » : suivi des décaissements de primes (versé / dû / à venir / provisoire).
+    async function renderPrimeAdvancement() {
+      const el = document.getElementById('kpiPrimeAdvancement');
+      if (!el) return;
+      el.innerHTML = '<div class="prime-card"><p style="margin:0;color:var(--text-secondary)">Chargement…</p></div>';
+      let data;
+      try {
+        const res = await fetch('/api/primes/avancement');
+        data = await res.json();
+      } catch (e) {
+        el.innerHTML = '<div class="prime-card"><p style="margin:0;color:var(--danger)">Erreur de chargement du suivi.</p></div>';
+        return;
+      }
+      const deals = (data && data.parDeal) || [];
+      if (!deals.length) {
+        el.innerHTML = '<div class="prime-card"><p style="margin:0;color:var(--text-secondary)">Aucune prime à suivre pour cette année.</p></div>';
+        return;
+      }
+      const LABELS = { verse: 'Versé', du: 'Dû', aVenir: 'À venir', provisoire: 'Provisoire' };
+      // Total (bandeau)
+      const t = data.total || { verse: 0, du: 0, aVenir: 0, provisoire: 0, total: 0 };
+      let html = '<div class="prime-card"><p class="prime-card-h">Suivi des décaissements de primes</p>'
+        + '<div style="display:flex;flex-wrap:wrap;gap:0.8rem">'
+        + ['verse', 'du', 'aVenir', 'provisoire'].map(k =>
+            '<div><div style="font-size:0.72rem;color:var(--text-secondary)">' + LABELS[k] + '</div><div style="font-weight:700">' + primeFmtEur(t[k]) + '</div></div>'
+          ).join('')
+        + '<div><div style="font-size:0.72rem;color:var(--text-secondary)">Total</div><div style="font-weight:700">' + primeFmtEur(t.total) + '</div></div>'
+        + '</div></div>';
+      // Par associé
+      const pa = data.parAssocie || {};
+      html += '<div class="prime-card"><p class="prime-card-h">Par associé</p><table class="prime-recap"><thead><tr>'
+        + '<th style="text-align:left">Associé</th><th style="text-align:right">Versé</th><th style="text-align:right">Dû</th><th style="text-align:right">À venir</th><th style="text-align:right">Provisoire</th><th style="text-align:right">Total</th></tr></thead><tbody>'
+        + Object.keys(pa).map(p => {
+            const r = pa[p];
+            return '<tr><td>' + primeEsc(p) + '</td><td style="text-align:right">' + primeFmtEur(r.verse) + '</td><td style="text-align:right">' + primeFmtEur(r.du) + '</td><td style="text-align:right">' + primeFmtEur(r.aVenir) + '</td><td style="text-align:right">' + primeFmtEur(r.provisoire) + '</td><td class="tot" style="text-align:right">' + primeFmtEur(r.total) + '</td></tr>';
+          }).join('')
+        + '</tbody></table></div>';
+      // Par deal
+      html += '<div class="prime-card"><p class="prime-card-h">Par deal</p><table class="prime-recap"><thead><tr>'
+        + '<th style="text-align:left">Deal</th><th style="text-align:left">Associé</th><th style="text-align:right">Montant</th><th style="text-align:left">Charge</th><th style="text-align:left">Décaissement</th><th style="text-align:left">Statut</th></tr></thead><tbody>'
+        + deals.map(d =>
+            '<tr><td>' + primeEsc(d.nom || (d.etage === 2 ? 'Prime collective' : 'Sans nom')) + '</td><td>' + primeEsc(d.partner) + '</td>'
+            + '<td style="text-align:right">' + primeFmtEur(d.montant) + '</td>'
+            + '<td>' + (d.dateCharge || 'réel') + '</td><td>' + (d.dateDecaissement || '-') + '</td>'
+            + '<td>' + (LABELS[d.statut === 'a_venir' ? 'aVenir' : d.statut] || d.statut) + '</td></tr>'
+          ).join('')
+        + '</tbody></table></div>';
+      el.innerHTML = html;
     }
 
     // Contrôle de couverture : 100% du CA signé est-il rattaché à un partner ? Sinon, montant + missions.
