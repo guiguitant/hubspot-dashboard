@@ -11657,14 +11657,26 @@
     }
 
     // Colonnes du tableau "Par deal" : source unique pour l'alignement (même text-align sur <th> et <td>) et pour le tri par colonne.
+    // "Charge" (mois comptable) et "Décaissement" (mois de sortie de banque) sont deux dates distinctes : title = tooltip au survol de l'en-tête.
     const PRIME_ADV_DEAL_COLUMNS = [
       { key: 'nom',              label: 'Deal',         align: 'left',  sort: d => (d.nom || (d.etage === 2 ? 'Prime collective' : 'Sans nom')).toLowerCase() },
       { key: 'partner',          label: 'Associé',      align: 'left',  sort: d => (d.partner || '').toLowerCase() },
       { key: 'montant',          label: 'Montant',      align: 'right', sort: d => Number(d.montant) || 0 },
-      { key: 'dateCharge',       label: 'Charge',       align: 'right', sort: d => d.dateCharge || '' },
-      { key: 'dateDecaissement', label: 'Décaissement', align: 'right', sort: d => d.dateDecaissement || '' },
+      { key: 'dateCharge',       label: 'Charge',       align: 'right', sort: d => d.dateCharge || '',
+        title: 'Mois où la prime pèse sur le résultat (charge comptable de l\'exercice), pas forcément le mois où elle est payée.' },
+      { key: 'dateDecaissement', label: 'Décaissement', align: 'right', sort: d => d.dateDecaissement || '',
+        title: 'Mois où la prime sort réellement de la banque. Vide pour une provision : le versement n\'est pas encore programmé.' },
       { key: 'statut',           label: 'Statut',       align: 'left',  sort: d => primeStatutKey(d.statut) },
     ];
+
+    // Total du sous-onglet "Tableau des primes" (primes des deals signés dans l'année, cf. primeCompute().pool),
+    // utilisé uniquement pour la note de comparaison du bandeau "État d'avancement" ci-dessous. primeCompute()
+    // est une fonction pure (aucun effet de bord) ; primeConfig/primeState sont déjà remplis à ce stade car
+    // renderKpiPrime() appelle primeRecompute() avant de laisser l'utilisateur changer de sous-onglet.
+    function primeAdvTableTotal() {
+      if (!primeState || !primeConfig) return null;
+      try { return primeCompute().pool; } catch (e) { return null; }
+    }
 
     // Reconstruit les 3 blocs (bandeau récap, "Par associé", "Par deal") depuis le cache primeAdvData.
     // Appelé après chaque fetch. Les filtres/tri en cours (variables de module) sont ré-appliqués automatiquement.
@@ -11677,7 +11689,8 @@
         return;
       }
 
-      // --- Bandeau "Suivi des décaissements" : total dominant + barre de répartition segmentée + légende + explication ---
+      // --- Bandeau "Primes rattachées à l'exercice" (charges, pas décaissements) : total dominant + barre de répartition
+      // segmentée par statut de décaissement + légende + note de comparaison avec l'autre sous-onglet ---
       const t = primeAdvData.total || { verse: 0, du: 0, aVenir: 0, provisoire: 0, total: 0 };
       const totalAll = t.total || (t.verse + t.du + t.aVenir + t.provisoire) || 0;
       const pct = k => totalAll > 0 ? Math.round((t[k] || 0) / totalAll * 100) : 0;
@@ -11692,8 +11705,18 @@
         + '<span class="prime-adv-legend-pct">' + pct(k) + ' %</span>'
         + '</div>'
       ).join('');
+      // Note de comparaison avec le sous-onglet "Tableau des primes" : les deux totaux diffèrent légitimement
+      // (deals signés dans l'année vs. deals dont la charge est rattachée à cet exercice) ; on l'explique ici
+      // avec les deux montants réels pour que l'utilisateur comprenne l'écart sans avoir à demander.
+      const tableTotal = primeAdvTableTotal();
+      const compareNote = '<p class="prime-adv-foot" style="margin:.3rem 0 .9rem">'
+        + 'Le « Tableau des primes » totalise les primes des deals signés dans l\'année'
+        + (tableTotal != null ? ' (' + primeFmtEur(tableTotal) + ')' : '')
+        + ' ; ce tableau-ci totalise les primes dont la charge est rattachée à cet exercice, c\'est-à-dire facturées à l\'acompte pendant l\'exercice'
+        + ' (' + primeFmtEur(totalAll) + '). L\'écart vient des deals dont la signature et la facturation ne tombent pas dans le même exercice.</p>';
       let html = '<div class="prime-card">'
-        + '<p class="prime-card-h">Suivi des décaissements de primes</p>'
+        + '<p class="prime-card-h">Primes rattachées à l\'exercice</p>'
+        + compareNote
         + '<div class="prime-adv-total"><div class="prime-adv-total-val">' + primeFmtEur(totalAll) + '</div><div class="prime-adv-total-lab">Total des primes de l\'exercice</div></div>'
         + '<div class="prime-adv-bar">' + bar + '</div>'
         + '<div class="prime-adv-legend">' + legend + '</div>'
@@ -11809,7 +11832,8 @@
       const head = '<tr>' + PRIME_ADV_DEAL_COLUMNS.map(c => {
         const sorted = primeAdvSort.col === c.key;
         const arrow = sorted ? (primeAdvSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
-        return '<th class="sortable' + (sorted ? ' sorted' : '') + '" style="text-align:' + c.align + '" onclick="primeAdvToggleSort(\'' + c.key + '\')">' + c.label + arrow + '</th>';
+        const titleAttr = c.title ? ' title="' + primeEsc(c.title) + '"' : '';
+        return '<th class="sortable' + (sorted ? ' sorted' : '') + '" style="text-align:' + c.align + '"' + titleAttr + ' onclick="primeAdvToggleSort(\'' + c.key + '\')">' + c.label + arrow + '</th>';
       }).join('') + '</tr>';
 
       const body = rows.map(d => {
