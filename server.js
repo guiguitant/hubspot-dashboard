@@ -9,7 +9,7 @@ const { authenticator } = require('otplib');
 const { execFile } = require('child_process');
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
-const { computeKpi, totalCaAnnee, signedByQuarter, clawbackCandidates, computePrimePool, computePrimePayments } = require('./utils/kpiCompute');
+const { computeKpi, totalCaAnnee, signedByQuarter, clawbackCandidates, computePrimePool, computePrimePayments, selectChargeEntriesForExercice } = require('./utils/kpiCompute');
 const { computeBillingForYear } = require('./utils/billing');
 const { buildSalesNavUrl } = require('./utils/buildSalesNavUrl');
 const multer = require('multer');
@@ -8038,8 +8038,8 @@ async function computeChargesHybride(start, end) {
     // celle-là même qu'écrit le write-back et que la formule tableur .Primes -> CR_Prev utilise pour les
     // mois ouverts (fenêtre prévisionnelle). Sans cette réinjection, un exercice ENTIÈREMENT clos (aucun
     // mois prévisionnel, CR_Prev jamais lu) perdrait totalement la charge des primes.
-    // Tolérance : un échec de lecture du Sheet (réseau, credentials) ne fait pas tomber le calcul des
-    // charges, on continue avec une réinjection nulle.
+    // Tolérance : un échec de lecture (Supabase, Notion, ou du Sheet Masse_salariale) ne fait pas
+    // tomber le calcul des charges, on continue avec une réinjection nulle.
     if (hasReal) {
       try {
         // La catégorie GSheet .Primes porte AUSSI les primes des CDI (Arthur, Thomas, Evane...), à côté
@@ -8048,20 +8048,11 @@ async function computeChargesHybride(start, end) {
         // Si on réinjectait TOUTE la catégorie .Primes ici, la prime d'un CDI serait comptée deux fois
         // dès la clôture du mois qui la porte (une fois par la banque, une fois par cette réinjection).
         // On ne réinjecte donc QUE les lignes des associés, c'est-à-dire exactement celles qu'écrit le
-        // write-back (syncPrimesToSheet) : même règle de participants (primeParticipantsForYear), pour
-        // que "ce qui est réinjecté" reste toujours aligné avec "ce que le write-back a écrit".
-        const [splitRowsReinj, objRowsReinj] = await Promise.all([
-          supabase.from('kpi_ca_split').select('*'),
-          supabase.from('kpi_objectives').select('*'),
-        ]);
-        const missionsReinj = await fetchAllNotionMissions();
-        const kpiRefReinj = computeKpi({
-          missions: missionsReinj,
-          objectives: (objRowsReinj && objRowsReinj.data) || [],
-          splits: (splitRowsReinj && splitRowsReinj.data) || [],
-          year: now.getFullYear(),
-        });
-        const primesParticipants = primeParticipantsForYear(kpiRefReinj);
+        // write-back (syncPrimesToSheet) : primesParticipantsFor est LA fonction unique qui dérive cette
+        // liste des deux côtés (write-back/endpoint d'avancement ET cette réinjection, cf I3), pour que
+        // "ce qui est réinjecté" reste toujours aligné avec "ce que le write-back a écrit", même si l'un
+        // des deux évolue.
+        const primesParticipants = await primesParticipantsFor(now.toISOString());
 
         const masse = await fetchAndParseMasseSalarialeDetailed();
         let primesReinjectionTotal = 0;
@@ -8095,7 +8086,7 @@ async function computeChargesHybride(start, end) {
           else realSubVentilation.push({ categorie: 'Frais de personnel', sousCat: 'Primes', montant: primesReinjectionTotal });
         }
       } catch (e) {
-        console.error('[charges-hybride] échec lecture GSheet Masse_salariale pour réinjection primes :', e.message);
+        console.error('[charges-hybride] échec réinjection de la charge des primes (participants Supabase/Notion, ou GSheet Masse_salariale) :', e.message);
         // Tolérance : réinjection nulle (aucun ajout), le calcul des charges continue normalement.
       }
     }
@@ -8339,6 +8330,42 @@ function primeParticipantsForYear(kpi) {
   return (parts.length ? parts : (kpi.partners || [])).map(p => p.partner);
 }
 
+// Statuts connus d'une entree de charge (R7). Cle = valeur brute de detailCharge[].statut, valeur =
+// bucket camelCase de la reconciliation. SOURCE UNIQUE partagee par la reconciliation de
+// computePrimesChargeSchedule ET par le filtre "parDeal" de l'endpoint d'avancement (M6) : une entree
+// a statut inattendu doit etre ecartee des DEUX cotes, sinon la somme des lignes "Par deal" d'un associe
+// diverge de son total "Par associe" (l'entree serait arrondie/affichee sans jamais compter dans le
+// total reconcilie).
+const PRIME_STATUS_BUCKET = { verse: 'verse', du: 'du', a_venir: 'aVenir', provisoire: 'provisoire' };
+
+// Liste des participants au collectif de primes pour l'exercice de `nowIso` (annee civile) : meme
+// derivation que primeParticipantsForYear, appliquee au KPI de reference de CET exercice. SOURCE UNIQUE
+// partagee par computePrimesChargeSchedule (write-back + endpoint d'avancement) ET par la reinjection de
+// la charge des primes dans computeChargesHybride (mois clos, Option B) : avant cette factorisation, les
+// deux blocs refaisaient chacun les memes lectures Supabase + Notion + computeKpi, avec le risque de
+// diverger silencieusement si l'un des deux evoluait sans l'autre (double compte des primes de CDI, ou
+// charge manquante).
+// `preloaded` optionnel { missions, splits, objectives } : evite un refetch Supabase/Notion quand
+// l'appelant a deja ces donnees sous la main (cas de computePrimesChargeSchedule, qui les reutilise
+// ensuite pour sa propre enumeration multi-exercice) ; sinon (computeChargesHybride) fetch complet.
+async function primesParticipantsFor(nowIso, preloaded) {
+  const year = new Date(nowIso).getFullYear();
+  let missions, splits, objectives;
+  if (preloaded && preloaded.missions && preloaded.splits && preloaded.objectives) {
+    ({ missions, splits, objectives } = preloaded);
+  } else {
+    const [splitRows, objRows] = await Promise.all([
+      supabase.from('kpi_ca_split').select('*'),
+      supabase.from('kpi_objectives').select('*'),
+    ]);
+    splits = (splitRows && splitRows.data) || [];
+    objectives = (objRows && objRows.data) || [];
+    missions = await fetchAllNotionMissions();
+  }
+  const kpiRef = computeKpi({ missions, objectives, splits, year });
+  return primeParticipantsForYear(kpiRef);
+}
+
 // Echeancier de CHARGE des primes de l'exercice courant, par associe et par mois, + reconciliation
 // par statut. Enumere plusieurs annees de SIGNATURE (une charge peut etre facturee l'annee suivant
 // la signature) et ne garde que les charges datees dans l'exercice courant. `now` REEL (provisions +
@@ -8357,9 +8384,9 @@ async function computePrimesChargeSchedule(nowIso) {
   const missions = await fetchAllNotionMissions();
 
   const currentYear = new Date(nowIso).getFullYear();
-  const currentPrefix = String(currentYear) + '-';
-  const kpiRef = computeKpi({ missions, objectives, splits, year: currentYear });
-  const participants = primeParticipantsForYear(kpiRef);
+  // primesParticipantsFor = SOURCE UNIQUE (partagee avec la reinjection de computeChargesHybride, cf I3) ;
+  // preload {missions, splits, objectives} deja fetches ci-dessus pour eviter un refetch redondant.
+  const participants = await primesParticipantsFor(nowIso, { missions, splits, objectives });
 
   // Enumeration multi-exercice : deal signe en N-2..N, charge potentiellement en N.
   const floatByPartnerMonth = {};
@@ -8367,23 +8394,18 @@ async function computePrimesChargeSchedule(nowIso) {
   for (const y of [currentYear - 2, currentYear - 1, currentYear]) {
     const caFacture = computeBillingForYear(missions, factOverrides, y).total;
     const pay = computePrimePayments({ missions, splits, config, year: y, caFacture, versements: [], now: nowIso, participants });
-    // Detail par deal (toutes entrees, y compris provisions et 'du') dont la charge concerne N.
-    // dateCharge n'est plus jamais null (R4) : le filtre porte uniquement sur son prefixe d'annee.
-    // Provisions (statut 'provisoire') : la charge est posee au plancher de l'exercice COURANT REEL
-    // (floorChargeKey derive de `now`, pas de l'annee de signature y) -> a chaque appel ulterieur de
-    // cette fonction (annee suivante), la meme provision retomberait a nouveau dans currentPrefix pour
-    // le millesime de signature y = currentYear-2/-1, la comptant plusieurs fois (une fois par exercice
-    // tant que le deal reste non facture). On ne retient donc les provisions QUE pour le millesime de
-    // signature correspondant a l'exercice courant (y === currentYear) : une prime dont le deal n'est
-    // toujours pas facture apres la cloture de son exercice de signature sera chargee le jour de sa
-    // facturation (statut 'du'/'a_venir', regle R2), jamais reprovisionnee dans les exercices suivants.
+    // Filtre pur (utils/kpiCompute.js::selectChargeEntriesForExercice, teste independamment) : ne garde
+    // que les entrees dont la charge tombe dans l'exercice courant (dateCharge, jamais null grace a R4),
+    // et n'accepte une provision (statut 'provisoire') que pour le millesime de signature correspondant
+    // a l'exercice courant (y === currentYear) : sinon la meme provision glissante (floorChargeKey derive
+    // de `now`, pas de l'annee de signature y) serait comptee dans chaque exercice successif tant que le
+    // deal reste non facture. Une prime dont le deal n'est toujours pas facture apres la cloture de son
+    // exercice de signature sera chargee le jour de sa facturation (statut 'du'/'a_venir', regle R2),
+    // jamais reprovisionnee dans les exercices suivants (cf spec §10, points de vigilance).
     // byPartnerMonthCharge est reconstruit A PARTIR de detailCharge (et non de pay.byPartnerMonthCharge)
     // pour garantir que les deux restent exactement coherents (chaque entree detailCharge correspond a
     // un seul addCharge dans computePrimePayments, cf kpiCompute.js).
-    for (const e of pay.detailCharge || []) {
-      const inYear = e.dateCharge && e.dateCharge.startsWith(currentPrefix);
-      if (!inYear) continue;
-      if (e.statut === 'provisoire' && y !== currentYear) continue;
+    for (const e of selectChargeEntriesForExercice(pay.detailCharge, y, currentYear)) {
       detailCharge.push(e);
       const dst = floatByPartnerMonth[e.partner] = floatByPartnerMonth[e.partner] || {};
       dst[e.dateCharge] = (dst[e.dateCharge] || 0) + e.montant;
@@ -8403,10 +8425,9 @@ async function computePrimesChargeSchedule(nowIso) {
   // total = verse + du + aVenir + provisoire est ainsi garanti a l'euro.
   const floatReconciliation = {};
   for (const p of participants) floatReconciliation[p] = { verse: 0, du: 0, aVenir: 0, provisoire: 0 };
-  const bucket = { verse: 'verse', du: 'du', a_venir: 'aVenir', provisoire: 'provisoire' };
   for (const e of detailCharge) {
     if (!floatReconciliation[e.partner]) floatReconciliation[e.partner] = { verse: 0, du: 0, aVenir: 0, provisoire: 0 };
-    const k = bucket[e.statut];
+    const k = PRIME_STATUS_BUCKET[e.statut];
     if (k) floatReconciliation[e.partner][k] += e.montant;
     else console.warn('[primes] statut inattendu ignore dans la reconciliation :', e.statut, '(deal ' + e.deal + ', partner ' + e.partner + ')');
   }
@@ -8419,7 +8440,11 @@ async function computePrimesChargeSchedule(nowIso) {
     };
   }
 
-  return { byPartnerMonthCharge, detailCharge, participants, reconciliation };
+  // exercice : millesime REEL sur lequel ce calcul a ete fait (annee de nowIso). Renvoye par l'endpoint
+  // d'avancement pour que le front puisse verifier qu'il correspond a l'annee selectionnee dans #kpiYear
+  // avant de commenter un ecart (I1) : cet endpoint calcule TOUJOURS sur l'exercice courant, jamais sur
+  // l'annee choisie par l'utilisateur.
+  return { byPartnerMonthCharge, detailCharge, participants, reconciliation, exercice: currentYear };
 }
 
 // Etat de synchro (horodatage) persiste en base. Tolerant : un echec ne fait pas tomber la synchro.
@@ -8474,28 +8499,24 @@ app.get('/api/primes/sync-status', async (_req, res) => {
 app.get('/api/primes/avancement', async (_req, res) => {
   try {
     const nowIso = new Date().toISOString();
-    const { detailCharge, participants, reconciliation } = await computePrimesChargeSchedule(nowIso);
+    const { detailCharge, participants, reconciliation, exercice } = await computePrimesChargeSchedule(nowIso);
     const total = { verse: 0, du: 0, aVenir: 0, provisoire: 0, total: 0 };
     for (const p of Object.keys(reconciliation)) {
       for (const k of ['verse', 'du', 'aVenir', 'provisoire', 'total']) total[k] += reconciliation[p][k];
     }
     // Arrondi a l'entier pour l'affichage uniquement, EN PRESERVANT LA SOMME PAR ASSOCIE (meme methode,
-    // primesMap.roundPreservingSum, que celle utilisee pour parAssocie/byPartnerMonthCharge) : un
-    // Math.round ligne par ligne (ancien code) desynchronise la somme du detail par rapport au total
-    // reconcilie (mesure : Guillaume 3323 en detail vs 3322 en total). Cles uniques par ligne (l'index
-    // dans detailCharge) regroupees par associe, pour que la somme des lignes d'un associe tombe
-    // exactement sur son total affiche. Ne modifie pas detailCharge en amont, qui reste la source de
-    // verite flottante utilisee pour la reconciliation.
-    const floatsByPartner = {};
-    detailCharge.forEach((e, i) => {
-      (floatsByPartner[e.partner] = floatsByPartner[e.partner] || {})[i] = e.montant;
-    });
-    const roundedByIndex = {};
-    for (const floats of Object.values(floatsByPartner)) {
-      Object.assign(roundedByIndex, primesMap.roundPreservingSum(floats));
-    }
-    const parDeal = detailCharge.map((e, i) => ({ ...e, montant: roundedByIndex[i] }));
-    res.json({ parAssocie: reconciliation, parDeal, total, participants });
+    // primesMap.roundEntriesPreservingSumByPartner, que celle utilisee pour parAssocie/byPartnerMonthCharge) :
+    // un Math.round ligne par ligne (ancien code) desynchronise la somme du detail par rapport au total
+    // reconcilie (mesure : Guillaume 3323 en detail vs 3322 en total). Ne modifie pas detailCharge en
+    // amont, qui reste la source de verite flottante utilisee pour la reconciliation.
+    // Filtre M6 : seules les entrees a statut CONNU (PRIME_STATUS_BUCKET, meme reference que la
+    // reconciliation ci-dessus) alimentent l'arrondi, pour que "somme des lignes par associe = total
+    // reconcilie de cet associe" ne depende pas d'un invariant implicite (une entree a statut inattendu
+    // est deja ecartee de la reconciliation ; si elle restait dans parDeal, la somme des lignes
+    // divergerait du total affiche).
+    const knownEntries = detailCharge.filter(e => PRIME_STATUS_BUCKET[e.statut]);
+    const parDeal = primesMap.roundEntriesPreservingSumByPartner(knownEntries);
+    res.json({ parAssocie: reconciliation, parDeal, total, participants, exercice });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

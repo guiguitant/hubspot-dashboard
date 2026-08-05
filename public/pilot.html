@@ -4344,7 +4344,7 @@
       #kpiPrime table.prime-recap td:first-child { text-align:left; font-weight:600; }
       #kpiPrime table.prime-recap td.tot { font-weight:750; }
       #kpiPrime table.prime-recap tr.grand td { border-top:2px solid var(--border); font-weight:750; }
-      /* État d'avancement (décaissements de primes) : bandeau récap, badges de statut, filtres/tri "Par deal" */
+      /* État d'avancement (charge des primes rattachée à l'exercice, par statut de décaissement) : bandeau récap, badges de statut, filtres/tri "Par deal" */
       #kpiPrime .prime-adv-total { display:flex; align-items:baseline; gap:.6rem; flex-wrap:wrap; margin-bottom:.9rem; }
       #kpiPrime .prime-adv-total-val { font-size:2.1rem; font-weight:800; color:var(--text); line-height:1; }
       #kpiPrime .prime-adv-total-lab { font-size:.82rem; color:var(--text-secondary); }
@@ -11488,7 +11488,7 @@
     let primeParticipants = [];          // noms des partners commerciaux pris en compte
     let primeView = 'table';             // 'table' | 'advancement' : sous-onglet actif de la section KPI primes
     let _primeSaveTimer = null;
-    // --- Vue "État d'avancement" (décaissements) : état de filtres/tri, survit au re-rendu de la section ---
+    // --- Vue "État d'avancement" (charge des primes par statut de décaissement) : état de filtres/tri, survit au re-rendu de la section ---
     let primeAdvData = null;                                   // dernière réponse de /api/primes/avancement, en cache mémoire (filtrage/tri sans refetch réseau)
     let primeAdvFilters = { partner: '', statut: '', q: '' };  // '' = "Tous" / pas de recherche texte
     let primeAdvSort = { col: null, dir: 'asc' };               // colonne triée du tableau "Par deal" ; col=null → ordre reçu de l'API
@@ -11618,7 +11618,7 @@
       switchPrimeView(primeView);
     }
 
-    // Sous-onglets de la section KPI primes : « Tableau des primes » (existant) / « État d'avancement » (décaissements).
+    // Sous-onglets de la section KPI primes : « Tableau des primes » (existant) / « État d'avancement » (charge par statut de décaissement).
     function renderPrimeViewTabs() {
       const el = document.getElementById('primeViewTabs');
       if (!el) return;
@@ -11638,7 +11638,7 @@
       if (view === 'advancement') renderPrimeAdvancement();
     }
 
-    // Vue « État d'avancement » : suivi des décaissements de primes (versé / dû / à venir / provisoire).
+    // Vue « État d'avancement » : suivi de la charge des primes rattachée à l'exercice, par statut de décaissement (versé / dû / à venir / provisoire).
     // Le fetch alimente le cache mémoire primeAdvData ; tout le filtrage/tri se fait ensuite en local (primeAdvRenderAll / primeAdvRenderDealTable).
     async function renderPrimeAdvancement() {
       const el = document.getElementById('kpiPrimeAdvancement');
@@ -11658,15 +11658,18 @@
 
     // Colonnes du tableau "Par deal" : source unique pour l'alignement (même text-align sur <th> et <td>) et pour le tri par colonne.
     // "Charge" (mois comptable) et "Décaissement" (mois de sortie de banque) sont deux dates distinctes : title = tooltip au survol de l'en-tête.
+    // type: 'text' → tri via localeCompare('fr') (M11 : noms de deals venant de Notion, en français) ;
+    // sans `type` → tri via comparaison directe (dates 'YYYY-MM' triables lexicalement, montant numérique).
     const PRIME_ADV_DEAL_COLUMNS = [
-      { key: 'nom',              label: 'Deal',         align: 'left',  sort: d => (d.nom || (d.etage === 2 ? 'Prime collective' : 'Sans nom')).toLowerCase() },
-      { key: 'partner',          label: 'Associé',      align: 'left',  sort: d => (d.partner || '').toLowerCase() },
+      { key: 'nom',              label: 'Deal',         align: 'left',  type: 'text', sort: d => (d.nom || (d.etage === 2 ? 'Prime collective' : 'Sans nom')) },
+      { key: 'partner',          label: 'Associé',      align: 'left',  type: 'text', sort: d => (d.partner || '') },
       { key: 'montant',          label: 'Montant',      align: 'right', sort: d => Number(d.montant) || 0 },
       { key: 'dateCharge',       label: 'Charge',       align: 'right', sort: d => d.dateCharge || '',
         title: 'Mois où la prime pèse sur le résultat (charge comptable de l\'exercice), pas forcément le mois où elle est payée.' },
       { key: 'dateDecaissement', label: 'Décaissement', align: 'right', sort: d => d.dateDecaissement || '',
         title: 'Mois où la prime sort réellement de la banque. Vide pour une provision : le versement n\'est pas encore programmé.' },
-      { key: 'statut',           label: 'Statut',       align: 'left',  sort: d => primeStatutKey(d.statut) },
+      // Statut : tri sur l'ordre MÉTIER (PRIME_STATUT_ORDER), pas alphabétique sur la clé interne (M12).
+      { key: 'statut',           label: 'Statut',       align: 'left',  sort: d => PRIME_STATUT_ORDER.indexOf(primeStatutKey(d.statut)) },
     ];
 
     // Total du sous-onglet "Tableau des primes" (primes des deals signés dans l'année, cf. primeCompute().pool),
@@ -11693,8 +11696,19 @@
       // segmentée par statut de décaissement + légende + note de comparaison avec l'autre sous-onglet ---
       const t = primeAdvData.total || { verse: 0, du: 0, aVenir: 0, provisoire: 0, total: 0 };
       const totalAll = t.total || (t.verse + t.du + t.aVenir + t.provisoire) || 0;
-      const pct = k => totalAll > 0 ? Math.round((t[k] || 0) / totalAll * 100) : 0;
-      const bar = PRIME_STATUT_ORDER.filter(k => (t[k] || 0) > 0).map(k =>
+      // Pourcentages des segments : le DERNIER segment présent est calculé par différence (100 - somme
+      // des précédents), jamais arrondi indépendamment, pour que la barre totalise toujours exactement
+      // 100 % (un arrondi indépendant par segment peut sinon totaliser 99 % ou 101 %).
+      const presentKeys = PRIME_STATUT_ORDER.filter(k => (t[k] || 0) > 0);
+      const pctMap = {};
+      let usedPct = 0;
+      presentKeys.forEach((k, i) => {
+        if (totalAll <= 0) { pctMap[k] = 0; return; }
+        if (i === presentKeys.length - 1) pctMap[k] = Math.max(0, 100 - usedPct); // garde-fou : jamais de largeur negative
+        else { const p = Math.round((t[k] || 0) / totalAll * 100); pctMap[k] = p; usedPct += p; }
+      });
+      const pct = k => pctMap[k] || 0;
+      const bar = presentKeys.map(k =>
           '<span class="prime-adv-bar-seg ' + k + '" style="width:' + pct(k) + '%" title="' + PRIME_STATUT_META[k].label + ' · ' + pct(k) + ' %"></span>'
         ).join('') || '<span class="prime-adv-bar-seg aVenir" style="width:100%"></span>';
       const legend = PRIME_STATUT_ORDER.map(k =>
@@ -11708,19 +11722,34 @@
       // Note de comparaison avec le sous-onglet "Tableau des primes" : les deux totaux diffèrent légitimement
       // (deals signés dans l'année vs. deals dont la charge est rattachée à cet exercice) ; on l'explique ici
       // avec les deux montants réels pour que l'utilisateur comprenne l'écart sans avoir à demander.
-      const tableTotal = primeAdvTableTotal();
-      const compareNote = '<p class="prime-adv-foot" style="margin:.3rem 0 .9rem">'
-        + 'Le « Tableau des primes » totalise les primes des deals signés dans l\'année'
-        + (tableTotal != null ? ' (' + primeFmtEur(tableTotal) + ')' : '')
-        + ' ; ce tableau-ci totalise les primes dont la charge est rattachée à cet exercice, c\'est-à-dire facturées à l\'acompte pendant l\'exercice'
-        + ' (' + primeFmtEur(totalAll) + '). L\'écart vient des deals dont la signature et la facturation ne tombent pas dans le même exercice.</p>';
+      // ATTENTION (I1) : cet endpoint calcule TOUJOURS sur l'exercice courant (primeAdvData.exercice),
+      // quelle que soit l'année choisie dans #kpiYear. Comparer ce total à celui du « Tableau des primes »
+      // (qui suit l'année sélectionnée) n'a de sens QUE si les deux portent sur le même exercice ; sinon
+      // la note attribuerait à tort l'écart à un décalage signature/facturation alors qu'il s'agit d'un
+      // simple décalage d'exercice. On n'affiche donc la comparaison que si les deux millésimes coïncident.
+      const selectedYear = Number(kpiData && kpiData.year);
+      const advExercice = Number(primeAdvData.exercice);
+      const sameExercice = Number.isFinite(selectedYear) && Number.isFinite(advExercice) && selectedYear === advExercice;
+      let compareNote;
+      if (sameExercice) {
+        const tableTotal = primeAdvTableTotal();
+        compareNote = '<p class="prime-adv-foot" style="margin:.3rem 0 .9rem">'
+          + 'Le « Tableau des primes » totalise les primes des deals signés dans l\'année'
+          + (tableTotal != null ? ' (' + primeFmtEur(tableTotal) + ')' : '')
+          + ' ; ce tableau-ci totalise les primes dont la charge est rattachée à cet exercice, c\'est-à-dire facturées à l\'acompte pendant l\'exercice, ou provisionnées si l\'acompte n\'est pas encore facturé'
+          + ' (' + primeFmtEur(totalAll) + '). L\'écart vient des deals dont la signature et la facturation ne tombent pas dans le même exercice.</p>';
+      } else {
+        compareNote = '<p class="prime-adv-foot" style="margin:.3rem 0 .9rem;color:var(--warning)">'
+          + '⚠ Ce sous-onglet affiche toujours l\'exercice courant (' + (Number.isFinite(advExercice) ? advExercice : '?') + '), quelle que soit l\'année sélectionnée ci-dessus'
+          + (Number.isFinite(selectedYear) ? ' (' + selectedYear + ')' : '') + '.</p>';
+      }
       let html = '<div class="prime-card">'
         + '<p class="prime-card-h">Primes rattachées à l\'exercice</p>'
         + compareNote
         + '<div class="prime-adv-total"><div class="prime-adv-total-val">' + primeFmtEur(totalAll) + '</div><div class="prime-adv-total-lab">Total des primes de l\'exercice</div></div>'
         + '<div class="prime-adv-bar">' + bar + '</div>'
         + '<div class="prime-adv-legend">' + legend + '</div>'
-        + '<p class="prime-adv-foot">Versé : déjà payé. Dû : la charge est passée mais pas encore décaissée (retard de versement). À venir : décaissement déjà planifié. Provisoire : estimation, montant pas encore figé.</p>'
+        + '<p class="prime-adv-foot">Versé : déjà payé. Dû : facturé, le versement prévu est passé mais n\'est pas encore validé. À venir : décaissement déjà planifié. Provisoire : estimation, montant pas encore figé.</p>'
         + '</div>';
 
       // --- Par associé (mêmes couleurs de statut que le bandeau, via un point avant chaque en-tête) ---
@@ -11741,6 +11770,10 @@
       const partnerOpts = (primeAdvData.participants && primeAdvData.participants.length)
         ? primeAdvData.participants
         : Array.from(new Set(deals.map(d => d.partner).filter(Boolean)));
+      // M15 : si le filtre associé mémorisé (rechargement de page, ancien participant) n'existe plus
+      // parmi les options, on le réinitialise plutôt que de laisser le <select> retomber visuellement
+      // sur « Tous » pendant que le filtre continue de s'appliquer (tableau vide inexplicable).
+      if (primeAdvFilters.partner && !partnerOpts.includes(primeAdvFilters.partner)) primeAdvFilters.partner = '';
       html += '<div class="prime-card"><p class="prime-card-h">Par deal</p>'
         + '<div class="prime-adv-filters">'
         + '<select class="notion-select" id="primeAdvFilterPartner" onchange="primeAdvSetFilter(\'partner\', this.value)">'
@@ -11778,11 +11811,15 @@
       if (primeAdvSort.col) {
         const col = PRIME_ADV_DEAL_COLUMNS.find(c => c.key === primeAdvSort.col);
         if (col) {
+          // Direction passée AU comparateur (pas de rows.reverse() après coup, M10) : Array.prototype.sort
+          // est stable, donc inverser après coup inverserait aussi l'ordre des ex æquo, ce qu'un simple
+          // changement de signe dans le comparateur évite.
+          const dirMul = primeAdvSort.dir === 'desc' ? -1 : 1;
           rows = rows.slice().sort((a, b) => {
             const va = col.sort(a), vb = col.sort(b);
-            return va < vb ? -1 : va > vb ? 1 : 0;
+            const cmp = col.type === 'text' ? String(va).localeCompare(String(vb), 'fr') : (va < vb ? -1 : va > vb ? 1 : 0);
+            return dirMul * cmp;
           });
-          if (primeAdvSort.dir === 'desc') rows.reverse();
         }
       }
       return rows;
@@ -11829,11 +11866,19 @@
         return;
       }
 
+      // En-têtes triables accessibles au clavier (M14) : tabindex="0" + role="button" les rendent
+      // focusables/annoncés comme des boutons, aria-sort reflète l'état de tri courant, onkeydown permet
+      // de déclencher le tri avec Entrée/Espace comme le ferait un clic.
       const head = '<tr>' + PRIME_ADV_DEAL_COLUMNS.map(c => {
         const sorted = primeAdvSort.col === c.key;
         const arrow = sorted ? (primeAdvSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
         const titleAttr = c.title ? ' title="' + primeEsc(c.title) + '"' : '';
-        return '<th class="sortable' + (sorted ? ' sorted' : '') + '" style="text-align:' + c.align + '"' + titleAttr + ' onclick="primeAdvToggleSort(\'' + c.key + '\')">' + c.label + arrow + '</th>';
+        const ariaSort = sorted ? (primeAdvSort.dir === 'asc' ? 'ascending' : 'descending') : 'none';
+        return '<th class="sortable' + (sorted ? ' sorted' : '') + '" style="text-align:' + c.align + '"' + titleAttr
+          + ' tabindex="0" role="button" aria-sort="' + ariaSort + '"'
+          + ' onclick="primeAdvToggleSort(\'' + c.key + '\')"'
+          + ' onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();primeAdvToggleSort(\'' + c.key + '\')}"'
+          + '>' + c.label + arrow + '</th>';
       }).join('') + '</tr>';
 
       const body = rows.map(d => {

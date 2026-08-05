@@ -1,5 +1,5 @@
 'use strict';
-const { computeKpi, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, OPERE_STATES, SIGNE_EXCLUDED_STATES, computePrimePool, primeDefaultRates, computePrimePayments } = require('./kpiCompute');
+const { computeKpi, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, OPERE_STATES, SIGNE_EXCLUDED_STATES, computePrimePool, primeDefaultRates, computePrimePayments, selectChargeEntriesForExercice } = require('./kpiCompute');
 const { lastMonthOfQuarter } = require('./kpiCompute');
 
 describe('lastMonthOfQuarter : dernier mois du trimestre (date de charge)', () => {
@@ -714,5 +714,40 @@ describe('computePrimePayments : echeancier des versements de primes', () => {
     const e2 = r.detailCharge.find(d => d.etage === 2 && d.partner === 'Vincent');
     expect(e2.statut).toBe('provisoire');
     expect(e2.dateDecaissement).toBe('2026-03');                  // decaissement theorique (avant rattrapage/drop)
+  });
+});
+
+describe('selectChargeEntriesForExercice : filtre exercice + provision, garde-fou anti-double-compte (R3/R8)', () => {
+  // Un extrait realiste de detailCharge : une charge 'du' dans l'exercice courant, une charge 'a_venir'
+  // hors exercice (annee suivante), et une provision dans l'exercice courant.
+  const entries = [
+    { deal: 'a', partner: 'Vincent', dateCharge: '2026-03', statut: 'du', montant: 100 },
+    { deal: 'b', partner: 'Vincent', dateCharge: '2027-01', statut: 'a_venir', montant: 50 },
+    { deal: 'c', partner: 'Vincent', dateCharge: '2026-09', statut: 'provisoire', montant: 30 },
+  ];
+
+  it('ecarte les entrees dont la dateCharge tombe hors de l\'exercice courant', () => {
+    const r = selectChargeEntriesForExercice(entries, 2026, 2026);
+    expect(r.map(e => e.deal).sort()).toEqual(['a', 'c']); // 'b' (2027) exclu
+  });
+
+  it('ecarte une provision dont l\'annee de SIGNATURE differe de l\'exercice courant, meme si sa dateCharge tombe dedans (R3)', () => {
+    // signatureYear = 2025 (deal signe l'an dernier, jamais facture, provision glissante) ; currentYear = 2026.
+    const r = selectChargeEntriesForExercice(entries, 2025, 2026);
+    // 'a' (statut 'du', pas une provision) reste retenu ; 'c' (provisoire, signatureYear != currentYear) est ecarte.
+    expect(r.map(e => e.deal)).toEqual(['a']);
+  });
+
+  it('conserve la provision quand l\'annee de signature EST l\'exercice courant', () => {
+    const r = selectChargeEntriesForExercice(entries, 2026, 2026);
+    expect(r.some(e => e.deal === 'c')).toBe(true);
+  });
+
+  it('garde-fou anti-double-compte : sans le filtre de provision, la meme provision glissante serait retenue pour CHAQUE exercice de signature -> le filtre doit la reserver au seul exercice courant', () => {
+    const provision = [{ deal: 'p', partner: 'Vincent', dateCharge: '2026-09', statut: 'provisoire', montant: 500 }];
+    // Enumeration multi-exercice (comme server.js::computePrimesChargeSchedule) : signatureYear parcourt
+    // currentYear-2 .. currentYear. Un seul de ces appels doit retenir la provision.
+    const retenues = [2024, 2025, 2026].filter(signatureYear => selectChargeEntriesForExercice(provision, signatureYear, 2026).length > 0);
+    expect(retenues).toEqual([2026]);
   });
 });

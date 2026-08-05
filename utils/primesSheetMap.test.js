@@ -1,5 +1,5 @@
 'use strict';
-const { colToLetter, parseMonthHeader, discoverLayout, assertPartners, buildUpdates, roundPreservingSum, primesFloorKey } = require('./primesSheetMap');
+const { colToLetter, parseMonthHeader, discoverLayout, assertPartners, buildUpdates, roundPreservingSum, primesFloorKey, roundEntriesPreservingSumByPartner } = require('./primesSheetMap');
 
 // Grille type : 2 lignes vides en tete (gerees), en-tete mois en ligne 3 (index 2),
 // colonne C (index 2) = libelles, colonnes mois espacees de 2.
@@ -144,5 +144,41 @@ describe('primesSheetMap', () => {
     // 01/2026 (exercice courant, colonne F=index5) : reecrit avec la valeur.
     const vincent01 = updates.find(u => u.range === 'Masse_salariale!F7');
     expect(vincent01.value).toBe(1000);
+  });
+
+  it('roundEntriesPreservingSumByPartner : la somme des lignes arrondies d\'un associe = l\'arrondi de son total flottant (endpoint /api/primes/avancement, "Par deal")', () => {
+    const entries = [
+      { deal: 'a', partner: 'Vincent', montant: 3194.4 },
+      { deal: 'b', partner: 'Vincent', montant: 1656.3 },
+      { deal: 'c', partner: 'Vincent', montant: 281.3 },
+      { deal: 'd', partner: 'Guillaume', montant: 999.5 },
+      { deal: 'e', partner: 'Guillaume', montant: 0.5 },
+    ];
+    const out = roundEntriesPreservingSumByPartner(entries);
+    // Ordre et longueur preserves.
+    expect(out.map(e => e.deal)).toEqual(['a', 'b', 'c', 'd', 'e']);
+    // Assertion centrale (I2) : somme des lignes PAR ASSOCIE == total (arrondi) de cet associe.
+    const sumFor = (list, p) => list.filter(e => e.partner === p).reduce((s, e) => s + e.montant, 0);
+    expect(sumFor(out, 'Vincent')).toBe(Math.round(sumFor(entries, 'Vincent'))); // round(5132.0) = 5132
+    expect(sumFor(out, 'Guillaume')).toBe(Math.round(sumFor(entries, 'Guillaume'))); // round(1000.0) = 1000
+    // Chaque montant est bien un entier.
+    expect(out.every(e => Number.isInteger(e.montant))).toBe(true);
+  });
+
+  it('roundEntriesPreservingSumByPartner : garde-fou reel, echoue si l\'arrondi redevient ligne par ligne (Math.round independant) au lieu de par associe', () => {
+    // Reproduit le bug historique documente dans server.js (Guillaume 3323 en detail vs 3322 en total) :
+    // un Math.round independant par ligne peut faire diverger la somme des lignes du total attendu.
+    const naiveRound = (entries) => entries.map(e => ({ ...e, montant: Math.round(e.montant) }));
+    const entries = [
+      { deal: 'a', partner: 'Vincent', montant: 100.5 },
+      { deal: 'b', partner: 'Vincent', montant: 100.5 },
+      { deal: 'c', partner: 'Vincent', montant: 100.5 },
+    ]; // total flottant = 301.5 -> round = 302, mais 3x Math.round(100.5) = 3x101 = 303
+    const naive = naiveRound(entries);
+    const naiveSum = naive.reduce((s, e) => s + e.montant, 0);
+    expect(naiveSum).not.toBe(Math.round(301.5)); // le naif diverge (303 != 302) : preuve que le cas est reel
+    const fixed = roundEntriesPreservingSumByPartner(entries);
+    const fixedSum = fixed.reduce((s, e) => s + e.montant, 0);
+    expect(fixedSum).toBe(Math.round(301.5)); // le correctif, lui, preserve le total
   });
 });

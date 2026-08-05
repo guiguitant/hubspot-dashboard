@@ -113,4 +113,24 @@ function roundPreservingSum(values) {
   return out;
 }
 
-module.exports = { colToLetter, parseMonthHeader, discoverLayout, assertPartners, buildUpdates, roundPreservingSum, primesFloorKey };
+// Arrondit `entries` (typiquement detailCharge, une entree par ligne/deal, chacune avec { partner,
+// montant }) en entiers, en preservant la somme PAR ASSOCIE (entries[i].partner) plutot que la somme
+// globale : chaque associe est arrondi independamment via roundPreservingSum, pour que la somme des
+// lignes d'un associe dans le tableau "Par deal" (endpoint /api/primes/avancement) tombe EXACTEMENT sur
+// son total affiche dans "Par associe" (meme methode d'arrondi des deux cotes). Fonction PURE : retourne
+// un NOUVEAU tableau (memes entrees, `montant` remplace par sa version arrondie), dans le meme ordre que
+// `entries`, sans modifier `entries`.
+function roundEntriesPreservingSumByPartner(entries) {
+  const list = entries || [];
+  const floatsByPartner = {};
+  list.forEach((e, i) => {
+    (floatsByPartner[e.partner] = floatsByPartner[e.partner] || {})[i] = e.montant;
+  });
+  const roundedByIndex = {};
+  for (const floats of Object.values(floatsByPartner)) {
+    Object.assign(roundedByIndex, roundPreservingSum(floats));
+  }
+  return list.map((e, i) => ({ ...e, montant: roundedByIndex[i] }));
+}
+
+module.exports = { colToLetter, parseMonthHeader, discoverLayout, assertPartners, buildUpdates, roundPreservingSum, primesFloorKey, roundEntriesPreservingSumByPartner };

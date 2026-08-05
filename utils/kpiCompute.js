@@ -565,4 +565,22 @@ function computePrimePayments({ missions, splits, config, year, caFacture, verse
   return { byMonth, byPartnerMonth, detail, enAttente, enAttenteByPartner, verse, byMonthCharge, byPartnerMonthCharge, detailCharge };
 }
 
-module.exports = { computeKpi, yearOf, yearOfDate, signedAmountForYear, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, signatureDate, splitAmount, displaySplit, OPERE_STATES, SIGNE_EXCLUDED_STATES, primeDefaultRates, normalizePrimeConfig, computePrimePool, computePrimePayments, lastMonthOfQuarter };
+// Sélectionne, dans `detailCharge` (sortie de computePrimePayments pour l'année de SIGNATURE
+// `signatureYear`), les entrées dont la charge doit être retenue pour l'exercice courant `currentYear`
+// (R8, énumération multi-exercice de server.js::computePrimesChargeSchedule) :
+//   - filtre d'exercice : `dateCharge` doit tomber dans `currentYear` ;
+//   - filtre de provision (R3) : une entrée 'provisoire' n'est retenue QUE si signatureYear === currentYear,
+//     sinon la même provision glissante (cf floorChargeKey ci-dessus) serait comptée dans chaque exercice
+//     successif tant que le deal reste non facturé (double/triple compte).
+// Fonction PURE (aucun effet de bord, ne modifie pas `detailCharge`), extraite pour être réellement
+// testée : c'est le garde-fou anti-double-compte des provisions multi-exercice.
+function selectChargeEntriesForExercice(detailCharge, signatureYear, currentYear) {
+  const currentPrefix = String(currentYear) + '-';
+  return (detailCharge || []).filter((e) => {
+    if (!e || !e.dateCharge || !e.dateCharge.startsWith(currentPrefix)) return false;
+    if (e.statut === 'provisoire' && signatureYear !== currentYear) return false;
+    return true;
+  });
+}
+
+module.exports = { computeKpi, yearOf, yearOfDate, signedAmountForYear, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, signatureDate, splitAmount, displaySplit, OPERE_STATES, SIGNE_EXCLUDED_STATES, primeDefaultRates, normalizePrimeConfig, computePrimePool, computePrimePayments, lastMonthOfQuarter, selectChargeEntriesForExercice };
