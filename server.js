@@ -8145,7 +8145,8 @@ async function computeChargesHybride(start, end) {
       for (const [parent, subs] of Object.entries(subCategories)) {
         for (const [subName, monthMap] of Object.entries(subs)) {
           const montant = cols.reduce((acc, c) => acc + (monthMap[c.key] || 0), 0);
-          if (montant > 0) prevSubVentilation.push({ categorie: parent, sousCat: subName, montant: Math.round(montant) });
+          // D5 : on garde aussi les sous-categories a somme negative (ex credit d'impot budgete), seules les lignes vides (0) sont jetees
+          if (montant !== 0) prevSubVentilation.push({ categorie: parent, sousCat: subName, montant: Math.round(montant) });
         }
       }
     }
@@ -8228,7 +8229,8 @@ app.get('/api/previsionnel-charges', async (req, res) => {
     const totals = {};
     for (const [cat, monthMap] of Object.entries(categories)) {
       const sum = cols.reduce((acc, c) => acc + (monthMap[c.key] || 0), 0);
-      if (sum > 0) totals[cat] = sum;
+      // D5 : le total doit egaler la somme de la serie mensuelle ; une categorie negative (ex credit d'impot budgete) reste comptee
+      if (sum !== 0) totals[cat] = sum;
     }
     const totalCharges = Object.values(totals).reduce((a, b) => a + b, 0);
     const moyenneMensuelle = cols.length > 0 ? Math.round(totalCharges / cols.length) : 0;
@@ -8241,7 +8243,8 @@ app.get('/api/previsionnel-charges', async (req, res) => {
     for (const [parent, subs] of Object.entries(subCategories)) {
       for (const [subName, monthMap] of Object.entries(subs)) {
         const montant = cols.reduce((acc, c) => acc + (monthMap[c.key] || 0), 0);
-        if (montant > 0) ventilationChargesDetail.push({ categorie: parent, sousCat: subName, montant: Math.round(montant) });
+        // D5 : on garde aussi les sous-categories a somme negative (ex credit d'impot budgete), seules les lignes vides (0) sont jetees
+        if (montant !== 0) ventilationChargesDetail.push({ categorie: parent, sousCat: subName, montant: Math.round(montant) });
       }
     }
     ventilationChargesDetail.sort((a, b) => b.montant - a.montant);
