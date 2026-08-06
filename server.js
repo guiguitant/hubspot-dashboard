@@ -19,12 +19,9 @@ const { lineExpectedTTC, computeEcart } = require('./utils/facturationCoherence'
 const { computeDepenses } = require('./utils/depensesCompute');
 const gsheets = require('./utils/googleSheets');
 const primesMap = require('./utils/primesSheetMap');
+const chargesPerimetre = require('./utils/chargesPerimetre');
 const cron = require('node-cron');
 const MASSE_TAB = 'Masse_salariale';
-// Sous-categorie Qonto dediee aux virements de primes commerciales (a categoriser dans Qonto).
-// Les transactions de cette sous-categorie sont retirees du reel : la charge des primes vient
-// toujours du calcul (mois de charge), jamais du mois de decaissement bancaire.
-const PRIMES_QONTO_SUBCAT = process.env.PRIMES_QONTO_SUBCAT || 'Primes commerciales';
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
@@ -7860,6 +7857,10 @@ app.get('/api/charges', async (req, res) => {
       const map = {};
       for (const tx of txs) {
         if (!tx.settled_at) continue;
+        const cat = (tx.cashflow_category && tx.cashflow_category.name) || tx.category || 'Non catégorisé';
+        const sousCat = (tx.cashflow_subcategory && tx.cashflow_subcategory.name) || null;
+        if (chargesPerimetre.isPrimeSubcategory(sousCat)) continue; // primes retirees du reel (portees par le calcul)
+        if (chargesPerimetre.isHorsExploitation(cat, sousCat)) continue; // TVA reversee / IS : pas des charges d'exploitation (PCG)
         const d = new Date(tx.settled_at);
         const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
         map[key] = (map[key] || 0) + tx.amount;
@@ -7882,6 +7883,8 @@ app.get('/api/charges', async (req, res) => {
     for (const tx of txsN) {
       const cat = (tx.cashflow_category && tx.cashflow_category.name) || tx.category || 'Non catégorisé';
       const sousCat = (tx.cashflow_subcategory && tx.cashflow_subcategory.name) || null;
+      if (chargesPerimetre.isPrimeSubcategory(sousCat)) continue; // primes retirees du reel (portees par le calcul)
+      if (chargesPerimetre.isHorsExploitation(cat, sousCat)) continue; // TVA reversee / IS : pas des charges d'exploitation (PCG)
       chargesParCategorie[cat] = (chargesParCategorie[cat] || 0) + tx.amount;
       const sousCatKey = sousCat ? `${cat} > ${sousCat}` : cat;
       if (!chargesParSousCategorie[sousCatKey]) chargesParSousCategorie[sousCatKey] = { categorie: cat, sousCat: sousCat || null, montant: 0 };
@@ -7963,6 +7966,9 @@ async function computeChargesHybride(start, end) {
     let chargesParMoisNm1  = {};
     let realVentilation    = [];
     let realSubVentilation = [];
+    // Compteurs d'exclusions PCG (perimetre) de la boucle N, exposes dans la reponse pour tracabilite.
+    let primesExclues = { nb: 0, montant: 0 };
+    let horsExploitationExclues = { nb: 0, montant: 0 };
 
     // Qonto : on fetch toujours le N-1 sur la totalité de la période (pas seulement la partie réelle)
     // pour que les barres N-1 s'affichent aussi pour les mois futurs (ex. Avr-Déc 2025 vs Avr-Déc 2026)
@@ -8008,8 +8014,15 @@ async function computeChargesHybride(start, end) {
       const subCatMap = {};
       for (const tx of txsN) {
         const sousCat = (tx.cashflow_subcategory && tx.cashflow_subcategory.name) || null;
-        if (sousCat === PRIMES_QONTO_SUBCAT) continue; // primes retirees du reel (portees par le calcul)
         const cat = (tx.cashflow_category && tx.cashflow_category.name) || tx.category || 'Non catégorisé';
+        if (chargesPerimetre.isPrimeSubcategory(sousCat)) { // primes retirees du reel (portees par le calcul)
+          primesExclues.nb++; primesExclues.montant += tx.amount;
+          continue;
+        }
+        if (chargesPerimetre.isHorsExploitation(cat, sousCat)) { // TVA reversee / IS : pas des charges d'exploitation (PCG)
+          horsExploitationExclues.nb++; horsExploitationExclues.montant += tx.amount;
+          continue;
+        }
         catMap[cat] = (catMap[cat] || 0) + tx.amount;
         const subKey = sousCat ? `${cat}||${sousCat}` : `${cat}||`;
         if (!subCatMap[subKey]) subCatMap[subKey] = { categorie: cat, sousCat, montant: 0 };
@@ -8020,7 +8033,9 @@ async function computeChargesHybride(start, end) {
       }
       for (const tx of txsNm1) {
         const sousCatNm1 = (tx.cashflow_subcategory && tx.cashflow_subcategory.name) || null;
-        if (sousCatNm1 === PRIMES_QONTO_SUBCAT) continue; // meme exclusion que la boucle N (primes portees par le calcul)
+        const catNm1 = (tx.cashflow_category && tx.cashflow_category.name) || tx.category || 'Non catégorisé';
+        if (chargesPerimetre.isPrimeSubcategory(sousCatNm1)) continue; // meme exclusion que la boucle N (primes portees par le calcul)
+        if (chargesPerimetre.isHorsExploitation(catNm1, sousCatNm1)) continue; // meme exclusion que la boucle N (TVA reversee / IS)
         const d = new Date(tx.settled_at);
         const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
         chargesParMoisNm1[key] = (chargesParMoisNm1[key] || 0) + tx.amount;
@@ -8029,11 +8044,12 @@ async function computeChargesHybride(start, end) {
       realVentilation = Object.entries(catMap).map(([categorie, montant]) => ({ categorie, montant }));
       realSubVentilation = Object.values(subCatMap);
       realTotal = realVentilation.reduce((s, v) => s + v.montant, 0);
+      console.log('[charges] exclusions : primes %d€ (%d tx), hors-exploitation %d€ (%d tx)', Math.round(primesExclues.montant), primesExclues.nb, Math.round(horsExploitationExclues.montant), horsExploitationExclues.nb);
     }
 
     // --- Réinjection de la charge des primes (fenêtre RÉELLE uniquement) ---
-    // Qonto exclut désormais les virements de primes du réel (Option B, PRIMES_QONTO_SUBCAT, cf boucles
-    // ci-dessus) : cette charge n'y figure plus. Pour les mois clos, on la relit depuis le GSheet
+    // Qonto exclut désormais les virements de primes du réel (Option B, chargesPerimetre.isPrimeSubcategory,
+    // cf boucles ci-dessus) : cette charge n'y figure plus. Pour les mois clos, on la relit depuis le GSheet
     // Masse_salariale (catégorie .Primes) : c'est la vérité historique figée au bon mois de rattachement,
     // celle-là même qu'écrit le write-back et que la formule tableur .Primes -> CR_Prev utilise pour les
     // mois ouverts (fenêtre prévisionnelle). Sans cette réinjection, un exercice ENTIÈREMENT clos (aucun
@@ -8043,8 +8059,8 @@ async function computeChargesHybride(start, end) {
     if (hasReal) {
       try {
         // La catégorie GSheet .Primes porte AUSSI les primes des CDI (Arthur, Thomas, Evane...), à côté
-        // des trois associés (Vincent, Guillaume, Nathan). Qonto n'exclut du réel que la sous-catégorie
-        // "Primes commerciales" (PRIMES_QONTO_SUBCAT) : une prime CDI reste donc dans le réel bancaire.
+        // des trois associés (Vincent, Guillaume, Nathan). Qonto n'exclut du réel que les sous-catégories
+        // "Primes associées" / "Primes commerciales" (chargesPerimetre.isPrimeSubcategory) : une prime CDI reste donc dans le réel bancaire.
         // Si on réinjectait TOUTE la catégorie .Primes ici, la prime d'un CDI serait comptée deux fois
         // dès la clôture du mois qui la porte (une fois par la banque, une fois par cette réinjection).
         // On ne réinjecte donc QUE les lignes des associés, c'est-à-dire exactement celles qu'écrit le
@@ -8164,6 +8180,8 @@ async function computeChargesHybride(start, end) {
       ventilationCharges,
       ventilationChargesDetail,
       totalCharges,
+      primesExclues: { nb: primesExclues.nb, montant: Math.round(primesExclues.montant) },
+      horsExploitationExclues: { nb: horsExploitationExclues.nb, montant: Math.round(horsExploitationExclues.montant) },
       moyenneMensuelle: moisLabels.length > 0 ? Math.round(totalCharges / moisLabels.length) : 0,
       comparaison: {
         mois: moisLabels,
