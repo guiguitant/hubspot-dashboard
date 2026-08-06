@@ -7995,14 +7995,19 @@ async function computeChargesHybride(start, end) {
       // N réel : seulement la période passée
       // N-1 : toute la période sélectionnée décalée d'un an (pour comparer même les mois futurs)
       const fullStartD = new Date(startKey + '-01');
-      const fullEndD   = new Date(endKey   + '-28T23:59:59');
+      const fullEndD   = chargesPerimetre.monthEndDate(endKey);
       const nm1StartD  = new Date(fullStartD); nm1StartD.setFullYear(nm1StartD.getFullYear() - 1);
-      const nm1EndD    = new Date(fullEndD);   nm1EndD.setFullYear(nm1EndD.getFullYear() - 1);
+      // On ne decale pas fullEndD d'un an via setFullYear : sur un 29 fevrier bissextile, le decalage
+      // vers une annee non bissextile deraperait au 1er mars. On calcule plutot directement la cle
+      // N-1 (meme mois, annee precedente) puis sa vraie fin de mois via monthEndDate.
+      const [endYearStr, endMonthStr] = endKey.split('-');
+      const nm1EndKey  = `${Number(endYearStr) - 1}-${endMonthStr}`;
+      const nm1EndD    = chargesPerimetre.monthEndDate(nm1EndKey);
 
       const fetches = [fetchDebitsHybride(iban, nm1StartD.toISOString(), nm1EndD.toISOString())];
       if (hasReal) {
         const realStartD = new Date(startKey + '-01');
-        const realEndD   = new Date(realEndKey + '-28T23:59:59');
+        const realEndD   = chargesPerimetre.monthEndDate(realEndKey);
         fetches.unshift(fetchDebitsHybride(iban, realStartD.toISOString(), realEndD.toISOString()));
       }
 
