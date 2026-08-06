@@ -8136,10 +8136,16 @@ async function computeChargesHybride(start, end) {
         // liste des deux côtés (write-back/endpoint d'avancement ET cette réinjection, cf I3), pour que
         // "ce qui est réinjecté" reste toujours aligné avec "ce que le write-back a écrit", même si l'un
         // des deux évolue.
-        const primesParticipants = await primesParticipantsFor(now.toISOString());
+        // La liste des participants dépend de l'EXERCICE (elle peut changer d'une année à l'autre) : on
+        // la dérive de l'année de la FENÊTRE demandée (startKey), PAS de l'année courante (`now`). Sinon
+        // une fenêtre d'un exercice passé (ex. /api/ebe?year=2025 consultée en 2026) filtrerait les primes
+        // 2025 par la liste des participants 2026, ce qui peut exclure ou inclure des lignes à tort.
+        const windowYear = startKey.slice(0, 4);
+        const primesParticipants = await primesParticipantsFor(`${windowYear}-01-01T00:00:00.000Z`);
 
         const masse = await fetchAndParseMasseSalarialeDetailed();
         let primesReinjectionTotal = 0;
+        let moisReinjectes = 0; // nb de mois clos où une valeur non nulle a été réinjectée (pour le log)
         for (const [mKey, slot] of Object.entries(masse.byMonth || {})) {
           // Garde-fou anti-double-compte (le point critique de cette tâche) : on ne réinjecte QUE pour
           // les mois de la fenêtre RÉELLE (mk >= startKey && mk <= realEndKey). Les mois de la fenêtre
@@ -8156,18 +8162,23 @@ async function computeChargesHybride(start, end) {
           if (primeMois === 0) continue;
           chargesParMoisN[mKey] = (chargesParMoisN[mKey] || 0) + primeMois;
           primesReinjectionTotal += primeMois;
+          moisReinjectes++;
         }
+        // Log toujours émis (même à 0) : un "zéro" silencieux masquerait un échec de filtrage
+        // (participants de la mauvaise année, GSheet vide...) sans jamais lever d'erreur.
+        console.log('[charges] reinjection primes : %d€ sur %d mois clos', Math.round(primesReinjectionTotal), moisReinjectes);
         if (primesReinjectionTotal > 0) {
           realTotal += primesReinjectionTotal;
           // Rattachées aux "Frais de personnel" (même catégorie mère que Salaires nets / Charges soci.),
-          // cohérent avec CR_Prev qui les y range déjà (cf fetchAndParseCRPrev, sous-catégorie "Primes").
+          // cohérent avec CR_Prev qui les y range déjà (cf fetchAndParseCRPrev, sous-catégorie ".Primes",
+          // libellé brut du GSheet : les sous-catégories n'y sont jamais dé-préfixées du ".").
           const feEntry = realVentilation.find(v => v.categorie === 'Frais de personnel');
           if (feEntry) feEntry.montant += primesReinjectionTotal;
           else realVentilation.push({ categorie: 'Frais de personnel', montant: primesReinjectionTotal });
 
-          const primeSubEntry = realSubVentilation.find(v => v.categorie === 'Frais de personnel' && v.sousCat === 'Primes');
+          const primeSubEntry = realSubVentilation.find(v => v.categorie === 'Frais de personnel' && v.sousCat === '.Primes');
           if (primeSubEntry) primeSubEntry.montant += primesReinjectionTotal;
-          else realSubVentilation.push({ categorie: 'Frais de personnel', sousCat: 'Primes', montant: primesReinjectionTotal });
+          else realSubVentilation.push({ categorie: 'Frais de personnel', sousCat: '.Primes', montant: primesReinjectionTotal });
         }
       } catch (e) {
         console.error('[charges-hybride] échec réinjection de la charge des primes (participants Supabase/Notion, ou GSheet Masse_salariale) :', e.message);
