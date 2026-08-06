@@ -111,11 +111,17 @@ Tests : taux 20 % → 120 devient 100 ; taux 10 % ; taux 0 % inchangé ; non ré
 
 ---
 
-### Task 6 · Conversion HT branchée sur le réel
+### Task 6 · Conversion HT branchée sur le réel (RÉVISÉE 2026-08-06 : hybride Pennylane + table)
 
-**Files:** Modify `server.js`.
+**Files:** Modify `server.js`, `utils/tvaCharges.js` (+ test).
 
-Appliquer `tvaCharges.montantHT(tx, tableTaux)` aux points d'agrégation du réel : computeChargesHybride ~8013/8016/8019 (N) et ~8026 (N-1, impératif pour une comparaison homogène), et route legacy `/api/charges` (~7865/7885/7888). La table est chargée une fois par appel via `fetchAndParseCategoriesTVA` (cache existant). Tant que la table du classeur n'est pas remplie par l'utilisateur, la règle de prudence (« aucun taux connu : TTC inchangé ») fait que ce commit ne change RIEN aux totaux : le vérifier explicitement (totaux identiques avant/après). Commit `feat(pilot) charges : reel converti en HT par taux de categorie (D1, inerte tant que la table est vide)`.
+**Décision (analyse comparative des sources, spec §2.2 révisée) :** la source prioritaire de TVA est la facture fournisseur Pennylane rattachée à la transaction ; la table de taux devient le repli. Le champ `vat_amount` de Qonto est écarté.
+
+- [ ] Step 1 · **Index exact Pennylane** : nouvelle fonction serveur (près des autres fetchers Pennylane) qui construit `indexExact` en DEUX appels bulk seulement, en réutilisant `pennylaneFetchAll` : `/supplier_invoices` (filtre `date gteq` borne basse de la période, champs `currency_amount`, `currency_amount_before_tax`, `currency_tax`, `ledger_entry.id`) et `/ledger_entry_lines` (même filtre) pour le lettrage paiement↔facture (`supplier_invoice.id === ledger_entry.id`). Cache 10 min + singleton anti-concurrence, sur le modèle exact de `fetchDepensesTransactions`. JAMAIS d'appel par facture (pas de N+1, pas de `matched_transactions`). Tolérance aux pannes : échec → `indexExact` vide, la hiérarchie retombe sur la table (log une ligne).
+- [ ] Step 2 · **Étendre `montantHT(tx, tableTaux, indexExact)`** (3e paramètre OPTIONNEL, rétro-compatible : les 17 tests existants restent verts sans modification) : priorité 0 = TVA exacte de la facture rattachée (`HT = TTC - currency_tax`) ; puis la hiérarchie existante. La clé de correspondance transaction↔facture est celle du lettrage (à définir dans le contrat de l'index, documentée des deux côtés). Tests supplémentaires : priorité 0 gagne sur la table ; transaction absente de l'index → repli table ; index vide/absent → comportement actuel inchangé.
+- [ ] Step 3 · **Brancher** aux points d'agrégation du réel : `computeChargesHybride` (boucles N et N-1, impératif pour une comparaison homogène) et route legacy `/api/charges`. La table est chargée via `fetchAndParseCategoriesTVA` (cache existant), l'index via la nouvelle fonction. Exposer un indicateur de complétude dans la réponse hybride : `tvaExacte: { montantCouvert, montantTotal }` (part des dépenses converties par la priorité 0), pour l'affichage futur et le diagnostic.
+- [ ] Step 4 · Vérifications : `node --check`, `npm test`. Mesure contrôleur attendue : ~24 900 € de TVA sortent du réel jan-juil (référence grand livre 4456* : 27 470 € au total, dont ~91 % couverts). Les transactions hors table et hors index restent TTC (prudence).
+- [ ] Commit `feat(pilot) charges : reel converti en HT (TVA exacte Pennylane + repli table de taux, D1)`.
 
 ---
 
