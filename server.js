@@ -20,6 +20,7 @@ const { computeDepenses } = require('./utils/depensesCompute');
 const gsheets = require('./utils/googleSheets');
 const primesMap = require('./utils/primesSheetMap');
 const chargesPerimetre = require('./utils/chargesPerimetre');
+const { buildCoupleKey } = require('./utils/tvaCharges'); // cle categorie/sous-categorie partagee avec le parser Categories TVA (evite toute divergence)
 const cron = require('node-cron');
 const MASSE_TAB = 'Masse_salariale';
 const upload = multer({
@@ -4824,10 +4825,40 @@ async function fetchAndParseMasseSalarialeDetailed() {
 // Lit l'onglet GSheet Salaires (metadata employés) : nom, type de contrat, date début/fin.
 // Retourne [{ nom, type, date_debut, date_fin, isDirigeant }]. Utile pour la multi-select
 // "Salariés concernés" de l'override salaire_augmentation.
-// --- Catégories TVA (Phase E complète) ---
-// Onglet "Catégories" (GID 771195553). Format attendu : colonne nom + colonne taux TVA.
-// Parser défensif : scan toutes les colonnes pour trouver un taux TVA par ligne.
-// Taux reconnu : "20", "20%", "0.20", "20,00%", etc. — normalisé en décimale (0.20 pour 20%).
+// --- Catégories TVA (Phase E complète + Tâche 5 charges-perimetre-tva) ---
+// Onglet "Catégories" (GID 771195553). Disposition réelle du classeur (vérifiée en lecture sur le
+// classeur live, cf. rapport Tâche 5) : le nom de catégorie est en COLONNE C (row[2]), pas en colonne
+// A : les colonnes A/B portent un rang numérique interne au classeur, jamais le libellé. Le taux TVA
+// est en colonne D (row[3]) juste après. L'onglet est structuré en plusieurs blocs "Nom" (encaissement,
+// décaissement) avec un second mini-tableau (financements) plus à droite qui n'a pas de taux : le scan
+// du taux reste borné aux colonnes D..F (index 3..5) pour ne jamais capter les valeurs de ce second
+// bloc (ex. un simple compteur de lignes en colonne G aurait pu être lu à tort comme "5%").
+//
+// Convention "couple catégorie/sous-catégorie" : le classeur n'a qu'une seule colonne "Nom" (pas de
+// colonne sous-catégorie dédiée). Pour permettre malgré tout un taux différent pour une sous-catégorie
+// précise (ex. Frais de personnel = 0% SAUF Rémunération dirigeants = 20%), on écrit dans la même
+// cellule "Catégorie > Sous-catégorie" (le chevron est le SEUL séparateur sans ambiguïté : plusieurs
+// noms de catégories contiennent déjà '/', ex. "Publicité / marketing", "Marketing/Communication" —
+// les utiliser comme séparateur aurait cassé ces libellés existants).
+//
+// Colonne "récupérable" (oui/non) : optionnelle, lue si détectée sur une ligne d'en-tête ("Nom") dans
+// la fenêtre D..F ; absente du classeur au moment de cette tâche donc récupérable = oui par défaut
+// pour toutes les lignes (prudence : jamais non-récupérable sans indication explicite).
+//
+// Taux reconnu : "20", "20%", "0.20", "20,00%", etc., normalisé en décimale (0.20 pour 20%).
+//
+// Forme de sortie (contrat, voir aussi utils/tvaCharges.js) :
+// {
+//   byCategorie: { [nomBrut]: tauxDecimal },   // RETRO-COMPAT : uniquement les lignes "categorie simple"
+//                                               // (sans '>'), cle = libelle brut tel qu'ecrit dans le
+//                                               // classeur. Consomme par /api/categories-tva et par
+//                                               // getOverrideTvaInfo (dropdown categorie des overrides).
+//   nbDetected: number,                        // = Object.keys(byCategorie).length, RETRO-COMPAT.
+//   tableTaux: {                                // NOUVEAU (Tache 5), consomme par utils/tvaCharges.js#montantHT.
+//     parCategorie: { [normalizeLabel(categorie)]: { taux, recuperable } },
+//     parCouple:    { [buildCoupleKey(categorie, sousCategorie)]: { taux, recuperable } },
+//   },
+// }
 let categoriesTvaCache = null;
 let categoriesTvaCacheTime = 0;
 const CATEGORIES_TVA_CACHE_TTL = 30 * 60 * 1000;
@@ -4839,21 +4870,35 @@ async function fetchAndParseCategoriesTVA() {
   const csv = await fetchGoogleSheetCSV(GID_CATEGORIES_TVA);
   const rows = parseCSV(csv);
   const byCategorie = {};
-  // Ignore les 2 premières lignes si header probable ("Catégorie" / "Nom" / "Catégories" en col A, etc.)
-  let startRow = 0;
-  for (let r = 0; r < Math.min(3, rows.length); r++) {
-    const first = (rows[r][0] || '').trim().toLowerCase();
-    if (first === 'catégorie' || first === 'categorie' || first === 'catégories' || first === 'nom' || first === 'libellé' || first === '') {
-      startRow = r + 1;
+  const parCategorie = {};
+  const parCouple = {};
+  let recuperableCol = null;
+  // Passe 1 : cherche une eventuelle colonne "recuperable" sur une ligne d'en-tete ("Nom" en col C).
+  // Fenetre bornee D..F (index 3..5), comme le scan du taux : evite de capter du texte sans rapport
+  // plus loin sur la ligne (ex. le second mini-tableau "financements").
+  for (let r = 0; r < rows.length && recuperableCol === null; r++) {
+    const row = rows[r];
+    if ((row[2] || '').trim().toLowerCase() !== 'nom') continue;
+    for (let c = 3; c < Math.min(row.length, 6); c++) {
+      if (chargesPerimetre.normalizeLabel(row[c]).includes('recuperable')) { recuperableCol = c; break; }
     }
   }
-  for (let r = startRow; r < rows.length; r++) {
+
+  for (let r = 0; r < rows.length; r++) {
     const row = rows[r];
-    const nom = (row[0] || '').trim();
-    if (!nom) continue;
-    // Cherche un taux TVA dans les colonnes suivantes (première valeur numérique plausible en pct ou décimal)
+    const nomCell = (row[2] || '').trim();
+    if (!nomCell || nomCell.toLowerCase() === 'nom') continue; // ligne vide / en-tete de bloc
+
+    // "Categorie > Sous-categorie" : voir commentaire de convention en tete de fonction.
+    const parts = nomCell.split('>').map(s => s.trim()).filter(Boolean);
+    const isCouple = parts.length === 2;
+    const categorie = isCouple ? parts[0] : nomCell;
+    const sousCategorie = isCouple ? parts[1] : null;
+    // Scan du taux, colonnes D..F uniquement (fenetre bornee, voir commentaire en tete de fonction).
     let taux = null;
-    for (let c = 1; c < row.length; c++) {
+    const scanEnd = Math.min(row.length, 6);
+    for (let c = 3; c < scanEnd; c++) {
+      if (recuperableCol !== null && c === recuperableCol) continue;
       const raw = (row[c] || '').trim();
       if (!raw) continue;
       const cleaned = raw.replace(/[%\s ]/g, '').replace(',', '.');
@@ -4863,9 +4908,27 @@ async function fetchAndParseCategoriesTVA() {
       else if (n >= 0 && n <= 0.30) { taux = n; break; }   // "0.20", "0.055"
       else if (n === 0) { taux = 0; break; }
     }
-    if (taux !== null) byCategorie[nom] = taux;
+    if (taux === null) continue; // pas de taux exploitable sur cette ligne (titre de section, etc.)
+
+    // Recuperable = oui par defaut ; non seulement si la colonne dediee le dit explicitement.
+    let recuperable = true;
+    if (recuperableCol !== null) {
+      const rawRec = chargesPerimetre.normalizeLabel(row[recuperableCol]);
+      if (rawRec === 'non' || rawRec === 'no' || rawRec === 'false' || rawRec === '0') recuperable = false;
+    }
+
+    if (isCouple) {
+      parCouple[buildCoupleKey(categorie, sousCategorie)] = { taux, recuperable };
+    } else {
+      byCategorie[nomCell] = taux; // retro-compat : cle = libelle brut, comportement identique a avant reparation
+      parCategorie[chargesPerimetre.normalizeLabel(categorie)] = { taux, recuperable };
+    }
   }
-  const result = { byCategorie, nbDetected: Object.keys(byCategorie).length };
+  const result = {
+    byCategorie,
+    nbDetected: Object.keys(byCategorie).length,
+    tableTaux: { parCategorie, parCouple },
+  };
   console.log('[CategoriesTVA] parsed', result.nbDetected, 'catégories :', Object.keys(byCategorie).slice(0, 10).join(', '), result.nbDetected > 10 ? '...' : '');
   categoriesTvaCache = result;
   categoriesTvaCacheTime = Date.now();
