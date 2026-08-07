@@ -137,7 +137,7 @@ Tests : taux 20 % → 120 devient 100 ; taux 10 % ; taux 0 % inchangé ; non ré
 
 **Files:** Modify `public/pilot.html` ET `dist/pilot.html` (identiques).
 
-Carte Analytics (~4090) : libellé « Budget de charges HT · CR_Prev » et sous-titre inchangé ; corriger les commentaires mensongers (~10215-10217, ~10436) qui affirment que la carte et le compte de résultat partagent la même source. Aucun changement de logique. Vérifier parité `cmp`, parsing JS, `npm test`. Commit `fix(pilot) charges : la carte Analytics annonce sa source (budget CR_Prev)`.
+Carte Analytics (~4090) : libellé « Budget de charges HT », sous-titre « CR_Prev · budget annuel, hors réel bancaire » (formulation affinée au dispatch, fait foi) ; corriger les commentaires mensongers (~10215-10217, ~10436) qui affirment que la carte et le compte de résultat partagent la même source. Aucun changement de logique. Vérifier parité `cmp`, parsing JS, `npm test`. Commit `fix(pilot) charges : la carte Analytics annonce sa source (budget CR_Prev)`.
 
 ---
 
