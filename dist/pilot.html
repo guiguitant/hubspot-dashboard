@@ -4087,9 +4087,9 @@
       <!-- Cards instantanees, toujours actuelles, independantes de la periode selectionnee -->
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:2rem">
         <div class="kpi-block">
-          <div class="kpi-label">Charges annuelles <span class="kpi-unit">HT</span></div>
+          <div class="kpi-label">Budget de charges <span class="kpi-unit">HT</span></div>
           <div class="kpi-value" id="chargesAnnuellesValue">--</div>
-          <div class="kpi-sub" id="chargesAnnuellesSub">CR prévisionnel · année en cours</div>
+          <div class="kpi-sub" id="chargesAnnuellesSub">CR_Prev · budget annuel, hors réel bancaire</div>
         </div>
         <div class="kpi-block">
           <div class="kpi-label">Charges du mois <span class="kpi-unit">HT</span></div>
@@ -4111,11 +4111,11 @@
       <!-- Bandeau erreur Pennylane (detail indisponible) -->
       <div id="depensesPennylaneWarning" style="display:none;padding:0.6rem 1rem;background:rgba(224,62,62,0.08);border-left:3px solid var(--danger);border-radius:4px;margin-bottom:1rem;font-size:0.85rem;color:var(--text)"></div>
 
-      <!-- Bloc Comparatif : Qonto reel + previsionnel GSheet -->
+      <!-- Bloc Comparatif : budget CR_Prev (GSheet) seul, HT ; pas de donnee Qonto reelle dans ce graphe -->
       <div class="section">
         <div style="display:flex;align-items:baseline;justify-content:space-between;gap:1rem;margin-bottom:0.75rem;flex-wrap:wrap">
           <div class="section-title" style="margin-bottom:0">Charges N vs N-1 (par mois)</div>
-          <span style="font-size:0.72rem;color:var(--text-secondary)">Source : CR prévisionnel · HT (compte de résultat)</span>
+          <span style="font-size:0.72rem;color:var(--text-secondary)">Source : CR_Prev · HT · budget (hors réel bancaire)</span>
         </div>
         <div style="position:relative;height:300px"><canvas id="analyticsChargesComparaison"></canvas></div>
       </div>
@@ -10217,7 +10217,9 @@
       tabCharges.style.visibility = 'hidden';
 
       try {
-        // Charges du compte de resultat : CR_Prev (HT), pilote par la periode pour le graphe N vs N-1
+        // Charges du budget annuel (CR_Prev, HT), pilote par la periode pour le graphe N vs N-1.
+        // Attention : ce n'est PAS la meme source que le compte de resultat (/api/ebe), qui melange
+        // reel Qonto (mois clos) et budget CR_Prev (mois courant/futurs) via /api/charges-hybride.
         const cRes = await fetch(`/api/previsionnel-charges?start=${start.slice(0,7)}&end=${end.slice(0,7)}`);
         analyticsChargesData = await cRes.json();
         if (analyticsChargesData && analyticsChargesData.comparaison) renderChargesComparaison(analyticsChargesData.comparaison);
@@ -10246,9 +10248,10 @@
       }
     }
 
-    // Cartes HT du compte de resultat (CR_Prev), annee civile en cours, independantes du filtre de periode :
-    // "Charges annuelles" (total), "Charges du mois" (mois en cours) et "Moyenne mensuelle" (total / nb mois).
-    // Une seule source (CR_Prev, HT) pour rester coherent avec le compte de resultat ; reponse gardee en cache.
+    // Cartes HT de l'onglet Analytics (budget CR_Prev pur), annee civile en cours, independantes du filtre de periode :
+    // "Budget de charges" (total), "Charges du mois" (mois en cours) et "Moyenne mensuelle" (total / nb mois).
+    // Une seule source (CR_Prev, HT = budget, hors reel bancaire) : volontairement DIFFERENTE de l'hybride
+    // (reel Qonto mois clos + budget mois courant/futurs) utilisee par le compte de resultat ; reponse gardee en cache.
     async function renderChargesCards() {
       const elAnnuel = document.getElementById('chargesAnnuellesValue');
       const elMois   = document.getElementById('depKpiSorties');
@@ -10354,10 +10357,11 @@
       document.getElementById('modalMissionsBody').innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem">Chargement...</p>';
       document.getElementById('modalMissions').classList.add('open');
       try {
-        // Même source que le graphique : en mode prévisionnel, un mois futur n'a pas de charges
-        // réelles Qonto (l'endpoint /api/charges renverrait du vide) — il faut la version hybride
-        // qui inclut le prévisionnel GSheet, sinon la modale affiche "Aucune charge" à tort.
-        // Meme source que le graphe : CR_Prev (HT, compte de resultat). Format YYYY-MM.
+        // Le detail par categorie doit fonctionner meme sur un mois futur, ou /api/charges (Qonto reel)
+        // renverrait du vide ; on utilise donc /api/previsionnel-charges (CR_Prev, HT, budget pur,
+        // incluant le previsionnel GSheet), sinon la modale afficherait "Aucune charge" a tort.
+        // Meme source que le graphe (renderAnalyticsChargesChart) : CR_Prev, PAS le compte de resultat,
+        // qui utilise l'hybride reel Qonto + budget (/api/charges-hybride). Format YYYY-MM.
         const endpoint = `/api/previsionnel-charges?start=${start.slice(0,7)}&end=${end.slice(0,7)}`;
         const res = await fetch(endpoint);
         const data = await res.json();
@@ -10432,8 +10436,9 @@
         const analyticsData = await res.json();
         renderAnalytics(analyticsData);
 
-        // Onglet Charges : rendu (comparatif hybride + detail) uniquement s'il est visible.
-        // renderAnalyticsChargesChart fetche /api/charges-hybride (previsionnel toujours integre).
+        // Onglet Charges : rendu (comparatif budget CR_Prev + detail Pennylane) uniquement s'il est visible.
+        // renderAnalyticsChargesChart fetche /api/previsionnel-charges (budget CR_Prev pur, HT) ;
+        // c'est different de /api/charges-hybride, utilise par le compte de resultat (/api/ebe).
         if (tabCharges.style.display !== 'none') {
           await renderAnalyticsChargesChart();
         }
