@@ -3676,6 +3676,7 @@ async function pennylaneFetchAll(endpoint, params = {}, maxPages = 200) {
   const allItems = [];
   let cursor = null;
   let pageCount = 0;
+  let stillMore = false; // I3 (revue finale) : has_more de la DERNIERE page recuperee (voir warn plus bas)
 
   while (pageCount < maxPages) {
     const queryParams = new URLSearchParams(params);
@@ -3691,8 +3692,9 @@ async function pennylaneFetchAll(endpoint, params = {}, maxPages = 200) {
     }
 
     pageCount++;
+    stillMore = !!(result.has_more && result.next_cursor);
 
-    if (result.has_more && result.next_cursor) {
+    if (stillMore) {
       cursor = result.next_cursor;
     } else {
       break;
@@ -3700,6 +3702,15 @@ async function pennylaneFetchAll(endpoint, params = {}, maxPages = 200) {
 
     // Rate limit Pennylane : 25 req/5s = 200ms minimum. On respecte 250ms (10% marge) pour speedup vs 400ms.
     await new Promise(r => setTimeout(r, 250));
+  }
+
+  // I3 (revue finale) : la borne maxPages coupait silencieusement la pagination avant ce correctif.
+  // `pageCount === maxPages` seul ne suffit pas a detecter une troncature : si la VRAIE derniere page
+  // tombe exactement sur la borne (has_more false), ce n'est qu'une coincidence, rien n'est perdu. On
+  // ne warn que si la derniere page recuperee annoncait ENCORE has_more : la boucle se serait
+  // poursuivie sans la borne, des donnees restent bien disponibles au-dela.
+  if (pageCount === maxPages && stillMore) {
+    console.warn('[pennylaneFetchAll] troncature : %s a atteint la borne de %d pages (%d items recuperes), des donnees restent disponibles au-dela', endpoint, maxPages, allItems.length);
   }
 
   return allItems;
@@ -4334,13 +4345,25 @@ async function fetchSupplierInvoices() {
 // (date, montant), soit 186 104 € sur 271 208 € TTC = 68,6% des euros de la fenetre, pour 23 302 €
 // de TVA retiree par la seule priorite 0 (table neutralisee pour isoler cet effet).
 
-// Borne basse par defaut de l'index exact TVA : 13 mois (mois courant + 12 precedents), meme
-// fenetre que _defaultDepensesFromDate (coherence des conventions de cache Pennylane du fichier).
-function _defaultIndexExactTVAFromDate() {
-  const from = new Date();
-  from.setDate(1);
-  from.setMonth(from.getMonth() - 12);
-  return `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}-01`;
+// Borne basse FIXE de la fenetre de l'index exact TVA (CORRECTIF revue finale C1) : 1er janvier de
+// (annee courante - 2), calculee UNIQUEMENT depuis `new Date()` -- INDEPENDANTE de tout appelant.
+//
+// AVANT ce correctif, la fenetre dependait du `fromDate` transmis par l'appelant (voir l'ancienne
+// `_effectiveIndexExactFromDate` : min(fromDate, defaut glissant 13 mois)) : deux ecrans avec des
+// fenetres differentes (ex. /api/charges sur une fenetre recente vs computeChargesHybride sur une
+// fenetre plus ancienne pour couvrir sa comparaison N-1) obtenaient donc deux INDEX differents pour
+// la MEME transaction, donc potentiellement deux HT differents. Une fenetre plus large apparie plus
+// de factures (facture de decembre N-1 payee en janvier N) ET cree de nouvelles collisions
+// (date, montant) a HT different, exclues par prudence (cf buildIndexExactTVA) : deux mecanismes,
+// dans les deux sens. Preuve rejouee en revue finale : janvier 2025 valait 31 097 € vu depuis une
+// fenetre 2026, 28 601 € vu depuis une fenetre 2025 (2 095 € d'ecart sur le seul T1 2025).
+//
+// Surchargeable par INDEX_EXACT_TVA_FROM_DATE (YYYY-MM-DD, optionnel, tests/debug). En 2026, cette
+// borne (2024-01-01) couvre exactement la fenetre la plus large utilisee aujourd'hui (tresorerie,
+// N-1 de l'exercice precedent) = `currentYear - 2`.
+function _indexExactTVAFromDate() {
+  if (process.env.INDEX_EXACT_TVA_FROM_DATE) return process.env.INDEX_EXACT_TVA_FROM_DATE;
+  return `${new Date().getFullYear() - 2}-01-01`;
 }
 
 async function _buildIndexExactTVAFrom(fromDateStr) {
@@ -4357,40 +4380,44 @@ async function _buildIndexExactTVAFrom(fromDateStr) {
 
 // Fetch + cache de l'index exact TVA.
 //
-// CORRECTIF revue I2 : les deux sites d'appel (computeChargesHybride, /api/charges) passent
-// TOUJOURS un `fromDate` explicite (la borne N-1 de leur fenetre) ; l'ancienne version de cette
-// fonction ne cachait QUE le cas "sans argument", jamais atteint en pratique => chaque appel
+// CORRECTIF revue I2 (premiere vague) : les deux sites d'appel (computeChargesHybride, /api/charges)
+// passent TOUJOURS un `fromDate` explicite (la borne N-1 de leur fenetre) ; l'ancienne version de
+// cette fonction ne cachait QUE le cas "sans argument", jamais atteint en pratique => chaque appel
 // refetchait integralement (mesure : ~30s par appel, jamais mis en cache), et deux endpoints charges
-// ensemble par le dashboard (/api/ebe + /api/charges-hybride) declenchaient deux rafales concurrentes
-// contre la limite Pennylane (25 req/5s, 429 + retries). Le cache est desormais PAR CLE `from`
-// effective (`Map from -> { index, time }`), avec un singleton PAR CLE (une promesse en vol par
-// `from`, partagee par les appels concurrents qui calculent la meme fenetre) : que l'appelant
-// fournisse ou non un `fromDate`, le meme mecanisme de cache/singleton s'applique.
+// ensemble par le dashboard (/api/ebe + /api/tresorerie, tous deux consommateurs Pennylane au
+// chargement du dashboard) declenchaient deux rafales concurrentes contre la limite Pennylane
+// (25 req/5s, 429 + retries). Le cache est PAR CLE `from` (`Map from -> { index, time }`), avec un
+// singleton PAR CLE (une promesse en vol par `from`, partagee par les appels concurrents qui
+// calculent la meme fenetre).
 //
-// `from` effectif = min(fromDate demande, fenetre par defaut 13 mois) : permet d'elargir la fenetre
-// en arriere pour une periode plus ancienne (ex. comparaison N-1 sur un exercice passe), sans jamais
-// la retrecir sous 13 mois.
+// CORRECTIF revue finale C1 : la fenetre `from` ne depend plus du `fromDate` passe par l'appelant
+// (voir _indexExactTVAFromDate ci-dessus, fenetre FIXE). La signature `fetchIndexExactTVA(fromDate)`
+// est CONSERVEE pour ne pas devoir toucher ses deux appelants (server.js, cf `/api/charges` et
+// `computeChargesHybride`), mais le parametre est desormais IGNORE pour le calcul de la fenetre.
+// Consequence directe et voulue : `indexExactTVACacheByFrom` / `_inFlightFetchIndexExactTVAByFrom`
+// n'ont plus jamais qu'UNE SEULE cle en pratique (le minor "pas d'eviction des entrees expirees"
+// documente en spec disparait de fait), un seul build (~30-60s) suffit pour toute l'application, et
+// tous les ecrans voient desormais le meme HT pour le meme mois (fin de la divergence C1).
 //
-// Tolerance aux pannes (brief Step 1) : un echec Pennylane (reseau, rate limit epuise apres retries,
-// etc.) ne fait JAMAIS tomber le calcul des charges : index vide renvoye (non mis en cache, retry au
-// prochain appel), la hierarchie de montantHT retombe alors integralement sur la table de taux
-// (repli deja existant, Tache 5).
+// Tolerance aux pannes (brief Step 1, etendue par I2 revue finale ci-dessous) : un echec Pennylane
+// (reseau, rate limit epuise apres retries, etc.) ne fait JAMAIS tomber le calcul des charges : index
+// vide renvoye, la hierarchie de montantHT retombe alors integralement sur la table de taux (repli
+// deja existant, Tache 5).
 const INDEX_EXACT_TVA_CACHE_TTL = 10 * 60 * 1000;
-const indexExactTVACacheByFrom = new Map(); // from (YYYY-MM-DD) -> { index, time }
+// I2 (revue finale) : TTL du cache NEGATIF (echec Pennylane), volontairement court par rapport au
+// succes (10 min) : retente vite une fois la panne resorbee, sans pour autant remartelter l'API a
+// chaque requete pendant la panne (cf fetchIndexExactTVA plus bas).
+const INDEX_EXACT_TVA_FAILURE_CACHE_TTL = 45 * 1000;
+const indexExactTVACacheByFrom = new Map(); // from (YYYY-MM-DD) -> { index, time, isFailure }
 const _inFlightFetchIndexExactTVAByFrom = new Map(); // from (YYYY-MM-DD) -> Promise<Map>
 
-function _effectiveIndexExactFromDate(fromDate) {
-  const def = _defaultIndexExactTVAFromDate();
-  if (!fromDate) return def;
-  return String(fromDate) < def ? String(fromDate) : def;
-}
-
 function fetchIndexExactTVA(fromDate) {
-  const from = _effectiveIndexExactFromDate(fromDate);
+  const from = _indexExactTVAFromDate(); // C1 : fromDate de l'appelant ignore, fenetre fixe (voir plus haut)
 
   const cached = indexExactTVACacheByFrom.get(from);
-  if (cached && (Date.now() - cached.time) < INDEX_EXACT_TVA_CACHE_TTL) {
-    return Promise.resolve(cached.index);
+  if (cached) {
+    const ttl = cached.isFailure ? INDEX_EXACT_TVA_FAILURE_CACHE_TTL : INDEX_EXACT_TVA_CACHE_TTL;
+    if ((Date.now() - cached.time) < ttl) return Promise.resolve(cached.index);
   }
 
   const inFlight = _inFlightFetchIndexExactTVAByFrom.get(from);
@@ -4398,12 +4425,18 @@ function fetchIndexExactTVA(fromDate) {
 
   const promise = _buildIndexExactTVAFrom(from)
     .then(index => {
-      indexExactTVACacheByFrom.set(from, { index, time: Date.now() });
+      indexExactTVACacheByFrom.set(from, { index, time: Date.now(), isFailure: false });
       return index;
     })
     .catch(err => {
       console.error('[tvaExacte] echec construction indexExact Pennylane depuis %s (%s) : repli integral sur la table de taux', from, err.message);
-      return new Map(); // tolerance aux pannes : index vide, PAS mis en cache (retry au prochain appel)
+      // I2 (revue finale) : l'echec EST desormais mis en cache (index vide, TTL court ci-dessus).
+      // Avant ce correctif, rien n'etait cache ici : pendant une panne Pennylane, CHAQUE requete
+      // (charges, EBE...) relancait 2 fetchs pagines complets avec retries -- degradation lente et
+      // martelement de l'API deja en echec. Le TTL court permet de reessayer rapidement.
+      const emptyIndex = new Map();
+      indexExactTVACacheByFrom.set(from, { index: emptyIndex, time: Date.now(), isFailure: true });
+      return emptyIndex;
     })
     .finally(() => { _inFlightFetchIndexExactTVAByFrom.delete(from); });
 
@@ -4964,14 +4997,28 @@ async function fetchAndParseCategoriesTVA() {
   const parCouple = {};
   let recuperableCol = null;
   // Passe 1 : cherche une eventuelle colonne "recuperable" sur une ligne d'en-tete ("Nom" en col C).
-  // Fenetre bornee D..F (index 3..5), comme le scan du taux : evite de capter du texte sans rapport
-  // plus loin sur la ligne (ex. le second mini-tableau "financements").
+  // Comparaison via normalizeLabel (accents/casse/espaces, C2 revue finale) plutot qu'un simple
+  // trim+toLowerCase : plus tolerante a une variante d'en-tete (espaces superflus...) sans rien
+  // assouplir sur le contenu attendu ("nom"). Fenetre de recherche D..H (index 3..7, C2 revue finale :
+  // un peu plus large que le scan du taux D..F ci-dessous) pour ne pas rater la colonne si elle est
+  // placee un peu plus loin que prevu sur la ligne ; reste bornee pour eviter de capter du texte sans
+  // rapport plus loin (ex. le second mini-tableau "financements").
   for (let r = 0; r < rows.length && recuperableCol === null; r++) {
     const row = rows[r];
-    if ((row[2] || '').trim().toLowerCase() !== 'nom') continue;
-    for (let c = 3; c < Math.min(row.length, 6); c++) {
+    if (chargesPerimetre.normalizeLabel(row[2]) !== 'nom') continue;
+    for (let c = 3; c < Math.min(row.length, 8); c++) {
       if (chargesPerimetre.normalizeLabel(row[c]).includes('recuperable')) { recuperableCol = c; break; }
     }
+  }
+  // C2 (revue finale) : detection JAMAIS silencieuse. Avant ce correctif, si l'en-tete differait ou
+  // si la colonne etait ailleurs, TOUT devenait recuperable par defaut sans un mot en log -- alors
+  // que l'action utilisateur suivante est justement de coller une ligne NON recuperable (Travel
+  // Expenses, cf spec section 5). Position rapportee en lettre de colonne (A=0) pour lecture directe
+  // dans le classeur.
+  if (recuperableCol !== null) {
+    console.log('[CategoriesTVA] colonne "Recuperable" detectee en position %s (index %d)', String.fromCharCode(65 + recuperableCol), recuperableCol);
+  } else {
+    console.log('[CategoriesTVA] colonne "Recuperable" NON detectee : toutes les categories sont considerees recuperables par defaut (voir doc, action utilisateur restante)');
   }
 
   for (let r = 0; r < rows.length; r++) {
@@ -5018,6 +5065,7 @@ async function fetchAndParseCategoriesTVA() {
     byCategorie,
     nbDetected: Object.keys(byCategorie).length,
     tableTaux: { parCategorie, parCouple },
+    recuperableColonneDetectee: recuperableCol !== null, // C2 (revue finale) : verifiable via /api/categories-tva
   };
   console.log('[CategoriesTVA] parsed', result.nbDetected, 'catégories :', Object.keys(byCategorie).slice(0, 10).join(', '), result.nbDetected > 10 ? '...' : '');
   categoriesTvaCache = result;
@@ -7286,7 +7334,7 @@ app.get('/api/categories-tva', async (req, res) => {
     const list = Object.entries(data.byCategorie || {})
       .map(([nom, taux]) => ({ nom, taux, tauxLabel: (taux * 100).toFixed(taux % 0.01 ? 1 : 0) + '%' }))
       .sort((a, b) => a.nom.localeCompare(b.nom));
-    res.json({ categories: list, nbDetected: data.nbDetected });
+    res.json({ categories: list, nbDetected: data.nbDetected, recuperableColonneDetectee: data.recuperableColonneDetectee });
   } catch (err) {
     console.error('Erreur categories-tva:', err.message);
     res.status(500).json({ error: err.message });
@@ -8032,8 +8080,9 @@ app.get('/api/charges', async (req, res) => {
     const endNm1 = new Date(endD); endNm1.setFullYear(endNm1.getFullYear() - 1);
 
     // Tache 6 : table de taux (repli GSheet, cache existant) + index exact TVA Pennylane (priorite 0,
-    // lettrage comptable, cf buildIndexExactTVA). fromDate = startNm1 : borne la plus ancienne dont on
-    // a besoin (fenetre N-1), pour que l'index couvre aussi les mois de comparaison passes.
+    // lettrage comptable, cf buildIndexExactTVA). L'argument transmis ici est CONSERVE pour la
+    // compatibilite de signature mais IGNORE (C1, revue finale) : la fenetre de l'index est fixe,
+    // voir _indexExactTVAFromDate, elle couvre deja tous les besoins de cet appelant.
     const [txsN, txsNm1, categoriesTva, indexExact] = await Promise.all([
       fetchDebitsByRange(iban, startD.toISOString(), endD.toISOString()),
       fetchDebitsByRange(iban, startNm1.toISOString(), endNm1.toISOString()),
@@ -8182,11 +8231,11 @@ async function computeChargesHybride(start, end) {
       // N réel : seulement la période passée
       // N-1 : toute la période sélectionnée décalée d'un an (pour comparer même les mois futurs)
       const fullStartD = new Date(startKey + '-01');
-      const fullEndD   = chargesPerimetre.monthEndDate(endKey);
       const nm1StartD  = new Date(fullStartD); nm1StartD.setFullYear(nm1StartD.getFullYear() - 1);
-      // On ne decale pas fullEndD d'un an via setFullYear : sur un 29 fevrier bissextile, le decalage
-      // vers une annee non bissextile deraperait au 1er mars. On calcule plutot directement la cle
-      // N-1 (meme mois, annee precedente) puis sa vraie fin de mois via monthEndDate.
+      // On ne calcule pas la borne de fin N-1 en decalant simplement monthEndDate(endKey) d'un an via
+      // setFullYear : sur un 29 fevrier bissextile, le decalage vers une annee non bissextile
+      // deraperait au 1er mars. On calcule plutot directement la cle N-1 (meme mois, annee
+      // precedente) puis sa vraie fin de mois via monthEndDate.
       const [endYearStr, endMonthStr] = endKey.split('-');
       const nm1EndKey  = `${Number(endYearStr) - 1}-${endMonthStr}`;
       const nm1EndD    = chargesPerimetre.monthEndDate(nm1EndKey);
@@ -8199,8 +8248,9 @@ async function computeChargesHybride(start, end) {
       }
 
       // Tache 6 : table de taux (repli GSheet, cache existant) + index exact TVA Pennylane (priorite 0,
-      // lettrage comptable, cf buildIndexExactTVA). fromDate = nm1StartD : borne la plus ancienne dont
-      // on a besoin (fenetre N-1, toujours <= fenetre N), pour que l'index couvre aussi la comparaison.
+      // lettrage comptable, cf buildIndexExactTVA). L'argument transmis ici est CONSERVE pour la
+      // compatibilite de signature mais IGNORE (C1, revue finale) : la fenetre de l'index est fixe,
+      // voir _indexExactTVAFromDate, elle couvre deja tous les besoins de cet appelant.
       const [results, categoriesTva, indexExact] = await Promise.all([
         Promise.all(fetches),
         fetchAndParseCategoriesTVA().catch(err => { console.warn('[charges] categories TVA indisponibles (%s) : repli TTC (comme avant la Tache 6)', err.message); return { tableTaux: { parCategorie: {}, parCouple: {} } }; }),
@@ -8255,7 +8305,11 @@ async function computeChargesHybride(start, end) {
       realVentilation = Object.entries(catMap).map(([categorie, montant]) => ({ categorie, montant }));
       realSubVentilation = Object.values(subCatMap);
       realTotal = realVentilation.reduce((s, v) => s + v.montant, 0);
-      console.log('[charges] exclusions : primes %d€ (%d tx), hors-exploitation %d€ (%d tx)', Math.round(primesExclues.montant), primesExclues.nb, Math.round(horsExploitationExclues.montant), horsExploitationExclues.nb);
+      // Mineur (revue finale) : conditionne au reel (ou a des compteurs non nuls) pour cesser le
+      // bruit -- sans hasReal, txsN est vide et ce log affichait systematiquement "0€ (0 tx)".
+      if (hasReal || primesExclues.nb > 0 || horsExploitationExclues.nb > 0) {
+        console.log('[charges] exclusions : primes %d€ (%d tx), hors-exploitation %d€ (%d tx)', Math.round(primesExclues.montant), primesExclues.nb, Math.round(horsExploitationExclues.montant), horsExploitationExclues.nb);
+      }
       console.log('[charges] TVA exacte (priorite 0) : %d€ couverts sur %d€ TTC reel (%d%%)', Math.round(tvaExacteCouvert), Math.round(tvaExacteTotal), tvaExacteTotal > 0 ? Math.round(100 * tvaExacteCouvert / tvaExacteTotal) : 0);
     }
 
@@ -8897,7 +8951,16 @@ app.get('/api/ebe', async (req, res) => {
     res.json({
       year: yearParam,
       ca: { facture: caFacture, pipelinePondere, projete: caProjete },
-      charges: { total: totalCharges },
+      // I5 (revue finale) : passthrough pur des indicateurs de completude deja calcules par
+      // computeChargesHybride (tvaExacte, primesExclues, horsExploitationExclues), jusqu'ici exposes
+      // seulement par /api/charges-hybride que le front n'appelle plus -- donc invisibles en pratique.
+      // Aucune logique : mêmes objets que ceux renvoyés par computeChargesHybride ci-dessus.
+      charges: {
+        total: totalCharges,
+        tvaExacte: chargesData.tvaExacte,
+        primesExclues: chargesData.primesExclues,
+        horsExploitationExclues: chargesData.horsExploitationExclues,
+      },
       masseSalarialeAnnuelle,
       financements: {
         subventions: financements.subventions,
