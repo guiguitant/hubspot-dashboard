@@ -1,6 +1,6 @@
 # Charges du compte de résultat : périmètre, TVA, fenêtrage · design
 
-> Statut : VALIDÉ (audit 6 axes du 2026-08-06 + arbitrages utilisateur ; périmètre et TVA tranchés en expertise comptable sur délégation explicite de l'utilisateur)
+> Statut : IMPLÉMENTÉ · en recette utilisateur (merge en attente de validation) · 2026-08-07 (audit 6 axes du 2026-08-06 + arbitrages utilisateur ; périmètre et TVA tranchés en expertise comptable sur délégation explicite de l'utilisateur)
 > Branche : `fix/charges-perimetre-tva`
 
 ## 1. Problème
@@ -38,9 +38,32 @@ Le total de charges 2026 du compte de résultat (509 638 €) est faussé par si
 - TVA HT (jan-juil) : −24 800 à −25 900 (central ~25 157), sous réserve holdings.
 - Résultat net combiné 2026 : total charges attendu ~**491 000 à 494 000 €** (mesure exacte à la recette). Résultat 2025 corrigé : positif (~+100 k€), à recalculer après rattrapage primes.
 
-## 4. Hors périmètre (sujets suivants, signalés par l'audit)
+## 4. Résultats mesurés (recette du 2026-08-07)
+
+- CR 2026 (hybride) : `totalCharges` **476 648 €** (départ 509 638 €) ; invariant total = somme de la série mensuelle vérifié. Exclusions : primes 14 400 € (2 tx) + TVA/IS 22 055 € (5 tx). TVA exacte de facture Pennylane (priorité 0) : 191 977 € / 271 208 € = **70,8 %** des euros du réel convertis par cette priorité.
+- Carte Analytics (budget pur, CR_Prev) : **453 883 €**, invariant vérifié, moyenne mensuelle 37 824 €.
+- EBE 2026 : factuel **+45 482 €** (départ +12 632 €), projeté 231 582 €.
+- 2025 : charges **359 725 €** (départ 441 951 €), EBE factuel **+64 254 €** (départ −17 972 €) : l'exercice 2025 est désormais cohérent avec l'impôt réellement payé.
+- Cache index TVA (`fetchIndexExactTVA`) : premier appel ~33 s, appels suivants 0,09 s (cache 10 min, par `fromDate`).
+- Tests : 275/275.
+
+## 5. Hors périmètre (sujets suivants, signalés par l'audit ou en cours de chantier)
+
+Signalés par l'audit initial :
 
 - Écart subventions : 105 333 € encaissés (Qonto) vs 58 800 € comptés (`/api/ebe`, source Plan_TRE).
 - SaaS immobilisé : salaires et prestation Polara en charges pleines ET amortis, sans production immobilisée en produit.
 - Crédits fournisseurs (avoirs, 142 € en 2026) non déduits : négligeable, revoir si ça grossit.
 - Pont HubSpot → Notion (création automatique des missions) : n'existe pas, chantier séparé si souhaité.
+
+Signalés en cours de route (T6/T8), non corrigés car hors périmètre de leur tâche respective :
+
+- Bug latent pré-existant : le graphe « Charges N vs N-1 » lit `analyticsChargesData?.real?.end` (pilot.html:10310) pour distinguer visuellement les mois passés des mois prévisionnels (hachures), mais `analyticsChargesData` provient de `/api/previsionnel-charges`, qui ne retourne jamais de champ `real` (seul `/api/charges-hybride` le fait). `realEnd` vaut donc toujours `null` : les hachures ne s'affichent jamais. Probablement hérité d'une époque où ce graphe consommait `/api/charges-hybride`. Non touché en T8 (aucun changement de logique JS dans son périmètre) : à corriger en tâche séparée si le rendu visuel doit être restauré.
+- Sous-titres des cartes « Charges du mois » et « Moyenne mensuelle » (onglet Analytics) : toujours libellés « CR prévisionnel · ... », non harmonisés avec la carte « Charges annuelles » renommée en T8 (« Budget de charges HT » / « CR_Prev · budget annuel, hors réel bancaire »). Ajustement mineur possible en suivi.
+- Factures en devise étrangère non converties : 21/349 factures (6 %) exclues de l'index TVA exact faute d'un champ HT fiable en euros sur `supplier_invoices` ; impact faible en euros, traité par prudence (repli sur la table ou le TTC).
+- Pas d'éviction des entrées expirées du cache index TVA par `fromDate` (`indexExactTVACacheByFrom`) : cardinalité faible en pratique (peu de valeurs de `fromDate` différentes rencontrées), non traité.
+
+Action utilisateur restante :
+
+- Coller la table de repli des taux de TVA (~10 lignes, livrée en T5, onglet « Categories » du classeur, colonnes C/D/E).
+- Créer la colonne « Récupérable » (colonne E) dans ce même onglet ; tant qu'elle n'existe pas, toutes les lignes sont considérées récupérables par défaut (attention particulière : la ligne `Travel Expenses` doit être marquée « non » dès que la colonne existe, sinon elle sera convertie en HT à tort).
