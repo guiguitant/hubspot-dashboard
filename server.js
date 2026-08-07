@@ -20,7 +20,7 @@ const { computeDepenses } = require('./utils/depensesCompute');
 const gsheets = require('./utils/googleSheets');
 const primesMap = require('./utils/primesSheetMap');
 const chargesPerimetre = require('./utils/chargesPerimetre');
-const { buildCoupleKey } = require('./utils/tvaCharges'); // cle categorie/sous-categorie partagee avec le parser Categories TVA (evite toute divergence)
+const { buildCoupleKey, buildIndexExactKey, montantHT } = require('./utils/tvaCharges'); // cle categorie/sous-categorie partagee avec le parser Categories TVA (evite toute divergence) ; montantHT = conversion TTC->HT du reel (Tache 6)
 const cron = require('node-cron');
 const MASSE_TAB = 'Masse_salariale';
 const upload = multer({
@@ -4321,6 +4321,168 @@ async function fetchSupplierInvoices() {
   }));
 }
 
+// --- Index exact TVA Pennylane (Tache 6, priorite 0 de utils/tvaCharges.js#montantHT) ---
+//
+// But : retrouver, pour une transaction Qonto (TTC), la TVA EXACTE de la facture fournisseur
+// Pennylane qu'elle regle, SANS appel par facture (contrainte du brief : jamais de N+1, jamais
+// `matched_transactions` par facture, ce qui ferait 349 factures = 349 appels, interdit).
+//
+// Jointure retenue : le LETTRAGE comptable. Une facture cree une ecriture sur un compte 401
+// (fournisseurs) ; son reglement (le mouvement bancaire) cree une autre ecriture sur le MEME
+// compte 401 ; Pennylane relie les deux lignes via `lettered_ledger_entry_lines.ids`, deja inclus
+// dans la reponse bulk de /ledger_entry_lines (pas d'appel supplementaire necessaire). Verifie par
+// sonde directe (lecture seule, GET, `.env` local) : pour une facture "Facture Restaurants" de
+// 142,50 € TTC (id 27154348175360), la ligne 401 de son ecriture propre (credit 142,50 €) et la
+// ligne 401 de son reglement (debit 142,50 €, ecriture differente) partagent bien la meme paire
+// dans `lettered_ledger_entry_lines.ids`.
+//
+// Reste alors a relier cette ligne de reglement a la transaction QONTO d'origine (celle que
+// `computeChargesHybride`/`/api/charges` agregent). Sonde de /transactions (Pennylane) : aucun champ
+// ne porte l'id Qonto d'origine (pas de qonto_id/external_bank_id). La cle la plus fiable sans appel
+// supplementaire est donc (date, montant) du mouvement bancaire : la ligne de reglement porte sa
+// propre date et son propre montant (401), qui correspondent au settled_at/amount de la transaction
+// Qonto (verifie empiriquement : 244/516 transactions Qonto reelles de la fenetre jan-juil 2026 se
+// retrouvent par cette cle, cf mesure de couverture au commit). Cle : voir buildIndexExactKey
+// (utils/tvaCharges.js), partagee entre production (ici) et consommation (montantHT).
+//
+// Prudence (repli sur la table plutot que deviner), cas exclus de l'index :
+//  - facture en devise etrangere (`currency !== 'EUR'`) : `currency_amount*` sont dans la devise
+//    d'origine (ex. USD), pas en euros ; les melanger au TTC Qonto (toujours EUR) fausserait le
+//    montant. Verifie sur une facture OpenAI 20 USD / 17,36 € reglés : aucun champ HT en euros
+//    fiable n'existe sur /supplier_invoices pour reconvertir simplement (seul `amount`/`tax` existe
+//    en euros, mais TTC seulement, pas de `amount_before_tax` EUR dedie) : plutot que d'improviser
+//    un calcul par taux de change, ces factures restent hors index (repli table).
+//  - paiement fractionne (plus d'une "autre" ligne dans le lettrage, ou montant de la ligne de
+//    reglement != TTC facture a 1 centime pres) : le montant de chaque virement partiel ne
+//    correspond plus au TTC total de la facture, prudence.
+//  - collision (date, montant) entre DEUX factures differentes : aucune des deux n'est indexee
+//    (jamais de choix arbitraire entre candidats ambigus, regle explicite du brief).
+//  - facture non reglee (pas de ligne 401 de reglement retrouvee, ex. accounting_status 'entry',
+//    reconciled false) : normal, la transaction bancaire correspondante n'existe pas encore.
+//
+// Fonction pure (facilite la relecture) : separee du fetch reseau qui l'appelle (fetchIndexExactTVA).
+function buildIndexExactTVA(invoices, lines) {
+  const lineById = new Map();
+  for (const l of lines) lineById.set(l.id, l);
+
+  // Lignes du compte 401 (fournisseurs), regroupees par ecriture (ledger_entry.id) : une ecriture
+  // porte soit la facture (credit), soit son reglement (debit).
+  const lines401ByEntryId = new Map();
+  for (const l of lines) {
+    const num = (l.ledger_account && l.ledger_account.number) || '';
+    if (!num.startsWith('401')) continue;
+    const eid = l.ledger_entry && l.ledger_entry.id;
+    if (eid == null) continue;
+    if (!lines401ByEntryId.has(eid)) lines401ByEntryId.set(eid, []);
+    lines401ByEntryId.get(eid).push(l);
+  }
+
+  const candidates = [];
+  for (const inv of invoices) {
+    if (inv.currency !== 'EUR') continue; // devise etrangere : voir commentaire ci-dessus
+    const entryId = inv.ledger_entry && inv.ledger_entry.id;
+    const inv401Lines = lines401ByEntryId.get(entryId) || [];
+    if (inv401Lines.length === 0) continue; // pas encore comptabilisee dans la fenetre fetchee
+
+    let paymentLine = null;
+    let ambiguous = false;
+    for (const invLine of inv401Lines) {
+      const letteredIds = (invLine.lettered_ledger_entry_lines && invLine.lettered_ledger_entry_lines.ids) || [];
+      const otherIds = letteredIds.filter(id => id !== invLine.id);
+      if (otherIds.length === 0) continue; // pas encore lettree (facture pas reglee)
+      if (otherIds.length > 1) { ambiguous = true; continue; } // reglement fractionne : prudence
+      const candidate = lineById.get(otherIds[0]);
+      if (candidate) paymentLine = candidate; // absente si hors fenetre fetchee (limite documentee)
+    }
+    if (ambiguous || !paymentLine) continue;
+
+    const ttc = Math.abs(parseFloat(inv.currency_amount) || 0);
+    const paymentAmount = Math.abs(parseFloat(paymentLine.debit) || parseFloat(paymentLine.credit) || 0);
+    if (Math.abs(paymentAmount - ttc) > 0.01) continue; // reglement partiel : prudence
+
+    const ht = parseFloat(inv.currency_amount_before_tax) || 0;
+    const tax = parseFloat(inv.currency_tax) || 0;
+    const key = `${paymentLine.date}|${paymentAmount.toFixed(2)}`; // meme format que buildIndexExactKey
+    candidates.push({ key, invoiceId: inv.id, ht, ttc, tax });
+  }
+
+  // Collision (date, montant) partagee par deux factures differentes : on exclut les DEUX plutot
+  // que de deviner laquelle est la bonne (regle explicite du brief).
+  const byKey = new Map();
+  for (const c of candidates) {
+    if (!byKey.has(c.key)) byKey.set(c.key, []);
+    byKey.get(c.key).push(c);
+  }
+  const index = new Map();
+  let ambiguousKeys = 0;
+  for (const [key, arr] of byKey.entries()) {
+    if (arr.length > 1) { ambiguousKeys++; continue; }
+    index.set(key, arr[0]);
+  }
+  return { index, stats: { totalInvoices: invoices.length, totalLines: lines.length, matched: index.size, ambiguousKeys } };
+}
+
+// Borne basse par defaut de l'index exact TVA : 13 mois (mois courant + 12 precedents), meme
+// fenetre que _defaultDepensesFromDate (coherence des conventions de cache Pennylane du fichier).
+function _defaultIndexExactTVAFromDate() {
+  const from = new Date();
+  from.setDate(1);
+  from.setMonth(from.getMonth() - 12);
+  return `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}-01`;
+}
+
+async function _buildIndexExactTVAFrom(fromDateStr) {
+  const filter = JSON.stringify([{ field: 'date', operator: 'gteq', value: fromDateStr }]);
+  // Sequentiel plutot que Promise.all : deux fetchs pagines en parallele doublent le taux de
+  // requetes instantane vers Pennylane (limite 25 req/5s, cf _pennylaneRequestWithRetry) sans
+  // gain reel (le deuxieme fetch ne depend pas du premier, mais la marge de securite prime ici).
+  const invoices = await pennylaneFetchAll('/supplier_invoices', { filter, limit: '100' });
+  const lines = await pennylaneFetchAll('/ledger_entry_lines', { filter, limit: '100' });
+  const { index, stats } = buildIndexExactTVA(invoices, lines);
+  console.log('[tvaExacte] index construit depuis %s : %d factures, %d lignes -> %d cles exactes (%d ambigues exclues)', fromDateStr, stats.totalInvoices, stats.totalLines, stats.matched, stats.ambiguousKeys);
+  return index;
+}
+
+// Fetch + cache de l'index exact TVA. Modele exact de fetchDepensesTransactions (server.js ~6583) :
+// - sans argument : fenetre par defaut 13 mois, cache 10 min + singleton anti-concurrence.
+// - avec fromDate ('YYYY-MM-DD') : borne basse = min(fromDate, defaut), pour couvrir une periode
+//   demandee plus ancienne que la fenetre par defaut (ex. comparaison N-1 sur un exercice passe) ;
+//   fetch direct (cle variable, pas de cache), meme compromis assume que fetchDepensesTransactions.
+// Tolerance aux pannes (brief Step 1) : un echec Pennylane (reseau, rate limit epuise apres retries,
+// etc.) ne fait JAMAIS tomber le calcul des charges : index vide renvoye, la hierarchie de
+// montantHT retombe alors integralement sur la table de taux (repli deja existant, Tache 5).
+let indexExactTVACache = null;
+let indexExactTVACacheTime = 0;
+const INDEX_EXACT_TVA_CACHE_TTL = 10 * 60 * 1000;
+let _inFlightFetchIndexExactTVA = null;
+
+function fetchIndexExactTVA(fromDate) {
+  if (!fromDate) {
+    if (indexExactTVACache && (Date.now() - indexExactTVACacheTime) < INDEX_EXACT_TVA_CACHE_TTL) {
+      return Promise.resolve(indexExactTVACache);
+    }
+    if (_inFlightFetchIndexExactTVA) return _inFlightFetchIndexExactTVA;
+    _inFlightFetchIndexExactTVA = _buildIndexExactTVAFrom(_defaultIndexExactTVAFromDate())
+      .then(index => {
+        indexExactTVACache = index;
+        indexExactTVACacheTime = Date.now();
+        return index;
+      })
+      .catch(err => {
+        console.error('[tvaExacte] echec construction indexExact Pennylane (%s) : repli integral sur la table de taux', err.message);
+        return new Map(); // tolerance aux pannes : index vide (non mis en cache, retry au prochain appel)
+      })
+      .finally(() => { _inFlightFetchIndexExactTVA = null; });
+    return _inFlightFetchIndexExactTVA;
+  }
+  const def = _defaultIndexExactTVAFromDate();
+  const from = String(fromDate) < def ? String(fromDate) : def;
+  return _buildIndexExactTVAFrom(from).catch(err => {
+    console.error('[tvaExacte] echec construction indexExact Pennylane periode %s (%s) : repli integral sur la table de taux', from, err.message);
+    return new Map();
+  });
+}
+
 // Fetch recent transactions (last 6 months) for charges/categories analysis
 let _transactionsCache = [];
 
@@ -7926,7 +8088,10 @@ app.get('/api/charges', async (req, res) => {
         if (chargesPerimetre.isHorsExploitation(cat, sousCat)) continue; // TVA reversee / IS : pas des charges d'exploitation (PCG)
         const d = new Date(tx.settled_at);
         const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-        map[key] = (map[key] || 0) + tx.amount;
+        // Tache 6 : reel converti en HT (TVA exacte Pennylane en priorite, repli table de taux).
+        // tableTaux/indexExact sont captures par fermeture (declares plus bas, avant l'appel de
+        // cette fonction : voir chargesParMoisN/chargesParMoisNm1 ci-dessous).
+        map[key] = (map[key] || 0) + montantHT(tx, tableTaux, indexExact);
       }
       return map;
     }
@@ -7936,10 +8101,16 @@ app.get('/api/charges', async (req, res) => {
     const startNm1 = new Date(startD); startNm1.setFullYear(startNm1.getFullYear() - 1);
     const endNm1 = new Date(endD); endNm1.setFullYear(endNm1.getFullYear() - 1);
 
-    const [txsN, txsNm1] = await Promise.all([
+    // Tache 6 : table de taux (repli GSheet, cache existant) + index exact TVA Pennylane (priorite 0,
+    // lettrage comptable, cf buildIndexExactTVA). fromDate = startNm1 : borne la plus ancienne dont on
+    // a besoin (fenetre N-1), pour que l'index couvre aussi les mois de comparaison passes.
+    const [txsN, txsNm1, categoriesTva, indexExact] = await Promise.all([
       fetchDebitsByRange(iban, startD.toISOString(), endD.toISOString()),
       fetchDebitsByRange(iban, startNm1.toISOString(), endNm1.toISOString()),
+      fetchAndParseCategoriesTVA().catch(err => { console.warn('[charges] categories TVA indisponibles (%s) : repli TTC (comme avant la Tache 6)', err.message); return { tableTaux: { parCategorie: {}, parCouple: {} } }; }),
+      fetchIndexExactTVA(startNm1.toISOString().slice(0, 10)),
     ]);
+    const tableTaux = categoriesTva.tableTaux;
 
     const chargesParCategorie = {};
     const chargesParSousCategorie = {};
@@ -7948,10 +8119,11 @@ app.get('/api/charges', async (req, res) => {
       const sousCat = (tx.cashflow_subcategory && tx.cashflow_subcategory.name) || null;
       if (chargesPerimetre.isPrimeSubcategory(sousCat)) continue; // primes retirees du reel (portees par le calcul)
       if (chargesPerimetre.isHorsExploitation(cat, sousCat)) continue; // TVA reversee / IS : pas des charges d'exploitation (PCG)
-      chargesParCategorie[cat] = (chargesParCategorie[cat] || 0) + tx.amount;
+      const ht = montantHT(tx, tableTaux, indexExact); // Tache 6 : TTC -> HT (TVA exacte ou table)
+      chargesParCategorie[cat] = (chargesParCategorie[cat] || 0) + ht;
       const sousCatKey = sousCat ? `${cat} > ${sousCat}` : cat;
       if (!chargesParSousCategorie[sousCatKey]) chargesParSousCategorie[sousCatKey] = { categorie: cat, sousCat: sousCat || null, montant: 0 };
-      chargesParSousCategorie[sousCatKey].montant += tx.amount;
+      chargesParSousCategorie[sousCatKey].montant += ht;
     }
 
     const ventilationCharges = Object.entries(chargesParCategorie)
@@ -8032,6 +8204,10 @@ async function computeChargesHybride(start, end) {
     // Compteurs d'exclusions PCG (perimetre) de la boucle N, exposes dans la reponse pour tracabilite.
     let primesExclues = { nb: 0, montant: 0 };
     let horsExploitationExclues = { nb: 0, montant: 0 };
+    // Tache 6 : indicateur de completude de la conversion HT par priorite 0 (TVA exacte Pennylane),
+    // sur le TTC de la boucle N uniquement (celle qui alimente totalCharges de l'exercice courant).
+    let tvaExacteCouvert = 0;
+    let tvaExacteTotal = 0;
 
     // Qonto : on fetch toujours le N-1 sur la totalité de la période (pas seulement la partie réelle)
     // pour que les barres N-1 s'affichent aussi pour les mois futurs (ex. Avr-Déc 2025 vs Avr-Déc 2026)
@@ -8074,7 +8250,15 @@ async function computeChargesHybride(start, end) {
         fetches.unshift(fetchDebitsHybride(iban, realStartD.toISOString(), realEndD.toISOString()));
       }
 
-      const results = await Promise.all(fetches);
+      // Tache 6 : table de taux (repli GSheet, cache existant) + index exact TVA Pennylane (priorite 0,
+      // lettrage comptable, cf buildIndexExactTVA). fromDate = nm1StartD : borne la plus ancienne dont
+      // on a besoin (fenetre N-1, toujours <= fenetre N), pour que l'index couvre aussi la comparaison.
+      const [results, categoriesTva, indexExact] = await Promise.all([
+        Promise.all(fetches),
+        fetchAndParseCategoriesTVA().catch(err => { console.warn('[charges] categories TVA indisponibles (%s) : repli TTC (comme avant la Tache 6)', err.message); return { tableTaux: { parCategorie: {}, parCouple: {} } }; }),
+        fetchIndexExactTVA(nm1StartD.toISOString().slice(0, 10)),
+      ]);
+      const tableTaux = categoriesTva.tableTaux;
       const txsNm1 = hasReal ? results[1] : results[0];
       const txsN   = hasReal ? results[0] : [];
 
@@ -8091,13 +8275,22 @@ async function computeChargesHybride(start, end) {
           horsExploitationExclues.nb++; horsExploitationExclues.montant += tx.amount;
           continue;
         }
-        catMap[cat] = (catMap[cat] || 0) + tx.amount;
+        // Tache 6 : TTC -> HT (priorite 0 TVA exacte Pennylane, repli table de taux, sinon TTC inchange).
+        const ht = montantHT(tx, tableTaux, indexExact);
+        tvaExacteTotal += tx.amount;
+        if (indexExact) {
+          const cleExacte = buildIndexExactKey(tx);
+          if (cleExacte && (typeof indexExact.get === 'function' ? indexExact.get(cleExacte) : indexExact[cleExacte])) {
+            tvaExacteCouvert += tx.amount;
+          }
+        }
+        catMap[cat] = (catMap[cat] || 0) + ht;
         const subKey = sousCat ? `${cat}||${sousCat}` : `${cat}||`;
         if (!subCatMap[subKey]) subCatMap[subKey] = { categorie: cat, sousCat, montant: 0 };
-        subCatMap[subKey].montant += tx.amount;
+        subCatMap[subKey].montant += ht;
         const d = new Date(tx.settled_at);
         const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-        chargesParMoisN[key] = (chargesParMoisN[key] || 0) + tx.amount;
+        chargesParMoisN[key] = (chargesParMoisN[key] || 0) + ht;
       }
       for (const tx of txsNm1) {
         const sousCatNm1 = (tx.cashflow_subcategory && tx.cashflow_subcategory.name) || null;
@@ -8106,13 +8299,16 @@ async function computeChargesHybride(start, end) {
         if (chargesPerimetre.isHorsExploitation(catNm1, sousCatNm1)) continue; // meme exclusion que la boucle N (TVA reversee / IS)
         const d = new Date(tx.settled_at);
         const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-        chargesParMoisNm1[key] = (chargesParMoisNm1[key] || 0) + tx.amount;
+        // Tache 6 : meme conversion HT que la boucle N, imperatif pour une comparaison N/N-1 homogene
+        // (sinon les barres N-1 resteraient TTC alors que N passe en HT, biaisant la comparaison).
+        chargesParMoisNm1[key] = (chargesParMoisNm1[key] || 0) + montantHT(tx, tableTaux, indexExact);
       }
 
       realVentilation = Object.entries(catMap).map(([categorie, montant]) => ({ categorie, montant }));
       realSubVentilation = Object.values(subCatMap);
       realTotal = realVentilation.reduce((s, v) => s + v.montant, 0);
       console.log('[charges] exclusions : primes %d€ (%d tx), hors-exploitation %d€ (%d tx)', Math.round(primesExclues.montant), primesExclues.nb, Math.round(horsExploitationExclues.montant), horsExploitationExclues.nb);
+      console.log('[charges] TVA exacte (priorite 0) : %d€ couverts sur %d€ TTC reel (%d%%)', Math.round(tvaExacteCouvert), Math.round(tvaExacteTotal), tvaExacteTotal > 0 ? Math.round(100 * tvaExacteCouvert / tvaExacteTotal) : 0);
     }
 
     // --- Réinjection de la charge des primes (fenêtre RÉELLE uniquement) ---
@@ -8262,6 +8458,9 @@ async function computeChargesHybride(start, end) {
       totalCharges,
       primesExclues: { nb: primesExclues.nb, montant: Math.round(primesExclues.montant) },
       horsExploitationExclues: { nb: horsExploitationExclues.nb, montant: Math.round(horsExploitationExclues.montant) },
+      // Tache 6 : part des depenses TTC de la boucle N convertie en HT par la priorite 0 (TVA exacte
+      // facture Pennylane rattachee via le lettrage), le reste passe par la table de taux ou reste TTC.
+      tvaExacte: { montantCouvert: Math.round(tvaExacteCouvert), montantTotal: Math.round(tvaExacteTotal) },
       moyenneMensuelle: moisLabels.length > 0 ? Math.round(totalCharges / moisLabels.length) : 0,
       comparaison: {
         mois: moisLabels,

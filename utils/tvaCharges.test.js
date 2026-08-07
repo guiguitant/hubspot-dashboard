@@ -1,5 +1,5 @@
 'use strict';
-const { montantHT, buildCoupleKey, COUPLE_SEP } = require('./tvaCharges');
+const { montantHT, buildCoupleKey, buildIndexExactKey, COUPLE_SEP } = require('./tvaCharges');
 const { normalizeLabel } = require('./chargesPerimetre');
 
 // Table de taux de test, meme forme que celle produite par fetchAndParseCategoriesTVA (server.js) :
@@ -106,6 +106,76 @@ describe('montantHT', () => {
     const tx = { amount: 100, cashflow_category: { name: 'SaaS' } };
     expect(montantHT(tx, null)).toBe(100);
     expect(montantHT(tx, undefined)).toBe(100);
+  });
+
+  // --- Priorite 0 : TVA exacte via indexExact (Tache 6, hybride Pennylane + table) ---
+  describe('priorite 0 : indexExact (TVA exacte facture Pennylane)', () => {
+    // tx SaaS 120 TTC/20% -> la table donnerait 100 HT ; l'index exact donne une autre valeur pour
+    // prouver lequel des deux chemins a ete emprunte.
+    const txAvecMatch = {
+      amount: 120,
+      settled_at: '2026-07-15T10:00:00.000Z',
+      cashflow_category: { name: 'SaaS' },
+    };
+    const indexAvecMatch = new Map([
+      ['2026-07-15|120.00', { ht: 108.5, ttc: 120, tax: 11.5, invoiceId: 42 }],
+    ]);
+
+    it('priorite 0 gagne sur la table : renvoie le HT exact de la facture rattachee', () => {
+      expect(montantHT(txAvecMatch, TABLE_TEST, indexAvecMatch)).toBe(108.5);
+    });
+
+    it('transaction absente de l\'index (cle date+montant sans correspondance) : repli sur la table', () => {
+      const txSansMatch = {
+        amount: 120,
+        settled_at: '2026-07-16T10:00:00.000Z', // date differente -> pas de cle en commun
+        cashflow_category: { name: 'SaaS' },
+      };
+      expect(montantHT(txSansMatch, TABLE_TEST, indexAvecMatch)).toBe(100); // repli table (20%)
+    });
+
+    it('index vide : comportement identique a la hierarchie table seule (avant la Tache 6)', () => {
+      expect(montantHT(txAvecMatch, TABLE_TEST, new Map())).toBe(100); // 120 -> 100 via la table (20%)
+    });
+
+    it('index absent (3e argument omis) : comportement identique a avant la Tache 6', () => {
+      expect(montantHT(txAvecMatch, TABLE_TEST)).toBe(100);
+    });
+
+    it('index fourni mais tx sans settled_at : priorite 0 ignoree, repli table (pas de crash)', () => {
+      const txSansDate = { amount: 120, cashflow_category: { name: 'SaaS' } };
+      expect(montantHT(txSansDate, TABLE_TEST, indexAvecMatch)).toBe(100);
+    });
+
+    it('priorite 0 s\'applique meme sans tableTaux (tableTaux null) : ne depend pas de la table', () => {
+      expect(montantHT(txAvecMatch, null, indexAvecMatch)).toBe(108.5);
+    });
+
+    it('accepte un objet brut en plus d\'un Map (duck-typing)', () => {
+      const indexObjet = { '2026-07-15|120.00': { ht: 108.5, ttc: 120, tax: 11.5 } };
+      expect(montantHT(txAvecMatch, TABLE_TEST, indexObjet)).toBe(108.5);
+    });
+  });
+});
+
+describe('buildIndexExactKey', () => {
+  it('construit "date|montant" a partir de settled_at et amount (montant toujours positif, 2 decimales)', () => {
+    const tx = { amount: 142.5, settled_at: '2026-08-01T14:24:36.000Z' };
+    expect(buildIndexExactKey(tx)).toBe('2026-08-01|142.50');
+  });
+
+  it('valeur absolue du montant (au cas ou amount serait signe)', () => {
+    const tx = { amount: -34.43, settled_at: '2026-07-31T00:00:00.000Z' };
+    expect(buildIndexExactKey(tx)).toBe('2026-07-31|34.43');
+  });
+
+  it('tx sans settled_at : renvoie null (pas de cle exploitable)', () => {
+    expect(buildIndexExactKey({ amount: 100 })).toBeNull();
+  });
+
+  it('tx null/undefined : renvoie null', () => {
+    expect(buildIndexExactKey(null)).toBeNull();
+    expect(buildIndexExactKey(undefined)).toBeNull();
   });
 });
 
