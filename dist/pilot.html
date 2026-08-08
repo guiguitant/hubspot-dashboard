@@ -10199,7 +10199,6 @@
       if (tab === 'charges') renderAnalyticsChargesChart();
     }
 
-    let analyticsChargesPrev = true; // previsionnel toujours integre : passe = Qonto reel, mois courant + futurs = GSheet
     let analyticsChargesData = null;
     let chargesCardsCache = null; // reponse /api/previsionnel-charges (annee en cours, HT), gardee pour eviter un refetch a chaque changement de periode
 
