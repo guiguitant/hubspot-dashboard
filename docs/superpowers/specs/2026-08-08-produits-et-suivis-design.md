@@ -23,6 +23,16 @@ Badge sur le Compte de résultat, alimenté par le passthrough `tvaExacte` de `/
 **Problème** : la création des missions Notion est manuelle ; un deal HubSpot gagné peut être oublié ou rapproché de la mauvaise ligne (cas Somarail).
 **Solution** : endpoint `GET /api/coherence/deals-notion` : compare les deals HubSpot gagnés de l'année (`fetchWonDealsBetween`) aux missions Notion (`fetchAllNotionMissions`). Rapprochement : une mission « couvre » un deal si montant identique à ±1 % ET (date de signature Notion dans le trimestre du closedate OU nom/client similaires après normalisation). Renvoie les deals non couverts `{ nom, montant, closedate }`. Front : bandeau discret dans la section KPI (même patron que les bandeaux couverture/clawback existants) : « ⚠ X deal(s) gagné(s) sans mission Notion · voir » avec modale liste. Zéro écriture : la création reste manuelle.
 
+### C-2 · Validation manuelle des deals orphelins (T5, go utilisateur du 2026-08-08)
+
+**Problème constaté en recette** : les deux orphelins remontés (EPD - Ecoforest 39 000 €, Moulin du nord 2 500 €) SONT dans Notion, mais invisibles au rapprochement : le premier est découpé en deux missions (« Ecoforest Part1 » 28 000 € + « Ecoforest Part2 »), le second est regroupé avec un autre client dans une mission unique (« Minoterie / Moulin » 5 000 €). Le montant ±1 % un-pour-un ne peut pas couvrir les splits/regroupements ; l'utilisateur doit pouvoir arbitrer à la main.
+
+**Décision** :
+1. Chaque deal orphelin de la réponse `/api/coherence/deals-notion` porte son `dealId` HubSpot et ses `missionsProches` : les missions Notion au nom/client similaire (réutiliser `nomsSimilaires`), avec nom, montant, date de signature ; triées par proximité de montant, max 5.
+2. Table Supabase `deals_notion_validations` (deal_id text PK, nom, montant, closedate, validated_at) : RLS activée sans policy (service-role uniquement, patron kpi_prime_config). SQL fourni à l'utilisateur, exécution manuelle une fois.
+3. `POST /api/coherence/deals-notion/valider { dealId }` et annulation : marquent un deal « présent dans Notion ». Le bandeau ne compte que les orphelins non validés ; la modale liste tout (orphelins avec missions proches + bouton valider ; validés avec bouton annuler).
+4. Tolérance : si la table n'existe pas encore, le GET fonctionne (aucun validé) et le POST renvoie une erreur explicite. Un deal validé qui redevient couvert naturellement sort de la liste (la validation devient inerte, pas de nettoyage automatique).
+
 ## D · Clôture souple des primes (proposition utilisateur validée)
 
 **Problème** : une charge de prime du T4 saisie après le 31/12 est définitivement perdue (exercice figé au 1er janvier).
