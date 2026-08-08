@@ -6,6 +6,8 @@ const {
   dealMissionCandidate,
   maximumBipartiteMatching,
   orphanWonDeals,
+  motsSignificatifs,
+  missionsProches,
 } = require('./dealsNotionCoherence');
 
 describe('montantsProches', () => {
@@ -225,5 +227,79 @@ describe('orphanWonDeals', () => {
   it('entrees vides/non-array -> ne plante pas', () => {
     expect(orphanWonDeals([], [])).toEqual({ couverts: 0, orphelins: [] });
     expect(orphanWonDeals(undefined, undefined)).toEqual({ couverts: 0, orphelins: [] });
+  });
+});
+
+describe('motsSignificatifs', () => {
+  it('normalise, decoupe sur la ponctuation et retire les mots trop courts', () => {
+    expect(motsSignificatifs('EPD - Écoforest')).toEqual(['ecoforest']);
+    expect(motsSignificatifs('Minoterie / Moulin')).toEqual(['minoterie', 'moulin']);
+  });
+  it('retire les mots outils et les termes metier trop generiques', () => {
+    // "bilan carbone" seul ne doit JAMAIS rapprocher deux clients differents.
+    expect(motsSignificatifs('Bilan carbone pour la societe')).toEqual([]);
+  });
+  it('entree vide/nulle -> liste vide', () => {
+    expect(motsSignificatifs('')).toEqual([]);
+    expect(motsSignificatifs(null)).toEqual([]);
+    expect(motsSignificatifs(undefined)).toEqual([]);
+  });
+});
+
+describe('missionsProches', () => {
+  it('cas reel Ecoforest : deal splitte en deux missions, le prefixe "EPD - " ne bloque pas', () => {
+    // Le deal 39 000 EUR est decoupe en deux missions Notion : aucune ne matche a +/-1 %, donc
+    // orphanWonDeals le sort en orphelin. missionsProches doit quand meme proposer les deux parts
+    // pour que l'utilisateur puisse valider a la main.
+    const deal = { nom: 'EPD - Ecoforest', montant: 39000, closedate: '2026-06-18' };
+    const missions = [
+      { nom: 'Ecoforest Part1', client: 'Ecoforest', ca: 28000, dateSignature: '2026-06-18' },
+      { nom: 'Ecoforest Part2', client: '', ca: 11000, dateSignature: '2026-07-01' },
+      { nom: 'Autre dossier', client: 'Sans rapport', ca: 39000, dateSignature: '2026-06-18' },
+    ];
+    const r = missionsProches(deal, missions);
+    expect(r.map(m => m.nom)).toEqual(['Ecoforest Part1', 'Ecoforest Part2']);
+    expect(r[0]).toEqual({ nom: 'Ecoforest Part1', montant: 28000, dateSignature: '2026-06-18' });
+    expect(r[1]).toEqual({ nom: 'Ecoforest Part2', montant: 11000, dateSignature: '2026-07-01' });
+  });
+
+  it('cas reel Minoterie : match sur le client au pluriel, hors de portee du containment', () => {
+    // "moulin du nord" n'est PAS une sous-chaine de "la minoterie & moulins du nord" (le "s" de
+    // "moulins" casse le containment) : seul le rapprochement par mot significatif y arrive.
+    const deal = { nom: 'Moulin du nord', montant: 2500, closedate: '2026-03-10' };
+    const missions = [
+      { nom: 'Minoterie / Moulin', client: 'La Minoterie & Moulins du Nord', ca: 5000, dateSignature: '2026-03-01' },
+      { nom: 'Toiture solaire', client: 'Helios', ca: 2500, dateSignature: '2026-03-05' },
+    ];
+    const r = missionsProches(deal, missions);
+    expect(r.map(m => m.nom)).toEqual(['Minoterie / Moulin']);
+    expect(r[0].montant).toBe(5000);
+  });
+
+  it('aucune mission au nom/client similaire -> liste vide (meme au bon montant)', () => {
+    const deal = { nom: 'Client Zeta', montant: 1000, closedate: '2026-01-05' };
+    const missions = [{ nom: 'Alpha Beta', client: 'Gamma', ca: 1000, dateSignature: '2026-01-05' }];
+    expect(missionsProches(deal, missions)).toEqual([]);
+  });
+
+  it('tri par ecart de montant croissant et troncature au max (5 par defaut)', () => {
+    const deal = { nom: 'Ecoforest', montant: 10000, closedate: '2026-01-01' };
+    const missions = [
+      { nom: 'Ecoforest F', client: '', ca: 100000, dateSignature: null }, // ecart 90 000
+      { nom: 'Ecoforest E', client: '', ca: 50000, dateSignature: null },  // ecart 40 000
+      { nom: 'Ecoforest D', client: '', ca: 30000, dateSignature: null },  // ecart 20 000
+      { nom: 'Ecoforest C', client: '', ca: 20000, dateSignature: null },  // ecart 10 000
+      { nom: 'Ecoforest B', client: '', ca: 12000, dateSignature: null },  // ecart  2 000
+      { nom: 'Ecoforest A', client: '', ca: 10500, dateSignature: null },  // ecart    500
+    ];
+    const r = missionsProches(deal, missions);
+    expect(r.map(m => m.nom)).toEqual(['Ecoforest A', 'Ecoforest B', 'Ecoforest C', 'Ecoforest D', 'Ecoforest E']);
+    expect(missionsProches(deal, missions, 2).map(m => m.nom)).toEqual(['Ecoforest A', 'Ecoforest B']);
+  });
+
+  it('entrees vides/non-array/deal sans nom -> liste vide, ne plante pas', () => {
+    expect(missionsProches({ nom: '', montant: 0 }, [{ nom: 'Mission X', client: '', ca: 0 }])).toEqual([]);
+    expect(missionsProches(undefined, undefined)).toEqual([]);
+    expect(missionsProches({ nom: 'Ecoforest', montant: 1 }, [])).toEqual([]);
   });
 });

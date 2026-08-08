@@ -16,7 +16,7 @@ const multer = require('multer');
 const { parse: parseCsv } = require('csv-parse/sync');
 const { cleanEmeliaRows } = require('./utils/emeliaCleaner');
 const { lineExpectedTTC, computeEcart } = require('./utils/facturationCoherence');
-const { orphanWonDeals } = require('./utils/dealsNotionCoherence');
+const { orphanWonDeals, missionsProches } = require('./utils/dealsNotionCoherence');
 const { computeDepenses } = require('./utils/depensesCompute');
 const gsheets = require('./utils/googleSheets');
 const primesMap = require('./utils/primesSheetMap');
@@ -9031,12 +9031,65 @@ app.get('/api/primes/avancement', async (_req, res) => {
   }
 });
 
+// --- Validation manuelle des deals orphelins (feature C-2, design 2026-08-08#C-2) ---
+//
+// La table est creee A LA MAIN par l'utilisateur (SQL fourni ci-dessous, une seule fois). Tant que
+// ce n'est pas fait, tout doit continuer a marcher : le GET renvoie zero valide et
+// validationsDisponibles: false, les POST renvoient une 500 avec un message explicite.
+const DEALS_NOTION_VALIDATIONS_TABLE = 'deals_notion_validations';
+const DEALS_NOTION_SQL_PATH = 'docs/sql/2026-08-08-deals-notion-validations.sql';
+const DEALS_NOTION_TABLE_ABSENTE_MSG = `Table ${DEALS_NOTION_VALIDATIONS_TABLE} absente : exécuter le SQL ${DEALS_NOTION_SQL_PATH}`;
+let dealsNotionTableAbsenteWarned = false; // console.warn une seule fois, pas a chaque refresh du KPI
+
+// Detecte "la table n'existe pas" parmi les erreurs supabase-js. Deux formes selon la couche qui
+// repond : 42P01 = code SQLSTATE Postgres "undefined_table" ; PGRST205 = code PostgREST "table
+// absente du cache de schema" (le cas le plus frequent, PostgREST repond avant Postgres). Le repli
+// sur le message couvre les variantes de formulation entre versions.
+function isDealsNotionTableAbsente(error) {
+  if (!error) return false;
+  const code = String(error.code || '');
+  if (code === '42P01' || code === 'PGRST205' || code === 'PGRST202') return true;
+  return /does not exist|schema cache/i.test(String(error.message || ''));
+}
+
+// Ensemble des dealId valides manuellement. { ids: Set, disponible: bool }. Ne leve JAMAIS sur une
+// table absente (degradation douce) mais propage toute autre erreur : une panne Supabase reelle
+// doit rester visible, pas etre silencieusement transformee en "aucune validation".
+async function fetchDealsNotionValidations() {
+  const { data, error } = await supabaseAdmin
+    .from(DEALS_NOTION_VALIDATIONS_TABLE)
+    .select('deal_id');
+  if (error) {
+    if (!isDealsNotionTableAbsente(error)) throw new Error(error.message);
+    if (!dealsNotionTableAbsenteWarned) {
+      dealsNotionTableAbsenteWarned = true;
+      console.warn(`[coherence] ${DEALS_NOTION_TABLE_ABSENTE_MSG} (validations manuelles désactivées)`);
+    }
+    return { ids: new Set(), disponible: false };
+  }
+  return { ids: new Set((data || []).map(r => String(r.deal_id))), disponible: true };
+}
+
+// Normalise une closedate HubSpot (ISO complet, ex '2026-06-18T00:00:00Z') vers la colonne `date`
+// de Supabase (YYYY-MM-DD). null si absente ou non reconnue : la colonne est nullable, mieux vaut
+// perdre l'info decorative que faire echouer la validation.
+function dealsNotionCloseDateJour(v) {
+  const s = String(v || '');
+  return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
+}
+
 // GET /api/coherence/deals-notion : alerte "deal gagne sans mission Notion" (feature C, design
 // 2026-08-08). La creation des missions Notion est 100% manuelle : un deal HubSpot gagne peut etre
 // oublie, ou son rapprochement manuel pose sur la mauvaise ligne (cas reel "Somarail"). Lecture
 // seule (aucune ecriture, la creation de mission reste manuelle) : compare les deals gagnes de
 // l'annee courante (fetchWonDealsBetween, meme brique que le CA signe HubSpot) aux missions Notion
 // (fetchAllNotionMissions), rapprochement pur delegue a orphanWonDeals (utils/dealsNotionCoherence).
+//
+// C-2 : chaque orphelin porte son dealId HubSpot et ses missionsProches (suggestions pour la
+// validation manuelle), et la reponse separe les orphelins NON valides (`orphelins`, ce que compte
+// le bandeau d'alerte) des orphelins deja arbitres a la main (`valides`). Un deal valide qui
+// redevient couvert naturellement (mission Notion enfin creee au bon montant) disparait des DEUX
+// listes : sa ligne de validation reste en base mais devient inerte, pas de nettoyage automatique.
 app.get('/api/coherence/deals-notion', async (req, res) => {
   try {
     // M3 : `year` borne avant tout appel externe. Sans ce garde, ?year=-1 fabriquait des bornes ISO
@@ -9046,19 +9099,82 @@ app.get('/api/coherence/deals-notion', async (req, res) => {
     if (year < 2000 || year > 2100) return res.status(400).json({ error: 'Paramètre year hors bornes (2000 à 2100)' });
     const fromISO = new Date(Date.UTC(year, 0, 1)).toISOString();
     const toISO = new Date(Date.UTC(year + 1, 0, 1)).toISOString();
-    const [wonDeals, missions] = await Promise.all([
+    const [wonDeals, missions, validations] = await Promise.all([
       fetchWonDealsBetween(fromISO, toISO),
       fetchAllNotionMissions(),
+      fetchDealsNotionValidations(),
     ]);
-    const deals = wonDeals.map(d => ({ nom: d.name, montant: d.amount, closedate: d.closedate }));
+    // dealId conserve jusqu'au bout : c'est la cle de la validation manuelle (le nom d'un deal peut
+    // etre renomme dans HubSpot, son id non).
+    const deals = wonDeals.map(d => ({ dealId: String(d.id), nom: d.name, montant: d.amount, closedate: d.closedate }));
     const missionsInput = missions.map(m => ({ nom: m.nom, client: m.client, ca: m.ca, dateSignature: m.dateSignature }));
     const { couverts, orphelins } = orphanWonDeals(deals, missionsInput);
+    const nonValides = orphelins.filter(d => !validations.ids.has(d.dealId));
+    const valides = orphelins.filter(d => validations.ids.has(d.dealId));
     res.json({
       annee: year,
       dealsGagnes: deals.length,
       couverts,
-      orphelins: orphelins.map(d => ({ nom: d.nom, montant: d.montant, closedate: d.closedate })),
+      validationsDisponibles: validations.disponible,
+      orphelins: nonValides.map(d => ({
+        dealId: d.dealId,
+        nom: d.nom,
+        montant: d.montant,
+        closedate: d.closedate,
+        missionsProches: missionsProches(d, missionsInput),
+      })),
+      valides: valides.map(d => ({ dealId: d.dealId, nom: d.nom, montant: d.montant, closedate: d.closedate })),
     });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/coherence/deals-notion/valider : marque un deal orphelin comme "present dans Notion"
+// (split entre plusieurs missions ou regroupe avec un autre client, cas que le rapprochement
+// automatique un-pour-un ne peut pas voir). Upsert idempotent sur deal_id : re-valider un deal
+// deja valide rafraichit simplement validated_at.
+app.post('/api/coherence/deals-notion/valider', async (req, res) => {
+  try {
+    const dealId = typeof req.body?.dealId === 'string' ? req.body.dealId.trim() : '';
+    if (!dealId) return res.status(400).json({ error: 'dealId requis (chaîne non vide)' });
+    const montantBrut = Number(req.body?.montant);
+    const { error } = await supabaseAdmin
+      .from(DEALS_NOTION_VALIDATIONS_TABLE)
+      .upsert({
+        deal_id: dealId,
+        // Copie informative du deal au moment de la validation (relire la liste sans rappeler HubSpot).
+        nom: typeof req.body?.nom === 'string' ? req.body.nom.slice(0, 500) : null,
+        montant: Number.isFinite(montantBrut) ? montantBrut : null,
+        closedate: dealsNotionCloseDateJour(req.body?.closedate),
+        validated_at: new Date().toISOString(),
+      }, { onConflict: 'deal_id' });
+    if (error) {
+      if (isDealsNotionTableAbsente(error)) return res.status(500).json({ error: DEALS_NOTION_TABLE_ABSENTE_MSG });
+      throw new Error(error.message);
+    }
+    res.json({ ok: true, dealId });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/coherence/deals-notion/annuler : retire la validation manuelle d'un deal (il repasse
+// dans le bandeau d'alerte au prochain refresh). Idempotent : supprimer une ligne absente est un
+// succes cote PostgREST, l'utilisateur n'a pas a savoir si elle existait.
+app.post('/api/coherence/deals-notion/annuler', async (req, res) => {
+  try {
+    const dealId = typeof req.body?.dealId === 'string' ? req.body.dealId.trim() : '';
+    if (!dealId) return res.status(400).json({ error: 'dealId requis (chaîne non vide)' });
+    const { error } = await supabaseAdmin
+      .from(DEALS_NOTION_VALIDATIONS_TABLE)
+      .delete()
+      .eq('deal_id', dealId);
+    if (error) {
+      if (isDealsNotionTableAbsente(error)) return res.status(500).json({ error: DEALS_NOTION_TABLE_ABSENTE_MSG });
+      throw new Error(error.message);
+    }
+    res.json({ ok: true, dealId });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

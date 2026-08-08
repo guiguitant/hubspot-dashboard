@@ -134,13 +134,94 @@ function orphanWonDeals(deals, missions) {
   return { couverts, orphelins };
 }
 
+// --- Suggestions de missions pour la validation manuelle des orphelins (feature C-2) ---
+//
+// Pourquoi un second niveau de similarite : le rapprochement automatique ci-dessus est un-pour-un a
+// +/-1 %, il ne peut structurellement PAS voir un deal decoupe en plusieurs missions Notion
+// ("EPD - Ecoforest" 39 000 -> "Ecoforest Part1" 28 000 + "Ecoforest Part2" 11 000) ni un deal
+// regroupe avec un autre client dans une mission unique ("Moulin du nord" 2 500 -> "Minoterie /
+// Moulin" 5 000). Ces deals sortent en orphelins alors qu'ils SONT dans Notion. missionsProches ne
+// couvre rien (aucun impact sur couverts/orphelins) : elle ne fait que proposer a l'utilisateur les
+// lignes Notion plausibles, pour qu'il arbitre a la main.
+
+// Longueur minimale d'un mot pour etre "significatif". En dessous, un mot est soit un mot outil
+// ("de", "du", "la"), soit une abreviation ultra-repandue ("SA", "EPD", "ACV") qui rapprocherait
+// n'importe quoi de n'importe quoi.
+const MOT_MIN_LEN = 4;
+
+// Mots trop generiques pour identifier un client : mots outils francais et vocabulaire metier
+// present dans la moitie des intitules de deals/missions. Sans cette liste, "Renault - bilan
+// carbone" et "Peugeot bilan carbone" seraient rapproches sur "bilan"/"carbone".
+const MOTS_NON_SIGNIFICATIFS = new Set([
+  // mots outils (>= MOT_MIN_LEN, les plus courts sont deja filtres par la longueur)
+  'avec', 'dans', 'pour', 'sans', 'sous', 'leur', 'leurs', 'elle', 'elles', 'cette', 'ces', 'des',
+  'les', 'une', 'aux', 'par', 'plus', 'tout', 'tous', 'autre', 'autres',
+  // vocabulaire metier / structure de mission
+  'mission', 'missions', 'projet', 'projets', 'client', 'clients', 'dossier', 'etude', 'etudes',
+  'phase', 'part', 'part1', 'part2', 'part3', 'tranche', 'solde', 'acompte', 'devis', 'offre',
+  'bilan', 'carbone', 'empreinte', 'audit', 'accompagnement', 'conseil', 'formation', 'strategie',
+  'plan', 'societe', 'entreprise', 'groupe', 'group', 'france', 'sarl', 'sasu',
+]);
+
+// Mots significatifs d'un libelle : normalisation accents/casse (normalizeLabel), decoupe sur tout
+// ce qui n'est ni lettre ni chiffre (tirets, slashs, esperluettes...), puis filtre longueur + liste
+// des mots non significatifs.
+function motsSignificatifs(s) {
+  return normalizeLabel(s)
+    .split(/[^a-z0-9]+/)
+    .filter(mot => mot.length >= MOT_MIN_LEN && !MOTS_NON_SIGNIFICATIFS.has(mot));
+}
+
+// Vrai si les deux libelles partagent au moins un mot significatif. Complementaire du containment
+// de nomsSimilaires, qui echoue des qu'un caractere separe les deux formes : "moulin du nord" n'est
+// PAS une sous-chaine de "la minoterie & moulins du nord" (le "s" de "moulins" casse tout), alors
+// que le mot "moulin" est bien commun aux deux.
+function motsCommuns(a, b) {
+  const setA = new Set(motsSignificatifs(a));
+  if (setA.size === 0) return false;
+  return motsSignificatifs(b).some(mot => setA.has(mot));
+}
+
+// Vrai si la mission est un candidat PLAUSIBLE pour ce deal aux yeux d'un humain (nom ou client
+// similaire). Volontairement plus large que dealMissionCandidate : aucun critere de montant ni de
+// date, puisque c'est justement l'ecart de montant (split/regroupement) qui empeche le
+// rapprochement automatique.
+function missionProcheDuDeal(deal, mission) {
+  if (nomsSimilaires(deal, mission)) return true;
+  const nomDeal = deal && deal.nom;
+  return motsCommuns(nomDeal, mission && mission.nom) || motsCommuns(nomDeal, mission && mission.client);
+}
+
+// Missions Notion plausibles pour un deal orphelin, triees par ecart de montant croissant (la plus
+// proche du montant du deal en premier : c'est l'ordre de lecture utile quand on cherche a
+// reconstituer un split) et tronquees a `max`. Retourne { nom, montant, dateSignature } par mission.
+// Le tri de V8 est stable : a ecart egal, l'ordre d'origine (celui de Notion) est conserve.
+function missionsProches(deal, missions, max = 5) {
+  const missionsList = Array.isArray(missions) ? missions : [];
+  const montantDeal = Number(deal && deal.montant) || 0;
+  return missionsList
+    .filter(mission => missionProcheDuDeal(deal, mission))
+    .map(mission => ({
+      nom: mission.nom || 'Sans nom',
+      montant: Number(mission.ca) || 0,
+      dateSignature: mission.dateSignature || null,
+    }))
+    .sort((a, b) => Math.abs(a.montant - montantDeal) - Math.abs(b.montant - montantDeal))
+    .slice(0, Math.max(0, Number(max) || 0));
+}
+
 module.exports = {
   MONTANT_TOLERANCE,
   MIN_NOM_LEN,
+  MOT_MIN_LEN,
   montantsProches,
   periodeTrimestre,
   nomsSimilaires,
   dealMissionCandidate,
   maximumBipartiteMatching,
   orphanWonDeals,
+  motsSignificatifs,
+  motsCommuns,
+  missionProcheDuDeal,
+  missionsProches,
 };
