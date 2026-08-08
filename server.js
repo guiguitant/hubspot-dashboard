@@ -21,7 +21,7 @@ const { computeDepenses } = require('./utils/depensesCompute');
 const gsheets = require('./utils/googleSheets');
 const primesMap = require('./utils/primesSheetMap');
 const chargesPerimetre = require('./utils/chargesPerimetre');
-const { classifyProduitSubvention } = require('./utils/produitsSubventions'); // Feature A produits-et-suivis : classification credits Qonto "Subventions et aides"
+const { classifyProduitSubvention, CATEGORIE_SUBVENTIONS } = require('./utils/produitsSubventions'); // Feature A produits-et-suivis : classification credits Qonto "Subventions et aides"
 const { buildCoupleKey, buildIndexExactKey, buildIndexExactTVA, montantHT } = require('./utils/tvaCharges'); // cle categorie/sous-categorie partagee avec le parser Categories TVA (evite toute divergence) ; montantHT = conversion TTC->HT du reel (Tache 6) ; buildIndexExactTVA = jointure pure lettrage Pennylane (extraite en utils, revue C1)
 const cron = require('node-cron');
 const MASSE_TAB = 'Masse_salariale';
@@ -8668,6 +8668,24 @@ async function fetchFinancementsForYear(year, minMonthKey) {
   return result;
 }
 
+// Forme neutre de la ventilation (tous compteurs a zero, aucun drapeau leve). Utilisee comme valeur
+// de repli quand il n'y a AUCUN mois clos dans l'annee demandee (fenetre reelle absente), comme base
+// du calcul de computeSubventionsReel et comme valeur de retour de son catch : une seule definition
+// de la forme, pour que le front n'ait jamais a tester l'existence de chaque champ.
+function emptySubventionsReel() {
+  return {
+    produits:      { montant: 0, nb: 0 }, // total EBE = subventions + aides (invariant garanti ci-dessous)
+    subventions:   { montant: 0, nb: 0 }, // sous-type I4 : ligne "Subventions" du compte de resultat
+    aides:         { montant: 0, nb: 0 }, // sous-type I4 : ligne "Aides" du compte de resultat
+    exclus:        { montant: 0, nb: 0 }, // avances remboursables / prets : jamais dans l'EBE
+    inconnus:      { montant: 0, nb: 0 }, // sous-categorie non reconnue : a reclasser
+    horsPerimetre: { montant: 0, nb: 0 }, // M2 : credit "...subvention..." sous une AUTRE categorie parente
+    ok: true,
+    erreur: null,
+    reclassementIncomplet: false,         // I1 : aucune avance detectee alors qu'il y a des produits
+  };
+}
+
 // Credits Qonto de la fenetre REELLE (mois clos), classes par classifyProduitSubvention (categorie
 // "Subventions et aides" uniquement -- les autres credits, ex. remboursement d'IS ou encaissements
 // clients, sont hors sujet et ignores ici, exactement comme le reel des charges ignore deja les
@@ -8675,13 +8693,10 @@ async function fetchFinancementsForYear(year, minMonthKey) {
 // /api/ebe et son miroir computeResultatFactuelForYear (meme alignement que computeChargesHybride),
 // pour que les deux cascades restent alignees si ce calcul evolue.
 // Tolerant : renvoie des compteurs nuls en cas d'echec Qonto (l'EBE ne doit pas planter si l'API
-// Qonto est indisponible), mais log TOUJOURS l'erreur -- jamais d'exclusion silencieuse.
+// Qonto est indisponible), mais log TOUJOURS l'erreur ET pose `ok: false` + `erreur` (I2) : jamais
+// d'exclusion silencieuse, ni cote log, ni cote reponse HTTP.
 async function computeSubventionsReel(startKey, realEndKey) {
-  const result = {
-    produits: { montant: 0, nb: 0 },
-    exclus:   { montant: 0, nb: 0 },
-    inconnus: { montant: 0, nb: 0 },
-  };
+  const result = emptySubventionsReel();
   try {
     const org = await qontoRequest('/v2/organization');
     const bankAccounts = org.organization.bank_accounts || [];
@@ -8696,29 +8711,71 @@ async function computeSubventionsReel(startKey, realEndKey) {
       const cat    = (tx.cashflow_category && tx.cashflow_category.name) || tx.category || null;
       const sousCat = (tx.cashflow_subcategory && tx.cashflow_subcategory.name) || null;
       const classification = classifyProduitSubvention(cat, sousCat);
-      if (classification === 'produit')      { result.produits.montant += tx.amount; result.produits.nb++; }
-      else if (classification === 'exclu')   { result.exclus.montant   += tx.amount; result.exclus.nb++; }
-      else if (classification === 'inconnu') { result.inconnus.montant += tx.amount; result.inconnus.nb++; }
-      // null = categorie hors sujet (pas "Subventions et aides") : ignore, comme avant.
+      if (classification === 'produit-subvention') { result.subventions.montant += tx.amount; result.subventions.nb++; }
+      else if (classification === 'produit-aide')  { result.aides.montant       += tx.amount; result.aides.nb++; }
+      else if (classification === 'exclu')         { result.exclus.montant      += tx.amount; result.exclus.nb++; }
+      else if (classification === 'inconnu')       { result.inconnus.montant    += tx.amount; result.inconnus.nb++; }
+      else {
+        // null = categorie parente differente de "Subventions et aides" : hors sujet, ignore (comme avant).
+        // M2 : la comparaison de la categorie parente est une egalite EXACTE (utils/produitsSubventions.js).
+        // Une categorie renommee ou variante ("Subventions & aides", "Subventions publiques"...) tomberait
+        // donc ici en silence, et tout le reel des produits passerait a zero sans le moindre signal. On ne
+        // change PAS la classification (aucun risque de faux positif sur l'EBE), on rend juste le trou
+        // visible : tout credit significatif dont la categorie CONTIENT "subvention" sans matcher est compte
+        // et logue.
+        const nCat = chargesPerimetre.normalizeLabel(cat);
+        if (tx.amount > 500 && nCat && nCat.includes('subvention')) {
+          result.horsPerimetre.montant += tx.amount;
+          result.horsPerimetre.nb++;
+        }
+      }
     }
-    result.produits.montant = Math.round(result.produits.montant);
-    result.exclus.montant   = Math.round(result.exclus.montant);
-    result.inconnus.montant = Math.round(result.inconnus.montant);
+    // Arrondi des sous-types D'ABORD, puis total DERIVE des valeurs deja arrondies : l'invariant
+    // produits = subventions + aides est ainsi garanti a l'euro (Math.round(a) + Math.round(b) peut
+    // differer de Math.round(a + b)), donc totalSubv + totalAide du compte de resultat reste
+    // exactement egal a ce qu'il valait avant le sous-typage (I4 : ventilation, pas changement de perimetre).
+    result.subventions.montant   = Math.round(result.subventions.montant);
+    result.aides.montant         = Math.round(result.aides.montant);
+    result.produits.montant      = result.subventions.montant + result.aides.montant;
+    result.produits.nb           = result.subventions.nb + result.aides.nb;
+    result.exclus.montant        = Math.round(result.exclus.montant);
+    result.inconnus.montant      = Math.round(result.inconnus.montant);
+    result.horsPerimetre.montant = Math.round(result.horsPerimetre.montant);
 
-    // Log unique : trace la ventilation reelle. Comportement TRANSITOIRE attendu tant que
-    // l'utilisateur n'a pas reclasse ses 12 encaissements "Aides a l'embauche" dans les 3
-    // sous-categories dediees qu'il a creees : ils remontent aujourd'hui TOUS en 'produit' (avance
-    // remboursable non isolee), donc `produits.montant` restera surestime (~105k au lieu de ~66k)
-    // jusqu'a ce reclassement -- ce log + le compteur `inconnus` rendent le reclassement verifiable.
-    console.log('[produits] subventions reel %s..%s : produits %d€ (%d tx), exclus %d€ (%d tx), inconnus %d€ (%d tx)',
+    // I1 : le mode de defaillance REEL du transitoire n'est pas `inconnus > 0` (les 12 encaissements ont
+    // tous une sous-categorie reconnue, "Aides a l'embauche") mais `exclus.nb === 0` : tant que
+    // l'utilisateur n'a pas reclasse ses encaissements dans les sous-categories Qonto dediees qu'il a
+    // creees, l'avance remboursable (39 200 €) reste comptee comme un produit et l'EBE est surevalue
+    // d'autant. La condition redevient fausse d'elle-meme une fois le reclassement fait.
+    result.reclassementIncomplet = result.exclus.nb === 0 && result.produits.nb > 0;
+
+    // Log unique : trace la ventilation reelle, toujours emis (meme a zero : un "zero" silencieux
+    // masquerait un echec de classification sans jamais lever d'erreur).
+    console.log('[produits] subventions reel %s..%s : produits %d€ (%d tx) dont subventions %d€ / aides %d€, exclus %d€ (%d tx), inconnus %d€ (%d tx)',
       startKey, realEndKey, result.produits.montant, result.produits.nb,
+      result.subventions.montant, result.aides.montant,
       result.exclus.montant, result.exclus.nb, result.inconnus.montant, result.inconnus.nb);
     if (result.inconnus.nb > 0) {
       console.warn('[produits] %d credit(s) "Subventions et aides" sans sous-categorie reconnue (%d€) : a verifier/reclasser', result.inconnus.nb, result.inconnus.montant);
     }
+    if (result.reclassementIncomplet) {
+      console.warn('[produits] aucune avance remboursable detectee parmi les %d encaissement(s) reels (%d€) : reclassement Qonto incomplet, l\'EBE peut etre surevalue', result.produits.nb, result.produits.montant);
+    }
+    if (result.horsPerimetre.nb > 0) {
+      console.warn('[produits] %d credit(s) > 500€ dont la categorie evoque une subvention SANS matcher "%s" (%d€) : categorie Qonto renommee ? classification inchangee, a verifier',
+        result.horsPerimetre.nb, CATEGORIE_SUBVENTIONS, result.horsPerimetre.montant);
+    }
   } catch (e) {
+    // I2 : la tolerance reste (l'EBE ne doit pas planter si Qonto est indisponible), mais elle n'est plus
+    // SILENCIEUSE : sans ce drapeau, une panne Qonto partielle renvoyait des compteurs nuls strictement
+    // indiscernables d'un "pas de subventions", donc un HTTP 200 avec un EBE ampute de ~104 k€ et aucun
+    // signal. On repart d'une forme neutre (jamais de total partiel accumule avant l'echec, qui serait
+    // pire qu'un zero) et on porte l'erreur jusqu'au front.
     console.error('[produits] echec lecture credits Qonto (subventions reel) :', e.message);
-    // Tolerance : compteurs nuls, le calcul de l'EBE continue normalement (comme les primes/amortissements).
+    const ko = emptySubventionsReel();
+    ko.ok = false;
+    ko.erreur = e.message;
+    return ko;
   }
   return result;
 }
@@ -8982,7 +9039,11 @@ app.get('/api/primes/avancement', async (_req, res) => {
 // (fetchAllNotionMissions), rapprochement pur delegue a orphanWonDeals (utils/dealsNotionCoherence).
 app.get('/api/coherence/deals-notion', async (req, res) => {
   try {
+    // M3 : `year` borne avant tout appel externe. Sans ce garde, ?year=-1 fabriquait des bornes ISO
+    // absurdes, HubSpot renvoyait une erreur et le message brut de l'API partait tel quel au client
+    // dans un HTTP 500. Meme patron de validation que /api/ebe (400 + message court en francais).
     const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+    if (year < 2000 || year > 2100) return res.status(400).json({ error: 'Paramètre year hors bornes (2000 à 2100)' });
     const fromISO = new Date(Date.UTC(year, 0, 1)).toISOString();
     const toISO = new Date(Date.UTC(year + 1, 0, 1)).toISOString();
     const [wonDeals, missions] = await Promise.all([
@@ -9024,7 +9085,7 @@ async function computeResultatFactuelForYear(year) {
   const [subventionsReel, financementsPrev] = await Promise.all([
     chargesData.real
       ? computeSubventionsReel(chargesData.real.start, chargesData.real.end)
-      : Promise.resolve({ produits: { montant: 0, nb: 0 }, exclus: { montant: 0, nb: 0 }, inconnus: { montant: 0, nb: 0 } }),
+      : Promise.resolve(emptySubventionsReel()),
     chargesData.prev
       ? fetchFinancementsForYear(year, chargesData.prev.start)
       : Promise.resolve({ subventions: [], aides: [] }),
@@ -9051,8 +9112,10 @@ async function computeResultatFactuelForYear(year) {
   // (onglet Masse_salariale ecrit par la synchro, agrege dans les Frais de personnel de CR_Prev).
   // Subventions hybrides (Feature A) : reel Qonto (mois clos, deja filtre 'produit') + Plan_TRE
   // restreint aux mois previsionnels (chargesData.prev.start, cf fetchFinancementsForYear ci-dessus).
-  const totalSubv = subventionsReel.produits.montant + financementsPrev.subventions.reduce((s, f) => s + f.montant, 0);
-  const totalAide = financementsPrev.aides.reduce((s, f) => s + f.montant, 0);
+  // Le reel est desormais SOUS-TYPE (I4) : subventions d'un cote, aides de l'autre, comme le Plan_TRE.
+  // Le total (totalSubv + totalAide) est inchange, produits = subventions + aides par construction.
+  const totalSubv = subventionsReel.subventions.montant + financementsPrev.subventions.reduce((s, f) => s + f.montant, 0);
+  const totalAide = subventionsReel.aides.montant + financementsPrev.aides.reduce((s, f) => s + f.montant, 0);
   const ebe = caFacture - totalCharges + totalSubv + totalAide;
   const resExploit = Math.round(ebe) - amortissements;
   const isBrut = computeIS(resExploit);
@@ -9110,17 +9173,23 @@ app.get('/api/ebe', async (req, res) => {
     const [subventionsReel, financementsPrev] = await Promise.all([
       chargesData.real
         ? computeSubventionsReel(chargesData.real.start, chargesData.real.end)
-        : Promise.resolve({ produits: { montant: 0, nb: 0 }, exclus: { montant: 0, nb: 0 }, inconnus: { montant: 0, nb: 0 } }),
+        : Promise.resolve(emptySubventionsReel()),
       chargesData.prev
         ? fetchFinancementsForYear(yearParam, chargesData.prev.start)
         : Promise.resolve({ subventions: [], aides: [] }),
     ]);
-    // Le reel Qonto (deja agrege, sans sous-typer subvention/aide -- cf classifyProduitSubvention)
-    // est ajoute comme UNE ligne au bucket "subventions" du detail expose au front : garde l'invariant
-    // total = somme des lignes pour la modale detail du Compte de resultat (pilot.html financementsTable()).
+    // Le reel Qonto est SOUS-TYPE (I4, classifyProduitSubvention) : une ligne dans "subventions", une
+    // ligne dans "aides". Avant, tout le reel atterrissait dans "subventions" et la ligne "Aides" du
+    // compte de resultat disparaissait des qu'une annee avait des mois clos (totalAide = 0). Le total
+    // (totalSubv + totalAide) est identique a l'ancien : c'est une ventilation, pas un changement de
+    // perimetre. Invariant conserve : total = somme des lignes, pour la modale detail du Compte de
+    // resultat (pilot.html financementsTable()).
     const financements = { subventions: [...financementsPrev.subventions], aides: [...financementsPrev.aides] };
-    if (subventionsReel.produits.montant !== 0) {
-      financements.subventions.push({ label: 'Subventions et aides (réel Qonto, mois clos)', montant: subventionsReel.produits.montant });
+    if (subventionsReel.subventions.montant !== 0) {
+      financements.subventions.push({ label: 'Subventions (réel Qonto, mois clos)', montant: subventionsReel.subventions.montant });
+    }
+    if (subventionsReel.aides.montant !== 0) {
+      financements.aides.push({ label: 'Aides (réel Qonto, mois clos)', montant: subventionsReel.aides.montant });
     }
     const totalSubv = financements.subventions.reduce((s, f) => s + f.montant, 0);
     const totalAide = financements.aides.reduce((s, f) => s + f.montant, 0);
@@ -9183,10 +9252,12 @@ app.get('/api/ebe', async (req, res) => {
         totalAide,
       },
       // Feature A produits-et-suivis : ventilation du reel Qonto "Subventions et aides" (mois clos
-      // seulement, cf computeSubventionsReel) -- montants + nb, jamais d'exclusion silencieuse.
-      // Comportement TRANSITOIRE tant que l'utilisateur n'a pas reclasse ses encaissements "Aides a
-      // l'embauche" dans les 3 sous-categories Qonto dediees : `produits` restera surestime (l'avance
-      // remboursable n'est pas encore isolee) et `inconnus` restera a 0 jusqu'a ce reclassement.
+      // seulement, cf computeSubventionsReel) : montants + nb, jamais d'exclusion silencieuse. Porte
+      // aussi les drapeaux consommes par la modale "Subventions" du front (pilot.html) :
+      //   - `reclassementIncomplet` (I1) : aucune avance remboursable detectee alors qu'il y a des
+      //     produits reels, donc reclassement Qonto pas encore fait et EBE potentiellement surevalue ;
+      //   - `ok` / `erreur` (I2) : lecture Qonto en echec, le montant affiche provient du budget seul ;
+      //   - `horsPerimetre` (M2) : credits evoquant une subvention sous une categorie parente non reconnue.
       subventionsReel,
       ebe: { factuel: Math.round(ebeFactuel), projete: Math.round(ebeProjete) },
       amortissements,

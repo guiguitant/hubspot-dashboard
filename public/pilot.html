@@ -14055,6 +14055,82 @@
       return ' <span class="cr-tva-badge' + (warn ? ' warn' : '') + '" title="' + title + '">TVA exacte : ' + pct + '% des dépenses réelles</span>';
     }
 
+    // --- Ventilation du réel Qonto « Subventions et aides » (findings I1 / I2 / M2) ---
+    // Passthrough pur de d.subventionsReel (/api/ebe -> computeSubventionsReel) : aucun calcul côté
+    // front, les drapeaux sont décidés côté serveur. Rien si le champ est absent (réponse d'une version
+    // antérieure encore en cache).
+
+    // Bandeau d'alerte, même patron visuel que les bandeaux KPI (renderKpiDealsNotion / renderKpiCloture).
+    function _crAlerteHtml(texte, danger) {
+      const bg  = danger ? 'var(--danger-bg)' : 'var(--warning-bg)';
+      const col = danger ? 'var(--danger)' : 'var(--warning)';
+      return '<div style="display:flex;align-items:flex-start;gap:0.5rem;padding:0.45rem 0.7rem;border-radius:8px;background:' + bg
+        + ';color:' + col + ';font-size:0.79rem;line-height:1.35;margin-bottom:0.55rem">'
+        + '<span style="flex:0 0 auto">&#9888;</span><span>' + texte + '</span></div>';
+    }
+
+    // Badge sur la ligne « Subventions » du compte de résultat : rend les deux transitoires visibles
+    // SANS avoir à ouvrir la modale (le détail chiffré, lui, est dans la modale). Même patron que le
+    // badge TVA (.cr-tva-badge.warn).
+    function _crSubventionsBadgeHtml(sr) {
+      if (!sr) return '';
+      if (sr.ok === false) {
+        return ' <span class="cr-tva-badge warn" title="La lecture des encaissements Qonto a échoué : le montant affiché provient du budget Plan TRE seul.">&#9888; réel Qonto indisponible</span>';
+      }
+      if (sr.reclassementIncomplet) {
+        return ' <span class="cr-tva-badge warn" title="Aucune avance remboursable n\'a été détectée dans les encaissements réels : tant que le reclassement Qonto n\'est pas fait, une avance (emprunt) peut être comptée comme un produit.">&#9888; reclassement Qonto à vérifier</span>';
+      }
+      return '';
+    }
+
+    // Bloc complet (alertes + ventilation) affiché dans les modales de détail Subventions et Aides :
+    // ces deux lignes portent désormais chacune une ligne « réel Qonto, mois clos » depuis le
+    // sous-typage subvention/aide côté serveur.
+    function _crSubventionsReelHtml(sr) {
+      if (!sr) return '';
+      const ligne = (label, bloc, indent) =>
+        '<div style="display:flex;justify-content:space-between;padding:0.28rem 0;border-bottom:1px solid var(--border)'
+        + (indent ? ';padding-left:1rem;color:var(--text-secondary);font-size:0.82rem' : '') + '">'
+        + '<span>' + label + '</span><span>' + formatEuro(bloc.montant) + ' <span style="color:var(--text-secondary);font-size:0.75rem">(' + bloc.nb + ' encaissement' + (bloc.nb > 1 ? 's' : '') + ')</span></span></div>';
+
+      let html = '';
+      // I2 : lecture Qonto en échec. Compteurs à zéro mais explicitement signalés, jamais confondus
+      // avec « pas de subventions ».
+      if (sr.ok === false) {
+        html += _crAlerteHtml('Subventions réelles indisponibles (erreur Qonto) : le montant affiché provient du budget seul, la partie réellement encaissée des mois clos manque. Détail : '
+          + escapeHtml(sr.erreur || 'erreur inconnue'), true);
+      }
+      // I1 : le vrai mode de défaillance du transitoire. Tant qu'aucune avance remboursable n'est
+      // isolée, l'avance (emprunt à taux 0) est comptée comme un produit et l'EBE est surévalué.
+      if (sr.reclassementIncomplet) {
+        html += _crAlerteHtml('Aucune avance remboursable détectée parmi les ' + sr.produits.nb
+          + ' encaissement' + (sr.produits.nb > 1 ? 's' : '') + ' réel' + (sr.produits.nb > 1 ? 's' : '')
+          + ' : reclassement Qonto incomplet, l\'EBE peut être surévalué. Reclasse les encaissements dans les sous-catégories dédiées de « Subventions et aides ».', true);
+      }
+      if (sr.inconnus && sr.inconnus.nb > 0) {
+        html += _crAlerteHtml(sr.inconnus.nb + ' encaissement' + (sr.inconnus.nb > 1 ? 's' : '')
+          + ' sans sous-catégorie reconnue (' + formatEuro(sr.inconnus.montant) + ') : non compté' + (sr.inconnus.nb > 1 ? 's' : '') + ' dans l\'EBE, à reclasser.', false);
+      }
+      // M2 : catégorie parente Qonto renommée ou variante, comparée en égalité exacte côté serveur.
+      if (sr.horsPerimetre && sr.horsPerimetre.nb > 0) {
+        html += _crAlerteHtml(sr.horsPerimetre.nb + ' encaissement' + (sr.horsPerimetre.nb > 1 ? 's' : '')
+          + ' de plus de 500 € évoque' + (sr.horsPerimetre.nb > 1 ? 'nt' : '') + ' une subvention sous une autre catégorie Qonto ('
+          + formatEuro(sr.horsPerimetre.montant) + ') : catégorie renommée ? Classification inchangée, à vérifier.', false);
+      }
+
+      const aDuReel = sr.produits.nb > 0 || sr.exclus.nb > 0 || (sr.inconnus && sr.inconnus.nb > 0);
+      if (aDuReel) {
+        html += '<div style="font-size:0.78rem;color:var(--text-secondary);margin:0.5rem 0 0.3rem">Ventilation des encaissements Qonto « Subventions et aides » des mois clos :</div>';
+        html += ligne('Produits retenus dans l\'EBE', sr.produits);
+        if (sr.subventions) html += ligne('dont subventions', sr.subventions, true);
+        if (sr.aides)       html += ligne('dont aides', sr.aides, true);
+        html += ligne('Exclus (avance remboursable, prêt)', sr.exclus);
+        if (sr.inconnus) html += ligne('Non classés (à reclasser)', sr.inconnus);
+      }
+      if (html) html = '<div style="margin-top:0.8rem;padding-top:0.6rem;border-top:1px dashed var(--border)">' + html + '</div>';
+      return html;
+    }
+
     function renderCompteResultat() {
       if (!crData) return;
       const projete = document.getElementById('crProjete').checked;
@@ -14094,7 +14170,11 @@
       if (d.charges && d.charges.primesCommerciales) {
         html += subRow('dont primes commerciales (deja dans les charges)', '(' + formatEuro(d.charges.primesCommerciales) + ')');
       }
-      if (d.financements.totalSubv) html += row('Subventions', d.financements.totalSubv, { plus: true, onclick: "openCrDetailModal('subventions')" });
+      // La ligne Subventions reste affichée si un avertissement doit l'être, même à montant nul :
+      // sinon une erreur de lecture Qonto (I2) ramenant le total à zéro ferait disparaître la ligne,
+      // donc l'alerte avec elle.
+      const subvBadge = _crSubventionsBadgeHtml(d.subventionsReel);
+      if (d.financements.totalSubv || subvBadge) html += row('Subventions', d.financements.totalSubv, { plus: true, onclick: "openCrDetailModal('subventions')", badge: subvBadge });
       if (d.financements.totalAide) html += row('Aides', d.financements.totalAide, { plus: true, onclick: "openCrDetailModal('aides')" });
       html += row("= Excedent brut d'exploitation (EBE)", ebe, { total: true });
       html += row('Dotations aux amortissements', d.amortissements, { neg: d.amortissements > 0, sep: true, onclick: "navigateTo('immobilisations')" });
@@ -14141,6 +14221,10 @@
         title = (kind === 'subventions' ? 'Subventions' : 'Aides') + ' ' + d.year;
         for (const f of list) body += '<div style="display:flex;justify-content:space-between;padding:0.35rem 0;border-bottom:1px solid var(--border)"><span>' + escapeHtml(f.label) + '</span><span>' + formatEuro(f.montant) + '</span></div>';
         if (!list.length) body += '<div style="color:var(--text-secondary);padding:0.4rem 0">Aucune ligne.</div>';
+        // I1 / I2 / M2 : ventilation du réel Qonto + avertissements. Rendu dans les DEUX modales
+        // (Subventions et Aides) : chacune porte une ligne « réel Qonto, mois clos » depuis le
+        // sous-typage subvention/aide, et la ventilation les concerne toutes les deux.
+        body += _crSubventionsReelHtml(d.subventionsReel);
       } else if (kind === 'is') {
         const base = projete ? d.resultatExploitation.projete : d.resultatExploitation.factuel;
         const is = projete ? d.is.projete : d.is.factuel;
