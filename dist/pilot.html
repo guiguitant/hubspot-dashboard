@@ -10303,10 +10303,14 @@
       const anneeN = comp.mois.length ? comp.mois[0].split('-')[0] : 'N';
       const anneeNm1 = String(parseInt(anneeN) - 1);
 
-      // Hachures pour les mois prévisionnels (après real.end en mode hybride)
-      const realEnd = analyticsChargesPrev && analyticsChargesData?.real ? analyticsChargesData.real.end : null;
-      const nColors = comp.mois.map(k => (realEnd && k > realEnd) ? makeHatchPattern('#7A9BBF') : '#7A9BBF');
-      const nBorders = comp.mois.map(k => (realEnd && k > realEnd) ? '#7A9BBF' : 'transparent');
+      // Hachures pour les mois a venir : ce graphe est du budget pur (CR_Prev) des deux cotes,
+      // il n'y a jamais de "reel" a comparer ici (contrairement a /api/charges-hybride, dont le
+      // champ real.end n'existe pas sur cette reponse). La frontiere "ecoule / a venir" est donc
+      // calculee localement (mois courant), sans dependre d'un champ API.
+      const now = new Date();
+      const moisCourantKey = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+      const nColors = comp.mois.map(k => (k >= moisCourantKey) ? makeHatchPattern('#7A9BBF') : '#7A9BBF');
+      const nBorders = comp.mois.map(k => (k >= moisCourantKey) ? '#7A9BBF' : 'transparent');
 
       comparaisonChart = new Chart(document.getElementById('analyticsChargesComparaison'), {
         type: 'bar',

@@ -4999,14 +4999,13 @@ async function fetchAndParseCategoriesTVA() {
   // Passe 1 : cherche une eventuelle colonne "recuperable" sur une ligne d'en-tete ("Nom" en col C).
   // Comparaison via normalizeLabel (accents/casse/espaces, C2 revue finale) plutot qu'un simple
   // trim+toLowerCase : plus tolerante a une variante d'en-tete (espaces superflus...) sans rien
-  // assouplir sur le contenu attendu ("nom"). Fenetre de recherche D..H (index 3..7, C2 revue finale :
-  // un peu plus large que le scan du taux D..F ci-dessous) pour ne pas rater la colonne si elle est
-  // placee un peu plus loin que prevu sur la ligne ; reste bornee pour eviter de capter du texte sans
-  // rapport plus loin (ex. le second mini-tableau "financements").
+  // assouplir sur le contenu attendu ("nom"). Fenetre de recherche D..F (index 3..5, meme borne que
+  // le scan du taux ci-dessous ; colonne reelle verifiee en E) : au-dela (G+) commence le second
+  // mini-tableau "financements", a ne surtout pas capter.
   for (let r = 0; r < rows.length && recuperableCol === null; r++) {
     const row = rows[r];
     if (chargesPerimetre.normalizeLabel(row[2]) !== 'nom') continue;
-    for (let c = 3; c < Math.min(row.length, 8); c++) {
+    for (let c = 3; c < Math.min(row.length, 6); c++) {
       if (chargesPerimetre.normalizeLabel(row[c]).includes('recuperable')) { recuperableCol = c; break; }
     }
   }
