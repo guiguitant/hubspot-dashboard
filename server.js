@@ -16,6 +16,7 @@ const multer = require('multer');
 const { parse: parseCsv } = require('csv-parse/sync');
 const { cleanEmeliaRows } = require('./utils/emeliaCleaner');
 const { lineExpectedTTC, computeEcart } = require('./utils/facturationCoherence');
+const { orphanWonDeals } = require('./utils/dealsNotionCoherence');
 const { computeDepenses } = require('./utils/depensesCompute');
 const gsheets = require('./utils/googleSheets');
 const primesMap = require('./utils/primesSheetMap');
@@ -1169,7 +1170,7 @@ async function fetchWonDealsBetween(fromISO, toISO) {
         { propertyName: 'closedate', operator: 'GTE', value: fromISO },
         { propertyName: 'closedate', operator: 'LT', value: toISO },
       ] }],
-      properties: ['amount', 'closedate', 'pipeline'],
+      properties: ['amount', 'closedate', 'dealname', 'pipeline'],
       sorts: [{ propertyName: 'closedate', direction: 'DESCENDING' }],
       limit: 100,
     };
@@ -1179,9 +1180,16 @@ async function fetchWonDealsBetween(fromISO, toISO) {
     if (result.paging && result.paging.next && result.paging.next.after) after = result.paging.next.after;
     else break;
   }
+  // name/closedate ajoutes pour l'alerte de coherence deals/missions Notion (feature C) : les
+  // autres appelants (CA signe primes + Analytics) n'utilisent que .amount, non impacte.
   return deals
     .filter(d => !d.properties.pipeline || d.properties.pipeline === 'default')
-    .map(d => ({ id: d.id, amount: parseFloat(d.properties.amount) || 0 }));
+    .map(d => ({
+      id: d.id,
+      amount: parseFloat(d.properties.amount) || 0,
+      name: d.properties.dealname || 'Sans nom',
+      closedate: d.properties.closedate || null,
+    }));
 }
 
 // Deals gagnés (closed-won, pipeline default) dont la date de clôture tombe dans `year`.
@@ -8872,6 +8880,35 @@ app.get('/api/primes/avancement', async (_req, res) => {
     const knownEntries = detailCharge.filter(e => PRIME_STATUS_BUCKET[e.statut]);
     const parDeal = primesMap.roundEntriesPreservingSumByPartner(knownEntries);
     res.json({ parAssocie: reconciliation, parDeal, total, participants, exercice });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/coherence/deals-notion — Alerte "deal gagne sans mission Notion" (feature C, design
+// 2026-08-08). La creation des missions Notion est 100% manuelle : un deal HubSpot gagne peut etre
+// oublie, ou son rapprochement manuel pose sur la mauvaise ligne (cas reel "Somarail"). Lecture
+// seule (aucune ecriture, la creation de mission reste manuelle) : compare les deals gagnes de
+// l'annee courante (fetchWonDealsBetween, meme brique que le CA signe HubSpot) aux missions Notion
+// (fetchAllNotionMissions), rapprochement pur delegue a orphanWonDeals (utils/dealsNotionCoherence).
+app.get('/api/coherence/deals-notion', async (req, res) => {
+  try {
+    const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+    const fromISO = new Date(Date.UTC(year, 0, 1)).toISOString();
+    const toISO = new Date(Date.UTC(year + 1, 0, 1)).toISOString();
+    const [wonDeals, missions] = await Promise.all([
+      fetchWonDealsBetween(fromISO, toISO),
+      fetchAllNotionMissions(),
+    ]);
+    const deals = wonDeals.map(d => ({ nom: d.name, montant: d.amount, closedate: d.closedate }));
+    const missionsInput = missions.map(m => ({ nom: m.nom, client: m.client, ca: m.ca, dateSignature: m.dateSignature }));
+    const { couverts, orphelins } = orphanWonDeals(deals, missionsInput);
+    res.json({
+      annee: year,
+      dealsGagnes: deals.length,
+      couverts,
+      orphelins: orphelins.map(d => ({ nom: d.nom, montant: d.montant, closedate: d.closedate })),
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

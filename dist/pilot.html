@@ -11563,6 +11563,7 @@
     let primeAdvData = null;                                   // dernière réponse de /api/primes/avancement, en cache mémoire (filtrage/tri sans refetch réseau)
     let primeAdvFilters = { partner: '', statut: '', q: '' };  // '' = "Tous" / pas de recherche texte
     let primeAdvSort = { col: null, dir: 'asc' };               // colonne triée du tableau "Par deal" ; col=null → ordre reçu de l'API
+    let dealsNotionOrphelins = [];  // cache mémoire des deals gagnés sans mission Notion (réponse /api/coherence/deals-notion), pour la modale détail
 
     function primeFmtEur(n) { return (Math.round(n) || 0).toLocaleString('fr-FR') + ' €'; }
     function primeFmtPct(n) { return (Math.round((Number(n) || 0) * 100) / 100).toString().replace('.', ',') + ' %'; }
@@ -11678,6 +11679,7 @@
       body.innerHTML =
         '<div id="prime-coverage" style="margin-bottom:0.9rem"></div>'
         + '<div id="prime-clawback" style="margin-bottom:0.9rem"></div>'
+        + '<div id="kpi-deals-notion" style="margin-bottom:0.9rem"></div>'
         + '<div class="kpi-signed-tabs" id="primeViewTabs" style="margin-top:1rem"></div>'
         + '<div class="prime-results" id="kpiPrimeResults" style="margin-top:0.9rem"></div>'
         + '<div id="kpiPrimeAdvancement" style="margin-top:0.9rem;display:none"></div>';
@@ -11685,6 +11687,7 @@
       primeRecompute();
       renderKpiCoverage();
       renderKpiClawback();
+      renderKpiDealsNotion();
       renderPrimeViewTabs();
       switchPrimeView(primeView);
     }
@@ -12044,6 +12047,43 @@
       let html = '<p class="kpi-detail-total">' + cands.length + ' ligne' + (cands.length > 1 ? 's' : '') + ' · ' + kpiFmtEur(tot) + ' à reprendre (indicatif)</p>';
       html += '<p style="color:var(--text-secondary);font-size:0.8rem;margin:0 0 0.6rem">Missions signées sur un trimestre déjà payé et passées « Annulé ». À vérifier avant de déduire : une annulation antérieure au paiement n\'est pas à reprendre.</p>';
       html += rows || '<p style="color:var(--text-secondary)">Aucune.</p>';
+      document.getElementById('kpiDetailBody').innerHTML = html;
+      document.getElementById('kpiDetailModal').classList.add('active');
+    }
+
+    // Alerte "deal gagné sans mission Notion" (feature C) : la création des missions Notion est
+    // manuelle, un deal gagné peut être oublié ou rapproché de la mauvaise ligne (cas Somarail).
+    // Rien affiché si 0 orphelin (pas de bandeau vert, contrairement à renderKpiCoverage) : cohérent
+    // avec renderKpiClawback, qui reste discret tant qu'il n'y a rien à signaler.
+    // Fetch avec gestion d'erreur silencieuse : une alerte qui plante ne doit jamais casser le KPI.
+    async function renderKpiDealsNotion() {
+      const el = document.getElementById('kpi-deals-notion');
+      if (!el) return;
+      try {
+        const res = await fetch('/api/coherence/deals-notion');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        dealsNotionOrphelins = data.orphelins || [];
+      } catch (e) {
+        el.innerHTML = '';
+        return;
+      }
+      const nb = dealsNotionOrphelins.length;
+      if (nb === 0) { el.innerHTML = ''; return; }
+      el.innerHTML = '<div style="display:inline-flex;flex-wrap:wrap;align-items:center;gap:0.5rem 0.8rem;padding:0.45rem 0.8rem;border-radius:8px;background:var(--danger-bg);font-size:0.85rem">'
+        + '<span style="width:9px;height:9px;border-radius:50%;background:var(--danger);flex:0 0 auto"></span>'
+        + '<span style="color:var(--danger);font-weight:600;cursor:pointer" onclick="openKpiDealsNotionDetail()">⚠ ' + nb + ' deal' + (nb > 1 ? 's' : '') + ' gagné' + (nb > 1 ? 's' : '') + ' sans mission Notion · voir</span>'
+        + '</div>';
+    }
+    function openKpiDealsNotionDetail() {
+      const orphelins = dealsNotionOrphelins || [];
+      document.getElementById('kpiDetailTitle').textContent = 'Deals gagnés sans mission Notion';
+      let html = '<p style="color:var(--text-secondary);font-size:0.8rem;margin:0 0 0.6rem">Crée la mission dans Notion puis renseigne sa date de signature.</p>';
+      html += orphelins.map(d =>
+        '<div class="kpi-detail-row"><div><div class="kpi-detail-nom">' + escapeHtml(d.nom || 'Sans nom') + '</div>'
+        + '<div class="kpi-detail-client">' + (d.closedate ? new Date(d.closedate).toLocaleDateString('fr-FR') : '') + '</div></div>'
+        + '<div class="kpi-detail-montant">' + kpiFmtEur(d.montant) + '</div></div>'
+      ).join('') || '<p style="color:var(--text-secondary)">Aucun.</p>';
       document.getElementById('kpiDetailBody').innerHTML = html;
       document.getElementById('kpiDetailModal').classList.add('active');
     }
