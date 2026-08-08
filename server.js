@@ -21,6 +21,7 @@ const { computeDepenses } = require('./utils/depensesCompute');
 const gsheets = require('./utils/googleSheets');
 const primesMap = require('./utils/primesSheetMap');
 const chargesPerimetre = require('./utils/chargesPerimetre');
+const { classifyProduitSubvention } = require('./utils/produitsSubventions'); // Feature A produits-et-suivis : classification credits Qonto "Subventions et aides"
 const { buildCoupleKey, buildIndexExactKey, buildIndexExactTVA, montantHT } = require('./utils/tvaCharges'); // cle categorie/sous-categorie partagee avec le parser Categories TVA (evite toute divergence) ; montantHT = conversion TTC->HT du reel (Tache 6) ; buildIndexExactTVA = jointure pure lettrage Pennylane (extraite en utils, revue C1)
 const cron = require('node-cron');
 const MASSE_TAB = 'Masse_salariale';
@@ -8218,6 +8219,24 @@ function filterCRPrevBudgetHorsExploitation(categories, subCategories) {
   return { categories: filteredCategories, subCategories: filteredSubCategories };
 }
 
+// Pagination generique des transactions Qonto sur une plage de dates (aucun filtre sur `side`) :
+// factorisee pour etre reutilisee a la fois par le reel des CHARGES (debits, computeChargesHybride
+// ci-dessous) et le reel des PRODUITS/subventions (credits, computeSubventionsReel, Feature A
+// produits-et-suivis) sans jamais dupliquer la boucle de pagination (page/per_page=100).
+async function fetchQontoTransactionsRange(ibanVal, from, to) {
+  const txs = []; let page = 1;
+  while (true) {
+    const r = await qontoRequest(
+      `/v2/transactions?iban=${ibanVal}&status[]=completed&sort_by=settled_at:desc&per_page=100&current_page=${page}&settled_at_from=${from}&settled_at_to=${to}`
+    );
+    const batch = r.transactions || [];
+    txs.push(...batch);
+    if (batch.length < 100) break;
+    page++;
+  }
+  return txs;
+}
+
 // Calcul des charges hybrides (réel Qonto jusqu'au mois précédent + prévisionnel GSheet à partir
 // du mois en cours). Extrait en fonction pour être appelable directement côté serveur (ex. /api/ebe)
 // sans passer par un fetch HTTP self-référent — ce dernier serait bloqué par le dashboardGate (401)
@@ -8265,19 +8284,8 @@ async function computeChargesHybride(start, end) {
 
     // Qonto : on fetch toujours le N-1 sur la totalité de la période (pas seulement la partie réelle)
     // pour que les barres N-1 s'affichent aussi pour les mois futurs (ex. Avr-Déc 2025 vs Avr-Déc 2026)
-    const fetchDebitsHybride = async (ibanVal, from, to) => {
-      const txs = []; let page = 1;
-      while (true) {
-        const r = await qontoRequest(
-          `/v2/transactions?iban=${ibanVal}&status[]=completed&sort_by=settled_at:desc&per_page=100&current_page=${page}&settled_at_from=${from}&settled_at_to=${to}`
-        );
-        const batch = r.transactions || [];
-        txs.push(...batch);
-        if (batch.length < 100) break;
-        page++;
-      }
-      return txs.filter(t => t.side === 'debit');
-    };
+    const fetchDebitsHybride = async (ibanVal, from, to) =>
+      (await fetchQontoTransactionsRange(ibanVal, from, to)).filter(t => t.side === 'debit');
 
     if (hasReal || hasPrev) {
       const org = await qontoRequest('/v2/organization');
@@ -8629,7 +8637,12 @@ async function fetchAndParsePlanTresorerie() {
   return data;
 }
 
-async function fetchFinancementsForYear(year) {
+// minMonthKey ('YYYY-MM') optionnel : ne somme que les mois >= minMonthKey (Feature A produits-et-suivis,
+// hybridation des subventions). Sert a restreindre le Plan_TRE a la fenetre PREVISIONNELLE (mois
+// courant/futurs) quand la fenetre REELLE (mois clos) est desormais couverte par les credits Qonto
+// (computeSubventionsReel ci-dessous) -- sans ce filtre, un mois clos serait compte deux fois (une
+// fois par Qonto, une fois par le Plan_TRE figue). Omis (comportement d'origine) : toute l'annee.
+async function fetchFinancementsForYear(year, minMonthKey) {
   const planData = await fetchAndParsePlanTresorerie();
   if (!planData.financements) return { subventions: [], aides: [] };
 
@@ -8637,13 +8650,73 @@ async function fetchFinancementsForYear(year) {
   for (const fin of planData.financements) {
     let total = 0;
     planData.months.forEach((m, i) => {
-      if (m.year === year) total += fin.values[i] || 0;
+      if (m.year !== year) return;
+      if (minMonthKey) {
+        const mKey = `${m.year}-${String(m.month).padStart(2, '0')}`;
+        if (mKey < minMonthKey) return;
+      }
+      total += fin.values[i] || 0;
     });
     if (total === 0) continue;
     const bucket = fin.category === 'subvention' ? result.subventions
                  : fin.category === 'aide'       ? result.aides
                  : null;
     if (bucket) bucket.push({ label: fin.name, montant: Math.round(total) });
+  }
+  return result;
+}
+
+// Credits Qonto de la fenetre REELLE (mois clos), classes par classifyProduitSubvention (categorie
+// "Subventions et aides" uniquement -- les autres credits, ex. remboursement d'IS ou encaissements
+// clients, sont hors sujet et ignores ici, exactement comme le reel des charges ignore deja les
+// categories hors PCG). Feature A produits-et-suivis (2026-08-08). SOURCE UNIQUE partagee par
+// /api/ebe et son miroir computeResultatFactuelForYear (meme alignement que computeChargesHybride),
+// pour que les deux cascades restent alignees si ce calcul evolue.
+// Tolerant : renvoie des compteurs nuls en cas d'echec Qonto (l'EBE ne doit pas planter si l'API
+// Qonto est indisponible), mais log TOUJOURS l'erreur -- jamais d'exclusion silencieuse.
+async function computeSubventionsReel(startKey, realEndKey) {
+  const result = {
+    produits: { montant: 0, nb: 0 },
+    exclus:   { montant: 0, nb: 0 },
+    inconnus: { montant: 0, nb: 0 },
+  };
+  try {
+    const org = await qontoRequest('/v2/organization');
+    const bankAccounts = org.organization.bank_accounts || [];
+    const mainAccount = bankAccounts.reduce((a, b) => (b.balance_cents > a.balance_cents ? b : a));
+    const iban = mainAccount.iban;
+    const realStartD = new Date(startKey + '-01');
+    const realEndD   = chargesPerimetre.monthEndDate(realEndKey);
+    const txs = await fetchQontoTransactionsRange(iban, realStartD.toISOString(), realEndD.toISOString());
+
+    for (const tx of txs) {
+      if (tx.side !== 'credit') continue;
+      const cat    = (tx.cashflow_category && tx.cashflow_category.name) || tx.category || null;
+      const sousCat = (tx.cashflow_subcategory && tx.cashflow_subcategory.name) || null;
+      const classification = classifyProduitSubvention(cat, sousCat);
+      if (classification === 'produit')      { result.produits.montant += tx.amount; result.produits.nb++; }
+      else if (classification === 'exclu')   { result.exclus.montant   += tx.amount; result.exclus.nb++; }
+      else if (classification === 'inconnu') { result.inconnus.montant += tx.amount; result.inconnus.nb++; }
+      // null = categorie hors sujet (pas "Subventions et aides") : ignore, comme avant.
+    }
+    result.produits.montant = Math.round(result.produits.montant);
+    result.exclus.montant   = Math.round(result.exclus.montant);
+    result.inconnus.montant = Math.round(result.inconnus.montant);
+
+    // Log unique : trace la ventilation reelle. Comportement TRANSITOIRE attendu tant que
+    // l'utilisateur n'a pas reclasse ses 12 encaissements "Aides a l'embauche" dans les 3
+    // sous-categories dediees qu'il a creees : ils remontent aujourd'hui TOUS en 'produit' (avance
+    // remboursable non isolee), donc `produits.montant` restera surestime (~105k au lieu de ~66k)
+    // jusqu'a ce reclassement -- ce log + le compteur `inconnus` rendent le reclassement verifiable.
+    console.log('[produits] subventions reel %s..%s : produits %d€ (%d tx), exclus %d€ (%d tx), inconnus %d€ (%d tx)',
+      startKey, realEndKey, result.produits.montant, result.produits.nb,
+      result.exclus.montant, result.exclus.nb, result.inconnus.montant, result.inconnus.nb);
+    if (result.inconnus.nb > 0) {
+      console.warn('[produits] %d credit(s) "Subventions et aides" sans sous-categorie reconnue (%d€) : a verifier/reclasser', result.inconnus.nb, result.inconnus.montant);
+    }
+  } catch (e) {
+    console.error('[produits] echec lecture credits Qonto (subventions reel) :', e.message);
+    // Tolerance : compteurs nuls, le calcul de l'EBE continue normalement (comme les primes/amortissements).
   }
   return result;
 }
@@ -8921,12 +8994,24 @@ app.get('/api/coherence/deals-notion', async (req, res) => {
 // conforme à la réponse Actemis). sumDotationsForYear/sumCreditsForYear sont déjà tolérants (0 si erreur).
 async function computeResultatFactuelForYear(year) {
   const start = `${year}-01-01`, end = `${year}-12-31`;
-  const [missions, chargesData, financements, amortissements, creditImpot] = await Promise.all([
+  const [missions, chargesData, amortissements, creditImpot] = await Promise.all([
     fetchAllNotionMissions(),
     computeChargesHybride(start, end),
-    fetchFinancementsForYear(year),
     sumDotationsForYear(year),
     sumCreditsForYear(year),
+  ]);
+  // Feature A produits-et-suivis : subventions hybrides, MEMES bornes reel/previsionnel que les
+  // charges hybrides ci-dessus (chargesData.real / chargesData.prev) -- mois clos -> credits Qonto
+  // classes (computeSubventionsReel) ; mois courant/futurs -> Plan_TRE (fetchFinancementsForYear,
+  // inchange), restreint a ces seuls mois pour eviter un double compte avec le reel Qonto. Miroir de
+  // /api/ebe ci-dessous : si l'un evolue, garder l'autre aligne.
+  const [subventionsReel, financementsPrev] = await Promise.all([
+    chargesData.real
+      ? computeSubventionsReel(chargesData.real.start, chargesData.real.end)
+      : Promise.resolve({ produits: { montant: 0, nb: 0 }, exclus: { montant: 0, nb: 0 }, inconnus: { montant: 0, nb: 0 } }),
+    chargesData.prev
+      ? fetchFinancementsForYear(year, chargesData.prev.start)
+      : Promise.resolve({ subventions: [], aides: [] }),
   ]);
   const startDate = new Date(start);
   const endDate = new Date(end); endDate.setHours(23, 59, 59, 999);
@@ -8948,8 +9033,10 @@ async function computeResultatFactuelForYear(year) {
   const totalCharges = Math.round(chargesData.totalCharges || 0);
   // Primes : plus de fold ici. Elles entrent dans totalCharges via la formule .Primes -> CR_Prev
   // (onglet Masse_salariale ecrit par la synchro, agrege dans les Frais de personnel de CR_Prev).
-  const totalSubv = financements.subventions.reduce((s, f) => s + f.montant, 0);
-  const totalAide = financements.aides.reduce((s, f) => s + f.montant, 0);
+  // Subventions hybrides (Feature A) : reel Qonto (mois clos, deja filtre 'produit') + Plan_TRE
+  // restreint aux mois previsionnels (chargesData.prev.start, cf fetchFinancementsForYear ci-dessus).
+  const totalSubv = subventionsReel.produits.montant + financementsPrev.subventions.reduce((s, f) => s + f.montant, 0);
+  const totalAide = financementsPrev.aides.reduce((s, f) => s + f.montant, 0);
   const ebe = caFacture - totalCharges + totalSubv + totalAide;
   const resExploit = Math.round(ebe) - amortissements;
   const isBrut = computeIS(resExploit);
@@ -8997,8 +9084,28 @@ app.get('/api/ebe', async (req, res) => {
     // Primes commerciales : plus de fold. Elles entrent dans totalCharges via la formule .Primes ->
     // CR_Prev (onglet Masse_salariale ecrit par la synchro), pour eviter le double compte.
 
-    // 3) Financements (Subv + Aide) de l'année depuis GSheet Plan_TRE_Prév
-    const financements = await fetchFinancementsForYear(yearParam);
+    // 3) Financements (Subv + Aide) de l'année : HYBRIDE (Feature A produits-et-suivis), MEMES bornes
+    // reel/previsionnel que les charges hybrides ci-dessus (chargesData.real / chargesData.prev).
+    // Mois clos -> credits Qonto de la categorie "Subventions et aides", classes par
+    // classifyProduitSubvention (avances remboursables exclues, cf utils/produitsSubventions.js).
+    // Mois courant/futurs -> Plan_TRE (fetchFinancementsForYear, inchange), restreint a ces seuls mois
+    // (chargesData.prev.start) pour ne jamais compter un mois clos deux fois. Miroir de
+    // computeResultatFactuelForYear ci-dessus : si l'un evolue, garder l'autre aligne.
+    const [subventionsReel, financementsPrev] = await Promise.all([
+      chargesData.real
+        ? computeSubventionsReel(chargesData.real.start, chargesData.real.end)
+        : Promise.resolve({ produits: { montant: 0, nb: 0 }, exclus: { montant: 0, nb: 0 }, inconnus: { montant: 0, nb: 0 } }),
+      chargesData.prev
+        ? fetchFinancementsForYear(yearParam, chargesData.prev.start)
+        : Promise.resolve({ subventions: [], aides: [] }),
+    ]);
+    // Le reel Qonto (deja agrege, sans sous-typer subvention/aide -- cf classifyProduitSubvention)
+    // est ajoute comme UNE ligne au bucket "subventions" du detail expose au front : garde l'invariant
+    // total = somme des lignes pour la modale detail du Compte de resultat (pilot.html financementsTable()).
+    const financements = { subventions: [...financementsPrev.subventions], aides: [...financementsPrev.aides] };
+    if (subventionsReel.produits.montant !== 0) {
+      financements.subventions.push({ label: 'Subventions et aides (réel Qonto, mois clos)', montant: subventionsReel.produits.montant });
+    }
     const totalSubv = financements.subventions.reduce((s, f) => s + f.montant, 0);
     const totalAide = financements.aides.reduce((s, f) => s + f.montant, 0);
 
@@ -9059,6 +9166,12 @@ app.get('/api/ebe', async (req, res) => {
         totalSubv,
         totalAide,
       },
+      // Feature A produits-et-suivis : ventilation du reel Qonto "Subventions et aides" (mois clos
+      // seulement, cf computeSubventionsReel) -- montants + nb, jamais d'exclusion silencieuse.
+      // Comportement TRANSITOIRE tant que l'utilisateur n'a pas reclasse ses encaissements "Aides a
+      // l'embauche" dans les 3 sous-categories Qonto dediees : `produits` restera surestime (l'avance
+      // remboursable n'est pas encore isolee) et `inconnus` restera a 0 jusqu'a ce reclassement.
+      subventionsReel,
       ebe: { factuel: Math.round(ebeFactuel), projete: Math.round(ebeProjete) },
       amortissements,
       resultatExploitation: { factuel: resExploitFactuel, projete: resExploitProjete },
