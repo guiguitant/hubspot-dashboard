@@ -3,6 +3,7 @@ const {
   normalizeLabel,
   isPrimeSubcategory,
   isHorsExploitation,
+  isHorsExploitationBudget,
   monthEndDate,
   PRIMES_SUBCATS,
   HORS_EXPLOITATION,
@@ -113,6 +114,39 @@ describe('isHorsExploitation', () => {
 
   it('rejette null', () => {
     expect(isHorsExploitation(null, null)).toBe(false);
+  });
+});
+
+describe('isHorsExploitationBudget (Tache 10 : perimetre applique aux LIGNES du budget CR_Prev)', () => {
+  it('matche le libelle reel du classeur pour l\'IS, avec accents ("IS (impôt sur les sociétés)")', () => {
+    expect(isHorsExploitationBudget('IS (impôt sur les sociétés)')).toBe(true);
+  });
+
+  it('matche une variante sans le prefixe "IS (" tant que "impot sur les societes" est present', () => {
+    expect(isHorsExploitationBudget('Impôt sur les sociétés')).toBe(true);
+  });
+
+  it("n'exclut pas \"Autres impôts et taxes\" (charge legitime, +1200€)", () => {
+    expect(isHorsExploitationBudget('Autres impôts et taxes')).toBe(false);
+  });
+
+  it('matche la TVA reversee ("Paiements de la TVA")', () => {
+    expect(isHorsExploitationBudget('Paiements de la TVA')).toBe(true);
+  });
+
+  it("n'exclut pas le prelevement a la source", () => {
+    expect(isHorsExploitationBudget('Prélèvement à la source')).toBe(false);
+  });
+
+  it('rejette un libelle quelconque hors perimetre', () => {
+    expect(isHorsExploitationBudget('Loyers')).toBe(false);
+    expect(isHorsExploitationBudget('SaaS')).toBe(false);
+  });
+
+  it('rejette null, undefined et chaine vide', () => {
+    expect(isHorsExploitationBudget(null)).toBe(false);
+    expect(isHorsExploitationBudget(undefined)).toBe(false);
+    expect(isHorsExploitationBudget('')).toBe(false);
   });
 });
 

@@ -43,6 +43,24 @@ function isPrimeSubcategory(sousCat, list = PRIMES_SUBCATS) {
 const HORS_EXPLOITATION = ['paiements de la tva', 'impot sur les societes'].map(normalizeLabel);
 function isHorsExploitation(cat, sousCat) { return HORS_EXPLOITATION.includes(normalizeLabel(sousCat)); }
 
+// Tache 10 : meme perimetre PCG (IS + TVA reversee hors exploitation), mais applique aux LIGNES
+// BUDGETAIRES du classeur CR_Prev, pas aux sous-categories Qonto (isHorsExploitation ci-dessus).
+// Le libelle brut du classeur differe de celui de Qonto (ex. « IS (impôt sur les sociétés) » vs
+// « Impôt sur les sociétés ») : on ne peut donc pas reutiliser HORS_EXPLOITATION.includes() tel quel,
+// il faut un match plus tolerant (prefixe/contenance) sur le libelle NORMALISE. Le prelevement a la
+// source et « Autres impots et taxes » restent volontairement hors de ces motifs (charges legitimes).
+function isHorsExploitationBudget(label) {
+  const n = normalizeLabel(label);
+  if (!n) return false;
+  // IS : libelle reel du classeur « IS (impôt sur les sociétés) » -> match par prefixe ("is (")
+  // ou par contenance ("impot sur les societes", variante sans parentheses/sans le prefixe "IS").
+  if (n.startsWith('is (') || n.includes('impot sur les societes')) return true;
+  // TVA reversee : aucune ligne n'existe aujourd'hui dans le classeur, mais le perimetre doit rester
+  // identique au reel des qu'une ligne apparaitra (peu importe son libelle exact final).
+  if (n.includes('paiements de la tva') || n.includes('tva reversee') || n.includes('reversement tva')) return true;
+  return false;
+}
+
 // Fin de mois REELLE d'une cle 'YYYY-MM', en heure locale (meme referentiel que le bucketing
 // des transactions) : new Date(y, m, 0) = dernier jour du mois m. Remplace la borne fixe au 28.
 function monthEndDate(ymKey) {
@@ -54,6 +72,7 @@ module.exports = {
   normalizeLabel,
   isPrimeSubcategory,
   isHorsExploitation,
+  isHorsExploitationBudget,
   monthEndDate,
   PRIMES_SUBCATS,
   HORS_EXPLOITATION,

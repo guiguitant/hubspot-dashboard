@@ -8161,6 +8161,56 @@ app.get('/api/charges', async (req, res) => {
   }
 });
 
+// Tâche 10 : applique aux SOUS-LIGNES budgétaires de CR_Prev le même périmètre PCG que le réel Qonto
+// (chargesPerimetre.isHorsExploitation, boucles N/N-1 de computeChargesHybride ci-dessous) : l'IS et
+// la TVA reversée ne sont pas des charges d'exploitation, qu'elles soient lues sur une transaction
+// bancaire ou budgétées dans le classeur. N'appeler QUE depuis les deux chemins « charges »
+// (computeChargesHybride partie prévisionnelle, /api/previsionnel-charges) : la trésorerie
+// (buildTresorerieFromQonto), l'EBE prévisionnel (buildPrevisionnel) et le picker d'override
+// (/api/cr-prev/categories) continuent de lire categories/subCategories BRUTS (non filtrés), car un
+// IS ou une TVA budgétés restent un vrai décaissement pour ces usages-là.
+//
+// Une ligne exclue disparaît à la fois du total catégorie mère (recalculé en lui retranchant, mois
+// par mois, la valeur de la sous-ligne exclue) ET du détail sous-catégories : ni total, ni série
+// mensuelle, ni ventilation ne doivent plus la voir. categories/subCategories ne sont jamais mutés
+// (copie superficielle par catégorie mère) : le cache partagé de fetchAndParseCRPrev, consommé tel
+// quel par la trésorerie, reste intact.
+function filterCRPrevBudgetHorsExploitation(categories, subCategories) {
+  const filteredCategories = {};
+  for (const [parent, monthMap] of Object.entries(categories)) {
+    filteredCategories[parent] = { ...monthMap };
+  }
+
+  const filteredSubCategories = {};
+  let exclNb = 0;
+  let exclMontant = 0;
+  const exclLabels = [];
+
+  for (const [parent, subs] of Object.entries(subCategories)) {
+    filteredSubCategories[parent] = {};
+    for (const [subName, monthMap] of Object.entries(subs)) {
+      if (chargesPerimetre.isHorsExploitationBudget(subName)) {
+        exclNb++;
+        exclLabels.push(subName);
+        for (const [key, val] of Object.entries(monthMap)) {
+          exclMontant += val;
+          if (filteredCategories[parent]) filteredCategories[parent][key] = (filteredCategories[parent][key] || 0) - val;
+        }
+        continue; // exclue : ni total categorie, ni serie mensuelle, ni ventilation sous-categories
+      }
+      filteredSubCategories[parent][subName] = monthMap;
+    }
+  }
+
+  // Log une ligne, uniquement si quelque chose a effectivement ete exclu (meme modele que le log
+  // d'exclusions du reel Qonto ci-dessous, cf '[charges] exclusions : ...').
+  if (exclNb > 0) {
+    console.log('[charges-budget] exclusions PCG (CR_Prev) : %d€ sur %d ligne(s) (%s)', Math.round(exclMontant), exclNb, exclLabels.join(', '));
+  }
+
+  return { categories: filteredCategories, subCategories: filteredSubCategories };
+}
+
 // Calcul des charges hybrides (réel Qonto jusqu'au mois précédent + prévisionnel GSheet à partir
 // du mois en cours). Extrait en fonction pour être appelable directement côté serveur (ex. /api/ebe)
 // sans passer par un fetch HTTP self-référent — ce dernier serait bloqué par le dashboardGate (401)
@@ -8392,7 +8442,10 @@ async function computeChargesHybride(start, end) {
     let prevSubVentilation = [];
     let chargesGSheetParMoisNm1 = {};
     if (hasPrev) {
-      const { budgetCols, categories, subCategories } = await fetchAndParseCRPrev();
+      const { budgetCols, categories: rawCategories, subCategories: rawSubCategories } = await fetchAndParseCRPrev();
+      // Tache 10 : perimetre PCG applique au budget (IS, TVA reversee), meme logique que le reel Qonto
+      // ci-dessus (isHorsExploitation). Filtre uniquement ce chemin « charges », pas le cache brut.
+      const { categories, subCategories } = filterCRPrevBudgetHorsExploitation(rawCategories, rawSubCategories);
       const cols = budgetCols.filter(c => c.key >= prevStartKey && c.key <= end);
       const catMap = {};
       for (const [cat, monthMap] of Object.entries(categories)) {
@@ -8490,7 +8543,9 @@ app.get('/api/charges-hybride', async (req, res) => {
 app.get('/api/previsionnel-charges', async (req, res) => {
   try {
     const { start, end } = req.query; // format "YYYY-MM"
-    const { budgetCols, categories, subCategories } = await fetchAndParseCRPrev();
+    const { budgetCols, categories: rawCategories, subCategories: rawSubCategories } = await fetchAndParseCRPrev();
+    // Tache 10 : meme perimetre PCG que computeChargesHybride (IS, TVA reversee exclus du budget).
+    const { categories, subCategories } = filterCRPrevBudgetHorsExploitation(rawCategories, rawSubCategories);
 
     // Filtrer les colonnes dans la période
     const cols = budgetCols.filter(c => (!start || c.key >= start) && (!end || c.key <= end));
