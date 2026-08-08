@@ -632,4 +632,30 @@ function computePrimesChargeForExercice({ missions, splits, config, factOverride
   return { floatByPartnerMonth, detailCharge };
 }
 
-module.exports = { computeKpi, yearOf, yearOfDate, signedAmountForYear, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, signatureDate, splitAmount, displaySplit, OPERE_STATES, SIGNE_EXCLUDED_STATES, primeDefaultRates, normalizePrimeConfig, computePrimePool, computePrimePayments, lastMonthOfQuarter, selectChargeEntriesForExercice, endOfYearIso, computePrimesChargeForExercice };
+// Fusionne l'echeancier de charge de PLUSIEURS exercices, CHACUN AVEC SA PROPRE LISTE DE PARTICIPANTS
+// (I3). C'est la composition que fait server.js::computePrimesChargeSchedule pendant la periode de grace
+// de janvier : exercice N (asOfIso = maintenant) + exercice N-1 rejoue (asOfIso = fin N-1).
+// Pourquoi la liste doit etre PAR EXERCICE et non derivee une seule fois de "maintenant" : l'etage 2
+// (prime collective) est reparti a parts egales sur les participants (cf computePrimePayments), et la
+// liste des associes peut changer d'une annee a l'autre. Rejouer N-1 avec la liste de N ecrit une part
+// sur un associe absent de N-1 ; cette part est ensuite filtree par la reinjection des primes dans les
+// charges (server.js, primesParticipantsFor derive de l'annee de la FENETRE) : le compte de resultat
+// N-1 perdrait ce montant. Meme invariant que la reinjection : la liste suit l'EXERCICE, jamais `now`.
+// `exercices` : [{ targetYear, asOfIso, participants }]. Les passages ne se recouvrent jamais (preuve
+// dans computePrimesChargeForExercice ci-dessus) : fusion simple, aucune deduplication necessaire.
+// Fonction PURE (aucun I/O) : l'appelant resout les listes de participants en amont.
+function computePrimesChargeMultiExercice({ missions, splits, config, factOverrides, exercices }) {
+  const floatByPartnerMonth = {};
+  const detailCharge = [];
+  for (const { targetYear, asOfIso, participants } of (exercices || [])) {
+    const r = computePrimesChargeForExercice({ missions, splits, config, factOverrides, participants, targetYear, asOfIso });
+    detailCharge.push(...r.detailCharge);
+    for (const [partner, months] of Object.entries(r.floatByPartnerMonth)) {
+      const dst = floatByPartnerMonth[partner] = floatByPartnerMonth[partner] || {};
+      for (const [mk, v] of Object.entries(months)) dst[mk] = (dst[mk] || 0) + v;
+    }
+  }
+  return { floatByPartnerMonth, detailCharge };
+}
+
+module.exports = { computeKpi, yearOf, yearOfDate, signedAmountForYear, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, signatureDate, splitAmount, displaySplit, OPERE_STATES, SIGNE_EXCLUDED_STATES, primeDefaultRates, normalizePrimeConfig, computePrimePool, computePrimePayments, lastMonthOfQuarter, selectChargeEntriesForExercice, endOfYearIso, computePrimesChargeForExercice, computePrimesChargeMultiExercice };

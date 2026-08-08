@@ -9,7 +9,7 @@ const { authenticator } = require('otplib');
 const { execFile } = require('child_process');
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
-const { computeKpi, totalCaAnnee, signedByQuarter, clawbackCandidates, computePrimePool, computePrimePayments, endOfYearIso, computePrimesChargeForExercice } = require('./utils/kpiCompute');
+const { computeKpi, totalCaAnnee, signedByQuarter, clawbackCandidates, computePrimePool, computePrimePayments, endOfYearIso, computePrimesChargeMultiExercice } = require('./utils/kpiCompute');
 const { computeBillingForYear } = require('./utils/billing');
 const { buildSalesNavUrl } = require('./utils/buildSalesNavUrl');
 const multer = require('multer');
@@ -8403,8 +8403,10 @@ async function computeChargesHybride(start, end) {
         // la dérive de l'année de la FENÊTRE demandée (startKey), PAS de l'année courante (`now`). Sinon
         // une fenêtre d'un exercice passé (ex. /api/ebe?year=2025 consultée en 2026) filtrerait les primes
         // 2025 par la liste des participants 2026, ce qui peut exclure ou inclure des lignes à tort.
-        const windowYear = startKey.slice(0, 4);
-        const primesParticipants = await primesParticipantsFor(`${windowYear}-01-01T00:00:00.000Z`);
+        // primesParticipantsForExercice prend directement le MILLÉSIME (pas un ISO) : plus aucune
+        // conversion de date, donc plus de dépendance au fuseau du serveur pour retrouver l'année.
+        const windowYear = parseInt(startKey.slice(0, 4), 10);
+        const primesParticipants = await primesParticipantsForExercice(windowYear);
 
         const masse = await fetchAndParseMasseSalarialeDetailed();
         let primesReinjectionTotal = 0;
@@ -8774,18 +8776,21 @@ function primeParticipantsForYear(kpi) {
 // total reconcilie).
 const PRIME_STATUS_BUCKET = { verse: 'verse', du: 'du', a_venir: 'aVenir', provisoire: 'provisoire' };
 
-// Liste des participants au collectif de primes pour l'exercice de `nowIso` (annee civile) : meme
+// Liste des participants au collectif de primes pour l'EXERCICE `year` (millesime, annee civile) : meme
 // derivation que primeParticipantsForYear, appliquee au KPI de reference de CET exercice. SOURCE UNIQUE
 // partagee par computePrimesChargeSchedule (write-back + endpoint d'avancement) ET par la reinjection de
 // la charge des primes dans computeChargesHybride (mois clos, Option B) : avant cette factorisation, les
 // deux blocs refaisaient chacun les memes lectures Supabase + Notion + computeKpi, avec le risque de
 // diverger silencieusement si l'un des deux evoluait sans l'autre (double compte des primes de CDI, ou
 // charge manquante).
+// L'entree est le MILLESIME et non une date ISO (I3) : les deux appelants connaissent leur exercice
+// (annee de la fenetre de charges, targetYear de la grace) et une conversion ISO -> annee passerait par
+// getFullYear() en heure LOCALE, qui bascule d'une annee sur l'autre selon le fuseau du serveur (ex.
+// endOfYearIso(2025) = '2025-12-31T23:59:59.999Z' vaut deja 2026 a Paris).
 // `preloaded` optionnel { missions, splits, objectives } : evite un refetch Supabase/Notion quand
 // l'appelant a deja ces donnees sous la main (cas de computePrimesChargeSchedule, qui les reutilise
 // ensuite pour sa propre enumeration multi-exercice) ; sinon (computeChargesHybride) fetch complet.
-async function primesParticipantsFor(nowIso, preloaded) {
-  const year = new Date(nowIso).getFullYear();
+async function primesParticipantsForExercice(year, preloaded) {
   let missions, splits, objectives;
   if (preloaded && preloaded.missions && preloaded.splits && preloaded.objectives) {
     ({ missions, splits, objectives } = preloaded);
@@ -8820,9 +8825,6 @@ async function computePrimesChargeSchedule(nowIso) {
   const missions = await fetchAllNotionMissions();
 
   const currentYear = new Date(nowIso).getFullYear();
-  // primesParticipantsFor = SOURCE UNIQUE (partagee avec la reinjection de computeChargesHybride, cf I3) ;
-  // preload {missions, splits, objectives} deja fetches ci-dessus pour eviter un refetch redondant.
-  const participants = await primesParticipantsFor(nowIso, { missions, splits, objectives });
 
   // Exercice(s) a calculer : l'exercice courant REEL, toujours ; + l'exercice N-1 REJOUE comme s'il
   // etait encore ouvert, UNIQUEMENT PENDANT LA PERIODE DE GRACE de janvier (feature D, spec
@@ -8838,21 +8840,29 @@ async function computePrimesChargeSchedule(nowIso) {
     exercices.push({ targetYear: currentYear - 1, asOfIso: endOfYearIso(currentYear - 1) });
   }
 
+  // Liste des participants derivee PAR EXERCICE (I3), et non une seule fois de `nowIso`. L'etage 2
+  // (prime collective) est reparti a parts egales sur cette liste : rejouer N-1 avec la liste de N
+  // ecrirait une part sur un associe absent du collectif N-1, part que la reinjection des primes dans
+  // les charges filtre ensuite (elle derive SA liste de l'annee de la fenetre, cf primesParticipantsFor
+  // plus haut) : le compte de resultat N-1 perdrait ce montant. Meme invariant des deux cotes : la
+  // liste suit l'EXERCICE, jamais `now`. primesParticipantsForExercice = SOURCE UNIQUE ; preload
+  // {missions, splits, objectives} deja fetches ci-dessus pour eviter un refetch redondant (le surcout
+  // du 2e appel se limite alors a un computeKpi en memoire, seulement pendant la grace).
+  for (const ex of exercices) {
+    ex.participants = await primesParticipantsForExercice(ex.targetYear, { missions, splits, objectives });
+  }
+  // Union des listes : c'est elle qui pilote la STRUCTURE du GSheet (discoverLayout/assertPartners
+  // doivent connaitre toutes les colonnes a ecrire, y compris celles du seul exercice N-1) et
+  // l'initialisation de la reconciliation. La VENTILATION, elle, reste par exercice ci-dessus.
+  const participants = [];
+  for (const ex of exercices) for (const p of ex.participants) if (!participants.includes(p)) participants.push(p);
+
   // byPartnerMonthCharge est reconstruit A PARTIR de detailCharge (et non de pay.byPartnerMonthCharge)
   // pour garantir que les deux restent exactement coherents (chaque entree detailCharge correspond a
   // un seul addCharge dans computePrimePayments, cf kpiCompute.js). Les deux passages (exercice courant,
   // + exercice N-1 pendant la grace) ne se recouvrent jamais (cf preuve dans computePrimesChargeForExercice) :
-  // fusion simple, aucune deduplication necessaire.
-  const floatByPartnerMonth = {};
-  const detailCharge = [];
-  for (const { targetYear, asOfIso } of exercices) {
-    const r = computePrimesChargeForExercice({ missions, splits, config, factOverrides, participants, targetYear, asOfIso });
-    detailCharge.push(...r.detailCharge);
-    for (const [partner, months] of Object.entries(r.floatByPartnerMonth)) {
-      const dst = floatByPartnerMonth[partner] = floatByPartnerMonth[partner] || {};
-      for (const [mk, v] of Object.entries(months)) dst[mk] = (dst[mk] || 0) + v;
-    }
-  }
+  // fusion simple, aucune deduplication necessaire (computePrimesChargeMultiExercice, teste).
+  const { floatByPartnerMonth, detailCharge } = computePrimesChargeMultiExercice({ missions, splits, config, factOverrides, exercices });
 
   // Arrondi entier en preservant le total par associe (aligne a l'euro avec Pilot).
   const byPartnerMonthCharge = {};

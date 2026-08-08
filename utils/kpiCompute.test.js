@@ -1,5 +1,5 @@
 'use strict';
-const { computeKpi, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, OPERE_STATES, SIGNE_EXCLUDED_STATES, computePrimePool, primeDefaultRates, computePrimePayments, selectChargeEntriesForExercice, computePrimesChargeForExercice, endOfYearIso } = require('./kpiCompute');
+const { computeKpi, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, OPERE_STATES, SIGNE_EXCLUDED_STATES, computePrimePool, primeDefaultRates, computePrimePayments, selectChargeEntriesForExercice, computePrimesChargeForExercice, computePrimesChargeMultiExercice, endOfYearIso } = require('./kpiCompute');
 const { lastMonthOfQuarter } = require('./kpiCompute');
 
 describe('lastMonthOfQuarter : dernier mois du trimestre (date de charge)', () => {
@@ -828,5 +828,70 @@ describe('computePrimesChargeForExercice : cloture souple des primes (grace, fea
 
     const passGrace = computePrimesChargeForExercice({ ...base, missions: [dealFactureEnN], targetYear: 2025, asOfIso: endOfYearIso(2025) });
     expect(passGrace.detailCharge.find((e) => e.deal === 'facture-en-n')).toBeUndefined();
+  });
+});
+
+describe('computePrimesChargeMultiExercice : chaque exercice a SA PROPRE liste de participants (I3)', () => {
+  // Config identique a la suite grace ci-dessus, mais avec un CA facture assez eleve pour declencher
+  // l'etage 2 (collectif) : c'est LUI qui est reparti a parts egales sur la liste des participants,
+  // donc le seul endroit ou la composition de cette liste change la ventilation par associe.
+  const cfg = {
+    rates: { Vincent: { txNew: 4.5, txRepeat: 2.5 } },
+    tiers: [{ seuil: 650000, taux: 7 }, { seuil: 600000, taux: 5 }, { seuil: 550000, taux: 3 }],
+    resultatAnnuel: 150000,
+    gateTrimestriel: 120000,
+  };
+  // CA facture 600 000 en 2025 -> palier 5 % -> collectif = 5 % x 150 000 = 7 500 EUR, charge en 2025-12.
+  const dealBig2025 = mission({
+    id: 'big2025', typeCa: 'Newsale', dateSignature: '2025-11-05', partnerCommercial: ['Vincent'],
+    ca: 600000, etat: 'Signé', montantAcompte: 600000, dateFactureAcompte: '2025-12-20',
+  });
+  // Situation reelle visee : Nathan rejoint le collectif en 2026, il n'etait PAS participant en 2025.
+  const participants2025 = ['Vincent', 'Guillaume'];
+  const participants2026 = ['Vincent', 'Guillaume', 'Nathan'];
+
+  it("la ventilation de l'exercice N-1 utilise la liste N-1, pas celle de N (regression : liste unique derivee de now)", () => {
+    const r = computePrimesChargeMultiExercice({
+      missions: [dealBig2025], splits: [], config: cfg, factOverrides: [],
+      exercices: [
+        { targetYear: 2026, asOfIso: '2026-01-10T09:00:00.000Z', participants: participants2026 },
+        { targetYear: 2025, asOfIso: endOfYearIso(2025), participants: participants2025 },
+      ],
+    });
+    const e2 = r.detailCharge.filter((e) => e.etage === 2 && e.dateCharge === '2025-12');
+    // Deux parts (liste 2025), pas trois : Nathan n'a aucune part de la prime collective 2025.
+    expect(e2.map((e) => e.partner).sort()).toEqual(['Guillaume', 'Vincent']);
+    expect(e2[0].montant).toBe(3750); // 7500 / 2, et non 2500 (= 7500 / 3, liste 2026)
+    expect(r.floatByPartnerMonth.Nathan).toBeUndefined();
+    expect(r.floatByPartnerMonth.Guillaume['2025-12']).toBe(3750);
+  });
+
+  it("sensibilite : la MEME grace calculee avec la liste de N (ancien comportement) donne une ventilation differente", () => {
+    // Preuve que le parametre est bien discriminant : si les deux exercices partagent la liste N,
+    // la part collective 2025 tombe a 7500/3 et Nathan recoit une part d'un exercice ou il n'etait pas.
+    const rBuggy = computePrimesChargeMultiExercice({
+      missions: [dealBig2025], splits: [], config: cfg, factOverrides: [],
+      exercices: [
+        { targetYear: 2026, asOfIso: '2026-01-10T09:00:00.000Z', participants: participants2026 },
+        { targetYear: 2025, asOfIso: endOfYearIso(2025), participants: participants2026 },
+      ],
+    });
+    const e2 = rBuggy.detailCharge.filter((e) => e.etage === 2 && e.dateCharge === '2025-12');
+    expect(e2.length).toBe(3);
+    expect(e2[0].montant).toBe(2500);
+    expect(rBuggy.floatByPartnerMonth.Nathan['2025-12']).toBe(2500);
+  });
+
+  it('un seul exercice : strictement equivalent a computePrimesChargeForExercice (pas de regression du cas hors grace)', () => {
+    const exercice = { targetYear: 2025, asOfIso: endOfYearIso(2025), participants: participants2025 };
+    const multi = computePrimesChargeMultiExercice({
+      missions: [dealBig2025], splits: [], config: cfg, factOverrides: [], exercices: [exercice],
+    });
+    const solo = computePrimesChargeForExercice({
+      missions: [dealBig2025], splits: [], config: cfg, factOverrides: [],
+      participants: participants2025, targetYear: 2025, asOfIso: endOfYearIso(2025),
+    });
+    expect(multi.detailCharge).toEqual(solo.detailCharge);
+    expect(multi.floatByPartnerMonth).toEqual(solo.floatByPartnerMonth);
   });
 });
