@@ -10396,6 +10396,10 @@
     // + sous-lignes, sur l'annee civile en cours. Meme source ET meme cache que la carte
     // (chargesCardsCache, /api/previsionnel-charges) : le total en pied de tableau egale donc
     // toujours exactement le chiffre affiche sur la carte, par construction.
+    // Promesse en vol (evite un double fetch si la carte est recliquee avant que chargesCardsCache
+    // soit rempli ; endpoint rapide mais meme principe que la garde de openCrChargesDetailModal).
+    let budgetChargesDetailInFlight = null;
+
     async function openBudgetChargesDetailModal() {
       const year = new Date().getFullYear();
       document.getElementById('modalMissionsTitle').textContent = 'Budget de charges HT · ' + year;
@@ -10404,9 +10408,13 @@
       try {
         let data = chargesCardsCache;
         if (!data) {
-          const res = await fetch(`/api/previsionnel-charges?start=${year}-01&end=${year}-12`);
-          data = await res.json();
-          chargesCardsCache = data;
+          if (!budgetChargesDetailInFlight) {
+            budgetChargesDetailInFlight = fetch(`/api/previsionnel-charges?start=${year}-01&end=${year}-12`)
+              .then((res) => res.json())
+              .then((d) => { chargesCardsCache = d; return d; })
+              .finally(() => { budgetChargesDetailInFlight = null; });
+          }
+          data = await budgetChargesDetailInFlight;
         }
         const charges = data.ventilationCharges || [];
         const detail = data.ventilationChargesDetail || [];
@@ -14057,53 +14065,71 @@
     // Cache par annee (evite de refaire l'appel /api/charges-hybride, potentiellement ~30s la
     // premiere fois le temps que le serveur construise son index, a chaque ouverture de la modale).
     let crChargesDetailCache = {};
+    // Promesse en vol par annee : si l'utilisateur reclique sur la ligne pendant les ~30-45s du
+    // premier calcul, on reutilise CETTE promesse au lieu de relancer jusqu'a 3 requetes (dont
+    // l'appel lent qui construit un index cote serveur). Nettoyee que la promesse resolve OU
+    // echoue, pour ne jamais geler une annee apres un echec.
+    let crChargesDetailInFlight = {};
 
     async function openCrChargesDetailModal(year) {
       document.getElementById('tresoMoisDetailTitle').textContent = "Charges d'exploitation " + year;
       document.getElementById('tresoMoisDetailBody').innerHTML = '<p style="padding:1rem;color:var(--text-secondary)">Chargement... (le premier calcul peut prendre une trentaine de secondes ; les suivants sont immediats)</p>';
       document.getElementById('tresoMoisDetailModalOverlay').classList.add('active');
       try {
-        let cached = crChargesDetailCache[year];
-        if (!cached) {
-          const start = year + '-01-01';
-          const end = year + '-12-31';
-          const hybRes = await fetch(`/api/charges-hybride?start=${start}&end=${end}`);
-          if (!hybRes.ok) throw new Error('Erreur chargement charges hybride');
-          const hybride = await hybRes.json();
-
-          let real = null, prev = null;
-          if (hybride.real) {
-            if (!hybride.prev) {
-              // Annee entierement close (aucun mois budgete) : la reponse fusionnee EST deja
-              // real-only, pas besoin d'un second appel.
-              real = hybride;
-            } else {
-              const [ry, rm] = hybride.real.end.split('-').map(Number);
-              const lastDay = new Date(ry, rm, 0).getDate();
-              const realRes = await fetch(`/api/charges-hybride?start=${hybride.real.start}-01&end=${hybride.real.end}-${String(lastDay).padStart(2, '0')}`);
-              if (!realRes.ok) throw new Error('Erreur chargement detail reel');
-              real = await realRes.json();
-            }
-          }
-          if (hybride.prev) {
-            if (!hybride.real) {
-              // Annee entierement future (aucun mois reel) : la reponse fusionnee EST deja
-              // prev-only.
-              prev = hybride;
-            } else {
-              const prevRes = await fetch(`/api/previsionnel-charges?start=${hybride.prev.start}&end=${hybride.prev.end}`);
-              if (!prevRes.ok) throw new Error('Erreur chargement detail budget');
-              prev = await prevRes.json();
-            }
-          }
-          cached = { hybride, real, prev };
-          crChargesDetailCache[year] = cached;
-        }
+        const cached = await _getCrChargesDetail(year);
         renderCrChargesDetailModal(year, cached);
       } catch (e) {
         console.error('Erreur detail charges exploitation:', e);
         document.getElementById('tresoMoisDetailBody').innerHTML = '<p style="padding:1rem;color:var(--text-secondary)">Erreur de chargement.</p>';
       }
+    }
+
+    // Porte d'entree memoisee : renvoie le cache s'il existe, sinon la promesse deja en vol pour
+    // cette annee s'il y en a une, sinon en demarre une nouvelle (stockee avant tout premier await
+    // donc pas de fenetre de course possible entre deux clics successifs, JS etant mono-thread).
+    function _getCrChargesDetail(year) {
+      if (crChargesDetailCache[year]) return Promise.resolve(crChargesDetailCache[year]);
+      if (crChargesDetailInFlight[year]) return crChargesDetailInFlight[year];
+      const promise = _fetchCrChargesDetail(year)
+        .then((result) => { crChargesDetailCache[year] = result; delete crChargesDetailInFlight[year]; return result; })
+        .catch((err) => { delete crChargesDetailInFlight[year]; throw err; });
+      crChargesDetailInFlight[year] = promise;
+      return promise;
+    }
+
+    async function _fetchCrChargesDetail(year) {
+      const start = year + '-01-01';
+      const end = year + '-12-31';
+      const hybRes = await fetch(`/api/charges-hybride?start=${start}&end=${end}`);
+      if (!hybRes.ok) throw new Error('Erreur chargement charges hybride');
+      const hybride = await hybRes.json();
+
+      let real = null, prev = null;
+      if (hybride.real) {
+        if (!hybride.prev) {
+          // Annee entierement close (aucun mois budgete) : la reponse fusionnee EST deja
+          // real-only, pas besoin d'un second appel.
+          real = hybride;
+        } else {
+          const [ry, rm] = hybride.real.end.split('-').map(Number);
+          const lastDay = new Date(ry, rm, 0).getDate();
+          const realRes = await fetch(`/api/charges-hybride?start=${hybride.real.start}-01&end=${hybride.real.end}-${String(lastDay).padStart(2, '0')}`);
+          if (!realRes.ok) throw new Error('Erreur chargement detail reel');
+          real = await realRes.json();
+        }
+      }
+      if (hybride.prev) {
+        if (!hybride.real) {
+          // Annee entierement future (aucun mois reel) : la reponse fusionnee EST deja
+          // prev-only.
+          prev = hybride;
+        } else {
+          const prevRes = await fetch(`/api/previsionnel-charges?start=${hybride.prev.start}&end=${hybride.prev.end}`);
+          if (!prevRes.ok) throw new Error('Erreur chargement detail budget');
+          prev = await prevRes.json();
+        }
+      }
+      return { hybride, real, prev };
     }
 
     // "2026-01","2026-07" -> "janvier - juillet 2026" (meme mois -> "janvier 2026").
