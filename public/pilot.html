@@ -11564,6 +11564,8 @@
     let primeAdvFilters = { partner: '', statut: '', q: '' };  // '' = "Tous" / pas de recherche texte
     let primeAdvSort = { col: null, dir: 'asc' };               // colonne triée du tableau "Par deal" ; col=null → ordre reçu de l'API
     let dealsNotionOrphelins = [];  // cache mémoire des deals gagnés sans mission Notion (réponse /api/coherence/deals-notion), pour la modale détail
+    let dealsNotionValides = [];    // C-2 : orphelins déjà validés à la main ("oui, il EST dans Notion"), affichés à part dans la modale avec un bouton d'annulation
+    let dealsNotionDisponible = true; // C-2 : false tant que la table Supabase deals_notion_validations n'a pas été créée → boutons de validation désactivés
     let primeClotureDeals = [];     // cache mémoire des deals signés non facturés (statut 'provisoire' de /api/primes/avancement), pour la modale détail du bandeau clôture (D2)
 
     function primeFmtEur(n) { return (Math.round(n) || 0).toLocaleString('fr-FR') + ' €'; }
@@ -12071,28 +12073,115 @@
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         dealsNotionOrphelins = data.orphelins || [];
+        dealsNotionValides = data.valides || [];
+        dealsNotionDisponible = data.validationsDisponibles !== false;
       } catch (e) {
         el.innerHTML = '';
         return;
       }
       const nb = dealsNotionOrphelins.length;
-      if (nb === 0) { el.innerHTML = ''; return; }
+      const nbValides = dealsNotionValides.length;
+      if (nb === 0) {
+        // Plus aucune vraie alerte. On garde toutefois un accès discret (ton neutre, pas "danger")
+        // tant qu'il reste des validations manuelles : sans lui, la modale deviendrait injoignable
+        // et une validation posée par erreur ne serait plus annulable depuis l'interface.
+        el.innerHTML = nbValides === 0 ? ''
+          : '<div style="display:inline-flex;flex-wrap:wrap;align-items:center;gap:0.5rem 0.8rem;padding:0.45rem 0.8rem;border-radius:8px;background:var(--hover);font-size:0.85rem">'
+            + '<span style="color:var(--text-secondary);cursor:pointer" onclick="openKpiDealsNotionDetail()">' + nbValides + ' deal' + (nbValides > 1 ? 's' : '') + ' validé' + (nbValides > 1 ? 's' : '') + ' manuellement · voir</span>'
+            + '</div>';
+        return;
+      }
       el.innerHTML = '<div style="display:inline-flex;flex-wrap:wrap;align-items:center;gap:0.5rem 0.8rem;padding:0.45rem 0.8rem;border-radius:8px;background:var(--danger-bg);font-size:0.85rem">'
         + '<span style="width:9px;height:9px;border-radius:50%;background:var(--danger);flex:0 0 auto"></span>'
         + '<span style="color:var(--danger);font-weight:600;cursor:pointer" onclick="openKpiDealsNotionDetail()">⚠ ' + nb + ' deal' + (nb > 1 ? 's' : '') + ' gagné' + (nb > 1 ? 's' : '') + ' sans mission Notion · voir</span>'
         + '</div>';
     }
+
+    // Ligne "missions proches" d'un orphelin (C-2) : les missions Notion au nom/client similaire,
+    // triées par proximité de montant. C'est ce qui permet à l'utilisateur de reconnaître un deal
+    // découpé en plusieurs missions ("Ecoforest Part1" + "Part2") : la somme n'est affichée qu'à
+    // partir de 2 missions, puisque c'est justement elle qu'il compare au montant du deal.
+    function dealsNotionMissionsTexte(missions) {
+      const list = missions || [];
+      if (!list.length) return 'Aucune mission au nom similaire.';
+      let txt = list.map(function (m) {
+        return escapeHtml(m.nom || 'Sans nom') + ' · ' + kpiFmtEur(m.montant)
+          + (m.dateSignature ? ' (signée ' + new Date(m.dateSignature).toLocaleDateString('fr-FR') + ')' : '');
+      }).join(' + ');
+      if (list.length >= 2) {
+        const somme = list.reduce(function (s, m) { return s + (Number(m.montant) || 0); }, 0);
+        txt += ' · somme ' + kpiFmtEur(somme);
+      }
+      return txt;
+    }
+
     function openKpiDealsNotionDetail() {
       const orphelins = dealsNotionOrphelins || [];
+      const valides = dealsNotionValides || [];
+      // Boutons désactivés tant que la table Supabase n'existe pas : le POST échouerait de toute
+      // façon, autant l'expliquer au survol plutôt que laisser cliquer dans le vide.
+      const dis = dealsNotionDisponible ? ''
+        : ' disabled title="Validation indisponible : exécuter le SQL docs/sql/2026-08-08-deals-notion-validations.sql dans Supabase"';
+      const btnStyle = 'border:1px solid var(--border);flex:0 0 auto';
       document.getElementById('kpiDetailTitle').textContent = 'Deals gagnés sans mission Notion';
-      let html = '<p style="color:var(--text-secondary);font-size:0.8rem;margin:0 0 0.6rem">Crée la mission dans Notion puis renseigne sa date de signature.</p>';
-      html += orphelins.map(d =>
-        '<div class="kpi-detail-row"><div><div class="kpi-detail-nom">' + escapeHtml(d.nom || 'Sans nom') + '</div>'
-        + '<div class="kpi-detail-client">' + (d.closedate ? new Date(d.closedate).toLocaleDateString('fr-FR') : '') + '</div></div>'
-        + '<div class="kpi-detail-montant">' + kpiFmtEur(d.montant) + '</div></div>'
-      ).join('') || '<p style="color:var(--text-secondary)">Aucun.</p>';
+      let html = '<p style="color:var(--text-secondary);font-size:0.8rem;margin:0 0 0.6rem">Crée la mission dans Notion puis renseigne sa date de signature. Si le deal est déjà dans Notion (découpé en plusieurs missions ou regroupé avec un autre client), valide-le à la main.</p>';
+      html += orphelins.map(function (d, i) {
+        return '<div class="kpi-detail-row" style="flex-direction:column;align-items:stretch;gap:.35rem">'
+          + '<div style="display:flex;justify-content:space-between;gap:1rem;align-items:baseline">'
+            + '<div><div class="kpi-detail-nom">' + escapeHtml(d.nom || 'Sans nom') + '</div>'
+            + '<div class="kpi-detail-client">' + (d.closedate ? new Date(d.closedate).toLocaleDateString('fr-FR') : '') + '</div></div>'
+            + '<div class="kpi-detail-montant">' + kpiFmtEur(d.montant) + '</div></div>'
+          + '<div class="kpi-detail-client">' + dealsNotionMissionsTexte(d.missionsProches) + '</div>'
+          + '<div><button class="btn" style="' + btnStyle + '" onclick="validerDealNotion(' + i + ')"' + dis + '>Valider : présent dans Notion</button></div>'
+          + '</div>';
+      }).join('') || '<p style="color:var(--text-secondary)">Aucun.</p>';
+      if (valides.length) {
+        html += '<h4 style="margin:1.1rem 0 .3rem;font-size:.85rem;color:var(--text-secondary)">Validés manuellement</h4>';
+        html += valides.map(function (d, i) {
+          return '<div class="kpi-detail-row" style="flex-direction:column;align-items:stretch;gap:.35rem">'
+            + '<div style="display:flex;justify-content:space-between;gap:1rem;align-items:baseline">'
+              + '<div><div class="kpi-detail-nom">' + escapeHtml(d.nom || 'Sans nom') + '</div>'
+              + '<div class="kpi-detail-client">' + (d.closedate ? new Date(d.closedate).toLocaleDateString('fr-FR') : '') + '</div></div>'
+              + '<div class="kpi-detail-montant">' + kpiFmtEur(d.montant) + '</div></div>'
+            + '<div><button class="btn" style="' + btnStyle + '" onclick="annulerDealNotion(' + i + ')"' + dis + '>Annuler la validation</button></div>'
+            + '</div>';
+        }).join('');
+      }
       document.getElementById('kpiDetailBody').innerHTML = html;
       document.getElementById('kpiDetailModal').classList.add('active');
+    }
+
+    // POST de validation/annulation puis re-fetch : renderKpiDealsNotion recharge l'endpoint (donc
+    // le bandeau ET les caches mémoire), openKpiDealsNotionDetail re-rend la modale ouverte à partir
+    // de ces caches. On ne modifie jamais les listes localement : la seule source de vérité reste
+    // la réponse du serveur (un deal validé peut aussi avoir été couvert entre-temps).
+    async function postDealNotionValidation(url, body) {
+      try {
+        const res = await fetch(url, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(function () { return {}; });
+          throw new Error(j.error || ('HTTP ' + res.status));
+        }
+      } catch (e) {
+        alert('Opération impossible : ' + e.message);
+        return;
+      }
+      await renderKpiDealsNotion();
+      openKpiDealsNotionDetail();
+    }
+    async function validerDealNotion(i) {
+      const d = (dealsNotionOrphelins || [])[i];
+      if (!d || !d.dealId) return;
+      await postDealNotionValidation('/api/coherence/deals-notion/valider',
+        { dealId: d.dealId, nom: d.nom, montant: d.montant, closedate: d.closedate });
+    }
+    async function annulerDealNotion(i) {
+      const d = (dealsNotionValides || [])[i];
+      if (!d || !d.dealId) return;
+      await postDealNotionValidation('/api/coherence/deals-notion/annuler', { dealId: d.dealId });
     }
 
     // Alerte clôture souple des primes (feature D2) : en DÉCEMBRE uniquement (mois local), les deals
