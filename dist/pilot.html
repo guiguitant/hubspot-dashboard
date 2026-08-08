@@ -3943,6 +3943,8 @@
       .cr-sub { font-size:0.8rem; color:var(--text-secondary); padding:0.1rem 0.75rem 0.1rem 1.6rem; display:flex; justify-content:space-between; }
       .cr-total { border-top:2px solid var(--border); font-weight:700; margin-top:0.2rem; }
       .cr-sep { border-top:1px solid var(--border); margin-top:0.2rem; }
+      .cr-tva-badge { display:inline-block; padding:0.1rem 0.5rem; border-radius:var(--radius); font-size:0.7rem; font-weight:500; margin-left:0.5rem; vertical-align:middle; background:var(--bg-secondary); color:var(--text-secondary); }
+      .cr-tva-badge.warn { background:var(--warning-bg); color:var(--warning); }
     </style>
     <div class="page-icon">&#128202;</div>
     <h1 class="page-title">Compte de resultat</h1>
@@ -13946,6 +13948,17 @@
       }
     }
 
+    // Badge de completude TVA (Tache 1, spec produits-et-suivis section B) : passthrough pur de
+    // d.charges.tvaExacte (/api/ebe -> computeChargesHybride), aucun calcul cote front. Rien si
+    // absent ou montantTotal = 0 (annee sans mois reel, ex. tout previsionnel).
+    function _crTvaBadgeHtml(tva) {
+      if (!tva || !tva.montantTotal) return '';
+      const pct = Math.round((tva.montantCouvert / tva.montantTotal) * 100);
+      const warn = pct < 50;
+      const title = "Le dernier mois clos s'affine à mesure de la saisie comptable dans Pennylane.";
+      return ' <span class="cr-tva-badge' + (warn ? ' warn' : '') + '" title="' + title + '">TVA exacte : ' + pct + '% des dépenses réelles</span>';
+    }
+
     function renderCompteResultat() {
       if (!crData) return;
       const projete = document.getElementById('crProjete').checked;
@@ -13964,8 +13977,9 @@
         const color = opts.neg ? 'color:var(--danger)' : '';
         const size = opts.total ? ';font-size:1.05rem' : '';
         const hint = opts.onclick ? ' <span style="font-size:0.68rem;color:var(--text-secondary)">detail</span>' : '';
+        const badge = opts.badge || '';
         const click = opts.onclick ? ' onclick="' + opts.onclick + '"' : '';
-        return '<div class="' + cls + '"' + click + '><span>' + label + hint + '</span>'
+        return '<div class="' + cls + '"' + click + '><span>' + label + hint + badge + '</span>'
           + '<span style="' + color + size + '">' + sign + formatEuro(Math.abs(val)) + '</span></div>';
       };
       const subRow = (label, val) =>
@@ -13977,7 +13991,7 @@
         html += subRow('dont CA facture (Notion)', formatEuro(d.ca.facture));
         html += subRow('dont pipeline pondere (HubSpot)', formatEuro(d.ca.pipelinePondere));
       }
-      html += row("Charges d'exploitation", d.charges.total, { neg: true, onclick: "openCrDetailModal('charges')" });
+      html += row("Charges d'exploitation", d.charges.total, { neg: true, onclick: "openCrDetailModal('charges')", badge: _crTvaBadgeHtml(d.charges.tvaExacte) });
       if (d.masseSalarialeAnnuelle != null) {
         html += subRow('dont masse salariale (deja dans les charges)', '(' + formatEuro(d.masseSalarialeAnnuelle) + ')');
       }
