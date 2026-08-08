@@ -9037,19 +9037,22 @@ app.get('/api/primes/avancement', async (_req, res) => {
 // ce n'est pas fait, tout doit continuer a marcher : le GET renvoie zero valide et
 // validationsDisponibles: false, les POST renvoient une 500 avec un message explicite.
 const DEALS_NOTION_VALIDATIONS_TABLE = 'deals_notion_validations';
-const DEALS_NOTION_SQL_PATH = 'docs/sql/2026-08-08-deals-notion-validations.sql';
+const DEALS_NOTION_SQL_PATH = 'migrations/42_deals_notion_validations.sql';
 const DEALS_NOTION_TABLE_ABSENTE_MSG = `Table ${DEALS_NOTION_VALIDATIONS_TABLE} absente : exécuter le SQL ${DEALS_NOTION_SQL_PATH}`;
 let dealsNotionTableAbsenteWarned = false; // console.warn une seule fois, pas a chaque refresh du KPI
 
 // Detecte "la table n'existe pas" parmi les erreurs supabase-js. Deux formes selon la couche qui
 // repond : 42P01 = code SQLSTATE Postgres "undefined_table" ; PGRST205 = code PostgREST "table
-// absente du cache de schema" (le cas le plus frequent, PostgREST repond avant Postgres). Le repli
-// sur le message couvre les variantes de formulation entre versions.
+// absente du cache de schema" (le cas le plus frequent, PostgREST repond avant Postgres). Resserre
+// volontairement : un ancien repli `/does not exist|schema cache/i` attrapait AUSSI une colonne
+// manquante (42703 Postgres, PGRST204 PostgREST), la deguisant a tort en "table absente" au lieu de
+// la laisser remonter comme une vraie erreur. Le repli regex ne matche desormais que le libelle
+// propre a une RELATION absente, jamais une colonne.
 function isDealsNotionTableAbsente(error) {
   if (!error) return false;
   const code = String(error.code || '');
-  if (code === '42P01' || code === 'PGRST205' || code === 'PGRST202') return true;
-  return /does not exist|schema cache/i.test(String(error.message || ''));
+  if (code === '42P01' || code === 'PGRST205') return true;
+  return /relation .* does not exist|find the table .* in the schema cache/i.test(String(error.message || ''));
 }
 
 // Ensemble des dealId valides manuellement. { ids: Set, disponible: bool }. Ne leve JAMAIS sur une

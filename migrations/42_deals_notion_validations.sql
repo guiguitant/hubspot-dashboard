@@ -1,4 +1,4 @@
--- Validation manuelle des deals gagnes sans mission Notion (feature C-2, design
+-- Migration 42 : validation manuelle des deals gagnes sans mission Notion (feature C-2, design
 -- docs/superpowers/specs/2026-08-08-produits-et-suivis-design.md#C-2).
 --
 -- A EXECUTER UNE FOIS dans l'editeur SQL Supabase (SQL Editor > New query > coller > Run).
@@ -24,9 +24,10 @@ create table if not exists deals_notion_validations (
   validated_at timestamptz not null default now()
 );
 
--- RLS activee SANS AUCUNE POLICY : c'est le patron deja utilise par kpi_prime_config. Consequence
--- volontaire : la table est totalement inaccessible aux cles anon/authenticated (aucune policy ne
--- laisse passer quoi que ce soit) et n'est lisible/ecrivable que par la cle service-role du
--- serveur (supabaseAdmin), qui contourne RLS par construction. Aucune donnee de ce dashboard ne
--- doit etre exposee au navigateur directement.
+-- RLS activee SANS AUCUNE POLICY : c'est le patron deja utilise par migrations/41_primes_sheet_sync.sql
+-- (PAS kpi_prime_config, migrations/31_kpi_prime_config.sql : cette table-la cree au contraire une
+-- policy USING (true), donc un acces ouvert). Consequence volontaire ici : la table est totalement
+-- inaccessible aux cles anon/authenticated (aucune policy ne laisse passer quoi que ce soit) et
+-- n'est lisible/ecrivable que par la cle service-role du serveur (supabaseAdmin), qui contourne RLS
+-- par construction. Aucune donnee de ce dashboard ne doit etre exposee au navigateur directement.
 alter table deals_notion_validations enable row level security;

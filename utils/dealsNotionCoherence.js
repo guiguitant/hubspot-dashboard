@@ -153,14 +153,22 @@ const MOT_MIN_LEN = 4;
 // present dans la moitie des intitules de deals/missions. Sans cette liste, "Renault - bilan
 // carbone" et "Peugeot bilan carbone" seraient rapproches sur "bilan"/"carbone".
 const MOTS_NON_SIGNIFICATIFS = new Set([
-  // mots outils (>= MOT_MIN_LEN, les plus courts sont deja filtres par la longueur)
-  'avec', 'dans', 'pour', 'sans', 'sous', 'leur', 'leurs', 'elle', 'elles', 'cette', 'ces', 'des',
-  'les', 'une', 'aux', 'par', 'plus', 'tout', 'tous', 'autre', 'autres',
+  // mots outils (>= MOT_MIN_LEN ; les entrees de 3 lettres ou moins, "des"/"les"/"une"/"aux"/"par"/
+  // "ces", sont volontairement absentes : deja eliminees par le filtre de longueur ci-dessus, les
+  // lister ici serait mort et trompeur)
+  'avec', 'dans', 'pour', 'sans', 'sous', 'leur', 'leurs', 'elle', 'elles', 'cette',
+  'plus', 'tout', 'tous', 'autre', 'autres',
   // vocabulaire metier / structure de mission
   'mission', 'missions', 'projet', 'projets', 'client', 'clients', 'dossier', 'etude', 'etudes',
   'phase', 'part', 'part1', 'part2', 'part3', 'tranche', 'solde', 'acompte', 'devis', 'offre',
   'bilan', 'carbone', 'empreinte', 'audit', 'accompagnement', 'conseil', 'formation', 'strategie',
   'plan', 'societe', 'entreprise', 'groupe', 'group', 'france', 'sarl', 'sasu',
+  'solutions', 'energie', 'energies', 'services', 'consulting', 'technologies', 'industries',
+  'developpement',
+  // points cardinaux : trop frequents dans les raisons sociales ("Transports du Nord", "Boulangerie
+  // du Nord"...) pour identifier un client. "sud"/"est" sont deja sous MOT_MIN_LEN et donc filtres
+  // avant meme d'atteindre cet ensemble ; lister les 4 ici documente l'intention au meme endroit.
+  'nord', 'sud', 'est', 'ouest',
 ]);
 
 // Mots significatifs d'un libelle : normalisation accents/casse (normalizeLabel), decoupe sur tout
@@ -174,8 +182,12 @@ function motsSignificatifs(s) {
 
 // Vrai si les deux libelles partagent au moins un mot significatif. Complementaire du containment
 // de nomsSimilaires, qui echoue des qu'un caractere separe les deux formes : "moulin du nord" n'est
-// PAS une sous-chaine de "la minoterie & moulins du nord" (le "s" de "moulins" casse tout), alors
-// que le mot "moulin" est bien commun aux deux.
+// PAS une sous-chaine de "la minoterie & moulins du nord" (le "s" de "moulins" casse tout). Aucun
+// stemming ici : "moulin" (singulier) et "moulins" (pluriel) restent deux mots distincts, donc le
+// mot reellement commun avec ce CLIENT est "nord", pas "moulin". Le cas reel Minoterie (test
+// associe) matche quand meme, mais par le NOM de la mission ("Minoterie / Moulin", au singulier),
+// qui partage bien "moulin" avec le nom du deal. Limite connue et non geree : les formes flechies
+// (pluriels notamment) ne sont jamais rapprochees entre elles.
 function motsCommuns(a, b) {
   const setA = new Set(motsSignificatifs(a));
   if (setA.size === 0) return false;

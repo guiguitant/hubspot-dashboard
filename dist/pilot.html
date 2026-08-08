@@ -12058,8 +12058,10 @@
 
     // Alerte "deal gagné sans mission Notion" (feature C) : la création des missions Notion est
     // manuelle, un deal gagné peut être oublié ou rapproché de la mauvaise ligne (cas Somarail).
-    // Rien affiché si 0 orphelin (pas de bandeau vert, contrairement à renderKpiCoverage) : cohérent
-    // avec renderKpiClawback, qui reste discret tant qu'il n'y a rien à signaler.
+    // 0 orphelin : pas de bandeau danger (pas de bandeau vert non plus, contrairement à
+    // renderKpiCoverage), mais un bandeau neutre "N deal(s) validé(s) manuellement · voir" reste
+    // affiché tant qu'il existe des validations (C-2), pour garder la modale joignable et ces
+    // validations annulables. Conteneur vraiment vide seulement si aucun orphelin ET aucun validé.
     // Fetch avec gestion d'erreur silencieuse : une alerte qui plante ne doit jamais casser le KPI.
     async function renderKpiDealsNotion() {
       const el = document.getElementById('kpi-deals-notion');
@@ -12121,7 +12123,7 @@
       // Boutons désactivés tant que la table Supabase n'existe pas : le POST échouerait de toute
       // façon, autant l'expliquer au survol plutôt que laisser cliquer dans le vide.
       const dis = dealsNotionDisponible ? ''
-        : ' disabled title="Validation indisponible : exécuter le SQL docs/sql/2026-08-08-deals-notion-validations.sql dans Supabase"';
+        : ' disabled title="Validation indisponible : exécuter le SQL migrations/42_deals_notion_validations.sql dans Supabase"';
       const btnStyle = 'border:1px solid var(--border);flex:0 0 auto';
       document.getElementById('kpiDetailTitle').textContent = 'Deals gagnés sans mission Notion';
       let html = '<p style="color:var(--text-secondary);font-size:0.8rem;margin:0 0 0.6rem">Crée la mission dans Notion puis renseigne sa date de signature. Si le deal est déjà dans Notion (découpé en plusieurs missions ou regroupé avec un autre client), valide-le à la main.</p>';
@@ -12155,7 +12157,17 @@
     // le bandeau ET les caches mémoire), openKpiDealsNotionDetail re-rend la modale ouverte à partir
     // de ces caches. On ne modifie jamais les listes localement : la seule source de vérité reste
     // la réponse du serveur (un deal validé peut aussi avoir été couvert entre-temps).
+    //
+    // dealsNotionBusy : validerDealNotion(i)/annulerDealNotion(i) lisent dealsNotionOrphelins[i] /
+    // dealsNotionValides[i] AVANT d'appeler cette fonction. Tant que la requête + le re-fetch ne
+    // sont pas terminés, la modale affiche encore les anciens index alors que les tableaux peuvent
+    // déjà avoir changé : un double-clic pendant ce laps de temps validerait/annulerait le mauvais
+    // deal. Le drapeau couvre tout le cycle (requête, re-fetch, re-rendu) et ignore les clics reçus
+    // pendant qu'il est posé.
+    let dealsNotionBusy = false;
     async function postDealNotionValidation(url, body) {
+      if (dealsNotionBusy) return;
+      dealsNotionBusy = true;
       try {
         const res = await fetch(url, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -12165,12 +12177,13 @@
           const j = await res.json().catch(function () { return {}; });
           throw new Error(j.error || ('HTTP ' + res.status));
         }
+        await renderKpiDealsNotion();
+        openKpiDealsNotionDetail();
       } catch (e) {
         alert('Opération impossible : ' + e.message);
-        return;
+      } finally {
+        dealsNotionBusy = false;
       }
-      await renderKpiDealsNotion();
-      openKpiDealsNotionDetail();
     }
     async function validerDealNotion(i) {
       const d = (dealsNotionOrphelins || [])[i];

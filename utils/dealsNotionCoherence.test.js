@@ -276,6 +276,17 @@ describe('missionsProches', () => {
     expect(r[0].montant).toBe(5000);
   });
 
+  it('un point cardinal seul ne suffit plus a rapprocher deux clients differents', () => {
+    // "nord" est dans MOTS_NON_SIGNIFICATIFS (trop frequent dans les raisons sociales) : deux
+    // clients sans aucun autre rapport ne doivent plus se rapprocher juste parce qu'ils contiennent
+    // tous les deux "Nord".
+    const deal = { nom: 'Boulangerie du Nord', montant: 4000, closedate: '2026-05-10' };
+    const missions = [
+      { nom: 'Transports du Nord', client: '', ca: 4000, dateSignature: '2026-05-01' },
+    ];
+    expect(missionsProches(deal, missions)).toEqual([]);
+  });
+
   it('aucune mission au nom/client similaire -> liste vide (meme au bon montant)', () => {
     const deal = { nom: 'Client Zeta', montant: 1000, closedate: '2026-01-05' };
     const missions = [{ nom: 'Alpha Beta', client: 'Gamma', ca: 1000, dateSignature: '2026-01-05' }];
