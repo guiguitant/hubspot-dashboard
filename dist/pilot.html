@@ -12060,7 +12060,11 @@
       const el = document.getElementById('kpi-deals-notion');
       if (!el) return;
       try {
-        const res = await fetch('/api/coherence/deals-notion');
+        // Scope sur l'annee du selecteur KPI (#kpiYear), comme les bandeaux voisins : sans ca,
+        // l'alerte retomberait toujours sur l'annee civile courante cote serveur, incoherente
+        // avec le reste de la section quand l'utilisateur regarde une autre annee.
+        const anneeKpi = (kpiData && kpiData.year) || new Date().getFullYear();
+        const res = await fetch('/api/coherence/deals-notion?year=' + anneeKpi);
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         dealsNotionOrphelins = data.orphelins || [];

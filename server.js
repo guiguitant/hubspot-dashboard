@@ -8885,7 +8885,7 @@ app.get('/api/primes/avancement', async (_req, res) => {
   }
 });
 
-// GET /api/coherence/deals-notion — Alerte "deal gagne sans mission Notion" (feature C, design
+// GET /api/coherence/deals-notion : alerte "deal gagne sans mission Notion" (feature C, design
 // 2026-08-08). La creation des missions Notion est 100% manuelle : un deal HubSpot gagne peut etre
 // oublie, ou son rapprochement manuel pose sur la mauvaise ligne (cas reel "Somarail"). Lecture
 // seule (aucune ecriture, la creation de mission reste manuelle) : compare les deals gagnes de

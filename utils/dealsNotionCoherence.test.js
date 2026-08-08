@@ -4,6 +4,7 @@ const {
   periodeTrimestre,
   nomsSimilaires,
   dealMissionCandidate,
+  maximumBipartiteMatching,
   orphanWonDeals,
 } = require('./dealsNotionCoherence');
 
@@ -58,6 +59,15 @@ describe('nomsSimilaires', () => {
   it('nom deal vide -> jamais de match trivial', () => {
     expect(nomsSimilaires({ nom: '' }, { nom: '' })).toBe(false);
     expect(nomsSimilaires({ nom: null }, { nom: 'x', client: '' })).toBe(false);
+  });
+  it('M3 : nom court (< 4 caracteres normalises) ne matche jamais par containment', () => {
+    // "SA" est contenu dans un nombre enorme de noms d'entreprise (Somarail SA, Alpha SA...) :
+    // sans garde de longueur minimale, ca produirait des faux positifs massifs.
+    expect(nomsSimilaires({ nom: 'Une Entreprise SA' }, { nom: 'SA' })).toBe(false);
+    expect(nomsSimilaires({ nom: 'SA' }, { nom: 'Une Entreprise SA' })).toBe(false);
+    expect(nomsSimilaires({ nom: 'CO2' }, { nom: 'Bilan CO2 complet' })).toBe(false);
+    // Mais un nom de 4 caracteres pile matche toujours (limite non exclue).
+    expect(nomsSimilaires({ nom: 'Acme Corp' }, { nom: 'Acme' })).toBe(true);
   });
 });
 
@@ -116,18 +126,63 @@ describe('orphanWonDeals', () => {
     expect(r.orphelins).toHaveLength(1);
   });
 
-  it('deals jumeaux (meme montant, meme trimestre) candidats pour UNE SEULE mission -> aucun couvert (prudence)', () => {
-    // Cas cite par la spec : deux deals "jumeaux" ne doivent pas etre tous les deux consideres
-    // couverts par la meme ligne Notion. En cas de doute, aucun n'est marque couvert : mieux vaut
-    // une alerte de trop qu'une couverture silencieuse erronee sur l'un des deux.
+  it('2 deals jumeaux (meme montant, meme trimestre) + 1 SEULE mission candidate -> 1 couvert, 1 orphelin', () => {
+    // Une seule mission ne peut couvrir qu'un seul deal : l'appariement maximum en assigne
+    // exactement UN (le juste nombre), l'autre reste orphelin faute de mission disponible.
     const deals = [
       { nom: 'Deal Jumeau 1', montant: 10000, closedate: '2026-02-10' },
       { nom: 'Deal Jumeau 2', montant: 10000, closedate: '2026-02-20' },
     ];
     const missions = [{ nom: 'Mission unique', client: '', ca: 10000, dateSignature: '2026-02-01' }];
     const r = orphanWonDeals(deals, missions);
-    expect(r.couverts).toBe(0);
-    expect(r.orphelins).toHaveLength(2);
+    expect(r.couverts).toBe(1);
+    expect(r.orphelins).toHaveLength(1);
+  });
+
+  it('2 deals jumeaux + 2 missions jumelles (meme montant, meme trimestre) -> 2 couverts, 0 orphelin', () => {
+    // I1 (revue) : cas metier legitime (ex. audits jumeaux d'un meme client). Un appariement
+    // complet existe (D1-M1, D2-M2) meme si AUCUN deal n'a de mission "unique" au sens naif :
+    // chaque deal a 2 candidats, chaque mission a 2 candidats. L'ancienne heuristique "naked
+    // singles" rendait 0 couvert ici (2 fausses alertes) ; l'appariement maximum en trouve 2.
+    const deals = [
+      { nom: 'Deal Jumeau 1', montant: 10000, closedate: '2026-02-10' },
+      { nom: 'Deal Jumeau 2', montant: 10000, closedate: '2026-02-20' },
+    ];
+    const missions = [
+      { nom: 'Mission jumelle 1', client: '', ca: 10000, dateSignature: '2026-02-01' },
+      { nom: 'Mission jumelle 2', client: '', ca: 10000, dateSignature: '2026-02-05' },
+    ];
+    const r = orphanWonDeals(deals, missions);
+    expect(r.couverts).toBe(2);
+    expect(r.orphelins).toEqual([]);
+  });
+
+  it('3 deals jumeaux + 3 missions jumelles -> 3 couverts, 0 orphelin', () => {
+    const deals = [
+      { nom: 'Deal Jumeau 1', montant: 5000, closedate: '2026-03-01' },
+      { nom: 'Deal Jumeau 2', montant: 5000, closedate: '2026-03-10' },
+      { nom: 'Deal Jumeau 3', montant: 5000, closedate: '2026-03-20' },
+    ];
+    const missions = [
+      { nom: 'Mission jumelle 1', client: '', ca: 5000, dateSignature: '2026-01-05' },
+      { nom: 'Mission jumelle 2', client: '', ca: 5000, dateSignature: '2026-02-05' },
+      { nom: 'Mission jumelle 3', client: '', ca: 5000, dateSignature: '2026-03-05' },
+    ];
+    const r = orphanWonDeals(deals, missions);
+    expect(r.couverts).toBe(3);
+    expect(r.orphelins).toEqual([]);
+  });
+
+  it('chemin augmentant : D1 candidat de M1 et M2, D2 candidat de M1 seulement -> D2-M1, D1-M2, 2 couverts', () => {
+    // Cas qui exige un vrai chemin augmentant (pas juste un appariement glouton naif) : si on
+    // affecte D1 a M1 en premier (glouton, ordre naturel de parcours), D2 n'a plus de mission
+    // disponible. Un appariement maximum correct doit "reloger" D1 sur M2 pour liberer M1 a D2 :
+    // c'est precisement ce que fait la recursion de tryAugment (matchMission[mi] deja pris ->
+    // on retente d'augmenter le deal qui l'occupe avant d'abandonner).
+    const dealCandidats = [[0, 1], [0]]; // D1 (index 0) -> [M1, M2] ; D2 (index 1) -> [M1] seulement
+    const match = maximumBipartiteMatching(dealCandidats, 2);
+    expect(match).toEqual([1, 0]); // D1 -> M2 (index 1), D2 -> M1 (index 0) : les deux couvrent
+    expect(match.every(mi => mi !== -1)).toBe(true);
   });
 
   it('deals au meme montant mais trimestres distincts, une mission par trimestre -> chacun couvre un deal distinct', () => {
@@ -146,17 +201,17 @@ describe('orphanWonDeals', () => {
     expect(r.orphelins).toEqual([]);
   });
 
-  it('une mission ne peut pas couvrir deux deals differents (non-jumeaux) : le second reste orphelin', () => {
+  it('une mission ne peut couvrir qu\'un seul deal parmi deux candidats (non-jumeaux) : 1 couvert, 1 orphelin', () => {
     const deals = [
       { nom: 'Deal A', montant: 10000, closedate: '2026-02-10' },
       { nom: 'Deal B', montant: 10050, closedate: '2026-02-15' },
     ];
     // Une seule mission, candidate pour les deux deals (montants proches l'un de l'autre et de la
-    // mission, meme trimestre) : ambigu -> aucun des deux n'est assigne (voir test jumeaux ci-dessus).
+    // mission, meme trimestre) : l'appariement maximum en couvre UN (le juste nombre disponible).
     const missions = [{ nom: 'Mission partagee', client: '', ca: 10025, dateSignature: '2026-01-01' }];
     const r = orphanWonDeals(deals, missions);
-    expect(r.couverts).toBe(0);
-    expect(r.orphelins).toHaveLength(2);
+    expect(r.couverts).toBe(1);
+    expect(r.orphelins).toHaveLength(1);
   });
 
   it('couverture par similarite de nom quand les trimestres different (missions signees en avance/retard)', () => {

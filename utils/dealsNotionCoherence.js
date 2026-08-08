@@ -35,16 +35,22 @@ function periodeTrimestre(dateStr) {
   return `${d.getFullYear()}-Q${quarter}`;
 }
 
+// Longueur normalisee minimale pour qu'un containment compte comme similarite (M3, revue) : un nom
+// court ("SA", "CO2"...) contenu dans presque n'importe quelle chaine produirait des faux positifs
+// massifs. En dessous de ce seuil, ni dealNom ni le champ mission compare ne peuvent faire matcher
+// par containment (les deux cotes doivent faire au moins MIN_NOM_LEN caracteres normalises).
+const MIN_NOM_LEN = 4;
+
 // Similarite de nom/client apres normalisation (accents/casse, cf. normalizeLabel) : match si le
 // nom du deal contient (ou est contenu dans) le nom de la mission, ou le client de la mission.
 // Chaine vide cote deal = jamais de match (evite un match trivial sur deux champs vides).
 function nomsSimilaires(deal, mission) {
   const dealNom = normalizeLabel(deal && deal.nom);
-  if (!dealNom) return false;
+  if (!dealNom || dealNom.length < MIN_NOM_LEN) return false;
   const missionNom = normalizeLabel(mission && mission.nom);
-  if (missionNom && (dealNom.includes(missionNom) || missionNom.includes(dealNom))) return true;
+  if (missionNom && missionNom.length >= MIN_NOM_LEN && (dealNom.includes(missionNom) || missionNom.includes(dealNom))) return true;
   const missionClient = normalizeLabel(mission && mission.client);
-  if (missionClient && (dealNom.includes(missionClient) || missionClient.includes(dealNom))) return true;
+  if (missionClient && missionClient.length >= MIN_NOM_LEN && (dealNom.includes(missionClient) || missionClient.includes(dealNom))) return true;
   return false;
 }
 
@@ -60,25 +66,61 @@ function dealMissionCandidate(deal, mission) {
   return memeTrimestre || nomsSimilaires(deal, mission);
 }
 
+// Appariement biparti MAXIMUM entre deals et missions candidates (algorithme de Kuhn, chemins
+// augmentants : quelques dizaines de deals par an, complexite O(deals x missions x candidats)
+// totalement negligeable). dealCandidats[di] = liste des index de missions candidates du deal di.
+// Renvoie matchDeal[di] = index de la mission appariee (-1 si aucune).
+//
+// Pourquoi un vrai appariement maximum et pas une heuristique "naked singles" (ancienne version,
+// corrigee en revue) : sur N deals jumeaux (meme montant, meme trimestre) face a N missions
+// jumelles, un appariement complet existe (chaque deal a sa propre mission) mais AUCUN deal n'a de
+// candidat "unique" (chacun a N candidats) -> l'heuristique locale rendait 0 couvert au lieu de N,
+// generant N fausses alertes. L'appariement maximum trouve la meilleure solution globale : autant
+// de missions candidates que de deals jumeaux -> tous couverts ; moins de missions que de deals ->
+// exactement le nombre manquant d'orphelins. C'est la vraie prudence (ni faux couverts, ni fausses
+// alertes), pas une heuristique conservatrice qui sous-couvre par construction.
+function maximumBipartiteMatching(dealCandidats, nbMissions) {
+  const matchDeal = new Array(dealCandidats.length).fill(-1); // deal -> mission
+  const matchMission = new Array(nbMissions).fill(-1); // mission -> deal
+
+  // Cherche un chemin augmentant depuis le deal di : essaie chaque mission candidate non visitee
+  // dans cette tentative ; si elle est libre ou que son deal actuel peut se reloger ailleurs
+  // (recursion), on (re)affecte di <-> mi et on remonte "true".
+  function tryAugment(di, visited) {
+    for (const mi of dealCandidats[di]) {
+      if (visited[mi]) continue;
+      visited[mi] = true;
+      if (matchMission[mi] === -1 || tryAugment(matchMission[mi], visited)) {
+        matchMission[mi] = di;
+        matchDeal[di] = mi;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  for (let di = 0; di < dealCandidats.length; di++) {
+    tryAugment(di, new Array(nbMissions).fill(false));
+  }
+
+  return matchDeal;
+}
+
 // Rapproche une liste de deals gagnes HubSpot ({ nom, montant, closedate }) et une liste de
 // missions Notion ({ nom, client, ca, dateSignature }). Renvoie { couverts, orphelins }.
 //
 // Unicite de couverture : chaque mission ne peut couvrir qu'UN SEUL deal (sinon deux deals
 // "jumeaux" au meme montant seraient tous les deux consideres couverts par la meme ligne Notion,
-// masquant que l'un des deux n'a en realite AUCUNE mission). Algorithme par propagation de points
-// fixes : on n'assigne que les paires SANS AMBIGUITE (le deal n'a qu'une mission candidate ET
-// cette mission n'a que ce deal comme candidat), on retire la paire, on recommence tant que de
-// nouvelles paires non-ambigues apparaissent. Toute ambiguite residuelle (deal sans mission
-// candidate disponible, ou mission disputee par plusieurs deals sans autre issue) reste NON
-// couverte : en cas de doute, on prefere une alerte de trop (verification humaine) qu'une
-// couverture silencieuse potentiellement erronee.
+// masquant que l'un des deux n'a en realite AUCUNE mission). Resolu par appariement biparti
+// MAXIMUM (voir maximumBipartiteMatching ci-dessus) entre l'ensemble des deals et l'ensemble des
+// missions candidates : couverts = taille de l'appariement, orphelins = deals non apparies. Un
+// deal sans AUCUNE mission candidate reste toujours orphelin (aucune ambiguite possible).
 function orphanWonDeals(deals, missions) {
   const dealsList = Array.isArray(deals) ? deals : [];
   const missionsList = Array.isArray(missions) ? missions : [];
 
-  // Liste des index de missions candidates pour chaque deal (calculee une seule fois : le
-  // resultat de dealMissionCandidate ne change pas au fil de l'algorithme, seule la disponibilite
-  // de la mission/du deal evolue).
+  // Liste des index de missions candidates pour chaque deal (dealMissionCandidate est pure, son
+  // resultat ne depend que des donnees d'entree, jamais de l'appariement en cours de calcul).
   const dealCandidats = dealsList.map(deal =>
     missionsList.reduce((acc, mission, mi) => {
       if (dealMissionCandidate(deal, mission)) acc.push(mi);
@@ -86,43 +128,19 @@ function orphanWonDeals(deals, missions) {
     }, [])
   );
 
-  const dealCouvert = new Array(dealsList.length).fill(false);
-  const missionUtilisee = new Array(missionsList.length).fill(false);
-
-  let changed = true;
-  while (changed) {
-    changed = false;
-
-    // Nombre de deals non-couverts encore candidats pour chaque mission non-utilisee.
-    const dealsParMission = new Array(missionsList.length).fill(0);
-    for (let di = 0; di < dealsList.length; di++) {
-      if (dealCouvert[di]) continue;
-      for (const mi of dealCandidats[di]) {
-        if (!missionUtilisee[mi]) dealsParMission[mi]++;
-      }
-    }
-
-    for (let di = 0; di < dealsList.length; di++) {
-      if (dealCouvert[di]) continue;
-      const candidatsDispo = dealCandidats[di].filter(mi => !missionUtilisee[mi]);
-      if (candidatsDispo.length === 1 && dealsParMission[candidatsDispo[0]] === 1) {
-        dealCouvert[di] = true;
-        missionUtilisee[candidatsDispo[0]] = true;
-        changed = true;
-      }
-    }
-  }
-
-  const orphelins = dealsList.filter((_, di) => !dealCouvert[di]);
-  const couverts = dealCouvert.filter(Boolean).length;
+  const matchDeal = maximumBipartiteMatching(dealCandidats, missionsList.length);
+  const orphelins = dealsList.filter((_, di) => matchDeal[di] === -1);
+  const couverts = dealsList.length - orphelins.length;
   return { couverts, orphelins };
 }
 
 module.exports = {
   MONTANT_TOLERANCE,
+  MIN_NOM_LEN,
   montantsProches,
   periodeTrimestre,
   nomsSimilaires,
   dealMissionCandidate,
+  maximumBipartiteMatching,
   orphanWonDeals,
 };
