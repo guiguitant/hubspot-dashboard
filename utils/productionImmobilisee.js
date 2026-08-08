@@ -44,9 +44,14 @@ function _anneePoste(poste, immo) {
 function _fenetreAnnee(poste, annee) {
   const debutAnnee = new Date(annee, 0, 1);
   const finAnnee = new Date(annee + 1, 0, 1); // exclue
-  const d = poste.date_debut ? new Date(poste.date_debut) : debutAnnee;
-  const f = poste.date_fin ? new Date(new Date(poste.date_fin).getTime() + MS_PAR_JOUR) : finAnnee;
-  if (isNaN(d.getTime()) || isNaN(f.getTime())) return { debut: debutAnnee, fin: finAnnee, joursAnnee: _daysBetween(debutAnnee, finAnnee) };
+  let d = poste.date_debut ? new Date(poste.date_debut) : debutAnnee;
+  let f = poste.date_fin ? new Date(new Date(poste.date_fin).getTime() + MS_PAR_JOUR) : finAnnee;
+  // Repli INDEPENDANT par borne : une date invalide retombe sur le defaut de CETTE borne seule (comme
+  // server.js/_prorataPoste, ou une comparaison avec une date NaN est toujours fausse et choisit deja
+  // implicitement la borne d'annee cote a cote) -- une seule date corrompue ne doit pas ecraser l'autre,
+  // valide.
+  if (isNaN(d.getTime())) d = debutAnnee;
+  if (isNaN(f.getTime())) f = finAnnee;
   const debut = d > debutAnnee ? d : debutAnnee;
   const fin = f < finAnnee ? f : finAnnee;
   return { debut, fin, joursAnnee: _daysBetween(debutAnnee, finAnnee) };
@@ -120,10 +125,14 @@ function _nomImmo(immo) {
  */
 function computeProductionImmobilisee(immos, postesByImmo, year, realEndIso) {
   const y = Number(year);
-  // Borne du reel ramenee a l'exercice : si elle ne depasse pas le 1er janvier de l'annee demandee,
-  // AUCUN jour de cet exercice n'est clos, donc rien n'est factuel -- y compris pour un poste ponctuel
-  // dont la date de debut, elle, serait deja passee (cas d'un exercice futur dont les prestations sont
-  // deja commandees : la charge appartient a l'exercice suivant, pas au reel de celui-ci).
+  // Defense en profondeur du module PUR : si la borne du reel ne depasse pas le 1er janvier de l'annee
+  // demandee, AUCUN jour de cet exercice n'est clos, donc rien n'est factuel -- y compris pour un poste
+  // ponctuel dont la date de debut, elle, serait deja passee (cas d'un exercice futur dont les
+  // prestations sont deja commandees : la charge appartient a l'exercice suivant, pas au reel de
+  // celui-ci). Ce cas n'est PAS atteignable via l'appelant reel /api/ebe : une annee future y a deja
+  // `real = null` (cf computeChargesHybride/hasReal), donc realEndIso = null et factuel = 0 avant meme
+  // d'arriver ici. La garde protege un appel direct du module (tests, ou futur appelant qui fournirait
+  // malgre tout une borne reelle pour un exercice futur).
   const borneBrute = _borneReelle(realEndIso);
   const borne = (borneBrute && borneBrute > new Date(y, 0, 1)) ? borneBrute : null;
   const parImmo = [];

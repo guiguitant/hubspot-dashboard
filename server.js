@@ -735,6 +735,8 @@ function computePlanAmortissement(immo) {
 }
 
 // --- Postes d'assiette (Phase 5.2/5.3) : composent le montant amortissable + la base CIR/CII ---
+// ATTENTION : formule dupliquee dans utils/productionImmobilisee.js (_prorataPoste/_montantRetenu) --
+// toute modification ici doit y etre repercutee (module pur teste, source de l'EBE Feature E).
 // Prorata temporis d'un poste : fraction de son année couverte par [date_debut, date_fin].
 // 1 si pas de dates (année pleine). date_fin est inclusive.
 function _prorataPoste(p) {
@@ -9284,7 +9286,9 @@ async function computeResultatFactuelForYear(year) {
   const creditTotal = creditImpot.total;
   const impotNet = isBrut - creditTotal;
   const remboursementCredit = Math.max(0, creditTotal - isBrut);
-  return { year, caFacture, totalCharges, productionImmobilisee: productionImmobilisee.factuel, resExploit, isBrut, creditTotal, impotNet, remboursementCredit };
+  // Cle differenciee de /api/ebe : ce miroir renvoie un NOMBRE (le seul factuel), pas l'objet
+  // { projete, factuel, parImmo } de /api/ebe -- meme cle avec deux types differents serait un piege.
+  return { year, caFacture, totalCharges, productionImmobiliseeFactuel: productionImmobilisee.factuel, resExploit, isBrut, creditTotal, impotNet, remboursementCredit };
 }
 
 app.get('/api/ebe', async (req, res) => {

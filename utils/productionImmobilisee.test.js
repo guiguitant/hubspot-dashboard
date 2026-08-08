@@ -92,6 +92,26 @@ describe('computeProductionImmobilisee · projete (retenu annuel)', () => {
   });
 });
 
+describe('computeProductionImmobilisee · fenetre (une seule date invalide)', () => {
+  it('ne retombe sur le defaut annee QUE pour la date invalide, garde la date valide en face', () => {
+    // Montant choisi pour un calcul rond : 36 500 / 365 = 100 EUR/jour.
+    // Cas 1 : date_debut invalide -> repli sur le 01/01/2026 seul, date_fin (30/06 inclus, donc
+    //   01/07 exclu) reste la borne haute. Jours : 01/01 -> 01/07 = 31+28+31+30+31+30 = 181.
+    //   projete = 100 x 181 = 18 100 EUR (et non 36 500, qui serait l annee pleine si le bug
+    //   "toute la fenetre efface par une seule date invalide" etait encore present).
+    const immosA = [immo('a')];
+    const postesA = { a: [poste({ montant: 36500, date_debut: 'pas-une-date', date_fin: '2026-06-30' })] };
+    expect(computeProductionImmobilisee(immosA, postesA, 2026, null).projete).toBe(18100);
+
+    // Cas 2 (symetrique) : date_fin invalide -> repli sur le 31/12/2026 (exclu 01/01/2027) seul,
+    //   date_debut (02/07) reste la borne basse. Jours : 02/07 -> 01/01/2027 =
+    //   30(juil)+31(aout)+30(sep)+31(oct)+30(nov)+31(dec) = 183. projete = 100 x 183 = 18 300 EUR.
+    const immosB = [immo('b')];
+    const postesB = { b: [poste({ montant: 36500, date_debut: '2026-07-02', date_fin: 'pas-une-date' })] };
+    expect(computeProductionImmobilisee(immosB, postesB, 2026, null).projete).toBe(18300);
+  });
+});
+
 describe('computeProductionImmobilisee · factuel (avancement au dernier mois clos)', () => {
   it('vaut 0 sans borne reelle (aucun mois clos)', () => {
     const immos = [immo('a')];
@@ -196,19 +216,41 @@ describe('computeProductionImmobilisee · invariants', () => {
     expect(computeProductionImmobilisee(immos, postes, 2025, null).projete).toBe(0);
   });
 
-  it('controle de recette : projete 2026 = SaaS + Simapro = 158 238 EUR', () => {
-    // Reproduction simplifiee des deux immos reelles (montants retenus deja connus) : le module
-    // doit rendre le total attendu par la spec et le detail par immo.
-    const immos = [immo('saas', { libelle: 'SaaS' }), immo('simapro', { libelle: 'Simapro' })];
+  it('deux immos avec quote-parts et fenetres : total = somme des retenus arrondis par immo', () => {
+    // Calcul a la main, INDEPENDANT de la formule du module (pas de chiffre de recette vivante) :
+    //
+    // Immo A (poste continu, prorata calendaire) :
+    //   assiette = montant 200 000 EUR x quote-part 25 % = 50 000 EUR
+    //   fenetre du poste = 01/03/2026 -> 31/08/2026 inclus, soit 01/03 -> 01/09 exclu =
+    //     mars(31) + avril(30) + mai(31) + juin(30) + juillet(31) + aout(31) = 184 jours, sur les
+    //     365 jours de 2026 (non bissextile).
+    //   projete = 50 000 x 184/365 = 25 205,4794... -> arrondi 25 205 EUR
+    //   borne du reel = 30/06/2026 inclus, donc jusqu'au 01/07/2026 exclu. Jours ecoules dans LA
+    //     fenetre du poste (01/03 -> 01/07) = mars(31) + avril(30) + mai(31) + juin(30) = 122 jours,
+    //     sur les 184 jours de la fenetre.
+    //   factuel = 25 205,4794... x 122/184 = 16 712,3287... -> arrondi 16 712 EUR
+    //
+    // Immo B (poste ponctuel, prorata_temporel = false -> pas de prorata calendaire) :
+    //   montant 45 000 EUR x quote-part 100 % (par defaut) = 45 000 EUR, montant plein.
+    //   date de debut 15/05/2026 < borne du reel (01/07/2026 exclu) -> deja engage, compte en entier.
+    //   projete = factuel = 45 000 EUR
+    //
+    // Total projete = 25 205 + 45 000 = 70 205 EUR
+    // Total factuel = 16 712 + 45 000 = 61 712 EUR
+    const immos = [immo('a', { libelle: 'Immo A' }), immo('b', { libelle: 'Immo B' })];
     const postes = {
-      saas: [poste({ montant: 124653, prorata_temporel: false })],
-      simapro: [poste({ montant: 33585, prorata_temporel: false })],
+      a: [poste({ montant: 200000, quote_part: 25, date_debut: '2026-03-01', date_fin: '2026-08-31' })],
+      b: [poste({ montant: 45000, prorata_temporel: false, date_debut: '2026-05-15' })],
     };
-    const r = computeProductionImmobilisee(immos, postes, 2026, null);
-    expect(r.projete).toBe(158238);
+    const r = computeProductionImmobilisee(immos, postes, 2026, '2026-06-30');
+    expect(r.projete).toBe(70205);
+    expect(r.factuel).toBe(61712);
+    // Immo B avant Immo A : tri par projete decroissant.
     expect(r.parImmo).toEqual([
-      { nom: 'SaaS', projete: 124653, factuel: 0 },
-      { nom: 'Simapro', projete: 33585, factuel: 0 },
+      { nom: 'Immo B', projete: 45000, factuel: 45000 },
+      { nom: 'Immo A', projete: 25205, factuel: 16712 },
     ]);
+    expect(r.projete).toBe(r.parImmo.reduce((s, x) => s + x.projete, 0));
+    expect(r.factuel).toBe(r.parImmo.reduce((s, x) => s + x.factuel, 0));
   });
 });
