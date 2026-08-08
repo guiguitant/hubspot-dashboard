@@ -22,6 +22,7 @@ const gsheets = require('./utils/googleSheets');
 const primesMap = require('./utils/primesSheetMap');
 const chargesPerimetre = require('./utils/chargesPerimetre');
 const { classifyProduitSubvention, CATEGORIE_SUBVENTIONS } = require('./utils/produitsSubventions'); // Feature A produits-et-suivis : classification credits Qonto "Subventions et aides"
+const { computeProductionImmobilisee } = require('./utils/productionImmobilisee'); // Feature E produits-et-suivis : produit d'exploitation "Production immobilisee" (compte 72)
 const { buildCoupleKey, buildIndexExactKey, buildIndexExactTVA, montantHT } = require('./utils/tvaCharges'); // cle categorie/sous-categorie partagee avec le parser Categories TVA (evite toute divergence) ; montantHT = conversion TTC->HT du reel (Tache 6) ; buildIndexExactTVA = jointure pure lettrage Pennylane (extraite en utils, revue C1)
 const cron = require('node-cron');
 const MASSE_TAB = 'Masse_salariale';
@@ -954,6 +955,42 @@ async function sumCreditsForYear(year) {
     return { cii: Math.round(cii), cir: Math.round(cir), total: Math.round(cii + cir) };
   } catch (e) {
     return { cii: 0, cir: 0, total: 0 };
+  }
+}
+
+// Production immobilisee (compte 72) d'une annee : produit d'exploitation qui neutralise, l'annee de
+// leur engagement, les quote-parts de charges portees a l'actif par le module Immobilisations. Sans
+// lui, le compte de resultat compte ces montants DEUX fois : en charge pleine (salaires du reel Qonto
+// ou du budget, prestations) PUIS en dotation aux amortissements. Feature E produits-et-suivis.
+// Le calcul lui-meme est pur et teste (utils/productionImmobilisee.js) ; cette fonction ne fait que
+// charger les donnees. SOURCE UNIQUE partagee par /api/ebe et son miroir computeResultatFactuelForYear
+// (meme role que computeSubventionsReel) : si le calcul evolue, les deux cascades suivent ensemble.
+// realEndKey = dernier mois CLOS ('YYYY-MM', MEME borne que le reel des charges et des subventions),
+// ou null si l'exercice n'en a aucun -> part factuelle nulle.
+// TOLERANT : { 0, 0, [] } si les tables immobilisations/postes n'existent pas encore ou en cas d'erreur.
+async function computeProductionImmobiliseeForYear(year, realEndKey) {
+  const vide = { projete: 0, factuel: 0, parImmo: [] };
+  try {
+    const { data, error } = await supabaseAdmin.from('immobilisations').select('*');
+    if (error || !data) return vide;
+    const postesByImmo = await fetchPostesByImmo();
+    // Borne du reel en date pleine. Construite en LOCAL (pas via toISOString, qui ferait basculer la
+    // fin de mois sur le jour suivant selon le fuseau, decalant l'avancement d'un jour).
+    let realEndIso = null;
+    if (realEndKey) {
+      const d = chargesPerimetre.monthEndDate(realEndKey);
+      realEndIso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+    const r = computeProductionImmobilisee(data, postesByImmo, year, realEndIso);
+    // Log unique, toujours emis (meme a zero : un "zero" silencieux masquerait une table vide ou un
+    // traitement mal saisi, alors que ce produit pese ~158 k€ sur l'exercice 2026).
+    console.log('[produits] production immobilisee %d : projete %d€, factuel %d€ (borne reel %s), %d immo(s) : %s',
+      year, r.projete, r.factuel, realEndIso || 'aucun mois clos', r.parImmo.length,
+      r.parImmo.map(i => i.nom + ' ' + i.projete + '€').join(', ') || 'aucune');
+    return r;
+  } catch (e) {
+    console.warn('[produits] production immobilisee indisponible (%s) : 0 retenu', e.message);
+    return vide;
   }
 }
 
@@ -9201,13 +9238,17 @@ async function computeResultatFactuelForYear(year) {
   // classes (computeSubventionsReel) ; mois courant/futurs -> Plan_TRE (fetchFinancementsForYear,
   // inchange), restreint a ces seuls mois pour eviter un double compte avec le reel Qonto. Miroir de
   // /api/ebe ci-dessous : si l'un evolue, garder l'autre aligne.
-  const [subventionsReel, financementsPrev] = await Promise.all([
+  const [subventionsReel, financementsPrev, productionImmobilisee] = await Promise.all([
     chargesData.real
       ? computeSubventionsReel(chargesData.real.start, chargesData.real.end)
       : Promise.resolve(emptySubventionsReel()),
     chargesData.prev
       ? fetchFinancementsForYear(year, chargesData.prev.start)
       : Promise.resolve({ subventions: [], aides: [] }),
+    // Feature E produits-et-suivis : production immobilisee, MEME borne de reel que les charges et
+    // les subventions ci-dessus. Cette cascade est la cascade FACTUELLE : elle ne prend que la part
+    // deja ecoulee (comme elle ne prend que le CA facture, jamais le pipeline).
+    computeProductionImmobiliseeForYear(year, chargesData.real ? chargesData.real.end : null),
   ]);
   const startDate = new Date(start);
   const endDate = new Date(end); endDate.setHours(23, 59, 59, 999);
@@ -9235,13 +9276,15 @@ async function computeResultatFactuelForYear(year) {
   // Le total (totalSubv + totalAide) est inchange, produits = subventions + aides par construction.
   const totalSubv = subventionsReel.subventions.montant + financementsPrev.subventions.reduce((s, f) => s + f.montant, 0);
   const totalAide = subventionsReel.aides.montant + financementsPrev.aides.reduce((s, f) => s + f.montant, 0);
-  const ebe = caFacture - totalCharges + totalSubv + totalAide;
+  // Feature E : la production immobilisee est un produit d'exploitation, elle entre donc dans l'EBE
+  // (et par ricochet dans le resultat d'exploitation, l'IS et le credit d'impot rembourse en N+1).
+  const ebe = caFacture - totalCharges + totalSubv + totalAide + productionImmobilisee.factuel;
   const resExploit = Math.round(ebe) - amortissements;
   const isBrut = computeIS(resExploit);
   const creditTotal = creditImpot.total;
   const impotNet = isBrut - creditTotal;
   const remboursementCredit = Math.max(0, creditTotal - isBrut);
-  return { year, caFacture, totalCharges, resExploit, isBrut, creditTotal, impotNet, remboursementCredit };
+  return { year, caFacture, totalCharges, productionImmobilisee: productionImmobilisee.factuel, resExploit, isBrut, creditTotal, impotNet, remboursementCredit };
 }
 
 app.get('/api/ebe', async (req, res) => {
@@ -9289,13 +9332,16 @@ app.get('/api/ebe', async (req, res) => {
     // Mois courant/futurs -> Plan_TRE (fetchFinancementsForYear, inchange), restreint a ces seuls mois
     // (chargesData.prev.start) pour ne jamais compter un mois clos deux fois. Miroir de
     // computeResultatFactuelForYear ci-dessus : si l'un evolue, garder l'autre aligne.
-    const [subventionsReel, financementsPrev] = await Promise.all([
+    const [subventionsReel, financementsPrev, productionImmobilisee] = await Promise.all([
       chargesData.real
         ? computeSubventionsReel(chargesData.real.start, chargesData.real.end)
         : Promise.resolve(emptySubventionsReel()),
       chargesData.prev
         ? fetchFinancementsForYear(yearParam, chargesData.prev.start)
         : Promise.resolve({ subventions: [], aides: [] }),
+      // Feature E produits-et-suivis : production immobilisee (compte 72), MEME borne de reel que
+      // les charges et les subventions ci-dessus (chargesData.real.end = dernier mois clos).
+      computeProductionImmobiliseeForYear(yearParam, chargesData.real ? chargesData.real.end : null),
     ]);
     // Le reel Qonto est SOUS-TYPE (I4, classifyProduitSubvention) : une ligne dans "subventions", une
     // ligne dans "aides". Avant, tout le reel atterrissait dans "subventions" et la ligne "Aides" du
@@ -9317,9 +9363,12 @@ app.get('/api/ebe', async (req, res) => {
     const pipelinePondere = isCurrentYear ? await computePipelinePondere() : 0;
 
     // 5) EBE factuel (CA Facturé) et projeté (CA Facturé + Pipeline pondéré)
-    const ebeFactuel = caFacture - totalCharges + totalSubv + totalAide;
+    // Feature E : la production immobilisée est un produit d'exploitation (compte 72), elle entre
+    // donc dans l'EBE, avec la même logique factuel/projeté que le reste de la colonne : part déjà
+    // écoulée à la fin du dernier mois clos côté factuel, retenu annuel complet côté projeté.
+    const ebeFactuel = caFacture - totalCharges + totalSubv + totalAide + productionImmobilisee.factuel;
     const caProjete  = caFacture + pipelinePondere;
-    const ebeProjete = caProjete - totalCharges + totalSubv + totalAide;
+    const ebeProjete = caProjete - totalCharges + totalSubv + totalAide + productionImmobilisee.projete;
 
     // 5b) Masse salariale de l'année — INFO uniquement (déjà comprise dans totalCharges via "Frais de personnel").
     // Affichée en sous-ligne du Compte de résultat SANS être resoustraite (évite le double comptage).
@@ -9378,6 +9427,10 @@ app.get('/api/ebe', async (req, res) => {
       //   - `ok` / `erreur` (I2) : lecture Qonto en echec, le montant affiche provient du budget seul ;
       //   - `horsPerimetre` (M2) : credits evoquant une subvention sous une categorie parente non reconnue.
       subventionsReel,
+      // Feature E produits-et-suivis : produit d'exploitation "Production immobilisée" (compte 72).
+      // { factuel, projete, parImmo: [{ nom, projete, factuel }] } : le total est exactement la somme
+      // des lignes parImmo (arrondi par immo), pour la ligne de detail du compte de resultat.
+      productionImmobilisee,
       ebe: { factuel: Math.round(ebeFactuel), projete: Math.round(ebeProjete) },
       amortissements,
       resultatExploitation: { factuel: resExploitFactuel, projete: resExploitProjete },

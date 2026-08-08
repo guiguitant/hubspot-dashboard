@@ -14278,6 +14278,16 @@
       const subvBadge = _crSubventionsBadgeHtml(d.subventionsReel);
       if (d.financements.totalSubv || subvBadge) html += row('Subventions', d.financements.totalSubv, { plus: true, onclick: "openCrDetailModal('subventions')", badge: subvBadge });
       if (d.financements.totalAide) html += row('Aides', d.financements.totalAide, { plus: true, onclick: "openCrDetailModal('aides')" });
+      // Feature E : produit d'exploitation (compte 72) qui neutralise les charges portées à l'actif
+      // par le module Immobilisations (sinon elles pèsent deux fois : charge pleine + dotation).
+      // Même colonne que le reste du tableau : projeté = retenu annuel, factuel = part écoulée au
+      // dernier mois clos. Ligne masquée si le montant est nul (aucune immobilisation sur l'exercice).
+      const prodImmo = d.productionImmobilisee || null;
+      const prodImmoVal = prodImmo ? (projete ? prodImmo.projete : prodImmo.factuel) : 0;
+      if (prodImmoVal) {
+        html += row('Production immobilisée', prodImmoVal, { plus: true, onclick: "openCrDetailModal('productionImmobilisee')" });
+        html += subRow('Quote-parts immobilisées (module Immobilisations) : neutralise les charges portées à l\'actif', '');
+      }
       html += row("= Excedent brut d'exploitation (EBE)", ebe, { total: true });
       html += row('Dotations aux amortissements', d.amortissements, { neg: d.amortissements > 0, sep: true, onclick: "navigateTo('immobilisations')" });
       if (!d.amortissements) html += subRow('Aucune immobilisation active cette annee (module Immobilisations)', formatEuro(0));
@@ -14327,6 +14337,24 @@
         // (Subventions et Aides) : chacune porte une ligne « réel Qonto, mois clos » depuis le
         // sous-typage subvention/aide, et la ventilation les concerne toutes les deux.
         body += _crSubventionsReelHtml(d.subventionsReel);
+      } else if (kind === 'productionImmobilisee') {
+        // Feature E : détail par immobilisation. Les deux mesures sont affichées côte à côte (retenu
+        // annuel et avancement au dernier mois clos) : c'est la seule vue qui explique l'écart entre
+        // la colonne projetée et la colonne factuelle de cette ligne.
+        const pi = d.productionImmobilisee || { projete: 0, factuel: 0, parImmo: [] };
+        const lignes = pi.parImmo || [];
+        const val = projete ? pi.projete : pi.factuel;
+        const duo = (a, b) => formatEuro(a) + ' <span style="color:var(--text-secondary);font-size:0.78rem">· ' + formatEuro(b) + '</span>';
+        title = 'Production immobilisée ' + d.year;
+        body = '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.6rem">Quote-parts immobilisées (module Immobilisations) : neutralise les charges portées à l\'actif. Sans ce produit, ces montants pèseraient deux fois sur le résultat (charge pleine l\'année de la dépense, puis dotation aux amortissements sur 5 ans).</div>';
+        body += '<div style="display:flex;justify-content:space-between;padding:0.25rem 0;border-bottom:1px solid var(--border);font-size:0.74rem;color:var(--text-secondary)"><span>Immobilisation</span><span>Retenu ' + d.year + ' · avancement réel</span></div>';
+        for (const i of lignes) {
+          body += '<div style="display:flex;justify-content:space-between;padding:0.35rem 0;border-bottom:1px solid var(--border)"><span>' + escapeHtml(i.nom) + '</span><span>' + duo(i.projete, i.factuel) + '</span></div>';
+        }
+        if (!lignes.length) body += '<div style="color:var(--text-secondary);padding:0.4rem 0">Aucune immobilisation avec des postes sur cet exercice.</div>';
+        body += '<div style="display:flex;justify-content:space-between;padding:0.5rem 0;font-weight:700"><span>Total</span><span>' + duo(pi.projete, pi.factuel) + '</span></div>';
+        body += '<div style="font-size:0.74rem;color:var(--text-secondary)">Montant repris dans le compte de résultat (colonne ' + (projete ? 'projetée' : 'factuelle') + ') : ' + formatEuro(val) + '. L\'avancement réel s\'arrête à la fin du dernier mois clos, comme les charges et les subventions réelles.</div>';
+        body += '<div style="font-size:0.72rem;color:var(--text-secondary);margin-top:0.5rem"><a onclick="navigateTo(\'immobilisations\')" style="cursor:pointer;text-decoration:underline">Detail des postes et quote-parts dans le module Immobilisations</a></div>';
       } else if (kind === 'is') {
         const base = projete ? d.resultatExploitation.projete : d.resultatExploitation.factuel;
         const is = projete ? d.is.projete : d.is.factuel;
