@@ -609,7 +609,7 @@ function endOfYearIso(year) {
 //      avec le "maintenant" REEL (deja en janvier N), nowYear vaudrait N et non N-1 : une charge de N-1
 //      encore "roulante" (jamais rattrapee avant la cloture, ex. facturee tardivement) resterait bloquee
 //      a son mois theorique perime au lieu de converger vers decembre N-1 (le garde ne la reporte plus,
-//      puisque son annee (N-1) ne correspond plus a nowYear (N)) — et de toute facon
+//      puisque son annee (N-1) ne correspond plus a nowYear (N)) ; et de toute facon
 //      selectChargeEntriesForExercice l'ecarterait (dateCharge hors prefixe de targetYear). En simulant
 //      asOfIso = fin N-1, nowYear redevient N-1 le temps de CET appel : le garde continue de faire
 //      converger toute charge encore ouverte vers decembre N-1 (jamais vers N, jamais perdue), et
