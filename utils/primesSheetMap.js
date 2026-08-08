@@ -64,14 +64,37 @@ function assertPartners(layout, expected) {
   if (missing.length) throw new Error('Associe(s) introuvable(s) dans .Primes : ' + missing.join(', '));
 }
 
+// Duree en jours de la periode de grace de cloture (feature D, spec 2026-08-08-produits-et-suivis) :
+// jusqu'au PRIMES_GRACE_JOURS-ieme jour de janvier INCLUS, l'exercice N-1 reste ouvrable (miroir des
+// ecritures post-cloture qu'un expert-comptable passe toujours). Lue UNE SEULE FOIS au chargement du
+// module (comme les autres constantes surchargeables par env de ce projet, cf IS_SEUIL_REDUIT dans
+// server.js) ; les fonctions ci-dessous acceptent un 2e parametre optionnel `graceJours` pour rester
+// testables sans manipuler process.env (meme pattern que buildPrimesSubcats dans chargesPerimetre.js).
+const PRIMES_GRACE_JOURS = Number(process.env.PRIMES_GRACE_JOURS) || 20;
+
+// Vrai si nowIso tombe dans la fenetre de grace de janvier (1er au graceJours-ieme jour INCLUS).
+// Ne joue JAMAIS hors janvier : une charge de decembre est deja dans l'exercice courant (pas besoin de
+// grace) et le 31 decembre ne beneficie pas par avance de la grace de l'annee suivante (getMonth()===0
+// exclusivement, jamais getMonth()===11).
+function isPrimesGraceActive(nowIso, graceJours) {
+  const jours = graceJours != null ? graceJours : PRIMES_GRACE_JOURS;
+  const d = new Date(nowIso);
+  return d.getMonth() === 0 && d.getDate() <= jours;
+}
+
 // Clef plancher 'YYYY-01' du DEBUT DE L'EXERCICE de nowIso (pas le mois courant). Pourquoi : le
 // plancher de charge (floorChargeKey, cf kpiCompute.js) glisse de trimestre en trimestre ; si on
 // figeait au mois courant, la cellule du trimestre precedent garderait sa valeur obsolete (jamais
 // remise a 0) pendant que la meme charge est reecrite au trimestre suivant, d'ou un double compte.
 // Derive l'annee de la meme facon que l'appelant (server.js::syncPrimesToSheet) : ne change rien au
 // comportement, rend seulement la derivation testable independamment de server.js.
-function primesFloorKey(nowIso) {
+// Pendant la grace (D) : renvoie le debut de l'exercice N-1 (pas N), pour que buildUpdates continue de
+// reecrire (valeur ou 0) toutes les colonnes de N-1 en plus de celles de N, exactement comme il le fait
+// deja pour "l'exercice courant" (meme invariant, applique a N-1 le temps de la grace). Apres la grace,
+// comportement inchange (figement au 1er janvier de N).
+function primesFloorKey(nowIso, graceJours) {
   const currentYear = new Date(nowIso).getFullYear();
+  if (isPrimesGraceActive(nowIso, graceJours)) return (currentYear - 1) + '-01';
   return currentYear + '-01';
 }
 
@@ -133,4 +156,4 @@ function roundEntriesPreservingSumByPartner(entries) {
   return list.map((e, i) => ({ ...e, montant: roundedByIndex[i] }));
 }
 
-module.exports = { colToLetter, parseMonthHeader, discoverLayout, assertPartners, buildUpdates, roundPreservingSum, primesFloorKey, roundEntriesPreservingSumByPartner };
+module.exports = { colToLetter, parseMonthHeader, discoverLayout, assertPartners, buildUpdates, roundPreservingSum, primesFloorKey, roundEntriesPreservingSumByPartner, PRIMES_GRACE_JOURS, isPrimesGraceActive };

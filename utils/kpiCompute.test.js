@@ -1,5 +1,5 @@
 'use strict';
-const { computeKpi, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, OPERE_STATES, SIGNE_EXCLUDED_STATES, computePrimePool, primeDefaultRates, computePrimePayments, selectChargeEntriesForExercice } = require('./kpiCompute');
+const { computeKpi, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, OPERE_STATES, SIGNE_EXCLUDED_STATES, computePrimePool, primeDefaultRates, computePrimePayments, selectChargeEntriesForExercice, computePrimesChargeForExercice, endOfYearIso } = require('./kpiCompute');
 const { lastMonthOfQuarter } = require('./kpiCompute');
 
 describe('lastMonthOfQuarter : dernier mois du trimestre (date de charge)', () => {
@@ -749,5 +749,84 @@ describe('selectChargeEntriesForExercice : filtre exercice + provision, garde-fo
     // currentYear-2 .. currentYear. Un seul de ces appels doit retenir la provision.
     const retenues = [2024, 2025, 2026].filter(signatureYear => selectChargeEntriesForExercice(provision, signatureYear, 2026).length > 0);
     expect(retenues).toEqual([2026]);
+  });
+});
+
+describe('computePrimesChargeForExercice : cloture souple des primes (grace, feature D)', () => {
+  const cfg = {
+    rates: { Vincent: { txNew: 4.5, txRepeat: 2.5 } },
+    tiers: [{ seuil: 650000, taux: 7 }, { seuil: 600000, taux: 5 }, { seuil: 550000, taux: 3 }],
+    resultatAnnuel: 150000,
+    gateTrimestriel: 120000,
+  };
+  // Deal signe ET facture (acompte) au T4 2025 : le scenario documente par la spec D ("une charge de
+  // prime du T4 saisie apres le 31/12"). Charge theorique = dernier mois du T4 2025 = decembre 2025.
+  const dealT4N1 = (over = {}) => mission({
+    id: 'q4n1', typeCa: 'Newsale', dateSignature: '2025-11-05', partnerCommercial: ['Vincent'],
+    ca: 200000, etat: 'Signé', dateFactureAcompte: '2025-12-20', ...over,
+  });
+  const base = { splits: [], config: cfg, factOverrides: [], participants: ['Vincent'] };
+
+  it('endOfYearIso : 31 decembre 23:59:59.999 UTC de l\'annee donnee', () => {
+    expect(endOfYearIso(2025)).toBe('2025-12-31T23:59:59.999Z');
+  });
+
+  it('SANS le 2e passage (comme le fait computePrimesChargeSchedule hors grace, now = 10 janvier 2026) : la charge T4/2025 est perdue', () => {
+    // Reproduit exactement l'appel "exercice courant" que fait computePrimesChargeSchedule (targetYear
+    // = annee reelle, asOfIso = maintenant reel) : c'est le bug documente par la spec D, reproduit ici
+    // AVANT le correctif (le 2e passage grace n'est pas encore ajoute a cet appel).
+    const r = computePrimesChargeForExercice({ ...base, missions: [dealT4N1()], targetYear: 2026, asOfIso: '2026-01-10T09:00:00.000Z' });
+    expect(r.detailCharge.find((e) => e.deal === 'q4n1')).toBeUndefined();
+    expect(r.floatByPartnerMonth.Vincent).toBeUndefined();
+  });
+
+  it('meme cas au 25 janvier (hors grace, PRIMES_GRACE_JOURS=20 par defaut) : comportement actuel inchange, toujours perdue par ce seul passage', () => {
+    const r = computePrimesChargeForExercice({ ...base, missions: [dealT4N1()], targetYear: 2026, asOfIso: '2026-01-25T09:00:00.000Z' });
+    expect(r.detailCharge.find((e) => e.deal === 'q4n1')).toBeUndefined();
+  });
+
+  it('AVEC le 2e passage grace (targetYear=2025, asOfIso=fin d\'exercice 2025) : la charge T4/2025 est retenue, ECRITE EN DECEMBRE 2025 (jamais reportee vers 2026, jamais perdue)', () => {
+    // C'est exactement l'appel supplementaire que server.js::computePrimesChargeSchedule ajoute PENDANT
+    // LA GRACE (primesMap.isPrimesGraceActive), en PLUS de l'appel normal ci-dessus (qui reste vide pour
+    // ce deal).
+    const r = computePrimesChargeForExercice({ ...base, missions: [dealT4N1()], targetYear: 2025, asOfIso: endOfYearIso(2025) });
+    const e = r.detailCharge.find((x) => x.deal === 'q4n1');
+    expect(e).toBeDefined();
+    expect(e.dateCharge).toBe('2025-12');
+    expect(r.floatByPartnerMonth.Vincent['2025-12']).toBe(9000); // 200000 * 4.5%
+  });
+
+  it('fusion des deux passages (comme le fait computePrimesChargeSchedule pendant la grace) : exactement UNE entree pour ce deal, aucun double compte', () => {
+    const passNormal = computePrimesChargeForExercice({ ...base, missions: [dealT4N1()], targetYear: 2026, asOfIso: '2026-01-10T09:00:00.000Z' });
+    const passGrace = computePrimesChargeForExercice({ ...base, missions: [dealT4N1()], targetYear: 2025, asOfIso: endOfYearIso(2025) });
+    const merged = [...passNormal.detailCharge, ...passGrace.detailCharge].filter((e) => e.deal === 'q4n1');
+    expect(merged.length).toBe(1);
+    expect(merged[0].dateCharge).toBe('2025-12');
+  });
+
+  it('deal signe T4/2025 mais JAMAIS facture (provision) : la grace le garde provisoire en decembre 2025, pas perdu, pas retenu par le passage normal (R3)', () => {
+    const dealNonFacture = dealT4N1({ id: 'q4n1-prov', dateFactureAcompte: null });
+    const passNormal = computePrimesChargeForExercice({ ...base, missions: [dealNonFacture], targetYear: 2026, asOfIso: '2026-01-10T09:00:00.000Z' });
+    expect(passNormal.detailCharge.find((e) => e.deal === 'q4n1-prov')).toBeUndefined(); // signatureYear(2025) != targetYear(2026), R3
+
+    const passGrace = computePrimesChargeForExercice({ ...base, missions: [dealNonFacture], targetYear: 2025, asOfIso: endOfYearIso(2025) });
+    const e = passGrace.detailCharge.find((x) => x.deal === 'q4n1-prov');
+    expect(e).toBeDefined();
+    expect(e.statut).toBe('provisoire');
+    expect(e.dateCharge).toBe('2025-12'); // plancher T4 de l'exercice REJOUE (asOfIso = fin 2025)
+  });
+
+  it('deal signe en 2025 mais dont l\'acompte est REELLEMENT facture en 2026 : reste rattache a l\'exercice 2026, jamais aspire par le passage grace (R8, pas de double compte)', () => {
+    const dealFactureEnN = mission({
+      id: 'facture-en-n', typeCa: 'Newsale', dateSignature: '2025-11-05', partnerCommercial: ['Vincent'],
+      ca: 200000, etat: 'Signé', dateFactureAcompte: '2026-01-15',
+    });
+    const passNormal = computePrimesChargeForExercice({ ...base, missions: [dealFactureEnN], targetYear: 2026, asOfIso: '2026-01-20T09:00:00.000Z' });
+    const eN = passNormal.detailCharge.find((e) => e.deal === 'facture-en-n');
+    expect(eN).toBeDefined();
+    expect(eN.dateCharge).toBe('2026-03'); // T1 2026 (facture reelle le 15/01/2026)
+
+    const passGrace = computePrimesChargeForExercice({ ...base, missions: [dealFactureEnN], targetYear: 2025, asOfIso: endOfYearIso(2025) });
+    expect(passGrace.detailCharge.find((e) => e.deal === 'facture-en-n')).toBeUndefined();
   });
 });

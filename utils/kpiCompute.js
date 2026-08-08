@@ -1,4 +1,5 @@
 'use strict';
+const { computeBillingForYear } = require('./billing');
 
 // États : voir spec 2026-06-26-kpi-partners-design.md §2.
 const SIGNE_EXCLUDED_STATES = ['Annulé'];          // signé = tout sauf ça
@@ -583,4 +584,52 @@ function selectChargeEntriesForExercice(detailCharge, signatureYear, currentYear
   });
 }
 
-module.exports = { computeKpi, yearOf, yearOfDate, signedAmountForYear, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, signatureDate, splitAmount, displaySplit, OPERE_STATES, SIGNE_EXCLUDED_STATES, primeDefaultRates, normalizePrimeConfig, computePrimePool, computePrimePayments, lastMonthOfQuarter, selectChargeEntriesForExercice };
+// ISO du dernier instant de `year` (31 decembre 23:59:59.999). Sert de "now effectif" pour rejouer la
+// cloture d'un exercice (cf computePrimesChargeForExercice ci-dessous) : passer cette date en `now` a
+// computePrimePayments simule un calcul fait le dernier jour de l'exercice, donc nowYear === year et le
+// plancher de charge (floorChargeKey) tombe sur le dernier trimestre (decembre).
+function endOfYearIso(year) {
+  return year + '-12-31T23:59:59.999Z';
+}
+
+// Echeancier de charge des primes d'UN SEUL exercice `targetYear`, evalue "a la date" `asOfIso`
+// (nowYear/floorChargeKey/rattrapage de computePrimePayments, cf plus haut). Enumere les annees de
+// SIGNATURE [targetYear-2, targetYear-1, targetYear] (R8 : un deal signe en N-2 peut n'etre facture,
+// donc charge, qu'en N) et ne garde que les entrees retenues par selectChargeEntriesForExercice.
+// Fonction PURE (aucun I/O Supabase/Notion) : brique testable de server.js::computePrimesChargeSchedule,
+// qui l'appelle :
+//   1) TOUJOURS une fois pour l'exercice reel courant (targetYear = annee de "maintenant",
+//      asOfIso = "maintenant" reel) ;
+//   2) UNE DEUXIEME FOIS, uniquement PENDANT LA PERIODE DE GRACE de janvier (feature D, spec
+//      2026-08-08-produits-et-suivis-design.md §D, cf primesMap.isPrimesGraceActive), pour l'exercice
+//      N-1 avec targetYear = N-1 et asOfIso = endOfYearIso(N-1) : cela REJOUE la cloture de N-1 comme si
+//      elle avait eu lieu son dernier jour. Pourquoi c'est necessaire (et pas juste "laisser passer les
+//      entrees datees N-1") : le garde anti-franchissement d'exercice de computePrimePayments
+//      (`yearOfDate(chargeMk) === nowYear`) compare au nowYear DERIVE DE `now`. Si on appelait ce calcul
+//      avec le "maintenant" REEL (deja en janvier N), nowYear vaudrait N et non N-1 : une charge de N-1
+//      encore "roulante" (jamais rattrapee avant la cloture, ex. facturee tardivement) resterait bloquee
+//      a son mois theorique perime au lieu de converger vers decembre N-1 (le garde ne la reporte plus,
+//      puisque son annee (N-1) ne correspond plus a nowYear (N)) — et de toute facon
+//      selectChargeEntriesForExercice l'ecarterait (dateCharge hors prefixe de targetYear). En simulant
+//      asOfIso = fin N-1, nowYear redevient N-1 le temps de CET appel : le garde continue de faire
+//      converger toute charge encore ouverte vers decembre N-1 (jamais vers N, jamais perdue), et
+//      selectChargeEntriesForExercice(., y, targetYear=N-1) la retient. Les deux appels ne se recouvrent
+//      JAMAIS : dateCharge est deterministe pour une paire (deal, `now`) donnee, et le filtre par
+//      prefixe de selectChargeEntriesForExercice ne peut matcher qu'UN SEUL des deux targetYear (preuve
+//      par les tests, cf kpiCompute.test.js "clôture souple des primes (grâce, D)").
+function computePrimesChargeForExercice({ missions, splits, config, factOverrides, participants, targetYear, asOfIso }) {
+  const floatByPartnerMonth = {};
+  const detailCharge = [];
+  for (const y of [targetYear - 2, targetYear - 1, targetYear]) {
+    const caFacture = computeBillingForYear(missions, factOverrides, y).total;
+    const pay = computePrimePayments({ missions, splits, config, year: y, caFacture, versements: [], now: asOfIso, participants });
+    for (const e of selectChargeEntriesForExercice(pay.detailCharge, y, targetYear)) {
+      detailCharge.push(e);
+      const dst = floatByPartnerMonth[e.partner] = floatByPartnerMonth[e.partner] || {};
+      dst[e.dateCharge] = (dst[e.dateCharge] || 0) + e.montant;
+    }
+  }
+  return { floatByPartnerMonth, detailCharge };
+}
+
+module.exports = { computeKpi, yearOf, yearOfDate, signedAmountForYear, totalCaAnnee, signedByQuarter, clawbackCandidates, quarterOfDate, signatureDate, splitAmount, displaySplit, OPERE_STATES, SIGNE_EXCLUDED_STATES, primeDefaultRates, normalizePrimeConfig, computePrimePool, computePrimePayments, lastMonthOfQuarter, selectChargeEntriesForExercice, endOfYearIso, computePrimesChargeForExercice };

@@ -9,7 +9,7 @@ const { authenticator } = require('otplib');
 const { execFile } = require('child_process');
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
-const { computeKpi, totalCaAnnee, signedByQuarter, clawbackCandidates, computePrimePool, computePrimePayments, selectChargeEntriesForExercice } = require('./utils/kpiCompute');
+const { computeKpi, totalCaAnnee, signedByQuarter, clawbackCandidates, computePrimePool, computePrimePayments, endOfYearIso, computePrimesChargeForExercice } = require('./utils/kpiCompute');
 const { computeBillingForYear } = require('./utils/billing');
 const { buildSalesNavUrl } = require('./utils/buildSalesNavUrl');
 const multer = require('multer');
@@ -8824,27 +8824,33 @@ async function computePrimesChargeSchedule(nowIso) {
   // preload {missions, splits, objectives} deja fetches ci-dessus pour eviter un refetch redondant.
   const participants = await primesParticipantsFor(nowIso, { missions, splits, objectives });
 
-  // Enumeration multi-exercice : deal signe en N-2..N, charge potentiellement en N.
+  // Exercice(s) a calculer : l'exercice courant REEL, toujours ; + l'exercice N-1 REJOUE comme s'il
+  // etait encore ouvert, UNIQUEMENT PENDANT LA PERIODE DE GRACE de janvier (feature D, spec
+  // 2026-08-08-produits-et-suivis-design.md §D). Sans ce 2e passage, une charge de T4/N-1 saisie apres
+  // le 31/12 est perdue : le garde anti-franchissement d'exercice de computePrimePayments compare a
+  // l'annee de `now`, qui vaut deja N en janvier ; passer asOfIso = fin d'exercice N-1 restaure
+  // artificiellement "nowYear = N-1" le temps de ce calcul, pour que toute charge N-1 encore ouverte
+  // (facturee tardivement, ou jamais facturee = provision) converge vers decembre N-1 au lieu de rester
+  // bloquee a un mois perime ou d'etre ecartee par selectChargeEntriesForExercice. Design + preuve TDD :
+  // utils/kpiCompute.js::computePrimesChargeForExercice (fonction pure, testee independamment).
+  const exercices = [{ targetYear: currentYear, asOfIso: nowIso }];
+  if (primesMap.isPrimesGraceActive(nowIso)) {
+    exercices.push({ targetYear: currentYear - 1, asOfIso: endOfYearIso(currentYear - 1) });
+  }
+
+  // byPartnerMonthCharge est reconstruit A PARTIR de detailCharge (et non de pay.byPartnerMonthCharge)
+  // pour garantir que les deux restent exactement coherents (chaque entree detailCharge correspond a
+  // un seul addCharge dans computePrimePayments, cf kpiCompute.js). Les deux passages (exercice courant,
+  // + exercice N-1 pendant la grace) ne se recouvrent jamais (cf preuve dans computePrimesChargeForExercice) :
+  // fusion simple, aucune deduplication necessaire.
   const floatByPartnerMonth = {};
   const detailCharge = [];
-  for (const y of [currentYear - 2, currentYear - 1, currentYear]) {
-    const caFacture = computeBillingForYear(missions, factOverrides, y).total;
-    const pay = computePrimePayments({ missions, splits, config, year: y, caFacture, versements: [], now: nowIso, participants });
-    // Filtre pur (utils/kpiCompute.js::selectChargeEntriesForExercice, teste independamment) : ne garde
-    // que les entrees dont la charge tombe dans l'exercice courant (dateCharge, jamais null grace a R4),
-    // et n'accepte une provision (statut 'provisoire') que pour le millesime de signature correspondant
-    // a l'exercice courant (y === currentYear) : sinon la meme provision glissante (floorChargeKey derive
-    // de `now`, pas de l'annee de signature y) serait comptee dans chaque exercice successif tant que le
-    // deal reste non facture. Une prime dont le deal n'est toujours pas facture apres la cloture de son
-    // exercice de signature sera chargee le jour de sa facturation (statut 'du'/'a_venir', regle R2),
-    // jamais reprovisionnee dans les exercices suivants (cf spec §10, points de vigilance).
-    // byPartnerMonthCharge est reconstruit A PARTIR de detailCharge (et non de pay.byPartnerMonthCharge)
-    // pour garantir que les deux restent exactement coherents (chaque entree detailCharge correspond a
-    // un seul addCharge dans computePrimePayments, cf kpiCompute.js).
-    for (const e of selectChargeEntriesForExercice(pay.detailCharge, y, currentYear)) {
-      detailCharge.push(e);
-      const dst = floatByPartnerMonth[e.partner] = floatByPartnerMonth[e.partner] || {};
-      dst[e.dateCharge] = (dst[e.dateCharge] || 0) + e.montant;
+  for (const { targetYear, asOfIso } of exercices) {
+    const r = computePrimesChargeForExercice({ missions, splits, config, factOverrides, participants, targetYear, asOfIso });
+    detailCharge.push(...r.detailCharge);
+    for (const [partner, months] of Object.entries(r.floatByPartnerMonth)) {
+      const dst = floatByPartnerMonth[partner] = floatByPartnerMonth[partner] || {};
+      for (const [mk, v] of Object.entries(months)) dst[mk] = (dst[mk] || 0) + v;
     }
   }
 
