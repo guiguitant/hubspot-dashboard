@@ -4086,7 +4086,7 @@
     <div id="analytics-tab-charges" style="display:none">
       <!-- Cards instantanees, toujours actuelles, independantes de la periode selectionnee -->
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:2rem">
-        <div class="kpi-block">
+        <div class="kpi-block" onclick="openBudgetChargesDetailModal()" style="cursor:pointer">
           <div class="kpi-label">Budget de charges <span class="kpi-unit">HT</span></div>
           <div class="kpi-value" id="chargesAnnuellesValue">--</div>
           <div class="kpi-sub" id="chargesAnnuellesSub">CR_Prev · budget annuel, hors réel bancaire</div>
@@ -4129,10 +4129,7 @@
       <div class="section">
         <div class="section-title">Répartition par catégorie</div>
         <p style="color:var(--text-secondary);font-size:0.8rem;margin:-0.4rem 0 0.75rem">Source : Pennylane · TTC · décaissement.</p>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;align-items:start">
-          <div style="position:relative;height:500px"><canvas id="analyticsChargesChart"></canvas></div>
-          <div id="depensesTableCategories"><p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p></div>
-        </div>
+        <div id="depensesTableCategories"><p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p></div>
       </div>
 
       <div class="section">
@@ -10236,7 +10233,6 @@
           } else warnEl.style.display = 'none';
         }
         renderDepensesKpis();
-        renderDepensesCategoriesPie();
         renderDepensesCategories();
         renderDepensesVendors();
         renderDepensesSubscriptions();
@@ -10384,6 +10380,63 @@
             <td style="padding:0.45rem 0.8rem;text-align:right;font-weight:600">${formatEuro(c.montant)}</td>
             <td style="padding:0.45rem 0.8rem;text-align:right;color:var(--text-secondary)">${pct}%</td>
           </tr>`;
+        }
+        html += `<tr style="border-top:2px solid var(--text);font-weight:700">
+          <td style="padding:0.6rem 0.8rem">Total</td>
+          <td style="padding:0.6rem 0.8rem;text-align:right">${formatEuro(total)}</td>
+          <td style="padding:0.6rem 0.8rem;text-align:right">100%</td>
+        </tr></tbody></table>`;
+        document.getElementById('modalMissionsBody').innerHTML = html;
+      } catch(e) {
+        document.getElementById('modalMissionsBody').innerHTML = '<p style="color:var(--text-secondary)">Erreur de chargement.</p>';
+      }
+    }
+
+    // Detail de la carte "Budget de charges HT" (onglet Analytics) : ventilation par categorie
+    // + sous-lignes, sur l'annee civile en cours. Meme source ET meme cache que la carte
+    // (chargesCardsCache, /api/previsionnel-charges) : le total en pied de tableau egale donc
+    // toujours exactement le chiffre affiche sur la carte, par construction.
+    async function openBudgetChargesDetailModal() {
+      const year = new Date().getFullYear();
+      document.getElementById('modalMissionsTitle').textContent = 'Budget de charges HT · ' + year;
+      document.getElementById('modalMissionsBody').innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem">Chargement...</p>';
+      document.getElementById('modalMissions').classList.add('open');
+      try {
+        let data = chargesCardsCache;
+        if (!data) {
+          const res = await fetch(`/api/previsionnel-charges?start=${year}-01&end=${year}-12`);
+          data = await res.json();
+          chargesCardsCache = data;
+        }
+        const charges = data.ventilationCharges || [];
+        const detail = data.ventilationChargesDetail || [];
+        if (!charges.length) {
+          document.getElementById('modalMissionsBody').innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem">Aucune charge budgétée cette année.</p>';
+          return;
+        }
+        const total = data.totalCharges != null ? data.totalCharges : charges.reduce((s, c) => s + c.montant, 0);
+        let html = '<p style="color:var(--text-secondary);font-size:0.8rem;margin:0 0 0.8rem">Source : CR_Prev · budget annuel HT, hors réel bancaire. Sous-lignes indentées sous chaque catégorie.</p>';
+        html += `<table style="width:100%;border-collapse:collapse;font-size:0.85rem">
+          <thead><tr style="border-bottom:1px solid var(--border)">
+            <th style="text-align:left;padding:0.5rem 0.8rem;color:var(--text-secondary)">Catégorie</th>
+            <th style="text-align:right;padding:0.5rem 0.8rem;color:var(--text-secondary)">Montant</th>
+            <th style="text-align:right;padding:0.5rem 0.8rem;color:var(--text-secondary)">%</th>
+          </tr></thead><tbody>`;
+        for (const c of charges) {
+          const pct = total ? ((c.montant / total) * 100).toFixed(1) : '0.0';
+          html += `<tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:0.45rem 0.8rem;font-weight:600">${escapeHtml(c.categorie)}</td>
+            <td style="padding:0.45rem 0.8rem;text-align:right;font-weight:600">${formatEuro(c.montant)}</td>
+            <td style="padding:0.45rem 0.8rem;text-align:right;color:var(--text-secondary)">${pct}%</td>
+          </tr>`;
+          const sousLignes = detail.filter(x => x.categorie === c.categorie);
+          for (const s of sousLignes) {
+            html += `<tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:0.3rem 0.8rem 0.3rem 1.6rem;color:var(--text-secondary);font-size:0.78rem">${escapeHtml(s.sousCat || 'Non catégorisé')}</td>
+              <td style="padding:0.3rem 0.8rem;text-align:right;color:var(--text-secondary);font-size:0.78rem">${formatEuro(s.montant)}</td>
+              <td></td>
+            </tr>`;
+          }
         }
         html += `<tr style="border-top:2px solid var(--text);font-weight:700">
           <td style="padding:0.6rem 0.8rem">Total</td>
@@ -13951,6 +14004,8 @@
       if (!crData) return;
       const d = crData;
       const projete = document.getElementById('crProjete').checked;
+      // "charges" a son propre parcours (async, deux volets reel/budget) : voir openCrChargesDetailModal.
+      if (kind === 'charges') { openCrChargesDetailModal(d.year); return; }
       let title = '', body = '';
       if (kind === 'ca') {
         title = "Chiffre d'affaires " + d.year;
@@ -13960,12 +14015,6 @@
           body += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid var(--border)"><span>+ Pipeline pondere (HubSpot)</span><span>' + formatEuro(d.ca.pipelinePondere) + '</span></div>';
           body += '<div style="display:flex;justify-content:space-between;padding:0.5rem 0"><strong>CA projete</strong><strong>' + formatEuro(d.ca.projete) + '</strong></div>';
         }
-      } else if (kind === 'charges') {
-        title = "Charges d'exploitation " + d.year;
-        body = '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.6rem">Reel Qonto (mois clos) + previsionnel CR_Prev (mois a venir). La masse salariale est comprise dans ce total.</div>';
-        body += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid var(--border)"><span>Total charges</span><strong>' + formatEuro(d.charges.total) + '</strong></div>';
-        if (d.masseSalarialeAnnuelle != null) body += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;color:var(--text-secondary)"><span>dont masse salariale</span><span>' + formatEuro(d.masseSalarialeAnnuelle) + '</span></div>';
-        if (d.charges && d.charges.primesCommerciales) body += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;color:var(--text-secondary)"><span>dont primes commerciales</span><span>' + formatEuro(d.charges.primesCommerciales) + '</span></div>';
       } else if (kind === 'subventions' || kind === 'aides') {
         const list = kind === 'subventions' ? d.financements.subventions : d.financements.aides;
         title = (kind === 'subventions' ? 'Subventions' : 'Aides') + ' ' + d.year;
@@ -13996,6 +14045,141 @@
       document.getElementById('tresoMoisDetailTitle').textContent = title;
       document.getElementById('tresoMoisDetailBody').innerHTML = body;
       document.getElementById('tresoMoisDetailModalOverlay').classList.add('active');
+    }
+
+    // Detail "Charges d'exploitation" (ligne du compte de resultat) : deux volets avec leur
+    // propre periode. /api/charges-hybride ne renvoie qu'une ventilation FUSIONNEE (reel + budget) ;
+    // pour obtenir la ventilation propre a chaque volet, sans toucher au backend, on reutilise les
+    // MEMES endpoints avec des bornes de dates restreintes :
+    //  - volet reel : /api/charges-hybride avec end = fin du mois reel (le mois courant serveur est
+    //    alors hors fenetre => prev devient null => la reponse ne contient QUE le reel, HT).
+    //  - volet budget : /api/previsionnel-charges sur la fenetre prev (budget pur, HT).
+    // Cache par annee (evite de refaire l'appel /api/charges-hybride, potentiellement ~30s la
+    // premiere fois le temps que le serveur construise son index, a chaque ouverture de la modale).
+    let crChargesDetailCache = {};
+
+    async function openCrChargesDetailModal(year) {
+      document.getElementById('tresoMoisDetailTitle').textContent = "Charges d'exploitation " + year;
+      document.getElementById('tresoMoisDetailBody').innerHTML = '<p style="padding:1rem;color:var(--text-secondary)">Chargement... (le premier calcul peut prendre une trentaine de secondes ; les suivants sont immediats)</p>';
+      document.getElementById('tresoMoisDetailModalOverlay').classList.add('active');
+      try {
+        let cached = crChargesDetailCache[year];
+        if (!cached) {
+          const start = year + '-01-01';
+          const end = year + '-12-31';
+          const hybRes = await fetch(`/api/charges-hybride?start=${start}&end=${end}`);
+          if (!hybRes.ok) throw new Error('Erreur chargement charges hybride');
+          const hybride = await hybRes.json();
+
+          let real = null, prev = null;
+          if (hybride.real) {
+            if (!hybride.prev) {
+              // Annee entierement close (aucun mois budgete) : la reponse fusionnee EST deja
+              // real-only, pas besoin d'un second appel.
+              real = hybride;
+            } else {
+              const [ry, rm] = hybride.real.end.split('-').map(Number);
+              const lastDay = new Date(ry, rm, 0).getDate();
+              const realRes = await fetch(`/api/charges-hybride?start=${hybride.real.start}-01&end=${hybride.real.end}-${String(lastDay).padStart(2, '0')}`);
+              if (!realRes.ok) throw new Error('Erreur chargement detail reel');
+              real = await realRes.json();
+            }
+          }
+          if (hybride.prev) {
+            if (!hybride.real) {
+              // Annee entierement future (aucun mois reel) : la reponse fusionnee EST deja
+              // prev-only.
+              prev = hybride;
+            } else {
+              const prevRes = await fetch(`/api/previsionnel-charges?start=${hybride.prev.start}&end=${hybride.prev.end}`);
+              if (!prevRes.ok) throw new Error('Erreur chargement detail budget');
+              prev = await prevRes.json();
+            }
+          }
+          cached = { hybride, real, prev };
+          crChargesDetailCache[year] = cached;
+        }
+        renderCrChargesDetailModal(year, cached);
+      } catch (e) {
+        console.error('Erreur detail charges exploitation:', e);
+        document.getElementById('tresoMoisDetailBody').innerHTML = '<p style="padding:1rem;color:var(--text-secondary)">Erreur de chargement.</p>';
+      }
+    }
+
+    // "2026-01","2026-07" -> "janvier - juillet 2026" (meme mois -> "janvier 2026").
+    function _crPeriodLabel(startKey, endKey) {
+      const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+      const [sy, sm] = startKey.split('-').map(Number);
+      const [ey, em] = endKey.split('-').map(Number);
+      if (sy === ey && sm === em) return MOIS[sm - 1] + ' ' + sy;
+      if (sy === ey) return MOIS[sm - 1] + ' - ' + MOIS[em - 1] + ' ' + sy;
+      return MOIS[sm - 1] + ' ' + sy + ' - ' + MOIS[em - 1] + ' ' + ey;
+    }
+
+    function _crVentilationRows(ventilation) {
+      if (!ventilation || !ventilation.length) {
+        return '<div style="color:var(--text-secondary);padding:0.3rem 0;font-size:0.8rem">Aucune ligne.</div>';
+      }
+      const total = ventilation.reduce((s, c) => s + c.montant, 0);
+      return ventilation.map(c => {
+        const pct = total ? ((c.montant / total) * 100).toFixed(1) : '0.0';
+        return '<div style="display:flex;justify-content:space-between;padding:0.3rem 0;border-bottom:1px solid var(--border);font-size:0.82rem">'
+          + '<span>' + escapeHtml(c.categorie) + '</span>'
+          + '<span><span style="color:var(--text-secondary);margin-right:0.5rem">' + pct + '%</span>' + formatEuro(c.montant) + '</span>'
+          + '</div>';
+      }).join('');
+    }
+
+    function renderCrChargesDetailModal(year, cached) {
+      const hybride = cached.hybride, real = cached.real, prev = cached.prev;
+      const total = hybride.totalCharges != null ? hybride.totalCharges
+        : (hybride.real ? hybride.real.total : 0) + (hybride.prev ? hybride.prev.total : 0);
+
+      let html = '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.8rem">Hybride : réel bancaire Qonto pour les mois clos (converti TTC → HT), complété par le budget CR_Prev pour les mois en cours et à venir.</div>';
+      html += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:2px solid var(--text);font-weight:700;margin-bottom:1rem"><span>Total charges d\'exploitation ' + year + '</span><span>' + formatEuro(total) + '</span></div>';
+
+      if (hybride.real && real) {
+        const periode = _crPeriodLabel(hybride.real.start, hybride.real.end);
+        const tva = hybride.tvaExacte;
+        let tvaLine = '';
+        if (tva && tva.montantTotal) {
+          const pct = Math.round((tva.montantCouvert / tva.montantTotal) * 100);
+          tvaLine = '<div style="font-size:0.76rem;color:var(--text-secondary);margin:0.3rem 0 0.6rem">TVA exacte de facture sur ' + pct + '% des dépenses, le reste par taux de catégorie ou TTC.</div>';
+        }
+        html += '<div style="margin-bottom:1.4rem">'
+          + '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:1rem">'
+          + '<strong>Réel bancaire Qonto · converti TTC → HT</strong>'
+          + '<span style="font-size:0.76rem;color:var(--text-secondary);white-space:nowrap">' + periode + '</span></div>'
+          + tvaLine
+          + '<div style="display:flex;justify-content:space-between;padding:0.3rem 0;font-weight:600;border-bottom:1px solid var(--border);margin-bottom:0.2rem"><span>Total</span><span>' + formatEuro(hybride.real.total) + '</span></div>'
+          + _crVentilationRows(real.ventilationCharges)
+          + '</div>';
+      }
+
+      if (hybride.prev && prev) {
+        const periode = _crPeriodLabel(hybride.prev.start, hybride.prev.end);
+        html += '<div>'
+          + '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:1rem">'
+          + '<strong>Budget CR_Prev</strong>'
+          + '<span style="font-size:0.76rem;color:var(--text-secondary);white-space:nowrap">' + periode + '</span></div>'
+          + '<div style="display:flex;justify-content:space-between;padding:0.3rem 0;font-weight:600;border-bottom:1px solid var(--border);margin:0.3rem 0 0.2rem"><span>Total</span><span>' + formatEuro(hybride.prev.total) + '</span></div>'
+          + _crVentilationRows(prev.ventilationCharges)
+          + '</div>';
+      }
+
+      if (!hybride.real && !hybride.prev) {
+        html += '<div style="color:var(--text-secondary);padding:0.4rem 0">Aucune donnée sur cette période.</div>';
+      }
+
+      const exclusions = [];
+      if (hybride.primesExclues && hybride.primesExclues.nb) exclusions.push(hybride.primesExclues.nb + ' ligne(s) de primes exclues (' + formatEuro(hybride.primesExclues.montant) + ', réinjectées ailleurs)');
+      if (hybride.horsExploitationExclues && hybride.horsExploitationExclues.nb) exclusions.push(hybride.horsExploitationExclues.nb + ' ligne(s) hors exploitation exclues (' + formatEuro(hybride.horsExploitationExclues.montant) + ' : IS, TVA reversée...)');
+      if (exclusions.length) {
+        html += '<div style="font-size:0.72rem;color:var(--text-secondary);margin-top:0.8rem;padding-top:0.6rem;border-top:1px dashed var(--border)">' + exclusions.join(' · ') + '</div>';
+      }
+
+      document.getElementById('tresoMoisDetailTitle').textContent = "Charges d'exploitation " + year;
+      document.getElementById('tresoMoisDetailBody').innerHTML = html;
     }
 
     // ===== Immobilisations (Phase 5) — CRUD + plan d'amortissement + assiette CIR =====
@@ -15629,13 +15813,9 @@
     }
 
     // Graphe "Sorties par mois" (Pennylane) supprime : Analytics ne traite plus le decaissement.
-
-    // Camembert des categories (source Pennylane, sur la periode) : reutilise renderPieChart.
-    function renderDepensesCategoriesPie() {
-      if (!depensesData || depensesData.pennylaneError) { destroyAnalyticsChart('analyticsChargesChart'); return; }
-      const rows = (depensesData.byCategory || []).map(c => ({ label: c.label, montant: c.total12m }));
-      renderPieChart('analyticsChargesChart', rows.slice(0, 10));
-    }
+    // Camembert "Répartition par catégorie" (Pennylane) supprimé (T11) : doublon avec le détail
+    // par catégorie de la carte "Budget de charges HT" (openBudgetChargesDetailModal). Le tableau
+    // depensesTableCategories ci-dessous reste (donnée distincte : Pennylane TTC décaissement).
 
     function renderDepensesCategories() {
       const el = document.getElementById('depensesTableCategories');
