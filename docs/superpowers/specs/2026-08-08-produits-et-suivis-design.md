@@ -44,7 +44,21 @@ Badge sur le Compte de résultat, alimenté par le passthrough `tvaExacte` de `/
 
 **Note d'implémentation (I3, corrigé)** : la liste des participants au collectif est dérivée PAR EXERCICE (`primesParticipantsForExercice(year)`), jamais une seule fois de `now`. L'étage 2 étant réparti à parts égales sur cette liste, rejouer N-1 avec la liste de N écrirait une part sur un associé absent du collectif N-1, part ensuite filtrée par la réinjection des primes dans les charges (qui dérive sa propre liste de l'année de la fenêtre) : le compte de résultat N-1 perdrait ce montant. La composition multi-exercice est isolée dans la fonction pure `computePrimesChargeMultiExercice` (utils/kpiCompute.js), testée. L'union des listes reste utilisée pour la STRUCTURE du GSheet (`discoverLayout`/`assertPartners`), qui doit connaître toutes les colonnes à écrire.
 
+## E · Production immobilisée (T6, go utilisateur 2026-08-08)
+
+**Débloquage** : l'incohérence soupçonnée entre les immos SaaS et Simapro était une erreur de lecture (montants bruts comparés au lieu des retenus). L'utilisateur a confirmé : chaque poste du module Immobilisations porte une quote-part (`quote_part`), et `montantPosteRetenu` (server.js) calcule déjà montant × quote-part × prorata jours. Vérifié sur données réelles : retenus 2026 = SaaS 124 653 € (Thomas 50 %, Evane 50 %, Polara 100 % ponctuel, Guillaume 20 %, Arthur 60 %) + Simapro 33 585 € (5 quote-parts) = 158 238 € ; cumuls par personne ≤ 100 %, aucun double compte entre immos.
+
+**Problème** : ces 158 238 € restent comptés en charges pleines au CR (salaires dans le réel Qonto/budget, Polara en prestation) ET les dotations aux amortissements s'ajoutent depuis les mises en service (02/11/2026 SaaS, 01/09/2026 Simapro, ~10 375 € en 2026) : le résultat est pénalisé deux fois. Règle PCG : un produit d'exploitation « Production immobilisée » (compte 72) neutralise les charges immobilisées l'année de leur engagement ; ensuite seules les dotations pèsent (5 ans).
+
+**Décision** :
+1. Calcul pur extrait dans `utils/productionImmobilisee.js` (testable) : pour chaque immo `traitement === 'immobilise'`, somme des retenus des postes de l'année cible (même formule que `montantPosteRetenu` : montant × quote-part × prorata fenêtre×année). Part **factuelle** : par poste, fraction écoulée de sa fenêtre annuelle jusqu'à la fin du dernier mois clos (même borne `realEndKey` que les charges/subventions) ; poste ponctuel (`prorata_temporel === false`) : plein si sa date de début est passée, sinon 0 ; poste sans dates : linéaire sur l'année. Part **projetée** : retenu annuel complet.
+2. `/api/ebe` : nouveau produit `productionImmobilisee { factuel, projete, parImmo: [{ nom, factuel, projete }] }`, intégré à l'EBE (produit d'exploitation, comme les subventions) et donc à toute la cascade (résultat d'exploitation, IS, résultat net). Miroir `computeResultatFactuelForYear` : même part factuelle (les deux cascades restent alignées). Dotations inchangées.
+3. Front (CR, les deux pilot.html) : ligne « Production immobilisée » dans les produits (sous Subventions/Aides), affichée seulement si non nulle, détail par immo (SaaS / Simapro) au même patron que les autres lignes détaillées. Aucune saisie nouvelle : le module Immobilisations reste la source, le récap « Ressources mobilisées » le contrôle.
+4. Tolérance : tables Supabase absentes → 0 partout (patron `fetchPostesByImmo` existant). Trésorerie : produit non encaissable, AUCUN impact direct sur les flux (seul le canal IS/remboursement de crédit d'impôt bouge mécaniquement, ce qui est comptablement juste).
+
+Chiffres attendus 2026 (contrôle de recette) : projeté ≈ 158 238 € (SaaS 124 653 + Simapro 33 585) ; résultat 2026 rehaussé d'environ +148 000 € net des dotations déjà comptées.
+
 ## Hors lot / en attente
-- **SaaS production immobilisée** : données trouvées dans le module Immobilisations de Pilot (postes par personne/année), MAIS incohérence à clarifier avec le comptable : des postes 2026 identiques figurent dans les deux immos (SaaS et Simapro · Evane 29 120, Arthur 58 539, Thomas 40 473) → quote-parts déjà ventilées ou salaires entiers à ventiler ? Câblage (produit « Production immobilisée » jusqu'à mise en service + dotation ensuite) après réponse.
 - Réinjection primes N-1 (échéance avant janvier 2027, compris par l'utilisateur).
 - Tableau « Répartition par catégorie » : CONSERVÉ (décision utilisateur).
+- Validation par le comptable des quote-parts saisies dans le module Immobilisations (n'empêche pas le câblage : le CR suit le module).
