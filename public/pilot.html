@@ -2825,6 +2825,57 @@
       gap: 0.25rem;
     }
 
+    /* ── Fiche deal : alléger les appels à l'action ──────────────────────── */
+    /* Consigner note / email / appel : une seule ligne compacte au lieu de
+       trois boutons pleine largeur empilés. */
+    .sb-log-actions { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
+    .sb-log-actions-label {
+      font-size: 0.68rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-secondary);
+      margin-right: 0.15rem;
+    }
+    .sb-act {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.22rem 0.55rem;
+      font-size: 0.74rem;
+      font-weight: 600;
+      font-family: inherit;
+      color: var(--text-secondary);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      cursor: pointer;
+      transition: color 0.12s, border-color 0.12s, background 0.12s;
+    }
+    .sb-act:hover { color: var(--text); border-color: var(--text-secondary); }
+    .sb-act.email:hover { color: #1d4ed8; border-color: rgba(29,78,216,0.45); background: rgba(29,78,216,0.06); }
+    .sb-act.phone:hover { color: var(--warning); border-color: rgba(217,115,13,0.45); background: var(--warning-bg); }
+
+    /* Actions rares : un lien, pas un bouton. Elles ne doivent pas rivaliser
+       avec les gestes du quotidien. */
+    .sb-quiet-link {
+      display: inline-flex;
+      align-items: center;
+      /* Le parent est une colonne flex : sans ça le lien s'étire sur toute
+         la largeur et redevient visuellement un bouton. */
+      align-self: flex-start;
+      background: none;
+      border: none;
+      padding: 0.1rem 0;
+      font-family: inherit;
+      font-size: 0.76rem;
+      color: var(--text-secondary);
+      cursor: pointer;
+      text-decoration: underline;
+      text-decoration-color: var(--border);
+      text-underline-offset: 3px;
+    }
+    .sb-quiet-link:hover { color: var(--text); text-decoration-color: var(--text-secondary); }
+
     /* ── Fiche deal : en-tête ────────────────────────────────────────────── */
     /* Icônes Lucide : alignées sur la ligne de base du texte, jamais d'emoji. */
     .lu { flex-shrink: 0; vertical-align: -0.14em; margin-right: 0.35em; }
@@ -8635,10 +8686,11 @@
             </div>`;
       }
 
+      // Action rare : un lien discret, pas un bouton pleine largeur qui
+      // rivalise visuellement avec les gestes du quotidien.
       return `
             <div class="deal-sidebar-field">
-              <div class="deal-sidebar-label">${_lucide('snowflake',12)}Mise en attente</div>
-              <button class="relance-btn" onclick="toggleFreezeForm()" style="width:100%">Geler ce deal avec une date de réveil</button>
+              <button class="sb-quiet-link" onclick="toggleFreezeForm()">${_lucide('snowflake',12)}Mettre en attente jusqu'à une date</button>
               <div class="relance-form" id="sbFreezeForm">
                 <div style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:0.5rem">
                   Le deal sort du pipe et arrête de déclencher des alertes. Il revient tout seul le jour choisi. Réversible en un clic.
@@ -8745,6 +8797,9 @@
       clock:     '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
       activity:  '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
       target:    '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+      note:      '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/>',
+      mail:      '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/>',
+      phone:     '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2 4.2 2 2 0 0 1 4 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7A2 2 0 0 1 22 16.9z"/>',
     };
     function _lucide(name, size) {
       const d = LUCIDE[name];
@@ -8924,11 +8979,15 @@
             <span class="sb-section-chevron">▸</span>
           </div>
           <div class="sb-section-body">
+            <!-- Notes et relances répondent à la même question ("il s'est passé
+                 quoi ?") et vivaient dans deux blocs jumeaux, avec trois boutons
+                 pleine largeur empilés. Un seul déclencheur compact suffit. -->
             <div class="deal-sidebar-field">
-              <div class="deal-sidebar-label">Notes (figées)</div>
-              <div id="notesLogWrap">${_renderNotesLog(meta.notes)}</div>
-              <div class="relance-row" style="margin-top:0.5rem">
-                <button class="relance-btn note" onclick="openNoteForm('${deal.id}')" style="flex:1">📝 Ajouter une note</button>
+              <div class="sb-log-actions">
+                <span class="sb-log-actions-label">Consigner</span>
+                <button class="sb-act note" onclick="openNoteForm('${deal.id}')">${_lucide('note', 12)}note</button>
+                <button class="sb-act email" onclick="openRelanceForm('email','${deal.id}')">${_lucide('mail', 12)}email</button>
+                <button class="sb-act phone" onclick="openRelanceForm('phone','${deal.id}')">${_lucide('phone', 12)}appel</button>
               </div>
               <div class="relance-form" id="noteForm">
                 <div class="relance-form-row">
@@ -8944,16 +9003,6 @@
                   <button class="primary" id="noteSubmitBtn" onclick="submitNote('${deal.id}')">Enregistrer & figer</button>
                 </div>
               </div>
-            </div>
-
-            <div class="deal-sidebar-field">
-              <div class="deal-sidebar-label">Relances</div>
-              <div id="relanceLastWrap">${_renderLastRelance(relances)}</div>
-              ${relancesCount > 1 ? `<span class="relance-history-link" onclick="openRelanceHistory('${deal.id}')">Voir l'historique (${relancesCount})</span>` : ''}
-              <div class="relance-row" style="margin-top:0.5rem">
-                <button class="relance-btn email" onclick="openRelanceForm('email','${deal.id}')">📧 Relance email</button>
-                <button class="relance-btn phone" onclick="openRelanceForm('phone','${deal.id}')">📞 Relance tél</button>
-              </div>
               <div class="relance-form" id="relanceForm">
                 <div class="relance-form-row">
                   <label for="relanceDate">Date</label>
@@ -8968,6 +9017,10 @@
                   <button class="primary" id="relanceSubmitBtn" onclick="submitRelance('${deal.id}')">Enregistrer</button>
                 </div>
               </div>
+
+              <div id="notesLogWrap">${_renderNotesLog(meta.notes)}</div>
+              <div id="relanceLastWrap">${_renderLastRelance(relances)}</div>
+              ${relancesCount > 1 ? `<span class="relance-history-link" onclick="openRelanceHistory('${deal.id}')">Voir les ${relancesCount} relances</span>` : ''}
             </div>
           </div>
         </div>
