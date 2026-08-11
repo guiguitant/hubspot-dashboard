@@ -1658,12 +1658,6 @@
       color: var(--text-secondary);
     }
     .pchip-group { display: flex; gap: 0.25rem; flex-wrap: wrap; }
-    .pchip-sep {
-      width: 1px;
-      height: 16px;
-      background: var(--border);
-      margin: 0 0.3rem;
-    }
     .pchip {
       padding: 0.25rem 0.6rem;
       font-size: 0.74rem;
@@ -1684,9 +1678,7 @@
       color: #fff;
       font-weight: 600;
     }
-    .pchip-clear { color: #b91c1c; border-style: dashed; }
-    .pchip-clear:hover { background: rgba(239,68,68,0.08); border-color: #b91c1c; color: #b91c1c; }
-    /* Un filtre qui masque des deals doit se voir dans le compteur de colonne. */
+    /* Recherche ou filtre assigné qui masque des deals : le compteur le dit. */
     .kanban-header-hidden { opacity: 0.5; font-weight: 400; }
 
     /* --- Colonne "Inactivité" de la vue tableau --- */
@@ -3726,14 +3718,13 @@
         </div>
       </div>
 
-      <!-- Barre de tri / filtres : agit sur le Kanban ET le Tableau -->
+      <!-- Barre de tri : agit sur le Kanban ET le Tableau.
+           Pas de filtres ici : le tri des deals à reprendre passe par les
+           colonnes dédiées (En sommeil, Gelés), qui se voient sans qu'on ait
+           à penser à les activer. -->
       <div class="pipeline-chipbar">
         <span class="pchip-label">Trier</span>
         <div class="pchip-group" id="pipelineSortChips"></div>
-        <span class="pchip-sep"></span>
-        <span class="pchip-label">Filtrer</span>
-        <div class="pchip-group" id="pipelineFilterChips"></div>
-        <button class="pchip pchip-clear" id="pipelineFilterClear" onclick="clearPipelineFilters()" style="display:none" title="Retirer tous les filtres">✕ tout afficher</button>
       </div>
 
       <div class="critical-counter" id="criticalCounter" onclick="openPipelineModal('critical')" title="Voir les deals critiques">
@@ -5962,41 +5953,33 @@
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // TRI & FILTRES DU PIPELINE
+    // TRI DU PIPELINE
     //
     // Un seul moteur pour les deux vues. En Kanban le tri s'applique DANS
     // chaque colonne (les deals qui dorment remontent en haut de leur stage,
     // on ne change pas de vue pour trier). En Tableau il s'applique à plat sur
     // tout le pipe, puisque chaque ligne porte déjà son stage.
     //
-    // Les filtres se cumulent : "dort" + "sans tâche" = les deals à reprendre
-    // sur lesquels rien n'est prévu. C'est ce croisement qui fait le tri utile.
+    // Volontairement PAS de filtres ici. Une première version en proposait
+    // quatre, cumulables : trop de charge visuelle pour un gain qu'on n'obtient
+    // qu'en pensant à les activer puis à les désactiver. Les deals à reprendre
+    // sont ramassés par des COLONNES dédiées (En sommeil, Gelés) : une colonne
+    // se voit sans effort, un filtre demande qu'on s'en souvienne.
     // ═══════════════════════════════════════════════════════════════════════
 
     const PIPELINE_SORTS = {
       health:   { label: 'Ça dort',  title: 'Le plus mal en point en premier (sans relance ou bloqué dans son stage)' },
       amount:   { label: 'Montant',  title: 'Du plus gros au plus petit' },
-      proba:    { label: 'Proba',    title: 'Probabilité décroissante' },
       deadline: { label: 'Deadline', title: 'Date de clôture la plus proche en premier' },
       stage:    { label: 'Stage',    title: 'Ordre naturel du pipe, sans tri' },
     };
 
-    const PIPELINE_FILTERS = {
-      dort:      { label: '🔴 Dort',          title: 'Deals sans relance ou bloqués dans leur stage' },
-      rdv:       { label: '📅 RDV à venir',   title: 'Deals avec un rendez-vous planifié' },
-      propale:   { label: '📄 Propale',       title: 'Deals avec une propale envoyée' },
-      rienprevu: { label: '🕳 Rien de prévu', title: 'Ni RDV à venir, ni tâche à échéance future. Une tâche déjà en retard ne compte pas : ce n\'est plus un plan.' },
-    };
-
     let pipelineSort = 'health';
-    let pipelineFilters = new Set();
 
     const PIPELINE_PREFS_KEY = 'releafPilot.pipelinePrefs';
     function _savePipelinePrefs() {
       try {
-        localStorage.setItem(PIPELINE_PREFS_KEY, JSON.stringify({
-          sort: pipelineSort, filters: [...pipelineFilters],
-        }));
+        localStorage.setItem(PIPELINE_PREFS_KEY, JSON.stringify({ sort: pipelineSort }));
       } catch {}
     }
     function _loadPipelinePrefs() {
@@ -6004,10 +5987,8 @@
         const raw = localStorage.getItem(PIPELINE_PREFS_KEY);
         if (!raw) return;
         const p = JSON.parse(raw);
+        // `filters` a pu être stocké par une version précédente : on l'ignore.
         if (p && PIPELINE_SORTS[p.sort]) pipelineSort = p.sort;
-        if (p && Array.isArray(p.filters)) {
-          pipelineFilters = new Set(p.filters.filter(f => PIPELINE_FILTERS[f]));
-        }
       } catch {}
     }
 
@@ -6019,32 +6000,13 @@
       renderKanban();
     }
 
-    function togglePipelineFilter(key) {
-      if (!PIPELINE_FILTERS[key]) return;
-      if (pipelineFilters.has(key)) pipelineFilters.delete(key);
-      else pipelineFilters.add(key);
-      _savePipelinePrefs();
-      _syncPipelineChips();
-      renderKanban();
-    }
-
-    function clearPipelineFilters() {
-      pipelineFilters.clear();
-      _savePipelinePrefs();
-      _syncPipelineChips();
-      renderKanban();
-    }
-
-    // Construit la barre une fois, au chargement, à partir des deux dictionnaires.
+    // Construit la barre une fois, au chargement.
     function _buildPipelineChips() {
       const sortWrap = document.getElementById('pipelineSortChips');
-      const filtWrap = document.getElementById('pipelineFilterChips');
-      if (!sortWrap || !filtWrap) return;
+      if (!sortWrap) return;
       _loadPipelinePrefs();
       sortWrap.innerHTML = Object.entries(PIPELINE_SORTS).map(([k, s]) =>
         `<button class="pchip" data-sort="${k}" title="${s.title}" onclick="setPipelineSort('${k}')">${s.label}</button>`).join('');
-      filtWrap.innerHTML = Object.entries(PIPELINE_FILTERS).map(([k, f]) =>
-        `<button class="pchip" data-filter="${k}" title="${f.title}" onclick="togglePipelineFilter('${k}')">${f.label}</button>`).join('');
       _syncPipelineChips();
     }
 
@@ -6061,30 +6023,6 @@
     function _syncPipelineChips() {
       document.querySelectorAll('#pipelineSortChips .pchip').forEach(b =>
         b.classList.toggle('active', b.dataset.sort === pipelineSort));
-      document.querySelectorAll('#pipelineFilterChips .pchip').forEach(b =>
-        b.classList.toggle('active', pipelineFilters.has(b.dataset.filter)));
-      const clr = document.getElementById('pipelineFilterClear');
-      if (clr) clr.style.display = pipelineFilters.size ? '' : 'none';
-    }
-
-    function _dealMatchesChipFilters(deal, stageName) {
-      if (!pipelineFilters.size) return true;
-      const meta = dealMetadata[deal.id] || {};
-      for (const f of pipelineFilters) {
-        if (f === 'dort') {
-          const h = computeDealHealth(deal, meta, stageName);
-          if (h.status !== 'dort' && h.status !== 'bloque') return false;
-        } else if (f === 'rdv') {
-          if (!_hasFutureMeeting(meta)) return false;
-        } else if (f === 'propale') {
-          if (!meta.proposal_sent_at) return false;
-        } else if (f === 'rienprevu') {
-          // Même prédicat que les échappatoires du moteur de santé : les deux
-          // ne peuvent pas se contredire.
-          if (_hasFutureMeeting(meta) || _hasFutureTask(meta)) return false;
-        }
-      }
-      return true;
     }
 
     function _pipelineSortComparator(stageOf) {
@@ -6092,8 +6030,6 @@
       switch (pipelineSort) {
         case 'amount':
           return (a, b) => (b.amount || 0) - (a.amount || 0);
-        case 'proba':
-          return (a, b) => (b.probability || 0) - (a.probability || 0);
         case 'deadline':
           // Sans date de clôture, le deal passe en dernier plutôt que de polluer le haut.
           return (a, b) => {
@@ -6126,8 +6062,7 @@
     // (par colonne) et par le Tableau (à plat, cf. _pipelineFlatDeals), pour que
     // les deux vues ne puissent pas afficher des ensembles différents.
     function _pipelineVisibleDeals(stageName) {
-      let deals = _pipelineStageBase(stageName);
-      if (pipelineFilters.size) deals = deals.filter(d => _dealMatchesChipFilters(d, stageName));
+      const deals = _pipelineStageBase(stageName);
       const cmp = _pipelineSortComparator(() => stageName);
       return cmp ? [...deals].sort(cmp) : deals;
     }
@@ -7118,9 +7053,9 @@
 
       if (!relancerColumnOpen) {
         col.innerHTML = `
-          <div class="kanban-header" onclick="toggleRelancerColumn()" title="${dueCount ? dueCount + ' deal(s) à réveiller aujourd\'hui' : 'Voir les deals gelés'}">
+          <div class="kanban-header" onclick="toggleRelancerColumn()" title="${dueCount ? dueCount + ' deal(s) à réveiller aujourd\'hui' : 'Deals mis de côté volontairement, avec une date de réveil'}">
             <span class="won-toggle-icon">&#9654;</span>
-            <span class="won-collapsed-label">À relancer · ${deals.length}${dueCount ? ` <span class="wake-pill">⏰ ${dueCount}</span>` : ''}</span>
+            <span class="won-collapsed-label">🧊 Gelés · ${deals.length}${dueCount ? ` <span class="wake-pill">⏰ ${dueCount}</span>` : ''}</span>
           </div>`;
         return;
       }
@@ -7164,7 +7099,7 @@
 
       col.innerHTML = `
         <div class="kanban-header" onclick="toggleRelancerColumn()" title="Replier">
-          <span class="kanban-header-label">&#9660; À relancer</span>
+          <span class="kanban-header-label">&#9660; 🧊 Gelés</span>
           <span class="kanban-header-count">${deals.length}${dueCount ? ` <span class="wake-pill">⏰ ${dueCount}</span>` : ''} &middot; ${formatEuro(total)}</span>
         </div>
         <div class="kanban-cards">${cardsHtml}</div>`;
@@ -8374,6 +8309,18 @@
     // Réversible en un clic dans les deux sens : geler n'est pas fermer.
     // ═══════════════════════════════════════════════════════════════════════
 
+    // Stage courant d'un deal. ATTENTION : les objets deal de pipelineDeals ne
+    // portent PAS de champ `stage`, le stage est la CLÉ du dictionnaire. Seul
+    // l'objet enrichi par openDealSidebar en a un. Lire `deal.stage` sur un
+    // deal issu de findDealInPipeline renvoie undefined, silencieusement.
+    function _stageOfDeal(dealId) {
+      if (!dashboardData || !dashboardData.pipelineDeals) return null;
+      for (const [stage, deals] of Object.entries(dashboardData.pipelineDeals)) {
+        if (deals.some(d => d.id === dealId)) return stage;
+      }
+      return null;
+    }
+
     // Déplace un deal d'un stage à l'autre dans l'état local, sans refetch.
     function _moveDealLocally(dealId, targetStage) {
       if (!dashboardData || !dashboardData.pipelineDeals) return null;
@@ -8433,8 +8380,11 @@
       }
 
       const deal = findDealInPipeline(dealId);
-      const fromStage = deal ? deal.stage : null;
-      if (!fromStage || fromStage === RELANCER_STAGE_LABEL) return;
+      const fromStage = _stageOfDeal(dealId);
+      if (!fromStage || fromStage === RELANCER_STAGE_LABEL) {
+        if (typeof showToast === 'function') showToast('error', 'Impossible de retrouver le stage de ce deal, gel annulé.');
+        return;
+      }
 
       if (btn) { btn.disabled = true; btn.textContent = 'Gel en cours…'; }
       try {
@@ -8470,8 +8420,16 @@
 
         dealMetadata[dealId] = { ...(dealMetadata[dealId] || {}), ...freeze };
         _moveDealLocally(dealId, RELANCER_STAGE_LABEL);
+        // Le deal quitte sa colonne : sans un mot, il a juste l'air d'avoir
+        // disparu. On dit où il est parti, jusqu'à quand, et on ouvre la
+        // colonne des gelés pour qu'il soit visible à l'arrivée.
+        relancerColumnOpen = true;
         renderKanban();
         closeDealSidebar();
+        const quand = new Date(wakeIso).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+        if (typeof showToast === 'function') {
+          showToast('success', `${deal.name} est gelé jusqu'au ${quand}. Il est dans la colonne 🧊 Gelés, à droite, et revient tout seul ce jour-là.`, 6000);
+        }
       } catch (e) {
         if (btn) { btn.disabled = false; btn.textContent = '🧊 Geler'; }
         alert(e.message === 'metadata'
@@ -8511,8 +8469,12 @@
           ...(dealMetadata[dealId] || {}),
           wake_up_at: null, frozen_from_stage: null, frozen_note: null, frozen_at: null,
         };
+        const nom = (findDealInPipeline(dealId) || {}).name || 'Le deal';
         _moveDealLocally(dealId, target);
         renderKanban();
+        if (typeof showToast === 'function') {
+          showToast('success', `${nom} est de retour dans « ${target} ».`, 4000);
+        }
       } catch {
         alert('La réactivation a échoué.');
       }
