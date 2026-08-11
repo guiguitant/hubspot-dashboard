@@ -1576,7 +1576,127 @@
     .kanban-card-relancer {
       cursor: pointer;
       border-left: 3px solid var(--warning);
+      position: relative;
     }
+
+    /* --- Gel / réveil --- */
+    /* Un deal dont la date de réveil est passée : il redevient prioritaire. */
+    .kanban-card-wake-due {
+      border-left-color: #d9730d;
+      background: rgba(217,115,13,0.06);
+    }
+    .kanban-card-wake {
+      display: inline-block;
+      font-size: 0.68rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin: 0.15rem 0 0.3rem;
+    }
+    .kanban-card-wake.due { color: #d9730d; }
+    .kanban-card-wake.none { color: #b91c1c; }
+    [data-theme="dark"] .kanban-card-wake.due  { color: #fbbf24; }
+    [data-theme="dark"] .kanban-card-wake.none { color: #fca5a5; }
+    /* La raison du gel, écrite à chaud : c'est elle qui rend le réveil utile. */
+    .kanban-card-frozen-note {
+      font-size: 0.68rem;
+      color: var(--text-secondary);
+      font-style: italic;
+      line-height: 1.3;
+      margin-bottom: 0.3rem;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .kanban-card-unfreeze {
+      width: 100%;
+      margin-top: 0.4rem;
+      padding: 0.28rem 0.4rem;
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--warning);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .kanban-card-unfreeze:hover {
+      background: var(--warning-bg);
+      border-color: var(--warning);
+    }
+    .wake-pill {
+      display: inline-block;
+      padding: 0.02rem 0.3rem;
+      margin-left: 0.2rem;
+      border-radius: 999px;
+      background: #d9730d;
+      color: #fff;
+      font-size: 0.62rem;
+      font-weight: 700;
+      vertical-align: middle;
+    }
+    .freeze-preset.active {
+      background: var(--primary-bg);
+      border-color: var(--primary);
+      color: var(--primary);
+    }
+
+    /* --- Barre de tri / filtres du pipeline --- */
+    .pipeline-chipbar {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+      margin: 0.5rem 0 0.6rem;
+    }
+    .pchip-label {
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-secondary);
+    }
+    .pchip-group { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+    .pchip-sep {
+      width: 1px;
+      height: 16px;
+      background: var(--border);
+      margin: 0 0.3rem;
+    }
+    .pchip {
+      padding: 0.25rem 0.6rem;
+      font-size: 0.74rem;
+      font-weight: 500;
+      font-family: inherit;
+      color: var(--text-secondary);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.12s, border-color 0.12s, color 0.12s;
+    }
+    .pchip:hover { border-color: var(--text-secondary); color: var(--text); }
+    .pchip.active {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #fff;
+      font-weight: 600;
+    }
+    .pchip-clear { color: #b91c1c; border-style: dashed; }
+    .pchip-clear:hover { background: rgba(239,68,68,0.08); border-color: #b91c1c; color: #b91c1c; }
+    /* Un filtre qui masque des deals doit se voir dans le compteur de colonne. */
+    .kanban-header-hidden { opacity: 0.5; font-weight: 400; }
+
+    /* --- Colonne "Inactivité" de la vue tableau --- */
+    .dt-health { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.76rem; }
+    .dt-health-num { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+    .dt-health-num.over { color: #b91c1c; font-weight: 700; }
+    [data-theme="dark"] .dt-health-num.over { color: #fca5a5; }
+    .dt-health-sep { color: var(--border); }
+    .dt-health-na { color: var(--border); }
+    .dt-health-calm { font-size: 0.7rem; opacity: 0.75; }
 
     @media (max-width: 768px) {
       .kanban-board { grid-template-columns: 1fr 1fr; }
@@ -3604,6 +3724,16 @@
             <input type="date" id="pipelineTo" oninput="renderKanban()" style="font-size:0.78rem;padding:0.2rem 0.4rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text)">
           </div>
         </div>
+      </div>
+
+      <!-- Barre de tri / filtres : agit sur le Kanban ET le Tableau -->
+      <div class="pipeline-chipbar">
+        <span class="pchip-label">Trier</span>
+        <div class="pchip-group" id="pipelineSortChips"></div>
+        <span class="pchip-sep"></span>
+        <span class="pchip-label">Filtrer</span>
+        <div class="pchip-group" id="pipelineFilterChips"></div>
+        <button class="pchip pchip-clear" id="pipelineFilterClear" onclick="clearPipelineFilters()" style="display:none" title="Retirer tous les filtres">✕ tout afficher</button>
       </div>
 
       <div class="critical-counter" id="criticalCounter" onclick="openPipelineModal('critical')" title="Voir les deals critiques">
@@ -5831,6 +5961,183 @@
       renderKanban();
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // TRI & FILTRES DU PIPELINE
+    //
+    // Un seul moteur pour les deux vues. En Kanban le tri s'applique DANS
+    // chaque colonne (les deals qui dorment remontent en haut de leur stage,
+    // on ne change pas de vue pour trier). En Tableau il s'applique à plat sur
+    // tout le pipe, puisque chaque ligne porte déjà son stage.
+    //
+    // Les filtres se cumulent : "dort" + "sans tâche" = les deals à reprendre
+    // sur lesquels rien n'est prévu. C'est ce croisement qui fait le tri utile.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    const PIPELINE_SORTS = {
+      health:   { label: 'Ça dort',  title: 'Le plus mal en point en premier (sans relance ou bloqué dans son stage)' },
+      amount:   { label: 'Montant',  title: 'Du plus gros au plus petit' },
+      proba:    { label: 'Proba',    title: 'Probabilité décroissante' },
+      deadline: { label: 'Deadline', title: 'Date de clôture la plus proche en premier' },
+      stage:    { label: 'Stage',    title: 'Ordre naturel du pipe, sans tri' },
+    };
+
+    const PIPELINE_FILTERS = {
+      dort:      { label: '🔴 Dort',          title: 'Deals sans relance ou bloqués dans leur stage' },
+      rdv:       { label: '📅 RDV à venir',   title: 'Deals avec un rendez-vous planifié' },
+      propale:   { label: '📄 Propale',       title: 'Deals avec une propale envoyée' },
+      rienprevu: { label: '🕳 Rien de prévu', title: 'Ni RDV à venir, ni tâche à échéance future. Une tâche déjà en retard ne compte pas : ce n\'est plus un plan.' },
+    };
+
+    let pipelineSort = 'health';
+    let pipelineFilters = new Set();
+
+    const PIPELINE_PREFS_KEY = 'releafPilot.pipelinePrefs';
+    function _savePipelinePrefs() {
+      try {
+        localStorage.setItem(PIPELINE_PREFS_KEY, JSON.stringify({
+          sort: pipelineSort, filters: [...pipelineFilters],
+        }));
+      } catch {}
+    }
+    function _loadPipelinePrefs() {
+      try {
+        const raw = localStorage.getItem(PIPELINE_PREFS_KEY);
+        if (!raw) return;
+        const p = JSON.parse(raw);
+        if (p && PIPELINE_SORTS[p.sort]) pipelineSort = p.sort;
+        if (p && Array.isArray(p.filters)) {
+          pipelineFilters = new Set(p.filters.filter(f => PIPELINE_FILTERS[f]));
+        }
+      } catch {}
+    }
+
+    function setPipelineSort(key) {
+      if (!PIPELINE_SORTS[key]) return;
+      pipelineSort = key;
+      _savePipelinePrefs();
+      _syncPipelineChips();
+      renderKanban();
+    }
+
+    function togglePipelineFilter(key) {
+      if (!PIPELINE_FILTERS[key]) return;
+      if (pipelineFilters.has(key)) pipelineFilters.delete(key);
+      else pipelineFilters.add(key);
+      _savePipelinePrefs();
+      _syncPipelineChips();
+      renderKanban();
+    }
+
+    function clearPipelineFilters() {
+      pipelineFilters.clear();
+      _savePipelinePrefs();
+      _syncPipelineChips();
+      renderKanban();
+    }
+
+    // Construit la barre une fois, au chargement, à partir des deux dictionnaires.
+    function _buildPipelineChips() {
+      const sortWrap = document.getElementById('pipelineSortChips');
+      const filtWrap = document.getElementById('pipelineFilterChips');
+      if (!sortWrap || !filtWrap) return;
+      _loadPipelinePrefs();
+      sortWrap.innerHTML = Object.entries(PIPELINE_SORTS).map(([k, s]) =>
+        `<button class="pchip" data-sort="${k}" title="${s.title}" onclick="setPipelineSort('${k}')">${s.label}</button>`).join('');
+      filtWrap.innerHTML = Object.entries(PIPELINE_FILTERS).map(([k, f]) =>
+        `<button class="pchip" data-filter="${k}" title="${f.title}" onclick="togglePipelineFilter('${k}')">${f.label}</button>`).join('');
+      _syncPipelineChips();
+    }
+
+    function _syncPipelineChips() {
+      document.querySelectorAll('#pipelineSortChips .pchip').forEach(b =>
+        b.classList.toggle('active', b.dataset.sort === pipelineSort));
+      document.querySelectorAll('#pipelineFilterChips .pchip').forEach(b =>
+        b.classList.toggle('active', pipelineFilters.has(b.dataset.filter)));
+      const clr = document.getElementById('pipelineFilterClear');
+      if (clr) clr.style.display = pipelineFilters.size ? '' : 'none';
+    }
+
+    function _dealMatchesChipFilters(deal, stageName) {
+      if (!pipelineFilters.size) return true;
+      const meta = dealMetadata[deal.id] || {};
+      for (const f of pipelineFilters) {
+        if (f === 'dort') {
+          const h = computeDealHealth(deal, meta, stageName);
+          if (h.status !== 'dort' && h.status !== 'bloque') return false;
+        } else if (f === 'rdv') {
+          if (!_hasFutureMeeting(meta)) return false;
+        } else if (f === 'propale') {
+          if (!meta.proposal_sent_at) return false;
+        } else if (f === 'rienprevu') {
+          // Même prédicat que les échappatoires du moteur de santé : les deux
+          // ne peuvent pas se contredire.
+          if (_hasFutureMeeting(meta) || _hasFutureTask(meta)) return false;
+        }
+      }
+      return true;
+    }
+
+    function _pipelineSortComparator(stageOf) {
+      const meta = d => dealMetadata[d.id] || {};
+      switch (pipelineSort) {
+        case 'amount':
+          return (a, b) => (b.amount || 0) - (a.amount || 0);
+        case 'proba':
+          return (a, b) => (b.probability || 0) - (a.probability || 0);
+        case 'deadline':
+          // Sans date de clôture, le deal passe en dernier plutôt que de polluer le haut.
+          return (a, b) => {
+            const ta = a.closedate ? new Date(a.closedate).getTime() : Infinity;
+            const tb = b.closedate ? new Date(b.closedate).getTime() : Infinity;
+            return ta - tb;
+          };
+        case 'health':
+          return (a, b) =>
+            computeDealHealth(b, meta(b), stageOf(b)).score -
+            computeDealHealth(a, meta(a), stageOf(a)).score;
+        default:
+          return null;  // 'stage' : on ne touche pas à l'ordre reçu
+      }
+    }
+
+    // Périmètre d'une colonne AVANT les chips : filtres assigné/recherche, moins
+    // les deals en sommeil qui ont leur propre colonne. Sert de dénominateur au
+    // compteur "visibles/total" : un deal en sommeil n'est pas masqué, il a
+    // déménagé, donc il ne doit pas gonfler ce total.
+    function _pipelineStageBase(stageName) {
+      let deals = (dashboardData && dashboardData.pipelineDeals && dashboardData.pipelineDeals[stageName]) || [];
+      if (kanbanAssigneeFilter) deals = deals.filter(d => _dealMatchesAssignee(d.id));
+      if (kanbanSearchQuery) deals = deals.filter(_dealMatchesSearch);
+      return deals.filter(d =>
+        !isDealDormant(computeDealHealth(d, dealMetadata[d.id] || {}, stageName)));
+    }
+
+    // Deals visibles d'un stage : périmètre + chips + tri. Utilisé par le Kanban
+    // (par colonne) et par le Tableau (à plat, cf. _pipelineFlatDeals), pour que
+    // les deux vues ne puissent pas afficher des ensembles différents.
+    function _pipelineVisibleDeals(stageName) {
+      let deals = _pipelineStageBase(stageName);
+      if (pipelineFilters.size) deals = deals.filter(d => _dealMatchesChipFilters(d, stageName));
+      const cmp = _pipelineSortComparator(() => stageName);
+      return cmp ? [...deals].sort(cmp) : deals;
+    }
+
+    // Vue tableau : tout le pipe à plat, trié globalement. Chaque ligne porte
+    // déjà son stage (menu déroulant), donc le regroupement n'apporte rien dès
+    // qu'on trie sur autre chose que le stage.
+    function _pipelineFlatDeals() {
+      const stageOfId = {};
+      const out = [];
+      for (const stageName of KANBAN_STAGES_ORDER) {
+        for (const d of _pipelineVisibleDeals(stageName)) {
+          stageOfId[d.id] = stageName;
+          out.push(d);
+        }
+      }
+      const cmp = _pipelineSortComparator(d => stageOfId[d.id]);
+      return { deals: cmp ? [...out].sort(cmp) : out, stageOfId };
+    }
+
     // ===================== Export Excel (.xlsx) =====================
     // SheetJS chargé à la demande (CDN) pour ne pas alourdir le chargement de la page.
     function _loadSheetJS() {
@@ -6119,7 +6426,7 @@
       const deals = []; let total = 0;
       for (const stageName of KANBAN_STAGES_ORDER) {
         for (const d of (dashboardData.pipelineDeals[stageName] || [])) {
-          if (isDealDormant(computeDealCriticality(d, dealMetadata[d.id] || {}))) continue;
+          if (isDealDormant(computeDealHealth(d, dealMetadata[d.id] || {}, stageName))) continue;
           const w = d.amount * (d.probability || 0) / 100;
           deals.push({ name: d.name, stage: stageName, amount: d.amount, probability: d.probability, weighted: w });
           total += w;
@@ -6174,7 +6481,7 @@
         for (const stageName of KANBAN_STAGES_ORDER) {
           const deals = dashboardData.pipelineDeals[stageName] || [];
           for (const d of deals) {
-            if (isDealDormant(computeDealCriticality(d, dealMetadata[d.id] || {}))) continue; // en sommeil : hors pipeline pondéré
+            if (isDealDormant(computeDealHealth(d, dealMetadata[d.id] || {}, stageName))) continue; // en sommeil : hors pipeline pondéré
             pipelineCount++;
             pipelineTotal += d.amount;
             pipelineWeighted += d.amount * (d.probability / 100);
@@ -6582,62 +6889,143 @@
     let pipelineMovedDeals = [];
     let pipelineCriticalDeals = [];
 
-    // 🚨 Critère "deal critique" — un seul signal d'inactivité réelle :
-    //   "trop ancien" = > 21j depuis le dernier "contact" (= max(dernière relance, dernière note),
-    //                   fallback createdate si rien)
-    // Note ≡ Relance : ajouter l'une OU l'autre suffit à éteindre la criticité.
-    // Échappatoires (court-circuitent tout) :
-    //   - un prochain RDV futur (meta.next_meeting_at)
-    //   - une tâche ouverte dont l'échéance n'est pas encore passée (meta.tasks)
-    //   - un deal créé récemment (< CRITICAL_GRACE_DAYS) — délai de grâce pour l'instruire
-    const CRITICAL_RELANCE_DAYS = 21;
-    const CRITICAL_GRACE_DAYS = 7;
-    function computeDealCriticality(deal, meta) {
-      const nextMeetingTime = (meta && meta.next_meeting_at)
-        ? new Date(meta.next_meeting_at).getTime() : 0;
-      if (nextMeetingTime > Date.now()) {
-        return { critical: false, reasons: [], daysSinceTouch: null, nextMeetingAt: meta.next_meeting_at };
-      }
+    // ═══════════════════════════════════════════════════════════════════════
+    // SANTÉ DU DEAL — deux axes indépendants, à ne pas confondre.
+    //
+    //   1. CONTACT   : jours depuis le dernier échange (max relance / note,
+    //                  fallback createdate). Répond à "je l'ai relancé quand ?"
+    //   2. STAGNATION: jours passés dans le stage courant (stageEnteredAt,
+    //                  fallback createdate). Répond à "il avance, ce deal ?"
+    //
+    // Un deal relancé chaque semaine peut croupir 4 mois en Négociation : l'axe
+    // contact est vert, l'axe stagnation est rouge. C'est le second qui manquait.
+    //
+    // Statuts : frais → tiède → dort → bloqué   (+ gelé, hors course)
+    //   dort   = un des deux axes a dépassé son seuil
+    //   bloqué = un des deux axes a dépassé le double de son seuil
+    //
+    // "bloqué" n'est PAS "perdu". Aucun statut ne retire un deal du Kanban, du
+    // tableau ni du pipeline pondéré : il reste à sa valeur pleine. Seuls deux
+    // gestes MANUELS sortent un deal du pipe actif, le gel et le closedlost.
+    // Un seuil ne ferme jamais un deal tout seul.
+    //
+    // Les échappatoires (RDV futur, tâche à échéance, deal récent, deal gelé)
+    // n'effacent JAMAIS les compteurs : elles empêchent seulement de virer au
+    // rouge. Les chips restent affichés, donc l'info reste visible sans crier.
+    // ═══════════════════════════════════════════════════════════════════════
 
-      // Une tâche à faire avec une échéance future désamorce la criticité.
-      const tasksArr = (meta && Array.isArray(meta.tasks)) ? meta.tasks : [];
-      const hasFutureTask = tasksArr.some(t =>
+    // Seuil de stagnation par stage : plus le deal est avancé, moins on tolère
+    // qu'il traîne. 30j en Qualif c'est la vie, 10j sur un contrat envoyé c'est
+    // qu'il se passe quelque chose.
+    const STAGE_STALL_DAYS = {
+      'RDV Qualif':     30,
+      'RDV Propale':    21,
+      'Négociation':    14,
+      'Contrat envoyé': 10,
+    };
+    const STAGE_STALL_FALLBACK = 30;
+    const CRITICAL_RELANCE_DAYS = 21;  // seuil de l'axe contact
+    const CRITICAL_GRACE_DAYS = 7;     // un deal tout neuf a le droit d'être instruit
+    const BLOCKED_FACTOR = 2;          // au double du seuil, le deal passe "bloqué"
+
+    const _DAY_MS = 24 * 3600 * 1000;
+    function _daysSince(dateStr) {
+      if (!dateStr) return null;
+      const t = new Date(dateStr).getTime();
+      if (!t || isNaN(t)) return null;
+      return Math.floor((Date.now() - t) / _DAY_MS);
+    }
+
+    // "Quelque chose est prévu sur ce deal" — prédicat unique, partagé par le
+    // moteur de santé ET par le filtre "Rien de prévu". Une tâche dont l'échéance
+    // est passée ne compte pas : ce n'est plus un plan, c'est un rappel ignoré.
+    function _hasFutureMeeting(meta) {
+      const t = meta && meta.next_meeting_at ? new Date(meta.next_meeting_at).getTime() : 0;
+      return t > Date.now();
+    }
+    function _hasFutureTask(meta) {
+      return (meta && Array.isArray(meta.tasks) ? meta.tasks : []).some(t =>
         t && t.status !== 'done' && t.due_at && new Date(t.due_at).getTime() > Date.now());
-      if (hasFutureTask) {
-        return { critical: false, reasons: [], daysSinceTouch: null };
-      }
+    }
 
-      // Délai de grâce : un deal créé récemment n'est jamais critique (laisse le temps de l'instruire).
-      const createdTime = (deal && deal.createdate) ? new Date(deal.createdate).getTime() : 0;
-      if (createdTime > 0 && (Date.now() - createdTime) < CRITICAL_GRACE_DAYS * 24 * 3600 * 1000) {
-        return { critical: false, reasons: [], daysSinceTouch: null };
-      }
+    function computeDealHealth(deal, meta, stageName) {
+      meta = meta || {};
+      const stage = stageName || deal.stage || null;
 
-      const reasons = [];
-
-      const notesArr = (meta && Array.isArray(meta.notes)) ? meta.notes : [];
-      const relances = (meta && Array.isArray(meta.relances)) ? meta.relances : [];
-
-      // Last touch = max(dernière relance, dernière note)
+      // ---- Axe 1 : contact -------------------------------------------------
+      const relances = Array.isArray(meta.relances) ? meta.relances : [];
+      const notesArr = Array.isArray(meta.notes) ? meta.notes : [];
       const touchDates = [
         ...relances.map(r => r && r.at ? new Date(r.at).getTime() : 0),
         ...notesArr.map(n => n && n.at ? new Date(n.at).getTime() : 0),
       ].filter(t => t > 0);
       const lastTouchTime = touchDates.length ? Math.max(...touchDates) : null;
-      const fallbackTime = (lastTouchTime === null && deal && deal.createdate)
-        ? new Date(deal.createdate).getTime() : null;
-      const refTime = lastTouchTime !== null ? lastTouchTime : fallbackTime;
-      let daysSinceTouch = null;
-      if (refTime !== null) {
-        daysSinceTouch = Math.floor((Date.now() - refTime) / (24 * 3600 * 1000));
-        if (daysSinceTouch > CRITICAL_RELANCE_DAYS) {
-          reasons.push(lastTouchTime !== null
-            ? `⏱ ${daysSinceTouch}j sans relance`
-            : `⏱ ${daysSinceTouch}j sans contact`);
-        }
+      const everTouched = lastTouchTime !== null;
+      const daysSinceTouch = everTouched
+        ? Math.floor((Date.now() - lastTouchTime) / _DAY_MS)
+        : _daysSince(deal.createdate);
+
+      // ---- Axe 2 : stagnation ---------------------------------------------
+      const daysInStage = _daysSince(deal.stageEnteredAt || deal.createdate);
+      const stallThreshold = STAGE_STALL_DAYS[stage] || STAGE_STALL_FALLBACK;
+
+      // ---- Échappatoires (elles calment, elles n'effacent pas) -------------
+      const isFrozen = stage === RELANCER_STAGE_LABEL;  // const déclarée plus bas, lue à l'exécution
+      const hasFutureMeeting = _hasFutureMeeting(meta);
+      const hasFutureTask = _hasFutureTask(meta);
+      const inGrace = deal.createdate
+        && (Date.now() - new Date(deal.createdate).getTime()) < CRITICAL_GRACE_DAYS * _DAY_MS;
+
+      let silenced = null;
+      if (isFrozen) silenced = 'gele';
+      else if (hasFutureMeeting) silenced = 'rdv';
+      else if (hasFutureTask) silenced = 'tache';
+      else if (inGrace) silenced = 'grace';
+
+      // ---- Sévérité : combien de fois le seuil est dépassé ------------------
+      const touchRatio = daysSinceTouch !== null ? daysSinceTouch / CRITICAL_RELANCE_DAYS : 0;
+      const stallRatio = daysInStage !== null ? daysInStage / stallThreshold : 0;
+      const score = Math.max(touchRatio, stallRatio);  // sert au tri "ça dort"
+
+      // ---- Motifs (toujours calculés, affichés même si silencieux) ---------
+      const reasons = [];
+      if (daysSinceTouch !== null && daysSinceTouch > CRITICAL_RELANCE_DAYS) {
+        reasons.push(everTouched
+          ? `⏱ ${daysSinceTouch}j sans relance`
+          : `⏱ ${daysSinceTouch}j sans contact`);
+      }
+      if (daysInStage !== null && daysInStage > stallThreshold && stage && !isFrozen) {
+        reasons.push(`🐌 ${daysInStage}j en ${stage}`);
       }
 
-      return { critical: reasons.length > 0, reasons, daysSinceTouch };
+      // ---- Statut ----------------------------------------------------------
+      let status;
+      if (isFrozen) status = 'gele';
+      else if (silenced) status = 'frais';
+      else if (score > BLOCKED_FACTOR) status = 'bloque';
+      else if (score > 1) status = 'dort';
+      else if (score > 0.6) status = 'tiede';
+      else status = 'frais';
+
+      return {
+        status,
+        score,
+        reasons,
+        daysSinceTouch,
+        daysInStage,
+        stallThreshold,
+        silenced,
+        everTouched,
+        nextMeetingAt: meta.next_meeting_at || null,
+        wakeUpAt: meta.wake_up_at || null,
+        // Compat : les appelants historiques lisent .critical
+        critical: status === 'dort' || status === 'bloque',
+      };
+    }
+
+    // Ancien nom, conservé pour ne rien casser ailleurs.
+    function computeDealCriticality(deal, meta, stageName) {
+      return computeDealHealth(deal, meta, stageName);
     }
 
     // --- Colonne Gagné (repliable) ---
@@ -6709,22 +7097,41 @@
       if (kanbanSearchQuery) deals = deals.filter(_dealMatchesSearch);
       const total = deals.reduce((s, d) => s + d.amount, 0);
 
+      // Tri : à réveiller d'abord, puis par date de réveil la plus proche.
+      // Les gelés sans date ferment la marche : ce sont les oubliés du système.
+      const _wake = d => {
+        const w = (dealMetadata[d.id] || {}).wake_up_at;
+        return w ? new Date(w).getTime() : Infinity;
+      };
+      deals = [...deals].sort((a, b) => _wake(a) - _wake(b));
+      const dueCount = deals.filter(d => _isDueToWake(dealMetadata[d.id])).length;
+
       if (!relancerColumnOpen) {
         col.innerHTML = `
-          <div class="kanban-header" onclick="toggleRelancerColumn()" title="Voir les deals à relancer">
+          <div class="kanban-header" onclick="toggleRelancerColumn()" title="${dueCount ? dueCount + ' deal(s) à réveiller aujourd\'hui' : 'Voir les deals gelés'}">
             <span class="won-toggle-icon">&#9654;</span>
-            <span class="won-collapsed-label">À relancer · ${deals.length}</span>
+            <span class="won-collapsed-label">À relancer · ${deals.length}${dueCount ? ` <span class="wake-pill">⏰ ${dueCount}</span>` : ''}</span>
           </div>`;
         return;
       }
 
       let cardsHtml = '';
       if (deals.length === 0) {
-        cardsHtml = `<div class="won-empty">Aucun deal à relancer</div>`;
+        cardsHtml = `<div class="won-empty">Aucun deal gelé</div>`;
       } else {
         for (const d of deals) {
+          const m = dealMetadata[d.id] || {};
+          const due = _isDueToWake(m);
+          const wakeShort = m.wake_up_at ? formatShortDate(m.wake_up_at) : null;
           const since = d.stageEnteredAt ? formatShortDate(d.stageEnteredAt) : '';
-          cardsHtml += `<div class="kanban-card kanban-card-relancer"
+
+          // La ligne de date dit ce qui va se passer, pas depuis quand il dort.
+          let wakeLine;
+          if (due) wakeLine = `<span class="kanban-card-wake due">⏰ à réveiller (${wakeShort})</span>`;
+          else if (wakeShort) wakeLine = `<span class="kanban-card-wake">🧊 réveil ${wakeShort}</span>`;
+          else wakeLine = `<span class="kanban-card-wake none" title="Ce deal ne reviendra jamais tout seul : pose une date de réveil.">⚠ sans date de réveil</span>`;
+
+          cardsHtml += `<div class="kanban-card kanban-card-relancer${due ? ' kanban-card-wake-due' : ''}"
               draggable="true"
               data-deal-id="${d.id}"
               data-deal-amount="${d.amount}"
@@ -6733,11 +7140,14 @@
               ondragend="onDragEnd(event)"
               onclick="openDealSidebar('${d.id}')">
             <div class="kanban-card-name">${d.name}</div>
+            ${wakeLine}
+            ${m.frozen_note ? `<div class="kanban-card-frozen-note" title="${_escapeHtml(m.frozen_note)}">${_escapeHtml(m.frozen_note)}</div>` : ''}
             <div class="kanban-card-meta">
               <span class="kanban-card-amount">${formatEuro(d.amount)}</span>
-              <span class="kanban-card-won-date">${since ? 'depuis ' + since : ''}</span>
-              ${assigneeAvatarHtml(d.id, (dealMetadata[d.id] || {}).assignee)}
+              <span class="kanban-card-won-date" title="Gelé depuis le ${since}">${since ? 'gelé ' + since : ''}</span>
+              ${assigneeAvatarHtml(d.id, m.assignee)}
             </div>
+            <button class="kanban-card-unfreeze" onclick="unfreezeDeal('${d.id}', event)" title="Remettre ce deal dans « ${_unfreezeTarget(m)} »">↩ Réactiver</button>
           </div>`;
         }
       }
@@ -6745,7 +7155,7 @@
       col.innerHTML = `
         <div class="kanban-header" onclick="toggleRelancerColumn()" title="Replier">
           <span class="kanban-header-label">&#9660; À relancer</span>
-          <span class="kanban-header-count">${deals.length} &middot; ${formatEuro(total)}</span>
+          <span class="kanban-header-count">${deals.length}${dueCount ? ` <span class="wake-pill">⏰ ${dueCount}</span>` : ''} &middot; ${formatEuro(total)}</span>
         </div>
         <div class="kanban-cards">${cardsHtml}</div>`;
 
@@ -6817,8 +7227,35 @@
     const DORMANT_DAYS = 90;
     let dormantDeals = [];
     let dormantColumnOpen = false;
-    // daysSinceTouch est null si RDV futur, tâche future ou deal récent (cf. computeDealCriticality) -> jamais en sommeil.
-    function isDealDormant(crit) { return !!crit && crit.daysSinceTouch !== null && crit.daysSinceTouch >= DORMANT_DAYS; }
+    // ATTENTION — le test a changé de nature avec computeDealHealth.
+    // Avant : daysSinceTouch valait null quand un RDV futur / une tâche future /
+    // un deal récent désamorçait l'alerte, et le null servait de sentinelle.
+    // Maintenant les compteurs restent TOUJOURS calculés (c'est le point du
+    // nouveau moteur : afficher l'info sans crier), et c'est `silenced` qui
+    // porte le désamorçage. Tester le null ici mettrait en sommeil des deals
+    // ayant un RDV la semaine prochaine, et les sortirait du pipeline pondéré.
+    function isDealDormant(h) {
+      return !!h
+        && h.silenced === null          // aucun RDV futur, aucune tâche future, ni grâce, ni gel
+        && h.daysSinceTouch !== null
+        && h.daysSinceTouch >= DORMANT_DAYS;
+    }
+
+    // Deals en sommeil, tous stages confondus. On applique les mêmes filtres
+    // assigné/recherche que les colonnes principales, comme le faisait l'amont.
+    function _collectDormantDeals() {
+      const out = [];
+      if (!dashboardData || !dashboardData.pipelineDeals) return out;
+      for (const stageName of KANBAN_STAGES_ORDER) {
+        for (const d of (dashboardData.pipelineDeals[stageName] || [])) {
+          if (kanbanAssigneeFilter && !_dealMatchesAssignee(d.id)) continue;
+          if (kanbanSearchQuery && !_dealMatchesSearch(d)) continue;
+          const h = computeDealHealth(d, dealMetadata[d.id] || {}, stageName);
+          if (isDealDormant(h)) out.push({ ...d, stage: stageName, daysSinceTouch: h.daysSinceTouch });
+        }
+      }
+      return out;
+    }
     function toggleDormantColumn() { dormantColumnOpen = !dormantColumnOpen; renderDormantColumn(); }
     function renderDormantColumn() {
       const col = document.getElementById('kanbanDormantColumn');
@@ -6868,21 +7305,17 @@
       pipelineNewDeals = [];
       pipelineMovedDeals = [];
       pipelineCriticalDeals = [];
-      dormantDeals = [];
+      dormantDeals = _collectDormantDeals();
 
       for (const stageName of KANBAN_STAGES_ORDER) {
-        const allStageDeals = dashboardData.pipelineDeals[stageName] || [];
-        let deals = kanbanAssigneeFilter
-          ? allStageDeals.filter(d => _dealMatchesAssignee(d.id))
-          : allStageDeals;
-        if (kanbanSearchQuery) deals = deals.filter(_dealMatchesSearch);
-        // Sortir les deals "en sommeil" (>90j sans relance, aucun RDV futur) des colonnes principales.
-        deals = deals.filter(d => {
-          const c = computeDealCriticality(d, dealMetadata[d.id] || {});
-          if (isDealDormant(c)) { dormantDeals.push({ ...d, stage: stageName, daysSinceTouch: c.daysSinceTouch }); return false; }
-          return true;
-        });
+        // Filtres (assigné, recherche, sommeil) + chips + tri, appliqués DANS la
+        // colonne. L'extraction des deals en sommeil vit dans _pipelineStageBase,
+        // pour que le Kanban et le Tableau montrent exactement le même périmètre.
+        const deals = _pipelineVisibleDeals(stageName);
         const total = deals.reduce((s, d) => s + d.amount, 0);
+        // Dénominateur = ce que la colonne contiendrait sans les chips. Les deals
+        // en sommeil n'y comptent pas : ils ne sont pas masqués, ils ont déménagé.
+        const masques = _pipelineStageBase(stageName).length - deals.length;
 
         html += `<div class="kanban-column" data-stage="${stageName}"
             ondragover="event.preventDefault();this.classList.add('drag-over')"
@@ -6890,7 +7323,11 @@
             ondrop="onDropStage(event, '${stageName}')">
           <div class="kanban-header">
             <span class="kanban-header-label">${stageName}</span>
-            <span class="kanban-header-count">${deals.length} &middot; ${formatEuro(total)}</span>
+            <span class="kanban-header-count">${deals.length}${
+              // Un filtre qui cache des deals doit le dire : sinon on croit
+              // que la colonne est vide alors qu'elle est juste filtrée.
+              masques > 0 ? `<span class="kanban-header-hidden" title="${masques} deal(s) masqué(s) par les filtres">/${deals.length + masques}</span>` : ''
+            } &middot; ${formatEuro(total)}</span>
           </div>
           <div class="kanban-cards">`;
 
@@ -6915,10 +7352,17 @@
           const proposalMission     = meta.proposal_mission || null;
           const proposalNom         = meta.proposal_nom || null;
 
-          // 🚨 Détection deal critique (sans relance > 15j OU sans notes)
-          const crit = computeDealCriticality(deal, meta);
+          // 🚨 Santé du deal : axe contact (jours sans relance) + axe stagnation (jours dans le stage)
+          const crit = computeDealHealth(deal, meta, stageName);
           if (crit.critical) {
-            pipelineCriticalDeals.push({ ...deal, stage: stageName, reasons: crit.reasons, daysSinceTouch: crit.daysSinceTouch });
+            pipelineCriticalDeals.push({
+              ...deal, stage: stageName,
+              reasons: crit.reasons,
+              daysSinceTouch: crit.daysSinceTouch,
+              daysInStage: crit.daysInStage,
+              status: crit.status,
+              score: crit.score,
+            });
           }
           const criticalClass = crit.critical ? ' kanban-card-critical' : '';
           const criticalReasons = crit.critical
@@ -7032,27 +7476,54 @@
       }
     }
 
+    // Cellule "Inactivité" du tableau : les deux axes côte à côte, pour que le
+    // tri "Ça dort" soit lisible. Chaque nombre vire au rouge quand il dépasse
+    // son propre seuil, indépendamment de l'autre.
+    function _dtHealthCell(h) {
+      if (!h) return '';
+      const touchOver = h.daysSinceTouch !== null && h.daysSinceTouch > CRITICAL_RELANCE_DAYS;
+      const stallOver = h.daysInStage !== null && h.daysInStage > h.stallThreshold;
+      const cell = (val, over, tip) => val === null
+        ? '<span class="dt-health-na">—</span>'
+        : `<span class="dt-health-num${over ? ' over' : ''}" title="${tip}">${val}j</span>`;
+      const calme = h.silenced
+        ? { rdv: '📅', tache: '✅', grace: '🌱', gele: '🧊' }[h.silenced] || ''
+        : '';
+      return `<span class="dt-health">
+        ${cell(h.daysSinceTouch, touchOver, `Dernier contact il y a ${h.daysSinceTouch} jours (seuil ${CRITICAL_RELANCE_DAYS}j)`)}
+        <span class="dt-health-sep">·</span>
+        ${cell(h.daysInStage, stallOver, `Dans ce stage depuis ${h.daysInStage} jours (seuil ${h.stallThreshold}j)`)}
+        ${calme ? `<span class="dt-health-calm" title="Alerte désamorcée : ${h.silenced}">${calme}</span>` : ''}
+      </span>`;
+    }
+
     // Vue tableau : éditer tags / stage / assigné / montant en ligne, sans ouvrir chaque deal.
     function renderDealsTable() {
       const wrap = document.getElementById('dealsTableView');
       if (!wrap || !dashboardData || !dashboardData.pipelineDeals) return;
 
       let rows = '';
-      for (const stageName of KANBAN_STAGES_ORDER) {
-        const allStageDeals = dashboardData.pipelineDeals[stageName] || [];
-        let deals = kanbanAssigneeFilter
-          ? allStageDeals.filter(d => _dealMatchesAssignee(d.id))
-          : allStageDeals;
-        if (kanbanSearchQuery) deals = deals.filter(_dealMatchesSearch);
+      // Tri par stage → on garde le regroupement. Tout autre tri → liste à plat,
+      // sinon trier "par montant" à l'intérieur de 4 groupes ne trie rien du tout.
+      const groupByStage = pipelineSort === 'stage';
+      const flat = _pipelineFlatDeals();
+      const groupes = groupByStage
+        ? KANBAN_STAGES_ORDER.map(s => [s, _pipelineVisibleDeals(s)])
+        : [[null, flat.deals]];
+
+      for (const [groupStage, deals] of groupes) {
         if (!deals.length) continue;
 
-        const total = deals.reduce((s, d) => s + d.amount, 0);
-        rows += `<tr class="dt-stage-group"><td colspan="7">${stageName} &middot; ${deals.length} &middot; ${formatEuro(total)}</td></tr>`;
+        if (groupStage) {
+          const total = deals.reduce((s, d) => s + d.amount, 0);
+          rows += `<tr class="dt-stage-group"><td colspan="8">${groupStage} &middot; ${deals.length} &middot; ${formatEuro(total)}</td></tr>`;
+        }
 
         for (const deal of deals) {
+          const stageName = groupStage || flat.stageOfId[deal.id];
           const meta = dealMetadata[deal.id] || {};
           const tags = meta.tags || [];
-          const crit = computeDealCriticality(deal, meta);
+          const crit = computeDealHealth(deal, meta, stageName);
 
           const tagChips = tags.map(t => {
             const s = TAG_STYLES[t] || { bg: '#eee', color: '#555' };
@@ -7074,6 +7545,7 @@
             <td>${stageSelect}</td>
             <td><span class="dt-amount" onclick="startEditAmount(event, this, '${deal.id}', ${deal.amount})" title="Cliquer pour modifier">${formatEuro(deal.amount)}</span></td>
             <td><span class="kanban-card-proba ${probaClass} dt-proba">${deal.probability}%</span></td>
+            <td>${_dtHealthCell(crit)}</td>
             <td><div class="dt-tags">${tagChips}${addBtn}</div></td>
             <td>${assigneeAvatarHtml(deal.id, meta.assignee)}</td>
           </tr>`;
@@ -7092,6 +7564,7 @@
           <th>Stage</th>
           <th>Montant</th>
           <th>Proba</th>
+          <th title="À gauche : jours depuis le dernier contact. À droite : jours passés dans le stage courant.">Inactivité</th>
           <th>Tags</th>
           <th>Assigné</th>
         </tr></thead>
@@ -7308,10 +7781,11 @@
       const fmtDate = s => s ? new Date(s).toLocaleDateString('fr-FR', { day:'numeric', month:'short' }) : '';
 
       if (type === 'critical') {
-        // tri : plus de jours sans contact en premier
-        deals = [...pipelineCriticalDeals].sort((a, b) => (b.daysSinceTouch || 0) - (a.daysSinceTouch || 0));
+        // tri : le plus atteint en premier (score = pire des deux axes, contact ou stagnation)
+        deals = [...pipelineCriticalDeals].sort((a, b) => (b.score || 0) - (a.score || 0));
         title = '🚨 Deals critiques';
-        subtitle = `${deals.length} deal${deals.length > 1 ? 's' : ''} sans relance > ${CRITICAL_RELANCE_DAYS}j — à relancer.`;
+        const nBloques = deals.filter(d => d.status === 'bloque').length;
+        subtitle = `${deals.length} deal${deals.length > 1 ? 's' : ''} à reprendre${nBloques ? `, dont ${nBloques} bloqué${nBloques > 1 ? 's' : ''} depuis très longtemps` : ''}. Tous restent dans le pipeline.`;
       } else {
         deals = type === 'new' ? pipelineNewDeals : pipelineMovedDeals;
         title = type === 'new' ? 'Nouveaux leads' : 'Progressions';
@@ -7427,11 +7901,16 @@
       if (type === 'critical') {
         rows = `<div class="pa-critical-rules">
           <div class="pa-critical-rules-title">🚨 Qu'est-ce qu'un deal « critique » ?</div>
-          Un deal devient critique s'il <strong>n'a aucun RDV futur planifié</strong>, qu'il a été <strong>créé il y a plus de ${CRITICAL_GRACE_DAYS} jours</strong> (délai de grâce) et que :
+          Deux signaux indépendants, un seul suffit :
           <ul>
-            <li><strong>Plus de <code>${CRITICAL_RELANCE_DAYS} jours</code> sans relance</strong> — dernier contact (note ou relance, sinon date de création) trop ancien.</li>
+            <li><strong>⏱ Pas relancé</strong> — plus de <code>${CRITICAL_RELANCE_DAYS} jours</code> depuis le dernier contact (note ou relance, sinon date de création).</li>
+            <li><strong>🐌 Ça n'avance pas</strong> — trop longtemps dans le même stage : ${
+              Object.entries(STAGE_STALL_DAYS).map(([s, d]) => `<code>${s} ${d}j</code>`).join(' · ')
+            }. Un deal peut être relancé chaque semaine et croupir 4 mois au même endroit : c'est ce signal-là qui le voit.</li>
           </ul>
-          <div class="ok">✓ Pour le sortir de l'état critique : enregistre une note / relance (📝 📧 📞) ou planifie un RDV futur (📅) — un RDV à venir court-circuite tout.</div>
+          Au-delà du <strong>double</strong> du seuil, le deal passe de « dort » à « bloqué ». <strong>Bloqué ne veut pas dire perdu</strong> : le deal reste dans le pipeline, à sa valeur pleine, et se relance à tout moment. Seuls le gel et la fermeture le sortent du pipe, et ce sont deux gestes manuels.
+          Trois échappatoires le calment sans effacer les compteurs : un <strong>RDV futur</strong> planifié, une <strong>tâche ouverte à échéance future</strong>, ou un deal <strong>créé il y a moins de ${CRITICAL_GRACE_DAYS} jours</strong>.
+          <div class="ok">✓ Pour le sortir de là : enregistre une note / relance (📝 📧 📞), planifie un RDV (📅), ou gèle-le avec une date de réveil s'il n'y a rien à faire avant plusieurs mois.</div>
         </div>` + rows;
       }
 
@@ -7681,7 +8160,7 @@
       const n = pipelineCriticalDeals.length;
       const sub = document.getElementById('paModalSubtitle');
       if (sub) sub.textContent = n
-        ? `${n} deal${n > 1 ? 's' : ''} sans relance > ${CRITICAL_RELANCE_DAYS}j — à relancer.`
+        ? `${n} deal${n > 1 ? 's' : ''} sans relance ou bloqué${n > 1 ? 's' : ''} dans leur stage.`
         : 'Pipeline propre 🎉';
       // Total
       const total = pipelineCriticalDeals.reduce((s, d) => s + (d.amount || 0), 0);
@@ -7874,6 +8353,229 @@
       } catch {}
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // GEL / RÉVEIL
+    //
+    // "Très intéressant, on en reparle dans 3 mois" : le deal quitte le pipe
+    // actif au lieu de hurler pendant 3 mois, et il revient TOUT SEUL le jour dit.
+    // La date de réveil est obligatoire — c'est elle qui empêche "À relancer
+    // plus tard" de redevenir un cimetière.
+    //
+    // Réversible en un clic dans les deux sens : geler n'est pas fermer.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Déplace un deal d'un stage à l'autre dans l'état local, sans refetch.
+    function _moveDealLocally(dealId, targetStage) {
+      if (!dashboardData || !dashboardData.pipelineDeals) return null;
+      for (const deals of Object.values(dashboardData.pipelineDeals)) {
+        const idx = deals.findIndex(d => d.id === dealId);
+        if (idx === -1) continue;
+        const [deal] = deals.splice(idx, 1);
+        deal.stageEnteredAt = new Date().toISOString();
+        (dashboardData.pipelineDeals[targetStage] || []).push(deal);
+        return deal;
+      }
+      return null;
+    }
+
+    // Date de réveil proposée : +N mois à partir d'aujourd'hui, format input date.
+    function _wakeDateIn(months) {
+      const d = new Date();
+      d.setMonth(d.getMonth() + months);
+      return d.toISOString().slice(0, 10);
+    }
+
+    function setFreezePreset(months) {
+      const input = document.getElementById('sbFreezeDate');
+      if (input) input.value = _wakeDateIn(months);
+      document.querySelectorAll('#sbFreezeForm .freeze-preset').forEach(b =>
+        b.classList.toggle('active', Number(b.dataset.months) === months));
+    }
+
+    function toggleFreezeForm() {
+      const form = document.getElementById('sbFreezeForm');
+      if (!form) return;
+      const opening = !form.classList.contains('open');
+      form.classList.toggle('open', opening);
+      if (opening) {
+        if (!document.getElementById('sbFreezeDate').value) setFreezePreset(3);
+        const note = document.getElementById('sbFreezeNote');
+        if (note) note.focus();
+      }
+    }
+
+    async function freezeDeal(dealId) {
+      const dateInput = document.getElementById('sbFreezeDate');
+      const noteInput = document.getElementById('sbFreezeNote');
+      const btn = document.getElementById('sbFreezeConfirm');
+      const dateVal = dateInput ? dateInput.value : '';
+
+      // Règle dure : pas de gel sans date de réveil.
+      if (!dateVal) {
+        if (dateInput) { dateInput.focus(); dateInput.style.borderColor = '#dc2626'; }
+        return;
+      }
+      const wakeIso = new Date(dateVal + 'T09:00:00').toISOString();
+      if (new Date(wakeIso).getTime() <= Date.now()) {
+        if (dateInput) { dateInput.focus(); dateInput.style.borderColor = '#dc2626'; }
+        alert('La date de réveil doit être dans le futur.');
+        return;
+      }
+
+      const deal = findDealInPipeline(dealId);
+      const fromStage = deal ? deal.stage : null;
+      if (!fromStage || fromStage === RELANCER_STAGE_LABEL) return;
+
+      if (btn) { btn.disabled = true; btn.textContent = 'Gel en cours…'; }
+      try {
+        // 1) On déplace au congélateur.
+        const r1 = await fetch(`/api/deals/${dealId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stage: RELANCER_STAGE_LABEL }),
+        });
+        if (!r1.ok) throw new Error('stage');
+
+        // 2) On pose la date de réveil. Si ça rate, on REMET le deal où il était :
+        //    un deal au congélateur sans date de réveil, c'est un deal perdu.
+        const freeze = {
+          wake_up_at: wakeIso,
+          frozen_from_stage: fromStage,
+          frozen_note: noteInput ? noteInput.value.trim() : '',
+          frozen_at: new Date().toISOString(),
+        };
+        const r2 = await fetch(`/api/deals/${dealId}/metadata`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(freeze),
+        });
+        if (!r2.ok) {
+          await fetch(`/api/deals/${dealId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stage: fromStage }),
+          }).catch(() => {});
+          throw new Error('metadata');
+        }
+
+        dealMetadata[dealId] = { ...(dealMetadata[dealId] || {}), ...freeze };
+        _moveDealLocally(dealId, RELANCER_STAGE_LABEL);
+        renderKanban();
+        closeDealSidebar();
+      } catch (e) {
+        if (btn) { btn.disabled = false; btn.textContent = '🧊 Geler'; }
+        alert(e.message === 'metadata'
+          ? 'La date de réveil n\'a pas pu être enregistrée. Le deal a été remis à sa place, rien n\'est perdu.'
+          : 'Le deal n\'a pas pu être gelé.');
+      }
+    }
+
+    // Où atterrit un deal qu'on dégèle. On revalide le stage stocké : les deals
+    // gelés avant cette fonctionnalité n'en ont pas, et un libellé de stage peut
+    // avoir changé entre-temps. Dans le doute, retour en début de pipe.
+    function _unfreezeTarget(meta) {
+      const from = meta && meta.frozen_from_stage;
+      return KANBAN_STAGES_ORDER.includes(from) ? from : KANBAN_STAGES_ORDER[0];
+    }
+
+    // Dégel : le deal retourne dans son stage d'origine et redevient un deal normal.
+    async function unfreezeDeal(dealId, ev) {
+      if (ev) ev.stopPropagation();
+      const meta = dealMetadata[dealId] || {};
+      const target = _unfreezeTarget(meta);
+      try {
+        const r1 = await fetch(`/api/deals/${dealId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stage: target }),
+        });
+        if (!r1.ok) throw new Error();
+        await fetch(`/api/deals/${dealId}/metadata`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            wake_up_at: null, frozen_from_stage: null, frozen_note: null, frozen_at: null,
+          }),
+        });
+        dealMetadata[dealId] = {
+          ...(dealMetadata[dealId] || {}),
+          wake_up_at: null, frozen_from_stage: null, frozen_note: null, frozen_at: null,
+        };
+        _moveDealLocally(dealId, target);
+        renderKanban();
+      } catch {
+        alert('La réactivation a échoué.');
+      }
+    }
+
+    // Un deal gelé dont la date de réveil est passée.
+    function _isDueToWake(meta) {
+      return !!(meta && meta.wake_up_at && new Date(meta.wake_up_at).getTime() <= Date.now());
+    }
+
+    function _escapeHtml(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    // Bloc sidebar : geler (deal actif) ou réactiver (deal gelé).
+    function _renderFreezeField(deal, meta) {
+      meta = meta || {};
+      const isFrozen = deal.stage === RELANCER_STAGE_LABEL;
+
+      if (isFrozen) {
+        const due = _isDueToWake(meta);
+        const wake = meta.wake_up_at
+          ? new Date(meta.wake_up_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+          : null;
+        const back = _unfreezeTarget(meta);
+        return `
+            <div class="deal-sidebar-field" style="background:${due ? 'rgba(217,115,13,0.08)' : 'var(--bg)'};border:1px solid ${due ? 'rgba(217,115,13,0.35)' : 'var(--border)'};border-radius:var(--radius);padding:0.7rem">
+              <div class="deal-sidebar-label">🧊 Deal gelé ${due ? '<span style="color:#d9730d;font-weight:700">· à réveiller</span>' : ''}</div>
+              <div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:0.5rem">
+                ${wake
+                  ? (due ? `Réveil prévu le <strong>${wake}</strong>, c'est passé.` : `Revient tout seul le <strong>${wake}</strong>.`)
+                  : '<strong style="color:#b91c1c">Aucune date de réveil</strong> : ce deal ne reviendra jamais tout seul.'}
+              </div>
+              ${meta.frozen_note ? `<div style="font-size:0.78rem;background:var(--bg-secondary,rgba(0,0,0,0.03));border-left:2px solid var(--border);padding:0.4rem 0.6rem;margin-bottom:0.5rem;white-space:pre-wrap">${_escapeHtml(meta.frozen_note)}</div>` : ''}
+              <button class="relance-btn" onclick="unfreezeDeal('${deal.id}', event)" style="width:100%;font-weight:600">↩ Réactiver dans « ${back} »</button>
+            </div>`;
+      }
+
+      return `
+            <div class="deal-sidebar-field">
+              <div class="deal-sidebar-label">🧊 Rien avant longtemps ?</div>
+              <button class="relance-btn" onclick="toggleFreezeForm()" style="width:100%">Geler ce deal avec une date de réveil</button>
+              <div class="relance-form" id="sbFreezeForm">
+                <div style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:0.5rem">
+                  Le deal sort du pipe et arrête de déclencher des alertes. Il revient tout seul le jour choisi. Réversible en un clic.
+                </div>
+                <div class="relance-form-row">
+                  <label>Réveil</label>
+                  <div style="display:flex;gap:0.3rem;flex-wrap:wrap">
+                    <button type="button" class="relance-btn freeze-preset" data-months="1" onclick="setFreezePreset(1)" style="padding:0.25rem 0.5rem;font-size:0.72rem">+1 mois</button>
+                    <button type="button" class="relance-btn freeze-preset" data-months="3" onclick="setFreezePreset(3)" style="padding:0.25rem 0.5rem;font-size:0.72rem">+3 mois</button>
+                    <button type="button" class="relance-btn freeze-preset" data-months="6" onclick="setFreezePreset(6)" style="padding:0.25rem 0.5rem;font-size:0.72rem">+6 mois</button>
+                  </div>
+                </div>
+                <div class="relance-form-row">
+                  <label for="sbFreezeDate">Date</label>
+                  <input type="date" id="sbFreezeDate" min="${new Date(Date.now() + 86400000).toISOString().slice(0, 10)}" oninput="this.style.borderColor=''">
+                </div>
+                <div class="relance-form-row" style="align-items:flex-start">
+                  <label for="sbFreezeNote">Pourquoi</label>
+                  <textarea id="sbFreezeNote" rows="2" placeholder="Ex : très chaud, budget bloqué jusqu'à la clôture. Rappeler après le 10/11, interlocuteur = DAF."></textarea>
+                </div>
+                <div style="font-size:0.7rem;color:var(--text-secondary);font-style:italic;margin-top:-0.2rem">Dans 3 mois tu auras oublié. C'est cette phrase qui rendra le réveil utile.</div>
+                <div class="relance-form-actions">
+                  <button type="button" onclick="toggleFreezeForm()">Annuler</button>
+                  <button type="button" class="primary" id="sbFreezeConfirm" onclick="freezeDeal('${deal.id}')">🧊 Geler</button>
+                </div>
+              </div>
+            </div>`;
+    }
+
     // Re-render localisé du seul bloc "Prochain rendez-vous" dans la sidebar
     function _refreshNextMeetingField(deal, meta) {
       const input = document.getElementById('sbNextMeeting');
@@ -8007,6 +8709,8 @@
               </div>
               ${nextMeetingIsFuture ? `<div style="font-size:0.72rem;color:var(--text-secondary);margin-top:0.3rem;font-style:italic">Un RDV futur retire l'état critique du deal.</div>` : ''}
             </div>
+
+            ${_renderFreezeField(deal, meta)}
 
             <div class="deal-sidebar-field">
               <div class="deal-sidebar-label">✅ Tâches ${openTaskCount ? `<span style="color:var(--primary);font-weight:600">· ${openTaskCount} à faire</span>` : ''}</div>

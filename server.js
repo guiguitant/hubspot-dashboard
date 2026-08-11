@@ -1670,7 +1670,10 @@ app.get('/api/deals/:id', async (req, res) => {
 
 app.put('/api/deals/:id/metadata', async (req, res) => {
   const { id } = req.params;
-  const { tags, proposal_sent_at, next_meeting_at, assignee } = req.body;
+  const {
+    tags, proposal_sent_at, next_meeting_at, assignee,
+    wake_up_at, frozen_from_stage, frozen_note, frozen_at,
+  } = req.body;
   const update = { deal_id: id, updated_at: new Date().toISOString() };
   if (tags !== undefined) update.tags = tags;
   if (proposal_sent_at !== undefined) update.proposal_sent_at = proposal_sent_at;
@@ -1694,6 +1697,33 @@ app.put('/api/deals/:id/metadata', async (req, res) => {
       update.next_meeting_at = d.toISOString();
     }
   }
+
+  // --- Gel / réveil (migration 43) ---
+  // Le dégel envoie explicitement null sur les 4 champs : rien d'irréversible.
+  for (const [key, val] of [['wake_up_at', wake_up_at], ['frozen_at', frozen_at]]) {
+    if (val === undefined) continue;
+    if (val === null || val === '') { update[key] = null; continue; }
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return res.status(400).json({ error: `${key} invalide` });
+    update[key] = d.toISOString();
+  }
+  if (frozen_from_stage !== undefined) {
+    if (frozen_from_stage === null || frozen_from_stage === '') {
+      update.frozen_from_stage = null;
+    } else if (KANBAN_STAGES.some(s => s.forecast !== false && s.label === frozen_from_stage)) {
+      // Destination du réveil : uniquement un stage actif du pipe.
+      // On refuse "À relancer plus tard" (on ne dégèle pas vers le congélateur)
+      // et les stages fermés.
+      update.frozen_from_stage = frozen_from_stage;
+    } else {
+      return res.status(400).json({ error: 'frozen_from_stage invalide' });
+    }
+  }
+  if (frozen_note !== undefined) {
+    update.frozen_note = (frozen_note === null || frozen_note === '')
+      ? null : String(frozen_note).slice(0, 2000);
+  }
+
   try {
     const { error } = await supabaseAdmin
       .from('deal_metadata')
