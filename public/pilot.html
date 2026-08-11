@@ -2824,6 +2824,123 @@
       flex-direction: column;
       gap: 0.25rem;
     }
+
+    /* ── Fiche deal : en-tête ────────────────────────────────────────────── */
+    /* Icônes Lucide : alignées sur la ligne de base du texte, jamais d'emoji. */
+    .lu { flex-shrink: 0; vertical-align: -0.14em; margin-right: 0.35em; }
+    .deal-sidebar-label { display: flex; align-items: center; }
+
+    .sb-hero {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.85rem 0.9rem 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .sb-amount-row { display: flex; align-items: center; gap: 0.6rem; }
+    .sb-amount-wrap { flex: 1; display: flex; align-items: baseline; gap: 0.2rem; min-width: 0; }
+    /* Le montant est l'information numéro un de la fiche : il se lit d'abord. */
+    .sb-amount {
+      flex: 1;
+      min-width: 0;
+      font-size: 1.6rem;
+      font-weight: 700;
+      font-family: inherit;
+      color: var(--text);
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid transparent;
+      padding: 0 0 0.1rem;
+      outline: none;
+      -moz-appearance: textfield;
+    }
+    .sb-amount::-webkit-outer-spin-button,
+    .sb-amount::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .sb-amount:hover { border-bottom-color: var(--border); }
+    .sb-amount:focus { border-bottom-color: var(--primary); }
+    .sb-amount-cur { font-size: 1.2rem; font-weight: 600; color: var(--text-secondary); }
+
+    /* Escalier de statut : on voit la progression, on avance d'un clic. */
+    .sb-stepper { display: flex; gap: 0.15rem; }
+    .sb-step {
+      flex: 1;
+      min-width: 0;
+      background: none;
+      border: none;
+      padding: 0;
+      cursor: pointer;
+      font-family: inherit;
+      display: flex;
+      flex-direction: column;
+      gap: 0.28rem;
+      position: relative;
+    }
+    /* Le trait de liaison relie les étapes entre elles. */
+    .sb-step-dot {
+      height: 4px;
+      border-radius: 2px;
+      background: var(--border);
+      transition: background 0.15s;
+    }
+    .sb-step-label {
+      font-size: 0.66rem;
+      font-weight: 600;
+      color: var(--text-light);
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: color 0.15s;
+    }
+    .sb-step.done .sb-step-dot { background: var(--primary); opacity: 0.35; }
+    .sb-step.done .sb-step-label { color: var(--text-secondary); }
+    .sb-step.now .sb-step-dot { background: var(--primary); }
+    .sb-step.now .sb-step-label { color: var(--primary); font-weight: 700; }
+    .sb-step:hover .sb-step-dot { background: var(--primary); opacity: 0.7; }
+    .sb-step:hover .sb-step-label { color: var(--text); }
+
+    /* Santé du deal : les deux compteurs qui décident du statut. */
+    .sb-health { display: flex; flex-direction: column; gap: 0.4rem; }
+    .sb-health-head {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .sb-health-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .sb-health.ok     .sb-health-dot { background: var(--success); }
+    .sb-health.warn   .sb-health-dot { background: var(--warning); }
+    .sb-health.bad    .sb-health-dot { background: var(--danger); }
+    .sb-health.frozen .sb-health-dot { background: #64748b; }
+    .sb-health-calm {
+      font-size: 0.68rem;
+      font-weight: 500;
+      color: var(--text-secondary);
+      font-style: italic;
+    }
+    .sb-health-calm::before { content: '· '; }
+    .sb-health-pills { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+    .sb-health-pill {
+      display: inline-flex;
+      align-items: center;
+      font-size: 0.7rem;
+      color: var(--text-secondary);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.15rem 0.5rem;
+    }
+    .sb-health-pill strong { color: var(--text); margin-left: 0.25em; }
+    /* Chaque compteur rougit sur SON propre seuil, indépendamment de l'autre. */
+    .sb-health-pill.over { border-color: rgba(224,62,62,0.35); background: var(--danger-bg); color: #b91c1c; }
+    .sb-health-pill.over strong { color: #b91c1c; }
+    [data-theme="dark"] .sb-health-pill.over { color: #fca5a5; }
+    [data-theme="dark"] .sb-health-pill.over strong { color: #fca5a5; }
+
     .deal-sidebar-label {
       font-size: 0.7rem;
       font-weight: 600;
@@ -3343,6 +3460,9 @@
       border-top: 1px solid var(--border);
       margin-top: 0.4rem;
     }
+    /* Pas de flex:1 ici : l'accordéon joue sur `display`, forcer la croissance
+       fait déborder le contenu par-dessus la section suivante. C'est le corps de
+       la fiche qui défile, on ne veut pas d'un second ascenseur imbriqué. */
     .sb-section-header {
       display: flex;
       align-items: center;
@@ -8504,7 +8624,7 @@
         const back = _unfreezeTarget(meta);
         return `
             <div class="deal-sidebar-field" style="background:${due ? 'rgba(217,115,13,0.08)' : 'var(--bg)'};border:1px solid ${due ? 'rgba(217,115,13,0.35)' : 'var(--border)'};border-radius:var(--radius);padding:0.7rem">
-              <div class="deal-sidebar-label">🧊 Deal gelé ${due ? '<span style="color:#d9730d;font-weight:700">· à réveiller</span>' : ''}</div>
+              <div class="deal-sidebar-label">${_lucide('snowflake',12)}Deal gelé ${due ? '<span style="color:#d9730d;font-weight:700">· à réveiller</span>' : ''}</div>
               <div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:0.5rem">
                 ${wake
                   ? (due ? `Réveil prévu le <strong>${wake}</strong>, c'est passé.` : `Revient tout seul le <strong>${wake}</strong>.`)
@@ -8517,7 +8637,7 @@
 
       return `
             <div class="deal-sidebar-field">
-              <div class="deal-sidebar-label">🧊 Rien avant longtemps ?</div>
+              <div class="deal-sidebar-label">${_lucide('snowflake',12)}Mise en attente</div>
               <button class="relance-btn" onclick="toggleFreezeForm()" style="width:100%">Geler ce deal avec une date de réveil</button>
               <div class="relance-form" id="sbFreezeForm">
                 <div style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:0.5rem">
@@ -8608,7 +8728,82 @@
         + 'cursor:pointer;padding:0.2rem 0.6rem;border-radius:999px;font-size:0.72rem;font-weight:600;user-select:none';
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // FICHE DEAL — en-tête
+    //
+    // Icônes Lucide en trait, jamais d'emoji : la charte Releaf l'exige, et les
+    // emoji ne s'alignent pas sur la ligne de base d'un texte.
+    // ═══════════════════════════════════════════════════════════════════════
+    const LUCIDE = {
+      calendar:  '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+      checks:    '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
+      history:   '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>',
+      info:      '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
+      snowflake: '<path d="M2 12h20M12 2v20M4.9 4.9l14.2 14.2M19.1 4.9L4.9 19.1"/>',
+      alert:     '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+      plus:      '<path d="M12 5v14M5 12h14"/>',
+      clock:     '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+      activity:  '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+      target:    '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+    };
+    function _lucide(name, size) {
+      const d = LUCIDE[name];
+      if (!d) return '';
+      const s = size || 14;
+      return `<svg class="lu" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+    }
+
+    // Escalier de progression : remplace le menu déroulant du statut. On voit où
+    // en est le deal, et on l'avance d'un clic au lieu d'ouvrir une liste.
+    function _renderStageStepper(deal) {
+      const COURT = { 'RDV Qualif': 'Qualif', 'RDV Propale': 'Propale', 'Négociation': 'Négo', 'Contrat envoyé': 'Contrat' };
+      const idx = KANBAN_STAGES_ORDER.indexOf(deal.stage);
+      return `<div class="sb-stepper" role="group" aria-label="Statut du deal">${
+        KANBAN_STAGES_ORDER.map((s, i) => {
+          const etat = idx < 0 ? 'todo' : (i < idx ? 'done' : (i === idx ? 'now' : 'todo'));
+          return `<button type="button" class="sb-step ${etat}" title="${s}"
+              onclick="changeSidebarStage('${deal.id}', '${s}')">
+            <span class="sb-step-dot"></span><span class="sb-step-label">${COURT[s] || s}</span>
+          </button>`;
+        }).join('')
+      }</div>`;
+    }
+
+    // Santé du deal, enfin visible sur la fiche : les deux compteurs qui
+    // décident du statut, chacun rougissant sur SON seuil.
+    function _renderHealthStrip(health) {
+      if (!health) return '';
+      const LIB = {
+        frais:  ['Ce deal est vivant', 'ok'],
+        tiede:  ['Ça commence à traîner', 'warn'],
+        dort:   ['Ce deal dort', 'bad'],
+        bloque: ['Ce deal est bloqué', 'bad'],
+        gele:   ['Ce deal est gelé', 'frozen'],
+      };
+      const [titre, ton] = LIB[health.status] || LIB.frais;
+      const calme = { rdv: 'un RDV est prévu', tache: 'une tâche est prévue', grace: 'deal récent', gele: 'gel en cours' }[health.silenced];
+      const pastille = (label, val, over) => val === null ? '' :
+        `<span class="sb-health-pill${over ? ' over' : ''}">${_lucide('clock', 12)}${label} <strong>${val} j</strong></span>`;
+      return `
+        <div class="sb-health ${ton}">
+          <div class="sb-health-head">
+            <span class="sb-health-dot"></span>${titre}
+            ${calme ? `<span class="sb-health-calm">${calme}</span>` : ''}
+          </div>
+          <div class="sb-health-pills">
+            ${pastille('sans contact depuis', health.daysSinceTouch, health.daysSinceTouch !== null && health.daysSinceTouch > CRITICAL_RELANCE_DAYS)}
+            ${pastille('à ce statut depuis', health.daysInStage, health.daysInStage !== null && health.daysInStage > health.stallThreshold)}
+          </div>
+        </div>`;
+    }
+
     function renderSidebarBody(deal, meta) {
+      // Le deal de l'API n'a pas stageEnteredAt : on complète avec celui du
+      // pipeline, sinon "à ce statut depuis" repartirait de la date de création.
+      const _local = findDealInPipeline(deal.id) || {};
+      const _health = computeDealHealth(
+        { ...deal, stageEnteredAt: deal.stageEnteredAt || _local.stageEnteredAt },
+        meta, deal.stage);
       const tags = meta.tags || [];
       // Tags "mission" uniquement (on exclut l'acquisition, affichée à part)
       const missionTags = tags.filter(t => !ACQUISITION_TAGS.includes(t));
@@ -8643,21 +8838,20 @@
       const rdvMissed = nextMeetingIsPast && !_touchAfterRdv;       // RDV passé sans suite
 
       document.getElementById('sidebarBody').innerHTML = `
-        <div class="deal-sidebar-field">
-          <div style="display:flex;gap:1rem;align-items:flex-end">
-            <div style="flex:0 0 auto">
-              <div class="deal-sidebar-label">Statut</div>
-              <div><select class="deal-sidebar-input" id="sbStage" style="min-width:150px" onchange="onSidebarStageChange('${deal.id}', this)">${_sidebarStageOptions(deal.stage)}</select></div>
+        <div class="sb-hero">
+          <div class="sb-amount-row">
+            <div class="sb-amount-wrap">
+              <input class="sb-amount" id="sbAmount" type="number" value="${deal.amount}" min="0" step="100" aria-label="Montant">
+              <span class="sb-amount-cur">€</span>
             </div>
-            <div style="flex:1;min-width:0">
-              <div class="deal-sidebar-label">Montant</div>
-              <input class="deal-sidebar-input" id="sbAmount" type="number" value="${deal.amount}" min="0" step="100">
-            </div>
-          </div>
-          <input type="hidden" id="sbClosedate" value="${closedateVal}">
-          <div class="deal-sidebar-save-row" style="margin-top:0.55rem">
             <button class="deal-sidebar-save-btn" id="sbSaveBtn" onclick="saveSidebarChanges('${deal.id}')">Enregistrer</button>
           </div>
+          <input type="hidden" id="sbClosedate" value="${closedateVal}">
+          <!-- Le select reste, masqué : d'autres écrans savent le lire. Le
+               stepper est la surface visible et appelle la même fonction. -->
+          <select id="sbStage" hidden onchange="onSidebarStageChange('${deal.id}', this)">${_sidebarStageOptions(deal.stage)}</select>
+          ${_renderStageStepper(deal)}
+          ${_renderHealthStrip(_health)}
         </div>
 
         <div class="deal-sidebar-field">
@@ -8667,13 +8861,13 @@
 
         <div class="sb-section open">
           <div class="sb-section-header" onclick="toggleSbSection(this)">
-            <span class="sb-section-title">🎯 Prochaines actions ${openTaskCount ? `<span class="sb-section-count">${openTaskCount}</span>` : ''}</span>
+            <span class="sb-section-title">${_lucide('target')}Prochaines actions ${openTaskCount ? `<span class="sb-section-count">${openTaskCount}</span>` : ''}</span>
             <span class="sb-section-chevron">▸</span>
           </div>
           <div class="sb-section-body">
             <div class="deal-sidebar-field">
-              <div class="deal-sidebar-label">📅 Rendez-vous ${nextMeetingIsFuture ? `<span style="color:#1d4ed8;font-weight:600">· prévu dans ${nmDays} j</span>` : (rdvFollowedUp ? `<span style="color:var(--text-light);font-weight:500">· dernier le ${nmDateStr} (tenu)</span>` : (rdvMissed ? '' : '<span style="color:var(--text-light);font-weight:500">· aucun planifié</span>'))}</div>
-              ${rdvMissed ? `<div style="display:flex;align-items:center;gap:0.4rem;background:var(--danger-bg);color:#b91c1c;border-radius:6px;padding:0.4rem 0.6rem;font-size:0.8rem;font-weight:600;margin-bottom:0.4rem">⚠ RDV dépassé (${nmDateStr}, il y a ${Math.abs(nmDays)} j) · à reprogrammer</div>` : ''}
+              <div class="deal-sidebar-label">${_lucide('calendar',12)}Rendez-vous ${nextMeetingIsFuture ? `<span style="color:#1d4ed8;font-weight:600">· prévu dans ${nmDays} j</span>` : (rdvFollowedUp ? `<span style="color:var(--text-light);font-weight:500">· dernier le ${nmDateStr} (tenu)</span>` : (rdvMissed ? '' : '<span style="color:var(--text-light);font-weight:500">· aucun planifié</span>'))}</div>
+              ${rdvMissed ? `<div style="display:flex;align-items:center;gap:0.4rem;background:var(--danger-bg);color:#b91c1c;border-radius:6px;padding:0.4rem 0.6rem;font-size:0.8rem;font-weight:600;margin-bottom:0.4rem">${_lucide('alert',13)} RDV dépassé (${nmDateStr}, il y a ${Math.abs(nmDays)} j) · à reprogrammer</div>` : ''}
               <div style="display:flex;gap:0.4rem;align-items:center">
                 <input class="deal-sidebar-input" id="sbNextMeeting" type="datetime-local" value="${nextMeetingLocalVal}" style="flex:1">
                 <button class="relance-btn" id="sbNextMeetingSaveBtn" onclick="saveNextMeeting('${deal.id}')" style="flex:0 0 auto;padding:0.45rem 0.8rem">${rdvMissed ? 'Reprogrammer' : 'Enregistrer'}</button>
@@ -8685,10 +8879,10 @@
             ${_renderFreezeField(deal, meta)}
 
             <div class="deal-sidebar-field">
-              <div class="deal-sidebar-label">✅ Tâches ${openTaskCount ? `<span style="color:var(--primary);font-weight:600">· ${openTaskCount} à faire</span>` : ''}</div>
+              <div class="deal-sidebar-label">${_lucide('checks',12)}Tâches ${openTaskCount ? `<span style="color:var(--primary);font-weight:600">· ${openTaskCount} à faire</span>` : ''}</div>
               <div id="tasksWrap">${_renderTasks(meta.tasks, deal.id)}</div>
               <div class="relance-row" style="margin-top:0.5rem">
-                <button class="relance-btn" onclick="openTaskForm('${deal.id}')" style="flex:1">➕ Ajouter une tâche</button>
+                <button class="relance-btn" onclick="openTaskForm('${deal.id}')" style="flex:1">${_lucide('plus',13)} Ajouter une tâche</button>
               </div>
               <div class="relance-form" id="taskForm">
                 <div class="relance-form-row">
@@ -8721,9 +8915,12 @@
           </div>
         </div>
 
-        <div class="sb-section">
+        <!-- Ouvert par défaut : quand on ouvre un deal bloqué depuis des
+             semaines, la première question est "il s'est passé quoi ?".
+             Ça occupe aussi le bas de fiche, qui était vide. -->
+        <div class="sb-section open">
           <div class="sb-section-header" onclick="toggleSbSection(this)">
-            <span class="sb-section-title">🗒️ Historique ${(notesCount + relancesCount) ? `<span class="sb-section-count">${notesCount + relancesCount}</span>` : ''}</span>
+            <span class="sb-section-title">${_lucide('history')}Historique ${(notesCount + relancesCount) ? `<span class="sb-section-count">${notesCount + relancesCount}</span>` : ''}</span>
             <span class="sb-section-chevron">▸</span>
           </div>
           <div class="sb-section-body">
@@ -8777,7 +8974,7 @@
 
         <div class="sb-section">
           <div class="sb-section-header" onclick="toggleSbSection(this)">
-            <span class="sb-section-title">ℹ️ Infos deal</span>
+            <span class="sb-section-title">${_lucide('info')}Infos deal</span>
             <span class="sb-section-chevron">▸</span>
           </div>
           <div class="sb-section-body">
