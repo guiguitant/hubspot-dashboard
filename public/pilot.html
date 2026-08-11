@@ -6048,6 +6048,16 @@
       _syncPipelineChips();
     }
 
+    // Init autonome, volontairement collée à la fonction qu'elle appelle plutôt
+    // que greffée sur un DOMContentLoaded partagé : sans cet appel la barre reste
+    // vide et tout le tri devient inaccessible, alors que rien ne casse ni ne
+    // lève d'erreur. Une panne silencieuse, donc à garder sous les yeux.
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', _buildPipelineChips);
+    } else {
+      _buildPipelineChips();
+    }
+
     function _syncPipelineChips() {
       document.querySelectorAll('#pipelineSortChips .pchip').forEach(b =>
         b.classList.toggle('active', b.dataset.sort === pipelineSort));
