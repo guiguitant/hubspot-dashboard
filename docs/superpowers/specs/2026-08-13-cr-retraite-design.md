@@ -76,7 +76,7 @@ Signature :
 1. **Déficits reportables ignorés** : l'IS théorique est recalculé année par année ; si une année « charge pleine » du contrefactuel avait été déficitaire, son déficit reportable aurait réduit l'IS retraité des années suivantes. Impact nul tant que le résultat retraité de chaque année reste positif (cas actuel).
 2. **Approximations héritées du CR classique** : résultat imposable ≈ résultat d'exploitation, conditions du taux réduit 15 % supposées remplies. Rien de nouveau : la vue retraitée est exactement aussi approximative que la classique.
 3. **Crédit d'impôt identique dans les deux vues** : défendable (les dépenses de personnel de recherche sont en général éligibles l'année où elles sont engagées, indépendamment de l'activation comptable) ; l'assiette exacte relève du dossier CIR de l'expert-comptable, à évoquer avec lui en même temps que la confirmation des quote-parts.
-4. **Années post-capitalisation** : une fois la capitalisation terminée (ex. 2029), le résultat retraité dépasse le classique (plus de bonus à retirer, dotations neutralisées). C'est le comportement attendu du contrefactuel (les charges ont pesé plus tôt) ; la sous-ligne des dotations l'explique.
+4. **Années post-capitalisation** : une fois la capitalisation terminée (ex. 2029), le résultat retraité dépasse le classique (plus de bonus à retirer, dotations neutralisées). C'est le comportement attendu du contrefactuel (les charges ont pesé plus tôt) ; la sous-ligne des dotations l'explique. Démonstration chiffrée en annexe.
 5. **Pas une vue cash** : le retraité reste un compte de résultat d'engagement (CA facturé non encaissé, charges engagées). La trésorerie a sa propre page.
 6. **Vue locale au CR** : Analytics, scénarios, graphes N vs N-1 et trésorerie restent en lecture classique.
 
@@ -87,3 +87,21 @@ T1 module pur `utils/crRetraite.js` + tests (TDD) · T2 serveur (détail dotatio
 ## Hors lot
 - Retraitement des graphes comparatifs N vs N-1 et des scénarios.
 - Toute écriture comptable ou export : la vue est un affichage de pilotage.
+
+## Annexe · Pourquoi le retraité dépasse le classique après la capitalisation (limite n° 4)
+
+Question posée à la relecture (2026-08-13) : « le retraité doit retirer la production immobilisée et reprendre les dotations ; pourquoi peut-il être PLUS HAUT que le classique ? ». Réponse : c'est mathématiquement obligatoire, et c'est la preuve que le retraitement est juste, pas une erreur.
+
+Actif simple de 100 construit en 2026 (salaires en charges), mis en service au 01/01/2027, amorti 20/an sur 5 ans :
+
+| Année | Vue classique | Vue retraitée | Écart (retraité − classique) |
+|---|---|---|---|
+| 2026 | charges −100 + production immobilisée +100 = 0 | charges pleines = −100 | −100 (retraité plus bas) |
+| 2027 à 2031 | dotation −20/an | dotation reprise = 0 | +20/an (retraité plus haut) |
+| **Cumul** | **−100** | **−100** | **0** |
+
+Les deux vues reconnaissent le même coût total (100) : le classique l'étale sur la durée d'amortissement, le retraité le date entièrement sur l'année des dépenses. Après la capitalisation, le retraité n'a donc plus rien à porter et passe forcément au-dessus du classique, de l'exact montant des dotations reprises. Le cumul des écarts fait zéro : c'est l'invariant I1, verrouillé par un test du module pur.
+
+Contre-exemple (l'erreur évitée) : retirer la production immobilisée SANS reprendre les dotations donnerait un cumul retraité de −200 : les salaires compteraient deux fois (charge pleine en 2026 + amortissements 2027-2031). C'est précisément le double comptage que le compte 72 existe pour empêcher ; le supprimer d'un côté oblige à le supprimer de l'autre.
+
+Application aux chiffres réels 2026 (jour de la spec) : écart de résultat d'exploitation = 158 247 retirés − 10 376 repris = −147 871 € (le retraité est plus bas) ; après effet IS, écart de résultat net estimatif ≈ −110 k€. Les années où plus rien n'est capitalisé, l'écart deviendra positif à hauteur des dotations reprises (~30 k€/an), jusqu'à extinction des plans d'amortissement.
