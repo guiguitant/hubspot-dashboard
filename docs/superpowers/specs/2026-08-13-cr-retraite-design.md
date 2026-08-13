@@ -96,6 +96,8 @@ Signature :
 
 ## Questions au cabinet comptable (à poser dans le MÊME échange que la validation des quote-parts)
 
+> Mémo prêt à envoyer : `docs/questions-comptables/2026-08-13-capitalisation-fiscalite-dividendes.md` (les 6 questions ouvertes, reformulées pour le cabinet ; la n° 2 ci-dessous est réglée).
+
 1. **Décrire correctement l'immo « Outil simapro » au prochain échange** : le mémo interne du 24/07 la présentait comme « logiciel acquis » ; en réalité elle porte les coûts de développement interne d'un outil greffé en amont/aval de SimaPro (précision utilisateur du 2026-08-13, contradiction levée). Préciser au passage où est comptabilisée la licence SimaPro elle-même (abonnement en charges ? immobilisation acquise distincte ?).
 2. **RÉGLÉE · Assiette CII/CIR** : réponse écrite d'Actemis (mail du 24/07/2026, tracé dans docs/questions-comptables/2026-07-24-imputation-cii-cir-immobilisations.md) : assiette = année civile d'engagement des salaires R&D (méthode A, celle de Pilot) ; forfaits 40 %/75 % confirmés ; excédent de crédit remboursé immédiatement (compte 444). Réponse donnée pour le CIR, même principe retenu pour le CII. La garde B.4 reste en veille par sécurité.
 3. **Option de l'art. 236-I du CGI** : déduisons-nous fiscalement les dépenses de développement l'année de leur engagement malgré l'activation comptable ? (Change l'étiquette « IS théorique » de colonne, limite E3.)
