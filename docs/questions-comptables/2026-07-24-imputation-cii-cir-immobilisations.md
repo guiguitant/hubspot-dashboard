@@ -95,3 +95,15 @@ C'est ici que l'écart est le plus fort : **18 563 € sur 2026** (méthode A) c
 - Amortissement linéaire prorata temporis, indépendant du calcul du crédit.
 
 Merci de nous indiquer les corrections à apporter, en priorité sur les questions 1 à 3 (l'année d'imputation), qui conditionnent la fiabilité de nos prévisions.
+
+---
+
+## Réponses d'Actemis (mail du 24/07/2026, 15h36 · Coline Ramackers, cc Arnaud Uflont)
+
+Ce mémo a servi de préparation ; la version effectivement envoyée au cabinet est un mail court de 3 questions. Réponses reçues (transcrites depuis le mail, ajoutées ici le 2026-08-13) :
+
+1. **Forfait de fonctionnement** (« nous ajoutons à l'assiette 40 % des dépenses de personnel et 75 % des dotations aux amortissements : est-ce le bon mécanisme ? ») : « **Oui** ».
+2. **Salaires R&D du logiciel développé en interne, assiette CIR** (année d'engagement ou dotations ?) : « **a/ à l'année civile/calendaire** » : l'assiette est l'année d'engagement des salaires (méthode A du mémo), PAS les dotations. Réponse donnée pour le CIR ; même principe retenu pour le CII (même nature de dépenses).
+3. **Crédit supérieur à l'IS** : « En compta, enregistrée pour sa valeur normale au débit du compte 444 "État · impôt sur les bénéfices" ; en tréso, le montant qui n'est pas imputé sur l'IS fait l'objet du remboursement immédiat. » Conforme au modèle de Pilot (excédent restitué, produit d'impôt possible).
+
+**Note de correction (2026-08-13)** : la description de l'immobilisation 2 ci-dessus (« Outil simapro », présentée comme un logiciel ACQUIS) était erronée : cette immo porte les coûts de développement INTERNE d'un outil greffé en amont et en aval du champ d'action de SimaPro (d'où son nom). La spéculation « méthode B » qui découlait de la nature « acquise » tombe : les deux immobilisations sont du développement interne à quote-parts de salaires, couvertes par la réponse n° 2. Pilot applique la méthode A partout : conforme. Reste à préciser où est comptabilisée la licence SimaPro elle-même (abonnement en charges ou immobilisation acquise distincte).
