@@ -109,7 +109,7 @@ Signature :
 4. **Art. 236 I bis** : s'applique-t-il aux aides affectées aux dépenses immobilisées ?
 5. **Compte d'imputation (203 frais de développement ou 205 logiciels)** et conséquence sur la contrainte de distribution de dividendes (C. com. R. 123-187 : pas de distribution tant que les frais de développement ne sont pas amortis, sauf réserves libres suffisantes).
 6. **Subventions finançant des salaires par ailleurs capitalisés** : faut-il les traiter en subventions d'investissement (étalement) ?
-7. **Validation des quote-parts** (déjà en attente) : mêmes clés pour la production immobilisée, la base amortissable et l'assiette CII/CIR ; contrôle « par personne et par année, Σ quote-parts ≤ 100 % ».
+7. **Validation des quote-parts** (déjà en attente) : mêmes clés pour la production immobilisée, la base amortissable et l'assiette CII/CIR ; contrôle « par personne et par année, Σ quote-parts ≤ 100 % ». Positions temporaires Nathan (2026-08-15, tracées dans le mémo) : critères d'activation remplis à sa lecture ; feuilles de temps existantes via l'outil interne Releaf Time (non signées) ; pas de note séparée, Pilot fait foi. Reste la confirmation du cabinet.
 
 ## Découpage prévu (plan à venir)
 

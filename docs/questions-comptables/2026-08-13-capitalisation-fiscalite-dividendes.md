@@ -44,6 +44,8 @@ Nos quote-parts d'affectation (par personne et par année) alimentent trois calc
 
 Questions : (a) confirmez-vous que nos deux projets remplissent les **critères d'activation** (projet nettement individualisé, sérieuses chances de réussite technique et de rentabilité) ? (b) Nos clés d'affectation doivent-elles être adossées à des **feuilles de temps**, ou un déclaratif raisonnable suffit-il ? (c) Souhaitez-vous que nous formalisions une note d'une page « méthode de capitalisation » (projets, critères, durées, taux par salarié) pour le dossier ?
 
+*Positions temporaires en attendant votre retour (15/08/2026, réponses Nathan) : (a) oui, les deux projets remplissent les critères à notre lecture ; (b) nous disposons de feuilles de temps via un outil créé en interne (**Releaf Time**), non signées par les employés à ce jour ; (c) pas de note séparée, les informations (projets, quote-parts, durées, montants) sont dans notre outil Pilot. Merci de confirmer ces trois points, et de nous dire si l'absence de signature des feuilles de temps ou de note formalisée pose un problème pour le dossier CIR/CII.*
+
 ---
 
 Merci d'avance. Les questions 2 et 6 sont prioritaires pour nous : la 2 conditionne notre prévision d'IS 2026, la 6 fiabilise les trois calculs qui reposent sur les quote-parts.
