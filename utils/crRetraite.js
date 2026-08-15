@@ -96,7 +96,7 @@ function computeCrRetraite(input) {
   const amortissementsInput = inp.amortissements;
   const ecartDotations = amortissementsInput === null || amortissementsInput === undefined
     ? 0
-    : Number(amortissementsInput) - (dotationsNeutraliseesMontant + amortissements);
+    : _n(amortissementsInput) - (dotationsNeutraliseesMontant + amortissements);
 
   // 3. Resultat d'exploitation hors capitalisation = EBE hors capitalisation moins dotations
   // conservees (les dotations neutralisees ont deja disparu avec la production immobilisee).

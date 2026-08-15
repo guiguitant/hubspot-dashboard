@@ -316,6 +316,30 @@ describe('computeCrRetraite · garde ecartDotations', () => {
     });
     expect(r.ecartDotations).toBe(0);
   });
+
+  it('amortissements passe avec 10 EUR de moins que le detail par immo -> ecart -10 (le signe dit quelle source est trop haute)', () => {
+    const r = computeCrRetraite({
+      ebe: { factuel: 0, projete: 0 },
+      productionImmobilisee: { factuel: 0, projete: 0 },
+      dotationsParImmo,
+      amortissements: 9990,
+      creditTotal: 0,
+      isFn,
+    });
+    expect(r.ecartDotations).toBe(-10);
+  });
+
+  it('amortissements passe explicitement a 0 avec un detail par immo non vide -> ecart -10000 (0 est une vraie valeur, jamais traite comme une absence)', () => {
+    const r = computeCrRetraite({
+      ebe: { factuel: 0, projete: 0 },
+      productionImmobilisee: { factuel: 0, projete: 0 },
+      dotationsParImmo,
+      amortissements: 0,
+      creditTotal: 0,
+      isFn,
+    });
+    expect(r.ecartDotations).toBe(-10000);
+  });
 });
 
 describe('computeCrRetraite · robustesse', () => {
@@ -355,12 +379,17 @@ describe('computeCrRetraite · robustesse', () => {
       productionImmobilisee: { factuel: null, projete: 'nope' },
       dotationsParImmo: [{ nom: 'X', dotation: 'abc', aPostes: true }],
       creditTotal: 'nope',
+      amortissements: 'oops',
       isFn,
     });
     expect(r.ebe).toEqual({ factuel: 0, projete: 0 });
     expect(r.dotationsNeutralisees.montant).toBe(0);
     expect(Number.isNaN(r.resultatNet.factuel)).toBe(false);
     expect(Number.isNaN(r.resultatNet.projete)).toBe(false);
+    // amortissements non numerique (chaine invalide) : passe par _n(), jamais Number() brut, donc
+    // ecartDotations tombe a 0 (garde eteinte) plutot que de se propager en NaN (-> null en JSON).
+    expect(r.ecartDotations).toBe(0);
+    expect(Number.isNaN(r.ecartDotations)).toBe(false);
   });
 
   it('dotationsParImmo absent : traite comme tableau vide', () => {
