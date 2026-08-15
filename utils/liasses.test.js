@@ -121,9 +121,42 @@ describe('chargerLiasses · lecture tolerante du dossier', () => {
 
 describe('verifierLiasse · gardes d integrite de saisie', () => {
   test('la liasse 2025 reelle ne presente aucune anomalie', () => {
-    // 420 733 − 346 794 = 73 939 vs 73 940 declare : 1 € d arrondi, dans la tolerance.
-    // 73 940 − 3 848 = 70 092 = resultat net declare : exact.
+    // G1 : 420 733 − 346 794 = 73 939 vs 73 940 declare : 1 € d arrondi, dans la tolerance.
+    // G2 : 73 940 − 3 848 = 70 092 = resultat net declare : exact.
+    // G3 : 409 064 + 11 667 + 3 + 0 = 420 734 vs 420 733 declare : 1 € d arrondi, absorbe.
     expect(verifierLiasse(chargerLiasses(DOSSIER_REEL)[2025])).toEqual([]);
+  });
+
+  // --- G3 · somme des produits (garde ajoutee en revue, spec amendee le 15/08) ------------------
+  // Elle ferme la seule faute de saisie silencieuse qui restait : productionVendue est le chiffre le
+  // plus visible de la modale de reconciliation et aucune autre garde ne le touchait.
+  test('G3 · la somme des produits de la liasse 2025 reelle retombe sur le total (ecart 1 €)', () => {
+    const anomalies = verifierLiasse(chargerLiasses(DOSSIER_REEL)[2025]);
+    expect(anomalies.map(a => a.code)).not.toContain('coherenceSommeProduits');
+  });
+
+  test('G3 · production vendue saisie a 490 064 au lieu de 409 064 : anomalie detectee', () => {
+    const l = LIASSE_2025();
+    l.chiffres.productionVendue = 490064; // 490 064 + 11 667 + 3 + 0 = 501 734 vs 420 733 declare
+    const anomalies = verifierLiasse(l);
+    expect(anomalies).toHaveLength(1);
+    expect(anomalies[0].code).toBe('coherenceSommeProduits');
+    // Le message NE DOIT PAS accuser a tort : le total 2033-B peut contenir une rubrique non modelisee.
+    expect(anomalies[0].message).toMatch(/non modélisée/);
+  });
+
+  test('G3 · autresProduits absent : champ OPTIONNEL, aucune anomalie de ce fait', () => {
+    const l = LIASSE_2025();
+    delete l.chiffres.autresProduits; // 409 064 + 11 667 + 0 + 0 = 420 731 vs 420 733 : ecart 2, tolere
+    expect(verifierLiasse(l)).toEqual([]);
+  });
+
+  test('G3 · champ requis manquant : la garde est sautee, pas de double signalement', () => {
+    const l = LIASSE_2025();
+    delete l.chiffres.productionVendue;
+    const anomalies = verifierLiasse(l);
+    expect(anomalies).toHaveLength(1);
+    expect(anomalies[0].code).toBe('champManquant');
   });
 
   test('ecart de 2 € sur le resultat d exploitation : tolere (arrondis de la liasse)', () => {

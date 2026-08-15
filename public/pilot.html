@@ -15599,9 +15599,15 @@
 
     // Format compact des étiquettes et des graduations : « 354 k€ », arrondi au millier, espace
     // INSÉCABLE avant l'unité (une étiquette ne doit jamais se couper en fin de barre).
+    // Deux pièges corrigés en revue :
+    //  - Math.round(-400 / 1000) vaut -0 : l'étiquette affichait « -0 k€ », comme si le montant était
+    //    négatif alors qu'il est nul à l'arrondi. Math.abs le normalise (car -0 < 0 est faux) ;
+    //  - le signe produit par toLocaleString est le tiret U+002D, alors que tout le compte de résultat
+    //    (helper row()) utilise le vrai signe moins U+2212 : deux glyphes différents pour la même
+    //    information, à trois écrans d'écart.
     function _crKe(v) {
       const n = Math.round((Number(v) || 0) / 1000);
-      return n.toLocaleString('fr-FR') + ' k€';
+      return (n < 0 ? '− ' : '') + Math.abs(n).toLocaleString('fr-FR') + ' k€';
     }
 
     // Badge de variation d'un agrégat (spec F.2 bis, exigence 2) : « EBE : 354 k€ ▲ +18 % vs 299 k€ ».
@@ -15615,8 +15621,21 @@
       if (!dispo || base === 0) {
         return enveloppe(tete + ' <span style="color:var(--text-secondary)">· variation n.d.</span>');
       }
-      const pct = Math.round(((Number(valN) || 0) - base) / Math.abs(base) * 100);
       const rappel = '<span style="color:var(--text-secondary);font-size:0.78rem">vs ' + _crKe(base) + ' en ' + anneeNm1 + '</span>';
+      // Basculement de signe (correctif de revue) : un pourcentage n'a AUCUN sens à travers zéro
+      // (passer de +57 k€ à −50 k€ donne « −188 % », un nombre que personne ne peut interpréter, et
+      // l'inverse ferait lire une hausse là où l'agrégat est devenu négatif). On énonce alors le
+      // basculement en toutes lettres, avec la même flèche et la même couleur que le reste.
+      const courant = Number(valN) || 0;
+      if (Math.sign(courant) !== Math.sign(base)) {
+        const monte = courant > base;
+        // Signe explicite des DEUX bornes : c'est le passage d'un signe à l'autre qui est l'information.
+        const signeKe = (v) => ((Number(v) || 0) > 0 ? '+ ' : '') + _crKe(v);
+        return enveloppe(tete + ' <span style="color:' + (monte ? 'var(--success)' : 'var(--danger)')
+          + ';font-weight:600">' + (monte ? '▲' : '▼') + ' passe de ' + signeKe(base) + ' à ' + signeKe(courant)
+          + '</span> <span style="color:var(--text-secondary);font-size:0.78rem">depuis ' + anneeNm1 + '</span>');
+      }
+      const pct = Math.round((courant - base) / Math.abs(base) * 100);
       if (pct === 0) return enveloppe(tete + ' <span style="color:var(--text-secondary);font-weight:600">= 0 %</span> ' + rappel);
       const hausse = pct > 0;
       const fleche = hausse ? '▲' : '▼';
@@ -15788,8 +15807,11 @@
     // Aucun calcul ici : la série vient telle quelle de /api/ebe (retraite.effetCumule.serie).
     // Les deux couleurs de barres sont des constantes partagées : le graphe les applique, et la légende
     // texte de la modale les reprend pour que le lecteur sache ce que chaque couleur signifie.
-    // Elles reprennent la PAIRE VALIDÉE du comparatif (spec F.2 bis) : les deux graphes du CR parlent
-    // la même langue de couleur, et une seule paire est à valider pour toute la page.
+    // Elles reprennent les PAS DE COULEUR VALIDÉS du comparatif (spec F.2 bis) : même paire de teintes
+    // (une seule à valider en accessibilité pour toute la page), mais elle encode une ENTITÉ DIFFÉRENTE
+    // dans chaque graphe : l'exercice (N / N-1) dans le comparatif, la phase (capitalisation / reprise)
+    // ici. Une couleur ne se lit donc jamais d'un graphe à l'autre : chacun porte sa propre légende,
+    // et c'est elle qui fait foi.
     const CR_COUL_CAPI = CR_COUL_EX_N;      // années de capitalisation (écart positif) : accent
     const CR_COUL_REPRISE = CR_COUL_EX_NM1; // années de reprise (écart négatif) : teinte atténuée
 
@@ -16023,17 +16045,23 @@
         body += ligneRec('Subventions et aides', (d.financements ? (Number(d.financements.totalSubv) || 0) + (Number(d.financements.totalAide) || 0) : 0), num(lc.subventionsExploitation));
         body += ligneRec('Production immobilisée', fac(d.productionImmobilisee), num(lc.productionImmobilisee));
         body += ligneRec('Charges d\'exploitation', (d.charges ? Number(d.charges.total) || 0 : 0), num(lc.chargesExploitation));
+        // Ligne ajoutée en revue pour que les deux colonnes BOUCLENT : côté Pilot les dotations sont une
+        // ligne distincte du compte de résultat, côté liasse elles sont DÉJÀ dans chargesExploitation.
+        // Sans elle, un lecteur qui additionne la colonne Pilot tombe sur le résultat d'exploitation
+        // majoré des dotations, et croit à une erreur.
+        body += ligneRec('Dotations aux amortissements <span style="font-size:0.72rem;color:var(--text-secondary)">(liasse : déjà comprises dans les charges ci-dessus)</span>',
+          num(d.amortissements), num(lc.dontDotationsAmortissements));
         body += ligneRec('Résultat d\'exploitation', fac(d.resultatExploitation), num(lc.resultatExploitation), true);
-        body += ligneRec('IS estimé (après crédit d\'impôt)', fac(d.impotNet), num(lc.impotSurBenefices));
+        body += ligneRec('IS estimé (après CII et CIR)', fac(d.impotNet), num(lc.impotSurBenefices));
         body += ligneRec('Résultat net estimatif', fac(d.resultatNet), num(lc.resultatNet), true);
         body += '<div style="font-size:0.74rem;color:var(--text-secondary);margin-top:0.5rem">Colonne Pilot : montants factuels de l\'exercice clos (la case « Colonne projetée » ne change rien ici). Écart = Pilot moins liasse.</div>';
         body += '<div style="margin-top:0.8rem;padding-top:0.6rem;border-top:1px dashed var(--border);font-size:0.78rem;line-height:1.5;color:var(--text-secondary)">';
         body += '<strong>Pourquoi les colonnes diffèrent</strong> · Ce sont des écarts de convention, pas des erreurs :';
         body += '<div style="margin-top:0.35rem">· <strong>CA</strong> : Pilot compte le chiffre d\'affaires à la facture Notion, la liasse retient la production vendue comptable (factures à établir, produits constatés d\'avance, avoirs) : le même euro peut tomber d\'un exercice sur l\'autre.</div>';
-        body += '<div>· <strong>Charges</strong> : Pilot additionne le réel Qonto des mois clos et le budget des mois restants, converti HT sur un périmètre de pilotage (exclusions PCG, TVA estimée) ; la liasse agrège les rubriques fiscales, dotations aux amortissements ('
-          + formatEuro(num(lc.dontDotationsAmortissements)) + ') et autres charges de gestion (' + formatEuro(num(lc.dontAutresCharges)) + ') comprises.</div>';
-        body += '<div>· <strong>IS et résultat net</strong> : Pilot les estime au barème PME sur son résultat d\'exploitation, sans retraitements fiscaux ni déficits reportables ; la liasse porte l\'impôt réellement dû, après imputation du CIR ('
-          + formatEuro(num(lc.cir)) + ').</div>';
+        body += '<div>· <strong>Charges</strong> : Pilot additionne le réel Qonto des mois clos et le budget des mois restants, converti HT sur un périmètre de pilotage (exclusions PCG, TVA estimée), <strong>hors dotations</strong> (ligne distincte du compte de résultat) ; la rubrique fiscale de la liasse, elle, INCLUT les dotations aux amortissements ('
+          + formatEuro(num(lc.dontDotationsAmortissements)) + ', isolées sur la ligne dédiée ci-dessus pour que les deux colonnes bouclent) et les autres charges de gestion (' + formatEuro(num(lc.dontAutresCharges)) + ').</div>';
+        body += '<div>· <strong>IS et résultat net</strong> : Pilot les estime au barème PME sur son résultat d\'exploitation, sans retraitements fiscaux ni déficits reportables, et son impôt net déduit CII <strong>et</strong> CIR ; la liasse porte l\'impôt réellement dû de la ligne 306, après imputation du CIR seul ('
+          + formatEuro(num(lc.cir)) + '). Un impôt net Pilot négatif (crédit restitué) n\'est d\'ailleurs pas comparable à cette ligne, qui ne descend jamais sous zéro.</div>';
         body += '</div>';
       } else if (kind === 'credit') {
         const c = d.creditImpot || { cii: 0, cir: 0, total: 0 };

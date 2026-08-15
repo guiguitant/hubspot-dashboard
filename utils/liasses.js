@@ -132,6 +132,28 @@ function verifierLiasse(liasse) {
       });
     }
   }
+  // G3 (ajoutee en revue) : la somme des produits saisis retombe-t-elle sur leur total ? C'est la seule
+  // faute de saisie qui restait SILENCIEUSE : productionVendue est le chiffre le plus visible de la
+  // modale de reconciliation et aucune autre garde ne le touchait. `autresProduits` est OPTIONNEL
+  // (rubrique residuelle, absente de beaucoup de liasses) : lu a 0 quand il manque.
+  //
+  // Le message N'ACCUSE PAS a tort : le total 2033-B peut legitimement contenir une rubrique que ce
+  // schema ne modelise pas (ventes de marchandises, production stockee, reprises sur provisions).
+  // L'anomalie dit « verifier », pas « c'est faux ».
+  if (estNombre(c.productionVendue) && estNombre(c.subventionsExploitation)
+      && estNombre(c.productionImmobilisee) && estNombre(c.totalProduitsExploitation)) {
+    const somme = c.productionVendue + c.subventionsExploitation + (Number(c.autresProduits) || 0) + c.productionImmobilisee;
+    const delta = ecart(c.totalProduitsExploitation, somme);
+    if (Math.abs(delta) > TOLERANCE_EUROS) {
+      anomalies.push({
+        code: 'coherenceSommeProduits',
+        ecart: delta,
+        message: 'Les produits saisis totalisent ' + somme + ' € alors que la liasse déclare '
+          + c.totalProduitsExploitation + ' € de produits d\'exploitation (écart de ' + delta
+          + ' €) : vérifier la saisie, ou une rubrique de produits non modélisée (ventes de marchandises, production stockée, reprises...).',
+      });
+    }
+  }
   if (estNombre(c.resultatExploitation) && estNombre(c.impotSurBenefices) && estNombre(c.resultatNet)) {
     const attendu = c.resultatExploitation - c.impotSurBenefices;
     const delta = ecart(c.resultatNet, attendu);
