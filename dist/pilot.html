@@ -3957,9 +3957,15 @@
         <button class="cr-year-btn active" data-cryear="current" onclick="setCrYear('current')">Exercice courant</button>
         <button class="cr-year-btn" data-cryear="previous" onclick="setCrYear('previous')">Exercice precedent</button>
       </div>
+      <!-- Bascule de vue (spec C.1) : orthogonale aux onglets d'exercice et a la case projetee.
+           Aucun refetch au clic : les deux vues se rendent depuis le meme crData deja charge. -->
+      <div style="display:inline-flex;gap:0.25rem;background:var(--bg-secondary);padding:0.25rem;border-radius:8px">
+        <button class="cr-year-btn active" data-crview="comptable" onclick="setCrView('comptable')">CR comptable</button>
+        <button class="cr-year-btn" data-crview="horsCapi" onclick="setCrView('horsCapi')">CR hors capitalisation</button>
+      </div>
       <label style="display:inline-flex;align-items:center;gap:0.4rem;font-size:0.85rem;color:var(--text-secondary);cursor:pointer;user-select:none">
         <input type="checkbox" id="crProjete" checked onchange="renderCompteResultat()" style="cursor:pointer">
-        Projete (pipeline pondere)
+        Colonne projetée (année complète + pipeline pondéré)
       </label>
       <span id="crFreshness" style="margin-left:auto;font-size:0.78rem;color:var(--text-secondary)"></span>
     </div>
@@ -14118,22 +14124,54 @@
     // ===== Compte de resultat (Phase 4) — cascade "Du CA au resultat net" =====
     let crData = null;
     let crYearMode = 'current'; // 'current' | 'previous'
+    // Bascule de vue (spec C.1) : 'comptable' (defaut) ou 'horsCapi' (CR hors capitalisation, le
+    // contrefactuel "comme si les developpements etaient restes en charges"). Etat d'affichage pur :
+    // les deux vues se rendent depuis le meme crData, aucun appel reseau au changement de vue.
+    let crViewMode = 'comptable'; // 'comptable' | 'horsCapi'
+    // Etat de la case « Colonne projetee » au moment ou la vue hors capitalisation a ete activee
+    // (null = rien a restaurer) : voir setCrView, la vue comptable doit revenir telle qu'elle etait.
+    let crProjeteAvantHorsCapi = null;
 
     function _crYear() {
       const y = new Date().getFullYear();
       return crYearMode === 'previous' ? y - 1 : y;
     }
 
+    // Les deux groupes de pastilles partagent la classe .cr-year-btn (meme patron visuel) : chaque
+    // selecteur est donc restreint a SON data-attribut, sinon activer une vue eteindrait l'onglet
+    // d'exercice et inversement.
     function setCrYear(mode) {
       crYearMode = mode;
-      document.querySelectorAll('.cr-year-btn').forEach(b => b.classList.toggle('active', b.dataset.cryear === mode));
+      document.querySelectorAll('.cr-year-btn[data-cryear]').forEach(b => b.classList.toggle('active', b.dataset.cryear === mode));
       refreshCompteResultat();
+    }
+
+    function setCrView(mode) {
+      const activation = mode === 'horsCapi' && crViewMode !== 'horsCapi';
+      const retour = mode !== 'horsCapi' && crViewMode === 'horsCapi';
+      crViewMode = mode;
+      document.querySelectorAll('.cr-year-btn[data-crview]').forEach(b => b.classList.toggle('active', b.dataset.crview === mode));
+      const cb = document.getElementById('crProjete');
+      // Spec C.1 : a l'ACTIVATION de la vue hors capitalisation, on decoche la colonne projetee.
+      // Melanger un contrefactuel et du pipeline pondere prete a confusion pour un lecteur externe :
+      // la colonne factuelle d'abord. L'utilisateur reste libre de recocher (badge d'avertissement).
+      // Deux gardes (revue T3) : on memorise l'etat de la case pour le RESTAURER au retour en vue
+      // comptable (un aller-retour ne doit jamais modifier la vue comptable de l'utilisateur), et on
+      // ne touche a rien si `retraite` est absent, puisque c'est alors la vue comptable qui s'affiche.
+      if (activation && cb && crData && crData.retraite) {
+        crProjeteAvantHorsCapi = cb.checked;
+        cb.checked = false;
+      } else if (retour && cb && crProjeteAvantHorsCapi !== null) {
+        cb.checked = crProjeteAvantHorsCapi;
+        crProjeteAvantHorsCapi = null;
+      }
+      renderCompteResultat();
     }
 
     async function refreshCompteResultat() {
       const errEl = document.getElementById('crErrorBanner');
       if (errEl) errEl.textContent = '';
-      document.querySelectorAll('.cr-year-btn').forEach(b => b.classList.toggle('active', b.dataset.cryear === crYearMode));
+      document.querySelectorAll('.cr-year-btn[data-cryear]').forEach(b => b.classList.toggle('active', b.dataset.cryear === crYearMode));
       document.getElementById('crTable').innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p>';
       try {
         const res = await fetch('/api/ebe?year=' + _crYear());
@@ -14233,33 +14271,134 @@
       return html;
     }
 
+    // --- Vue « CR hors capitalisation » (spec C.2 à C.5) -------------------------------------
+    // Badge discret tant que les quote-parts du module Immobilisations ne sont pas validées par le
+    // cabinet comptable (passthrough du champ serveur quotePartsValidees, env PILOT_QUOTEPARTS_VALIDEES) :
+    // le CR comptable dépend des mêmes clés de répartition que le contrefactuel, le badge est donc
+    // affiché dans les DEUX vues (ligne Production immobilisée / pont de réconciliation).
+    function _crQuotePartsBadgeHtml(d) {
+      if (!d || d.quotePartsValidees) return '';
+      return ' <span class="cr-tva-badge" title="Les clés de répartition des quote-parts de développement (module Immobilisations) servent à la fois à la production immobilisée, à la base amortissable et à l\'assiette CII/CIR : elles attendent la validation du cabinet comptable.">quote-parts en attente de validation du cabinet</span>';
+    }
+
+    // Anomalie de cohérence des immobilisations (spec C.5, gardes serveur B.3 et ecartDotations) :
+    // si le détail par immo et les totaux divergent, le pont de réconciliation ne boucle plus (on
+    // retire d'un côté autre chose que ce qu'on reprend de l'autre). Affiché dans les DEUX vues :
+    // c'est un problème de données, pas d'affichage.
+    function _crAnomalieImmosHtml(r) {
+      if (!r) return '';
+      const casse = Array.isArray(r.invariantCasse) ? r.invariantCasse : [];
+      const ecart = Number(r.ecartDotations) || 0;
+      if (!casse.length && !ecart) return '';
+      const parts = [];
+      for (const i of casse) parts.push(escapeHtml(i && i.nom) + ' : ' + formatEuro(i && i.ecart));
+      if (ecart) parts.push('écart de dotations : ' + formatEuro(ecart));
+      return _crAlerteHtml('Anomalie de cohérence des immobilisations : le détail par immo et les totaux divergent ('
+        + parts.join(' · ') + ') : vérifier le module Immobilisations.', true);
+    }
+
+    // Pont de réconciliation en tête de la vue hors capitalisation (spec C.2). Colonne COURANTE
+    // uniquement (factuelle par défaut, projetée si la case est cochée) : un pont qui mélangerait les
+    // deux colonnes ne bouclerait pas. Il boucle par construction :
+    //   résultat d'exploitation hors capitalisation = comptable − production immobilisée + dotations neutralisées.
+    function _crPontHtml(d, r, projete) {
+      const col = (o) => (o ? (Number(projete ? o.projete : o.factuel) || 0) : 0);
+      const rexComptable = col(d.resultatExploitation);
+      const prodImmo     = col(d.productionImmobilisee);
+      const neutralisees = r.dotationsNeutralisees ? (Number(r.dotationsNeutralisees.montant) || 0) : 0;
+      const rexHors      = col(r.resultatExploitation);
+      const ebeHors      = col(r.ebe);
+      // Seule composante réellement décaissée de l'écart entre les deux vues : l'IS. Positif = la
+      // capitalisation fait payer plus d'IS cette année (et l'inverse une fois la capitalisation finie).
+      const surcoutIs    = col(d.is) - col(r.is);
+
+      const ligne = (label, texteValeur, total) =>
+        '<div style="display:flex;justify-content:space-between;align-items:baseline;padding:0.3rem 0'
+        + (total ? ';border-top:1px solid var(--border);margin-top:0.25rem;font-weight:700' : '') + '">'
+        + '<span>' + label + '</span><span>' + texteValeur + '</span></div>';
+
+      let html = '<div style="border:1px solid var(--border);border-radius:8px;padding:0.8rem 0.9rem;margin-bottom:0.6rem">';
+      html += '<div style="font-weight:600;font-size:0.9rem;margin-bottom:0.5rem">CR hors capitalisation'
+        + '<span style="font-weight:400;color:var(--text-secondary);font-size:0.78rem"> · pont de réconciliation, colonne '
+        + (projete ? 'projetée' : 'factuelle') + '</span>'
+        // Spec C.1 : la case projetée est décochée à l'activation de la vue ; si l'utilisateur la
+        // recoche, le badge rappelle que le contrefactuel contient alors du pipeline pondéré.
+        + (projete ? ' <span class="cr-tva-badge warn" title="La colonne projetée inclut le pipeline pondéré HubSpot : le contrefactuel porte donc du chiffre d\'affaires non encore facturé.">pipeline pondéré inclus</span>' : '')
+        + _crQuotePartsBadgeHtml(d) + '</div>';
+      html += ligne("Résultat d'exploitation comptable", formatEuro(rexComptable));
+      html += ligne('− Production immobilisée', '− ' + formatEuro(prodImmo));
+      html += ligne('+ Dotations neutralisées', '+ ' + formatEuro(neutralisees));
+      html += ligne("= Résultat d'exploitation hors capitalisation", formatEuro(rexHors), true);
+      html += '<div style="font-size:0.82rem;line-height:1.4;margin-top:0.6rem;padding-top:0.5rem;border-top:1px dashed var(--border)">'
+        + (surcoutIs >= 0
+          ? "Surcoût d'IS " + d.year + ' lié au choix de capitaliser : <strong>' + formatEuro(surcoutIs) + '</strong> · récupéré via les amortissements des années suivantes.'
+          : "Économie d'IS " + d.year + ' liée au choix de capitaliser : <strong>' + formatEuro(Math.abs(surcoutIs)) + "</strong> · contrepartie des surcoûts d'IS des exercices de capitalisation.")
+        + '</div>';
+      // Lecture positive (spec C.2), affichée seulement si elle est vraie : à EBE hors capitalisation
+      // négatif, l'exploitation ne finance justement rien.
+      if (ebeHors > 0) {
+        html += '<div style="font-size:0.82rem;line-height:1.4;color:var(--text-secondary);margin-top:0.35rem">À '
+          + formatEuro(ebeHors) + " d'EBE hors production immobilisée, l'exploitation finance l'effort de développement interne.</div>";
+      }
+      html += '</div>';
+      // Spec C.3 : phrase fixe sous le pont, non conditionnelle.
+      html += '<div style="font-size:0.78rem;line-height:1.45;color:var(--text-secondary);margin-bottom:1rem">'
+        + "Contrefactuel : ce que montrerait le compte de résultat si les quote-parts de développement étaient restées en charges. L'IS réel, la trésorerie et les dividendes suivent le CR comptable. Ce n'est pas une vue de trésorerie (voir la page Trésorerie).</div>";
+      return html;
+    }
+
     function renderCompteResultat() {
       if (!crData) return;
       const projete = document.getElementById('crProjete').checked;
       const d = crData;
-      const ca        = projete ? d.ca.projete : d.ca.facture;
-      const ebe       = projete ? d.ebe.projete : d.ebe.factuel;
-      const resExploit= projete ? d.resultatExploitation.projete : d.resultatExploitation.factuel;
-      const isBrut    = projete ? d.is.projete : d.is.factuel;
-      const credit    = d.creditImpot ? d.creditImpot.total : 0;
-      const resNet    = projete ? d.resultatNet.projete : d.resultatNet.factuel; // apres credit (estimatif)
+      // Robustesse (spec C.5) : une réponse /api/ebe d'une version antérieure encore en cache n'a pas
+      // de champ `retraite`. La pastille reste cliquable, mais on rend la vue comptable accompagnée
+      // d'un bandeau plutôt que de planter sur r.ebe.
+      const r = d.retraite || null;
+      const horsCapi = crViewMode === 'horsCapi' && !!r;
+      const retraiteIndispo = crViewMode === 'horsCapi' && !r;
+      const col = (o) => (o ? (Number(projete ? o.projete : o.factuel) || 0) : 0);
 
-      // Fabrique une ligne. opts : {neg, plus, total, sep, onclick}
+      const ca        = projete ? d.ca.projete : d.ca.facture;
+      const ebe       = horsCapi ? col(r.ebe) : col(d.ebe);
+      const resExploit= horsCapi ? col(r.resultatExploitation) : col(d.resultatExploitation);
+      const isBrut    = horsCapi ? col(r.is) : col(d.is);
+      // Dotations : conservées (immos sans postes) en vue hors capitalisation, total en vue comptable.
+      const dotations = horsCapi ? (Number(r.amortissements) || 0) : d.amortissements;
+      const credit    = d.creditImpot ? d.creditImpot.total : 0;
+      const resNet    = horsCapi ? col(r.resultatNet) : col(d.resultatNet); // apres credit (estimatif)
+
+      // Fabrique une ligne. opts : {neg, plus, total, sep, onclick, badge, title}
       const row = (label, val, opts = {}) => {
         const cls = 'cr-row' + (opts.total ? ' cr-total' : '') + (opts.sep ? ' cr-sep' : '') + (opts.onclick ? ' clickable' : '');
-        const sign = opts.neg ? '− ' : (opts.plus ? '+ ' : '');
-        const color = opts.neg ? 'color:var(--danger)' : '';
+        // Signe explicite (neg/plus) ou déduit du montant : sans cette déduction, un total négatif
+        // (exercice contrefactuel déficitaire, cas prévu par le bandeau C.5) s'afficherait en valeur
+        // absolue, donc positif.
+        const negatif = opts.neg || (!opts.plus && val < 0);
+        const sign = negatif ? '− ' : (opts.plus ? '+ ' : '');
+        const color = negatif ? 'color:var(--danger)' : '';
         const size = opts.total ? ';font-size:1.05rem' : '';
         const hint = opts.onclick ? ' <span style="font-size:0.68rem;color:var(--text-secondary)">detail</span>' : '';
         const badge = opts.badge || '';
         const click = opts.onclick ? ' onclick="' + opts.onclick + '"' : '';
-        return '<div class="' + cls + '"' + click + '><span>' + label + hint + badge + '</span>'
+        const tip = opts.title ? ' title="' + opts.title + '"' : '';
+        return '<div class="' + cls + '"' + click + tip + '><span>' + label + hint + badge + '</span>'
           + '<span style="' + color + size + '">' + sign + formatEuro(Math.abs(val)) + '</span></div>';
       };
       const subRow = (label, val) =>
         '<div class="cr-sub"><span>' + label + '</span><span>' + val + '</span></div>';
 
       let html = '';
+      // Bandeaux, avant tout chiffre : une anomalie de données rend la lecture des deux vues suspecte.
+      html += _crAnomalieImmosHtml(r);
+      if (retraiteIndispo) {
+        html += _crAlerteHtml('Vue hors capitalisation indisponible (recharger la page) : la réponse en cache ne porte pas les données de retraitement. Le CR comptable est affiché à la place.', false);
+      }
+      // Spec C.5 / limite E1 : computeIS plafonne à 0 et les déficits reportables ne sont pas modélisés.
+      if (horsCapi && resExploit < 0) {
+        html += _crAlerteHtml("Exercice contrefactuel déficitaire : l'IS théorique des exercices suivants est surestimé (déficit reportable ignoré).", false);
+      }
+      if (horsCapi) html += _crPontHtml(d, r, projete);
       html += row("Chiffre d'affaires" + (projete ? ' (facture + pipeline)' : ' facture'), ca, { onclick: "openCrDetailModal('ca')" });
       if (projete && d.ca.pipelinePondere) {
         html += subRow('dont CA facture (Notion)', formatEuro(d.ca.facture));
@@ -14284,28 +14423,57 @@
       // dernier mois clos. Ligne masquée si le montant est nul (aucune immobilisation sur l'exercice).
       const prodImmo = d.productionImmobilisee || null;
       const prodImmoVal = prodImmo ? (projete ? prodImmo.projete : prodImmo.factuel) : 0;
-      if (prodImmoVal) {
-        html += row('Production immobilisée', prodImmoVal, { plus: true, onclick: "openCrDetailModal('productionImmobilisee')" });
+      // Vue hors capitalisation : la ligne disparaît (c'est exactement ce que le contrefactuel retire),
+      // son montant est déjà explicité dans le pont de réconciliation ci-dessus.
+      if (!horsCapi && prodImmoVal) {
+        html += row('Production immobilisée', prodImmoVal, { plus: true, onclick: "openCrDetailModal('productionImmobilisee')", badge: _crQuotePartsBadgeHtml(d) });
         html += subRow('Quote-parts immobilisées (module Immobilisations) : neutralise les charges portées à l\'actif', '');
       }
-      html += row("= Excedent brut d'exploitation (EBE)", ebe, { total: true });
-      html += row('Dotations aux amortissements', d.amortissements, { neg: d.amortissements > 0, sep: true, onclick: "navigateTo('immobilisations')" });
-      if (!d.amortissements) html += subRow('Aucune immobilisation active cette annee (module Immobilisations)', formatEuro(0));
-      html += row("= Resultat d'exploitation", resExploit, { total: true });
-      html += row('Impot sur les societes (IS)', isBrut, { neg: true, sep: true, onclick: "openCrDetailModal('is')" });
-      // Resultat net "solide" : apres IS, SANS le credit d'impot (qui n'est qu'une estimation).
-      const resNetApresIS = resExploit - isBrut;
-      html += row('= Resultat net' + (credit ? ' (apres IS)' : ''), resNetApresIS, { total: true });
-      if (credit) {
-        // Bloc ESTIMATIF (italique) : le credit CII/CIR reste une estimation (chiffres calcules en
-        // interne) mais la methode a ete validee par l'expert-comptable. On l'affiche a part, avec le
-        // resultat net estimatif qui en decoule.
-        html += '<div style="margin-top:0.7rem;padding-top:0.5rem;border-top:1px dashed var(--border);font-style:italic;color:var(--text-secondary)">';
-        html += '<div style="font-size:0.74rem;margin-bottom:0.4rem">Estimatif (chiffres calcules en interne, methode validee par l\'expert-comptable). Le credit d\'impot CII/CIR reduit l\'IS ; l\'exces est restitue (PME).</div>';
-        html += '<div class="cr-row clickable" onclick="openCrDetailModal(\'credit\')" style="font-style:italic"><span>+ Credit d\'impot estime (CII / CIR) <span style="font-size:0.68rem">detail</span></span><span style="color:var(--primary)">+ ' + formatEuro(credit) + '</span></div>';
-        html += '<div class="cr-row" style="font-style:italic;font-weight:700"><span>= Resultat net estimatif (apres credit)</span><span>' + formatEuro(resNet) + '</span></div>';
-        html += '</div>';
+      html += row("= Excedent brut d'exploitation (EBE)" + (horsCapi ? ' hors capitalisation' : ''), ebe, { total: true, title: 'équivalent EBITDA' });
+      if (horsCapi) {
+        html += row('Dotations aux amortissements', dotations, { neg: dotations > 0, sep: true, onclick: "openCrDetailModal('dotationsRetraitees')" });
+        html += subRow('dotations des actifs neutralisés retirées avec la production immobilisée', '');
+      } else {
+        html += row('Dotations aux amortissements', dotations, { neg: dotations > 0, sep: true, onclick: "navigateTo('immobilisations')" });
+        if (!dotations) html += subRow('Aucune immobilisation active cette annee (module Immobilisations)', formatEuro(0));
       }
+      // Dernier chiffre « plein » du tableau (spec C.6) : tout ce qui suit est estimatif.
+      html += row("= Resultat d'exploitation" + (horsCapi ? ' hors capitalisation' : ''), resExploit, { total: true, title: 'équivalent résultat courant avant impôt (résultat financier non modélisé)' });
+      // Zone fiscale estimative, LES DEUX VUES (spec C.6) : à partir de l'IS, tout repose sur une
+      // estimation simplifiée (base = résultat d'exploitation, barème PME sans déficits reportables ni
+      // retraitements fiscaux). Le style italique gris du bloc « Estimatif » du crédit d'impôt est
+      // étendu à toute la zone, l'IS et le résultat net compris.
+      const resNetApresIS = resExploit - isBrut;
+      html += '<div style="margin-top:0.7rem;padding-top:0.5rem;border-top:1px dashed var(--border);font-style:italic;color:var(--text-secondary)">';
+      html += '<div style="font-size:0.74rem;margin-bottom:0.4rem">Estimation fiscale simplifiée (base = résultat d\'exploitation, barème PME). La référence est la liasse du cabinet. Points en attente : option 236-I, étalement des aides.</div>';
+      // `neg` conditionnel : un IS a 0 (exercice contrefactuel deficitaire, computeIS plafonne a 0)
+      // s'afficherait sinon « − 0 € », comme si l'impot etait juste tres petit.
+      html += row('Impot sur les societes (IS)' + (horsCapi ? ' théorique' : ''), isBrut, { neg: isBrut > 0, onclick: "openCrDetailModal('is')" });
+      // Resultat net "solide" : apres IS, SANS le credit d'impot (qui n'est qu'une estimation).
+      // Etiquette contrefactuelle en vue hors capitalisation (spec C.6, precision revue T3) : jamais
+      // un montant contrefactuel sous un libelle identique a celui du CR comptable.
+      html += row(horsCapi
+        ? '= Resultat net hors capitalisation' + (credit ? ' (apres IS theorique)' : '')
+        : '= Resultat net' + (credit ? ' (apres IS)' : ''), resNetApresIS, { total: true });
+      if (credit) {
+        // Le credit CII/CIR reste une estimation (chiffres calcules en interne) mais la methode a ete
+        // validee par l'expert-comptable. Il est INCHANGE dans les deux vues (spec B.4, phase 1) : la
+        // garde creditAdosseAuxDotations signale le seul cas ou cette hypothese serait incoherente.
+        const badgeCredit = (horsCapi && r.creditAdosseAuxDotations)
+          ? ' <span class="cr-tva-badge warn" title="Un actif neutralisé est en assiette « amortissement » : son crédit d\'impôt est adossé aux dotations que cette vue retire. Le crédit affiché reste celui du CR comptable, non retraité.">crédit adossé aux dotations neutralisées : crédit non retraité</span>'
+          : '';
+        html += '<div style="font-size:0.74rem;margin:0.55rem 0 0.35rem">Le credit d\'impot CII/CIR (chiffres calcules en interne, methode validee par l\'expert-comptable) reduit l\'IS ; l\'exces est restitue (PME).</div>';
+        html += '<div class="cr-row clickable" onclick="openCrDetailModal(\'credit\')"><span>+ Credit d\'impot estime (CII / CIR) <span style="font-size:0.68rem">detail</span>' + badgeCredit + '</span><span style="color:var(--primary)">+ ' + formatEuro(credit) + '</span></div>';
+        // Meme convention de signe que row() (revue T3) : sans elle, un resultat net estimatif negatif
+        // affichait le tiret par defaut d'Intl, en noir, alors que toutes les autres lignes negatives
+        // du tableau portent un « − » rouge.
+        const resNetNegatif = resNet < 0;
+        html += '<div class="cr-row" style="font-weight:700"><span>= Resultat net estimatif'
+          + (horsCapi ? ' hors capitalisation' : '') + ' (apres credit)</span><span'
+          + (resNetNegatif ? ' style="color:var(--danger)"' : '') + '>'
+          + (resNetNegatif ? '− ' : '') + formatEuro(Math.abs(resNet)) + '</span></div>';
+      }
+      html += '</div>';
 
       document.getElementById('crTable').innerHTML = html;
       const fresh = document.getElementById('crFreshness');
@@ -14356,13 +14524,47 @@
         body += '<div style="font-size:0.74rem;color:var(--text-secondary)">Montant repris dans le compte de résultat (colonne ' + (projete ? 'projetée' : 'factuelle') + ') : ' + formatEuro(val) + '. L\'avancement réel s\'arrête à la fin du dernier mois clos, comme les charges et les subventions réelles.</div>';
         body += '<div style="font-size:0.72rem;color:var(--text-secondary);margin-top:0.5rem"><a onclick="navigateTo(\'immobilisations\')" style="cursor:pointer;text-decoration:underline">Detail des postes et quote-parts dans le module Immobilisations</a></div>';
       } else if (kind === 'is') {
-        const base = projete ? d.resultatExploitation.projete : d.resultatExploitation.factuel;
-        const is = projete ? d.is.projete : d.is.factuel;
-        title = 'Impot sur les societes ' + d.year;
+        // En vue hors capitalisation, la base et l'IS viennent de `retraite` : l'IS y est THÉORIQUE
+        // (recalculé sur la base contrefactuelle). L'IS réellement dû, la trésorerie et les primes
+        // continuent de lire le CR comptable.
+        const rIs = (crViewMode === 'horsCapi' && d.retraite) ? d.retraite : null;
+        const src = rIs || d;
+        // Meme helper defensif que renderCompteResultat : un bloc `retraite` tronque (reponse partielle)
+        // ne doit jamais lever de TypeError a l'ouverture de la modale.
+        const colIs = (o) => (o ? (Number(projete ? o.projete : o.factuel) || 0) : 0);
+        const base = colIs(src.resultatExploitation);
+        const is = colIs(src.is);
+        title = (rIs ? 'Impot sur les societes theorique ' : 'Impot sur les societes ') + d.year;
         body = '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.6rem">Bareme PME : 15% jusqu\'a 42 500 EUR de resultat imposable, puis 25% au-dela.</div>';
-        body += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid var(--border)"><span>Resultat d\'exploitation (base)</span><strong>' + formatEuro(base) + '</strong></div>';
+        if (rIs) body += '<div style="font-size:0.82rem;color:var(--warning);margin-bottom:0.6rem">IS théorique recalculé sur la base hors capitalisation ; l\'IS réellement dû reste celui du CR comptable.</div>';
+        body += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid var(--border)"><span>' + (rIs ? 'Résultat d\'exploitation hors capitalisation (base)' : 'Resultat d\'exploitation (base)') + '</span><strong>' + formatEuro(base) + '</strong></div>';
         body += '<div style="display:flex;justify-content:space-between;padding:0.5rem 0"><span>IS brut calcule</span><strong style="color:var(--danger)">' + formatEuro(is) + '</strong></div>';
         if (d.creditImpot && d.creditImpot.total) body += '<div style="font-size:0.76rem;color:var(--text-secondary);margin-top:0.3rem">Le credit d\'impot CII/CIR (' + formatEuro(d.creditImpot.total) + ') vient ensuite reduire cet IS. Voir la ligne "Credit d\'impot".</div>';
+      } else if (kind === 'dotationsRetraitees') {
+        // Modale propre à la vue hors capitalisation (spec C.4) : elle montre le partage des dotations
+        // comptables entre neutralisées (actifs financés par la production immobilisée, retirés avec
+        // elle) et conservées, puis l'effet CUMULÉ depuis l'origine · le seul endroit où le retour à
+        // zéro du retraitement est visible, un compte de résultat n'affichant que N et N-1.
+        const rr = d.retraite;
+        if (!rr) return;
+        const ec = rr.effetCumule || { montant: 0, anneeBascule: null };
+        // Lignes à dotation nulle filtrées : un actif dont le plan n'a pas encore commencé (ou est
+        // terminé) n'a rien à retirer cette année et n'apporterait que du bruit.
+        const lignes = ((rr.dotationsNeutralisees && rr.dotationsNeutralisees.parImmo) || []).filter(i => i && Number(i.dotation));
+        title = 'Dotations aux amortissements hors capitalisation ' + d.year;
+        body = '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.6rem">Les dotations des actifs financés par la production immobilisée sont retirées EN MÊME TEMPS que ce produit : sinon le contrefactuel retirerait le bonus sans reprendre la charge qu\'il compense. Les autres dotations (actifs sans quote-part interne) restent au compte de résultat.</div>';
+        body += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid var(--border)"><span>Dotations comptables</span><strong>' + formatEuro(d.amortissements) + '</strong></div>';
+        for (const i of lignes) {
+          body += '<div style="display:flex;justify-content:space-between;padding:0.35rem 0;border-bottom:1px solid var(--border);color:var(--text-secondary)"><span style="padding-left:0.8rem">− neutralisées · ' + escapeHtml(i.nom) + '</span><span>− ' + formatEuro(i.dotation) + '</span></div>';
+        }
+        if (!lignes.length) body += '<div style="color:var(--text-secondary);padding:0.4rem 0">Aucune dotation neutralisée sur cet exercice.</div>';
+        body += '<div style="display:flex;justify-content:space-between;padding:0.5rem 0;border-top:2px solid var(--border);font-weight:700"><span>= Dotations conservées</span><span>' + formatEuro(rr.amortissements) + '</span></div>';
+        body += '<div style="margin-top:0.8rem;padding-top:0.6rem;border-top:1px dashed var(--border)">';
+        body += '<div style="display:flex;justify-content:space-between;padding:0.35rem 0"><span>Effet de la capitalisation depuis l\'origine</span><strong>' + formatEuro(ec.montant) + '</strong></div>';
+        body += '<div style="display:flex;justify-content:space-between;padding:0.35rem 0"><span>Année de bascule estimée</span><span>' + (ec.anneeBascule ? ec.anneeBascule : 'aucune : la capitalisation en cours domine encore') + '</span></div>';
+        body += '<div style="font-size:0.76rem;color:var(--text-secondary);line-height:1.45;margin-top:0.4rem">Tant que de nouvelles quote-parts sont immobilisées, la production immobilisée de l\'année dépasse les dotations neutralisées et le cumul monte. Une fois la capitalisation terminée, l\'écart annuel s\'inverse (plus rien à retirer, mais des dotations à reprendre) : le cumul redescend et revient vers zéro à la fin des plans d\'amortissement. C\'est le même euro de charge, seulement décalé dans le temps.</div>';
+        body += '</div>';
+        body += '<div style="font-size:0.72rem;color:var(--text-secondary);margin-top:0.5rem"><a onclick="navigateTo(\'immobilisations\')" style="cursor:pointer;text-decoration:underline">Plans d\'amortissement et postes dans le module Immobilisations</a></div>';
       } else if (kind === 'credit') {
         const c = d.creditImpot || { cii: 0, cir: 0, total: 0 };
         const isBrut = projete ? d.is.projete : d.is.factuel;
