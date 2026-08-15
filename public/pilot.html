@@ -14128,6 +14128,9 @@
     // contrefactuel "comme si les developpements etaient restes en charges"). Etat d'affichage pur :
     // les deux vues se rendent depuis le meme crData, aucun appel reseau au changement de vue.
     let crViewMode = 'comptable'; // 'comptable' | 'horsCapi'
+    // Etat de la case « Colonne projetee » au moment ou la vue hors capitalisation a ete activee
+    // (null = rien a restaurer) : voir setCrView, la vue comptable doit revenir telle qu'elle etait.
+    let crProjeteAvantHorsCapi = null;
 
     function _crYear() {
       const y = new Date().getFullYear();
@@ -14145,14 +14148,22 @@
 
     function setCrView(mode) {
       const activation = mode === 'horsCapi' && crViewMode !== 'horsCapi';
+      const retour = mode !== 'horsCapi' && crViewMode === 'horsCapi';
       crViewMode = mode;
       document.querySelectorAll('.cr-year-btn[data-crview]').forEach(b => b.classList.toggle('active', b.dataset.crview === mode));
+      const cb = document.getElementById('crProjete');
       // Spec C.1 : a l'ACTIVATION de la vue hors capitalisation, on decoche la colonne projetee.
       // Melanger un contrefactuel et du pipeline pondere prete a confusion pour un lecteur externe :
       // la colonne factuelle d'abord. L'utilisateur reste libre de recocher (badge d'avertissement).
-      if (activation) {
-        const cb = document.getElementById('crProjete');
-        if (cb) cb.checked = false;
+      // Deux gardes (revue T3) : on memorise l'etat de la case pour le RESTAURER au retour en vue
+      // comptable (un aller-retour ne doit jamais modifier la vue comptable de l'utilisateur), et on
+      // ne touche a rien si `retraite` est absent, puisque c'est alors la vue comptable qui s'affiche.
+      if (activation && cb && crData && crData.retraite) {
+        crProjeteAvantHorsCapi = cb.checked;
+        cb.checked = false;
+      } else if (retour && cb && crProjeteAvantHorsCapi !== null) {
+        cb.checked = crProjeteAvantHorsCapi;
+        crProjeteAvantHorsCapi = null;
       }
       renderCompteResultat();
     }
@@ -14434,10 +14445,16 @@
       // étendu à toute la zone, l'IS et le résultat net compris.
       const resNetApresIS = resExploit - isBrut;
       html += '<div style="margin-top:0.7rem;padding-top:0.5rem;border-top:1px dashed var(--border);font-style:italic;color:var(--text-secondary)">';
-      html += '<div style="font-size:0.74rem;margin-bottom:0.4rem">Estimation fiscale simplifiée (base = résultat d\'exploitation, barème PME). La référence est la liasse du cabinet.</div>';
-      html += row('Impot sur les societes (IS)' + (horsCapi ? ' théorique' : ''), isBrut, { neg: true, onclick: "openCrDetailModal('is')" });
+      html += '<div style="font-size:0.74rem;margin-bottom:0.4rem">Estimation fiscale simplifiée (base = résultat d\'exploitation, barème PME). La référence est la liasse du cabinet. Points en attente : option 236-I, étalement des aides.</div>';
+      // `neg` conditionnel : un IS a 0 (exercice contrefactuel deficitaire, computeIS plafonne a 0)
+      // s'afficherait sinon « − 0 € », comme si l'impot etait juste tres petit.
+      html += row('Impot sur les societes (IS)' + (horsCapi ? ' théorique' : ''), isBrut, { neg: isBrut > 0, onclick: "openCrDetailModal('is')" });
       // Resultat net "solide" : apres IS, SANS le credit d'impot (qui n'est qu'une estimation).
-      html += row('= Resultat net' + (credit ? ' (apres IS)' : ''), resNetApresIS, { total: true });
+      // Etiquette contrefactuelle en vue hors capitalisation (spec C.6, precision revue T3) : jamais
+      // un montant contrefactuel sous un libelle identique a celui du CR comptable.
+      html += row(horsCapi
+        ? '= Resultat net hors capitalisation' + (credit ? ' (apres IS theorique)' : '')
+        : '= Resultat net' + (credit ? ' (apres IS)' : ''), resNetApresIS, { total: true });
       if (credit) {
         // Le credit CII/CIR reste une estimation (chiffres calcules en interne) mais la methode a ete
         // validee par l'expert-comptable. Il est INCHANGE dans les deux vues (spec B.4, phase 1) : la
@@ -14447,7 +14464,14 @@
           : '';
         html += '<div style="font-size:0.74rem;margin:0.55rem 0 0.35rem">Le credit d\'impot CII/CIR (chiffres calcules en interne, methode validee par l\'expert-comptable) reduit l\'IS ; l\'exces est restitue (PME).</div>';
         html += '<div class="cr-row clickable" onclick="openCrDetailModal(\'credit\')"><span>+ Credit d\'impot estime (CII / CIR) <span style="font-size:0.68rem">detail</span>' + badgeCredit + '</span><span style="color:var(--primary)">+ ' + formatEuro(credit) + '</span></div>';
-        html += '<div class="cr-row" style="font-weight:700"><span>= Resultat net estimatif (apres credit)</span><span>' + formatEuro(resNet) + '</span></div>';
+        // Meme convention de signe que row() (revue T3) : sans elle, un resultat net estimatif negatif
+        // affichait le tiret par defaut d'Intl, en noir, alors que toutes les autres lignes negatives
+        // du tableau portent un « − » rouge.
+        const resNetNegatif = resNet < 0;
+        html += '<div class="cr-row" style="font-weight:700"><span>= Resultat net estimatif'
+          + (horsCapi ? ' hors capitalisation' : '') + ' (apres credit)</span><span'
+          + (resNetNegatif ? ' style="color:var(--danger)"' : '') + '>'
+          + (resNetNegatif ? '− ' : '') + formatEuro(Math.abs(resNet)) + '</span></div>';
       }
       html += '</div>';
 
@@ -14505,8 +14529,11 @@
         // continuent de lire le CR comptable.
         const rIs = (crViewMode === 'horsCapi' && d.retraite) ? d.retraite : null;
         const src = rIs || d;
-        const base = projete ? src.resultatExploitation.projete : src.resultatExploitation.factuel;
-        const is = projete ? src.is.projete : src.is.factuel;
+        // Meme helper defensif que renderCompteResultat : un bloc `retraite` tronque (reponse partielle)
+        // ne doit jamais lever de TypeError a l'ouverture de la modale.
+        const colIs = (o) => (o ? (Number(projete ? o.projete : o.factuel) || 0) : 0);
+        const base = colIs(src.resultatExploitation);
+        const is = colIs(src.is);
         title = (rIs ? 'Impot sur les societes theorique ' : 'Impot sur les societes ') + d.year;
         body = '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.6rem">Bareme PME : 15% jusqu\'a 42 500 EUR de resultat imposable, puis 25% au-dela.</div>';
         if (rIs) body += '<div style="font-size:0.82rem;color:var(--warning);margin-bottom:0.6rem">IS théorique recalculé sur la base hors capitalisation ; l\'IS réellement dû reste celui du CR comptable.</div>';
