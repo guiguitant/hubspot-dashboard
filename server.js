@@ -9600,6 +9600,11 @@ app.get('/api/ebe', async (req, res) => {
       creditImpot,                                                          // { cii, cir, total } de l'exercice
       impotNet: { factuel: impotNetFactuel, projete: impotNetProjete },     // IS apres credit (negatif = produit d'impot)
       resultatNet: { factuel: resExploitFactuel - impotNetFactuel, projete: resExploitProjete - impotNetProjete },
+      // Badge front C.5 : quote-parts du module Immobilisations en attente de validation du cabinet
+      // comptable. Passthrough env pur (le front ne lit pas l'environnement) : badge affiche tant que
+      // PILOT_QUOTEPARTS_VALIDEES n'est pas 'true', dans les DEUX vues (le CR comptable depend des
+      // memes quote-parts que la vue hors capitalisation).
+      quotePartsValidees: process.env.PILOT_QUOTEPARTS_VALIDEES === 'true',
       // Vue economique "CR hors capitalisation", ADDITIVE : affichee A COTE du compte de resultat
       // ci-dessus, jamais a sa place. Sortie du module pur utils/crRetraite.js (ebe,
       // dotationsNeutralisees, amortissements conserves, ecartDotations, resultatExploitation, is,
