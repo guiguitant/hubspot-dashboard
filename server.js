@@ -25,6 +25,7 @@ const { classifyProduitSubvention, CATEGORIE_SUBVENTIONS } = require('./utils/pr
 const { computeProductionImmobilisee } = require('./utils/productionImmobilisee'); // Feature E produits-et-suivis : produit d'exploitation "Production immobilisee" (compte 72)
 const { computeCrRetraite, computeEffetCumule, verifierInvariantImmos } = require('./utils/crRetraite'); // CR hors capitalisation : vue economique affichee A COTE du CR comptable (spec 2026-08-13-cr-retraite-design)
 const { normaliserPostesByImmo, nomImmoAffichage, estImmoAPostes, buildDotationsDetail } = require('./utils/dotationsDetail'); // detail des dotations par immo + repli d'annee des postes (module pur, helpers de calcul injectes depuis ce fichier)
+const { chargerLiasses, verifierLiasse } = require('./utils/liasses'); // Liasses fiscales des exercices clos : chiffres OFFICIELS affiches par le CR (spec 2026-08-15-liasse-exercice-clos-design), aucun calcul modifie
 const { buildCoupleKey, buildIndexExactKey, buildIndexExactTVA, montantHT } = require('./utils/tvaCharges'); // cle categorie/sous-categorie partagee avec le parser Categories TVA (evite toute divergence) ; montantHT = conversion TTC->HT du reel (Tache 6) ; buildIndexExactTVA = jointure pure lettrage Pennylane (extraite en utils, revue C1)
 const cron = require('node-cron');
 const MASSE_TAB = 'Masse_salariale';
@@ -9271,6 +9272,44 @@ app.post('/api/coherence/deals-notion/annuler', async (req, res) => {
   }
 });
 
+// --- Liasses fiscales des exercices clos (spec docs/superpowers/specs/2026-08-15-liasse-exercice-clos-design.md) ---
+// Chiffres OFFICIELS deposes par le cabinet, saisis a la main dans data/liasses/NNNN.json une fois par
+// an. Ils sont AFFICHES par le compte de resultat (zone fiscale ancree + modale de reconciliation) et
+// n'entrent dans AUCUN calcul : ni EBE, ni comparatif, ni tresorerie, ni primes. Meme gouvernance que
+// la vue hors capitalisation (invariant I7) : un seul point d'entree, verrouille par utils/liasses.test.js.
+//
+// Cache construit UNE fois au demarrage : ces fichiers sont versionnes, ils ne changent qu'au deploiement
+// (une nouvelle liasse = un commit + un redemarrage). Aucun acces disque dans le chemin des requetes.
+const LIASSES_DOSSIER = path.join(__dirname, 'data', 'liasses');
+let _liassesCache = null;
+function getLiasses() {
+  if (_liassesCache) return _liassesCache;
+  const brutes = chargerLiasses(LIASSES_DOSSIER);
+  const out = {};
+  for (const annee of Object.keys(brutes)) {
+    const l = brutes[annee];
+    // Forme servie au front, figee ici : les anomalies de saisie voyagent AVEC les chiffres. Une liasse
+    // en anomalie est servie quand meme (jamais de silence) : le front affiche un bandeau danger.
+    out[annee] = {
+      exercice: Number(l.exercice) || Number(annee),
+      cloture: l.cloture || null,
+      depot: l.depot || null,
+      source: l.source || null,
+      chiffres: l.chiffres || {},
+      anomalies: verifierLiasse(l),
+    };
+  }
+  _liassesCache = out;
+  const annees = Object.keys(out);
+  if (annees.length) {
+    const enAnomalie = annees.filter(a => out[a].anomalies.length);
+    console.log('[liasse] %d exercice(s) clos charge(s) : %s%s', annees.length, annees.join(', '),
+      enAnomalie.length ? ' | anomalies de saisie : ' + enAnomalie.join(', ') : '');
+  }
+  return out;
+}
+getLiasses(); // chargement au demarrage (le cache rend l'appel par requete gratuit)
+
 // --- CR hors capitalisation (vue economique, spec docs/superpowers/specs/2026-08-13-cr-retraite-design.md) ---
 // Contrefactuel "comme si les depenses de developpement etaient restees en charges", affiche A COTE du
 // CR comptable et JAMAIS a sa place : on retire la production immobilisee de l'EBE et on reprend en
@@ -9647,6 +9686,12 @@ app.get('/api/ebe', async (req, res) => {
       // front. L'IS y est THEORIQUE : l'IS reellement du reste celui du CR
       // comptable, tout comme la tresorerie et les primes.
       retraite,
+      // Liasse fiscale de l'exercice demande (spec 2026-08-15-liasse-exercice-clos-design), champ
+      // ADDITIF : `null` tant que l'exercice n'est pas clos et sa liasse saisie. Passthrough pur du
+      // cache getLiasses() : { exercice, cloture, depot, source, chiffres, anomalies }. AUCUN agregat
+      // ci-dessus n'en depend, le comparatif N vs N-1 non plus : la liasse est un affichage et une
+      // reconciliation, jamais un calcul.
+      liasse: getLiasses()[yearParam] || null,
       fetchedAt: new Date().toISOString(),
     });
   } catch (err) {
