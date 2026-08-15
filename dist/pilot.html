@@ -15275,6 +15275,15 @@
 
     function renderCompteResultat() {
       if (!crData) return;
+      // Rattrapage du décochage (résiduel revue T3) : si la vue hors capitalisation a été activée
+      // PENDANT le tout premier chargement (crData encore nul dans setCrView), la mémorisation et le
+      // décochage de la colonne projetée n'ont pas eu lieu : le mémo est alors resté à null, ce qui
+      // identifie exactement ce cas (toute activation normale pose un booléen). On rejoue l'opération
+      // au premier rendu avec données, AVANT de lire la case.
+      if (crViewMode === 'horsCapi' && crData.retraite && crProjeteAvantHorsCapi === null) {
+        const cbRattrapage = document.getElementById('crProjete');
+        if (cbRattrapage) { crProjeteAvantHorsCapi = cbRattrapage.checked; cbRattrapage.checked = false; }
+      }
       const projete = document.getElementById('crProjete').checked;
       const d = crData;
       // Robustesse (spec C.5) : une réponse /api/ebe d'une version antérieure encore en cache n'a pas
