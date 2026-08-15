@@ -409,9 +409,12 @@ describe('computeEffetCumule', () => {
     { annee: 2031, productionImmobilisee: 0, dotationsNeutralisees: 20000 },
   ];
 
+  // Phase 2a (spec F.1) : le retour porte EN PLUS un champ `serie` purement additif. Les assertions
+  // ci-dessous restent des toEqual STRICTS (aucun autre champ ne doit apparaitre) : `serie` y est
+  // declare via expect.any(Array), son contenu etant verifie par les tests dedies plus bas.
   it('serie de l actif I1 : montant a fin 2026 = +100 000, a fin 2031 = 0, annee de bascule = 2027', () => {
-    expect(computeEffetCumule(serieI1, 2026)).toEqual({ montant: 100000, anneeBascule: 2027 });
-    expect(computeEffetCumule(serieI1, 2031)).toEqual({ montant: 0, anneeBascule: 2027 });
+    expect(computeEffetCumule(serieI1, 2026)).toEqual({ montant: 100000, anneeBascule: 2027, serie: expect.any(Array) });
+    expect(computeEffetCumule(serieI1, 2031)).toEqual({ montant: 0, anneeBascule: 2027, serie: expect.any(Array) });
   });
 
   it('serie sans aucune annee negative : annee de bascule null', () => {
@@ -419,7 +422,7 @@ describe('computeEffetCumule', () => {
       { annee: 2026, productionImmobilisee: 50, dotationsNeutralisees: 10 },
       { annee: 2027, productionImmobilisee: 30, dotationsNeutralisees: 5 },
     ];
-    expect(computeEffetCumule(serie, 2027)).toEqual({ montant: 65, anneeBascule: null });
+    expect(computeEffetCumule(serie, 2027)).toEqual({ montant: 65, anneeBascule: null, serie: expect.any(Array) });
   });
 
   it('une annee a ecart exactement 0 suivie d une annee negative : la bascule est l annee negative, pas l annee a 0 (regle stricte < 0)', () => {
@@ -428,21 +431,103 @@ describe('computeEffetCumule', () => {
       { annee: 2027, productionImmobilisee: 40, dotationsNeutralisees: 50 }, // ecart -10
     ];
     // montant cumule = 0 (2026) + (-10) (2027) = -10.
-    expect(computeEffetCumule(serie, 2027)).toEqual({ montant: -10, anneeBascule: 2027 });
+    expect(computeEffetCumule(serie, 2027)).toEqual({ montant: -10, anneeBascule: 2027, serie: expect.any(Array) });
   });
 
   it('serie vide : montant 0, annee de bascule null', () => {
-    expect(computeEffetCumule([], 2026)).toEqual({ montant: 0, anneeBascule: null });
+    expect(computeEffetCumule([], 2026)).toEqual({ montant: 0, anneeBascule: null, serie: [] });
   });
 
   it('serie absente (undefined) : ne jette pas, meme resultat qu une serie vide', () => {
-    expect(computeEffetCumule(undefined, 2026)).toEqual({ montant: 0, anneeBascule: null });
+    expect(computeEffetCumule(undefined, 2026)).toEqual({ montant: 0, anneeBascule: null, serie: [] });
   });
 
   it('serie desordonnee : meme resultat qu une serie triee (le module trie en interne)', () => {
     const desordonnee = [serieI1[3], serieI1[0], serieI1[5], serieI1[1], serieI1[4], serieI1[2]];
     expect(computeEffetCumule(desordonnee, 2031)).toEqual(computeEffetCumule(serieI1, 2031));
-    expect(computeEffetCumule(desordonnee, 2026)).toEqual({ montant: 100000, anneeBascule: 2027 });
+    expect(computeEffetCumule(desordonnee, 2026)).toEqual({ montant: 100000, anneeBascule: 2027, serie: expect.any(Array) });
+  });
+});
+
+// Phase 2a (spec F.1) : serie annuelle detaillee exposee par computeEffetCumule, qui alimente le
+// graphe de trajectoire de la modale "dotations hors capitalisation" (F.3). Champ ADDITIF : les
+// tests du bloc precedent verrouillent le fait que montant et anneeBascule ne bougent pas.
+describe('computeEffetCumule · serie annuelle detaillee (F.1)', () => {
+  const serieI1 = [
+    { annee: 2026, productionImmobilisee: 100000, dotationsNeutralisees: 0 },
+    { annee: 2027, productionImmobilisee: 0, dotationsNeutralisees: 20000 },
+    { annee: 2028, productionImmobilisee: 0, dotationsNeutralisees: 20000 },
+    { annee: 2029, productionImmobilisee: 0, dotationsNeutralisees: 20000 },
+    { annee: 2030, productionImmobilisee: 0, dotationsNeutralisees: 20000 },
+    { annee: 2031, productionImmobilisee: 0, dotationsNeutralisees: 20000 },
+  ];
+
+  it('actif I1 : ecarts et cumuls derives a la main, cumul de la derniere annee = 0 (invariant I1)', () => {
+    // Derivation manuelle (annexe de la spec) : ecart = production immobilisee - dotations neutralisees,
+    // cumul = somme des ecarts jusqu'a l'annee incluse.
+    //   2026 : ecart +100 000 -> cumul 100 000
+    //   2027 : ecart  -20 000 -> cumul  80 000
+    //   2028 : ecart  -20 000 -> cumul  60 000
+    //   2029 : ecart  -20 000 -> cumul  40 000
+    //   2030 : ecart  -20 000 -> cumul  20 000
+    //   2031 : ecart  -20 000 -> cumul       0  (retour a zero : le cout total est reconnu une seule fois)
+    const { serie } = computeEffetCumule(serieI1, 2031);
+    expect(serie).toEqual([
+      { annee: 2026, productionImmobilisee: 100000, dotationsNeutralisees: 0, ecart: 100000, cumul: 100000 },
+      { annee: 2027, productionImmobilisee: 0, dotationsNeutralisees: 20000, ecart: -20000, cumul: 80000 },
+      { annee: 2028, productionImmobilisee: 0, dotationsNeutralisees: 20000, ecart: -20000, cumul: 60000 },
+      { annee: 2029, productionImmobilisee: 0, dotationsNeutralisees: 20000, ecart: -20000, cumul: 40000 },
+      { annee: 2030, productionImmobilisee: 0, dotationsNeutralisees: 20000, ecart: -20000, cumul: 20000 },
+      { annee: 2031, productionImmobilisee: 0, dotationsNeutralisees: 20000, ecart: -20000, cumul: 0 },
+    ]);
+    expect(serie[serie.length - 1].cumul).toBe(0);
+  });
+
+  it('la serie est complete quelle que soit l annee cible : seul `montant` depend de la cible', () => {
+    // La serie decrit toute la trajectoire (passe ET futur) : elle n'est jamais tronquee a la cible,
+    // sinon le graphe F.3 ne pourrait pas montrer le retour a zero d'une annee anterieure a la fin.
+    const { serie } = computeEffetCumule(serieI1, 2026);
+    expect(serie.map(e => e.annee)).toEqual([2026, 2027, 2028, 2029, 2030, 2031]);
+  });
+
+  it('le cumul a l annee cible est exactement le montant retourne', () => {
+    for (const cible of [2026, 2027, 2028, 2029, 2030, 2031]) {
+      const { montant, serie } = computeEffetCumule(serieI1, cible);
+      const entree = serie.find(e => e.annee === cible);
+      expect(entree.cumul).toBe(montant);
+    }
+  });
+
+  it('serie vide ou absente : serie []', () => {
+    expect(computeEffetCumule([], 2026).serie).toEqual([]);
+    expect(computeEffetCumule(undefined, 2026).serie).toEqual([]);
+    expect(computeEffetCumule(null, 2026).serie).toEqual([]);
+  });
+
+  it('serie desordonnee : cumuls calcules dans l ordre chronologique, sortie triee', () => {
+    const desordonnee = [serieI1[3], serieI1[0], serieI1[5], serieI1[1], serieI1[4], serieI1[2]];
+    const { serie } = computeEffetCumule(desordonnee, 2031);
+    expect(serie.map(e => e.annee)).toEqual([2026, 2027, 2028, 2029, 2030, 2031]);
+    expect(serie.map(e => e.cumul)).toEqual([100000, 80000, 60000, 40000, 20000, 0]);
+  });
+
+  it('entrees mal typees (valeurs absentes ou non numeriques) : normalisees a 0, aucune exception', () => {
+    const { serie } = computeEffetCumule([
+      { annee: 2026, productionImmobilisee: '1000', dotationsNeutralisees: null },
+      { annee: 2027 },
+      null,
+    ], 2027);
+    expect(serie).toEqual([
+      { annee: 2026, productionImmobilisee: 1000, dotationsNeutralisees: 0, ecart: 1000, cumul: 1000 },
+      { annee: 2027, productionImmobilisee: 0, dotationsNeutralisees: 0, ecart: 0, cumul: 1000 },
+    ]);
+  });
+
+  it('la serie fournie en entree n est pas mutee', () => {
+    const entree = [{ annee: 2026, productionImmobilisee: 10, dotationsNeutralisees: 4 }];
+    const copie = JSON.parse(JSON.stringify(entree));
+    computeEffetCumule(entree, 2026);
+    expect(entree).toEqual(copie);
   });
 });
 

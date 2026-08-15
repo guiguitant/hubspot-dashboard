@@ -144,10 +144,22 @@ function computeCrRetraite(input) {
  * annees confondues, y compris futures) ou cet ecart annuel devient negatif -- l'annee ou l'effort
  * de developpement "rembourse" au resultat d'exploitation ce qu'il lui avait retire.
  *
+ * Phase 2a (spec F.1) : renvoie EN PLUS la serie annuelle detaillee `serie`, champ PUREMENT ADDITIF
+ * qui alimente le graphe de trajectoire de l'effet cote front. `montant` et `anneeBascule` sont
+ * inchanges (verrouilles par les tests existants).
+ *
  * @param {Array<{annee:number, productionImmobilisee:number, dotationsNeutralisees:number}>} serie
  *   - une entree par annee, non necessairement triee.
  * @param {number} anneeCible - derniere annee incluse dans le cumul.
- * @returns {{montant:number, anneeBascule:(number|null)}}
+ * @returns {{
+ *   montant:number,
+ *   anneeBascule:(number|null),
+ *   serie: Array<{annee:number, productionImmobilisee:number, dotationsNeutralisees:number, ecart:number, cumul:number}>
+ * }}
+ *   `serie` est triee par annee croissante, normalisee (toute valeur non numerique -> 0) et COMPLETE :
+ *   elle n'est jamais tronquee a `anneeCible` (le graphe doit pouvoir montrer le retour a zero, qui
+ *   est souvent posterieur a l'annee affichee). `cumul` est la somme des ecarts jusqu'a l'annee
+ *   incluse, donc `cumul` de l'entree `anneeCible` vaut exactement `montant`.
  */
 function computeEffetCumule(serie, anneeCible) {
   const arr = Array.isArray(serie) ? serie.filter(Boolean) : [];
@@ -158,13 +170,19 @@ function computeEffetCumule(serie, anneeCible) {
 
   let montant = 0;
   let anneeBascule = null;
+  let cumul = 0; // cumul GLISSANT sur toute la serie (independant de la cible), pour le champ serie
+  const detail = [];
   for (const entree of triee) {
     const annee = _n(entree.annee);
-    const ecart = _n(entree.productionImmobilisee) - _n(entree.dotationsNeutralisees);
+    const productionImmobilisee = _n(entree.productionImmobilisee);
+    const dotationsNeutralisees = _n(entree.dotationsNeutralisees);
+    const ecart = productionImmobilisee - dotationsNeutralisees;
+    cumul += ecart;
+    detail.push({ annee, productionImmobilisee, dotationsNeutralisees, ecart, cumul });
     if (annee <= cible) montant += ecart;
     if (anneeBascule === null && ecart < 0) anneeBascule = annee;
   }
-  return { montant, anneeBascule };
+  return { montant, anneeBascule, serie: detail };
 }
 
 /**

@@ -9395,7 +9395,9 @@ async function computeRetraiteForYear(year, ctx) {
     // volontairement PAS passe ici (sinon la garde ecartDotations signalerait un faux ecart alors que le
     // detail par immo est simplement indisponible).
     const cr = computeCrRetraite({ ebe: entreeEbe, productionImmobilisee: entreeProd, dotationsParImmo: [], creditTotal, isFn: computeIS });
-    return { ...cr, effetCumule: { montant: 0, anneeBascule: null }, invariantCasse: [] };
+    // `serie: []` (phase 2a, spec F.1) : meme forme que la sortie nominale de computeEffetCumule, pour
+    // que le front n'ait jamais a tester l'absence du champ (il masque simplement le graphe si vide).
+    return { ...cr, effetCumule: { montant: 0, anneeBascule: null, serie: [] }, invariantCasse: [] };
   }
 }
 
@@ -9639,7 +9641,10 @@ app.get('/api/ebe', async (req, res) => {
       // ci-dessus, jamais a sa place. Sortie du module pur utils/crRetraite.js (ebe,
       // dotationsNeutralisees, amortissements conserves, ecartDotations, resultatExploitation, is,
       // impotNet, resultatNet, creditAdosseAuxDotations) + effetCumule { montant, anneeBascule } et
-      // invariantCasse [{ nom, ecart }]. L'IS y est THEORIQUE : l'IS reellement du reste celui du CR
+      // invariantCasse [{ nom, ecart }]. effetCumule porte aussi (phase 2a, spec F.1) la serie annuelle
+      // detaillee `serie: [{ annee, productionImmobilisee, dotationsNeutralisees, ecart, cumul }]`,
+      // passthrough pur du module (aucune re-projection ici), consommee par le graphe de trajectoire du
+      // front. L'IS y est THEORIQUE : l'IS reellement du reste celui du CR
       // comptable, tout comme la tresorerie et les primes.
       retraite,
       fetchedAt: new Date().toISOString(),
