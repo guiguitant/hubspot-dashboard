@@ -4265,6 +4265,18 @@
     <div class="section" style="max-width:720px">
       <div id="crTable"><p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p></div>
     </div>
+
+    <!-- Phase 2a (spec F.2) : comparatif « Exercice précédent vs courant » des DEUX agrégats de
+         pilotage que la production immobilisée déplace (EBE et résultat d'exploitation). Rendu dans
+         les DEUX vues, il suit la vue active : agrégats comptables en CR comptable, agrégats
+         `retraite` en CR hors capitalisation. La zone fiscale (IS, résultats nets) en est exclue :
+         estimative et mono-exercice. Masqué tant qu'il n'y a rien à montrer (renderCrComparaison). -->
+    <div class="section" style="max-width:720px;margin-top:1rem;display:none" id="crComparaisonSection">
+      <div style="font-weight:600;font-size:0.9rem" id="crComparaisonTitre">Exercice précédent vs courant</div>
+      <div style="font-size:0.76rem;color:var(--text-secondary);line-height:1.4;margin:0.2rem 0 0.7rem" id="crComparaisonSousTitre"></div>
+      <div style="font-size:0.82rem;color:var(--text-secondary);padding:0.2rem 0" id="crComparaisonEtat"></div>
+      <div style="height:250px" id="crComparaisonCanvasWrap"><canvas id="crComparaisonChart"></canvas></div>
+    </div>
   </div>
   </div>
   <!-- end page-compte-resultat -->
@@ -15057,6 +15069,18 @@
     // Etat de la case « Colonne projetee » au moment ou la vue hors capitalisation a ete activee
     // (null = rien a restaurer) : voir setCrView, la vue comptable doit revenir telle qu'elle etait.
     let crProjeteAvantHorsCapi = null;
+    // Phase 2a (spec F.2) : cache des reponses /api/ebe par annee, alimente par refreshCompteResultat
+    // ET par le fetch paresseux du comparatif. Evite de recharger l'exercice de comparaison a chaque
+    // rendu (changement de vue, case projetee) et le partage entre les deux onglets d'exercice.
+    let crDataByYear = {};
+    // Promesses en vol par annee : sans cette garde, un rendu declenche pendant le chargement relancerait
+    // un fetch, qui declencherait un rendu, etc. Nettoyees a la resolution comme a l'echec.
+    let crComparaisonEnVol = {};
+    // Annees dont le chargement a echoue : la section est masquee et on ne retente pas a chaque rendu
+    // (spec F.2 : jamais d'erreur bloquante, jamais de boucle de requetes).
+    let crComparaisonEchecs = {};
+    let crComparaisonChart = null;
+    let crTrajectoireChart = null;
 
     function _crYear() {
       const y = new Date().getFullYear();
@@ -15099,10 +15123,14 @@
       if (errEl) errEl.textContent = '';
       document.querySelectorAll('.cr-year-btn[data-cryear]').forEach(b => b.classList.toggle('active', b.dataset.cryear === crYearMode));
       document.getElementById('crTable').innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p>';
+      const annee = _crYear();
       try {
-        const res = await fetch('/api/ebe?year=' + _crYear());
+        const res = await fetch('/api/ebe?year=' + annee);
         if (!res.ok) throw new Error('Erreur chargement compte de resultat');
         crData = await res.json();
+        // Cache partage avec le comparatif (F.2) : l'exercice courant sert de N-1 des que l'utilisateur
+        // bascule sur l'onglet « Exercice precedent » ... et inversement, sans nouvelle requete.
+        crDataByYear[annee] = crData;
         renderCompteResultat();
       } catch (err) {
         console.error('Erreur compte de resultat:', err);
@@ -15413,11 +15441,197 @@
       document.getElementById('crTable').innerHTML = html;
       const fresh = document.getElementById('crFreshness');
       if (fresh) fresh.textContent = 'Exercice ' + d.year + (d.fetchedAt ? ' · maj ' + new Date(d.fetchedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '');
+      // Comparatif N-1 vs N (spec F.2) : rendu APRES le tableau, dans les deux vues. Section autonome,
+      // elle se re-rend seule quand l'exercice de comparaison finit de charger (pas de rendu global).
+      renderCrComparaison();
+    }
+
+    // ===== Comparatif « Exercice précédent vs courant » (Phase 2a, spec F.2) =====
+    // Les deux SEULS agrégats de la zone de pilotage que la production immobilisée déplace : EBE et
+    // résultat d'exploitation. Convention de fenêtre, identique dans les deux onglets d'exercice :
+    //   N   = l'exercice affiché par le tableau, dans la colonne de la case « Colonne projetée » ;
+    //   N-1 = l'exercice qui le précède, TOUJOURS en colonne factuelle (exercice clos).
+    // En onglet « Exercice précédent », N vaut donc l'année précédente et le comparatif montre N-2 vs N-1.
+
+    function _crDetruireComparaison() {
+      if (crComparaisonChart) { crComparaisonChart.destroy(); crComparaisonChart = null; }
+    }
+
+    // Lit le couple d'agrégats d'une réponse /api/ebe dans la vue demandée. Renvoie null si la vue hors
+    // capitalisation est demandée alors que la réponse ne porte pas de bloc `retraite` (réponse d'une
+    // version antérieure encore en cache, ou bloc indisponible côté serveur) : l'appelant affiche alors
+    // la mention « indisponible » au lieu d'inventer des barres.
+    function _crAgregats(d, horsCapi, projete) {
+      if (!d) return null;
+      const src = horsCapi ? d.retraite : d;
+      if (!src) return null;
+      const col = (o) => (o ? (Number(projete ? o.projete : o.factuel) || 0) : 0);
+      return { ebe: col(src.ebe), resultatExploitation: col(src.resultatExploitation) };
+    }
+
+    // Fetch paresseux de l'exercice de comparaison, en arrière-plan. Au retour, on re-rend LA SEULE
+    // section comparatif : appeler renderCompteResultat repasserait par ici et bouclerait.
+    function _crChargerAnneeComparaison(annee) {
+      if (crComparaisonEnVol[annee]) return;
+      crComparaisonEnVol[annee] = fetch('/api/ebe?year=' + annee)
+        .then(res => { if (!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
+        .then(d => { crDataByYear[annee] = d; })
+        .catch(err => {
+          // Échec silencieux (spec F.2) : le comparatif est un complément, jamais un bloquant.
+          console.warn('Comparatif CR : exercice ' + annee + ' indisponible, section masquée.', err);
+          crComparaisonEchecs[annee] = true;
+        })
+        .then(() => { delete crComparaisonEnVol[annee]; renderCrComparaison(); });
+    }
+
+    function renderCrComparaison() {
+      const section = document.getElementById('crComparaisonSection');
+      if (!section || !crData) return;
+      const etat = document.getElementById('crComparaisonEtat');
+      const wrap = document.getElementById('crComparaisonCanvasWrap');
+      const masquer = () => { section.style.display = 'none'; _crDetruireComparaison(); };
+
+      const anneeN = Number(crData.year) || _crYear();
+      const anneeNm1 = anneeN - 1;
+      // Même règle que renderCompteResultat : sans bloc `retraite`, c'est la vue comptable qui s'affiche.
+      const horsCapi = crViewMode === 'horsCapi' && !!crData.retraite;
+      const cb = document.getElementById('crProjete');
+      const projete = !!(cb && cb.checked);
+
+      // Échec déjà constaté sur l'exercice de comparaison : rien à montrer, aucune nouvelle tentative.
+      if (crComparaisonEchecs[anneeNm1]) { masquer(); return; }
+
+      const dNm1 = crDataByYear[anneeNm1] || null;
+      const titreTexte = 'Exercice ' + anneeNm1 + ' vs ' + anneeN + (horsCapi ? ' · hors capitalisation' : '');
+      if (!dNm1) {
+        section.style.display = '';
+        document.getElementById('crComparaisonTitre').textContent = titreTexte;
+        document.getElementById('crComparaisonSousTitre').textContent = '';
+        etat.textContent = 'Chargement du comparatif...';
+        wrap.style.display = 'none';
+        _crDetruireComparaison();
+        _crChargerAnneeComparaison(anneeNm1);
+        return;
+      }
+
+      const agN = _crAgregats(crData, horsCapi, projete);
+      // N-1 : colonne factuelle imposée (exercice clos), quelle que soit la case « Colonne projetée ».
+      const agNm1 = _crAgregats(dNm1, horsCapi, false);
+      // Exercice affiché sans agrégats exploitables : rien à comparer. Ne peut survenir qu'en vue hors
+      // capitalisation sur une réponse tronquée, cas déjà signalé par le bandeau du tableau.
+      if (!agN) { masquer(); return; }
+
+      section.style.display = '';
+      wrap.style.display = '';
+      document.getElementById('crComparaisonTitre').textContent = titreTexte;
+      let sousTitre = "EBE et résultat d'exploitation · " + anneeNm1 + ' en colonne factuelle (exercice clos)';
+      if (projete) sousTitre += ' · (' + anneeN + ' : colonne projetée, pipeline pondéré inclus)';
+      document.getElementById('crComparaisonSousTitre').textContent = sousTitre;
+      // Tolérance F.2 : bloc `retraite` absent sur l'exercice de comparaison -> ses barres disparaissent
+      // et la mention le dit, plutôt que de comparer un contrefactuel à un chiffre comptable.
+      etat.textContent = agNm1 ? '' : ('exercice ' + anneeNm1 + ' : hors capitalisation indisponible');
+
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      _crDetruireComparaison();
+      crComparaisonChart = new Chart(document.getElementById('crComparaisonChart'), {
+        type: 'bar',
+        data: {
+          labels: ['EBE', "Résultat d'exploitation"],
+          datasets: [
+            // Mêmes couleurs que le comparatif N/N-1 des Analytics (renderCaComparaison) : mauve pour
+            // l'exercice le plus ancien, bleu pour le plus récent. Ordre chronologique, comme le titre.
+            { label: String(anneeNm1), data: agNm1 ? [agNm1.ebe, agNm1.resultatExploitation] : [null, null], backgroundColor: '#C0B8DC', borderRadius: 4 },
+            { label: String(anneeN), data: [agN.ebe, agN.resultatExploitation], backgroundColor: '#7A9BBF', borderRadius: 4 },
+          ],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            datalabels: { display: false },
+            legend: { position: 'top', labels: { color: isDark ? '#ccc' : '#37352f', font: { size: 13, weight: 'bold' } } },
+            tooltip: { callbacks: { label: ctx => ctx.dataset.label + ' : ' + formatEuro(ctx.parsed.y) } },
+          },
+          scales: {
+            x: { ticks: { color: isDark ? '#999' : '#787774' }, grid: { display: false } },
+            y: { ticks: { color: isDark ? '#999' : '#787774', callback: v => formatEuro(v) }, grid: { color: isDark ? '#2e2e2e' : '#e9e9e7' } },
+          },
+        },
+      });
+    }
+
+    // ===== Trajectoire de l'effet de la capitalisation (Phase 2a, spec F.3) =====
+    // Barres = écart annuel (production immobilisée − dotations neutralisées), ligne sur le MÊME axe =
+    // cumul depuis l'origine. C'est la matérialisation du « retour à zéro » : le cumul monte tant que
+    // de nouvelles quote-parts sont immobilisées, puis redescend vers zéro à la fin des plans.
+    // Aucun calcul ici : la série vient telle quelle de /api/ebe (retraite.effetCumule.serie).
+
+    function _crDetruireTrajectoire() {
+      if (crTrajectoireChart) { crTrajectoireChart.destroy(); crTrajectoireChart = null; }
+    }
+
+    function _crRenderTrajectoire(r, anneeAffichee) {
+      _crDetruireTrajectoire();
+      const cv = document.getElementById('crTrajectoireChart');
+      const ec = (r && r.effetCumule) || null;
+      const serie = (ec && Array.isArray(ec.serie)) ? ec.serie : [];
+      // Tolérance F.3 : pas de canvas inséré si la série est absente ou vide (texte seul, comme avant).
+      if (!cv || !serie.length) return;
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const COUL_CAPI = '#7A9BBF';    // années de capitalisation (écart >= 0) : l'effort part à l'actif
+      const COUL_REPRISE = '#C0B8DC'; // années de reprise (écart < 0) : les dotations neutralisées reviennent
+      const courante = Number(anneeAffichee);
+      crTrajectoireChart = new Chart(cv, {
+        type: 'bar',
+        data: {
+          labels: serie.map(e => String(e.annee)),
+          datasets: [
+            {
+              label: 'Écart annuel',
+              data: serie.map(e => Number(e.ecart) || 0),
+              backgroundColor: serie.map(e => ((Number(e.ecart) || 0) >= 0 ? COUL_CAPI : COUL_REPRISE)),
+              // L'exercice affiché est cerné d'une bordure épaisse : le lecteur se situe sur la trajectoire.
+              borderColor: serie.map(e => (Number(e.annee) === courante ? (isDark ? '#ffffff' : '#37352f') : 'transparent')),
+              borderWidth: serie.map(e => (Number(e.annee) === courante ? 2 : 0)),
+              borderRadius: 3,
+              order: 2,
+            },
+            {
+              label: "Cumul depuis l'origine",
+              data: serie.map(e => Number(e.cumul) || 0),
+              type: 'line',
+              borderColor: isDark ? '#F0B429' : '#D9730D',
+              borderWidth: 2,
+              pointRadius: 2,
+              fill: false,
+              order: 1,
+            },
+          ],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          animation: { duration: 300 },
+          plugins: {
+            datalabels: { display: false },
+            legend: { position: 'top', labels: { color: isDark ? '#ccc' : '#37352f', boxWidth: 12, font: { size: 11 } } },
+            tooltip: { callbacks: { label: ctx => ctx.dataset.label + ' : ' + formatEuro(ctx.parsed.y) } },
+          },
+          scales: {
+            x: { ticks: { color: isDark ? '#999' : '#787774', font: { size: 10 } }, grid: { display: false } },
+            // Axe PARTAGÉ écart / cumul : ce sont les mêmes euros, deux échelles rendraient le retour
+            // à zéro illisible (le cumul semblerait ne pas se refermer sur les écarts).
+            y: { ticks: { color: isDark ? '#999' : '#787774', font: { size: 10 }, callback: v => formatEuro(v) }, grid: { color: isDark ? '#2e2e2e' : '#e9e9e7' } },
+          },
+        },
+      });
     }
 
     // Detail d'une ligne du compte de resultat — reutilise le chrome de la modale mois (globale).
     function openCrDetailModal(kind) {
       if (!crData) return;
+      // Le corps de la modale est partagé : toute réouverture remplace son innerHTML, donc le canvas de
+      // la trajectoire (F.3). On détruit l'instance Chart AVANT de reconstruire, sinon Chart.js garde
+      // une référence sur un canvas détaché (fuite, et « canvas already in use » à la réouverture).
+      _crDetruireTrajectoire();
       const d = crData;
       const projete = document.getElementById('crProjete').checked;
       // "charges" a son propre parcours (async, deux volets reel/budget) : voir openCrChargesDetailModal.
@@ -15482,7 +15696,9 @@
         // zéro du retraitement est visible, un compte de résultat n'affichant que N et N-1.
         const rr = d.retraite;
         if (!rr) return;
-        const ec = rr.effetCumule || { montant: 0, anneeBascule: null };
+        const ec = rr.effetCumule || { montant: 0, anneeBascule: null, serie: [] };
+        // Phase 2a (spec F.1/F.3) : série annuelle de l'effet, passthrough de /api/ebe.
+        const serieEffet = Array.isArray(ec.serie) ? ec.serie : [];
         // Lignes à dotation nulle filtrées : un actif dont le plan n'a pas encore commencé (ou est
         // terminé) n'a rien à retirer cette année et n'apporterait que du bruit.
         const lignes = ((rr.dotationsNeutralisees && rr.dotationsNeutralisees.parImmo) || []).filter(i => i && Number(i.dotation));
@@ -15495,6 +15711,13 @@
         if (!lignes.length) body += '<div style="color:var(--text-secondary);padding:0.4rem 0">Aucune dotation neutralisée sur cet exercice.</div>';
         body += '<div style="display:flex;justify-content:space-between;padding:0.5rem 0;border-top:2px solid var(--border);font-weight:700"><span>= Dotations conservées</span><span>' + formatEuro(rr.amortissements) + '</span></div>';
         body += '<div style="margin-top:0.8rem;padding-top:0.6rem;border-top:1px dashed var(--border)">';
+        // Spec F.3 : trajectoire de l'effet AU-DESSUS des deux lignes de texte, qui restent inchangées.
+        // Série absente ou vide (aucun actif à postes, bloc neutre) -> texte seul, aucun canvas inséré.
+        if (serieEffet.length) {
+          body += '<div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:0.35rem">Trajectoire de l\'effet · bascule estimée : '
+            + (ec.anneeBascule ? ec.anneeBascule : 'aucune') + '</div>';
+          body += '<div style="height:200px;margin-bottom:0.7rem"><canvas id="crTrajectoireChart"></canvas></div>';
+        }
         body += '<div style="display:flex;justify-content:space-between;padding:0.35rem 0"><span>Effet de la capitalisation depuis l\'origine</span><strong>' + formatEuro(ec.montant) + '</strong></div>';
         body += '<div style="display:flex;justify-content:space-between;padding:0.35rem 0"><span>Année de bascule estimée</span><span>' + (ec.anneeBascule ? ec.anneeBascule : 'aucune : la capitalisation en cours domine encore') + '</span></div>';
         body += '<div style="font-size:0.76rem;color:var(--text-secondary);line-height:1.45;margin-top:0.4rem">Tant que de nouvelles quote-parts sont immobilisées, la production immobilisée de l\'année dépasse les dotations neutralisées et le cumul monte. Une fois la capitalisation terminée, l\'écart annuel s\'inverse (plus rien à retirer, mais des dotations à reprendre) : le cumul redescend et revient vers zéro à la fin des plans d\'amortissement. C\'est le même euro de charge, seulement décalé dans le temps.</div>';
@@ -15517,6 +15740,9 @@
       document.getElementById('tresoMoisDetailTitle').textContent = title;
       document.getElementById('tresoMoisDetailBody').innerHTML = body;
       document.getElementById('tresoMoisDetailModalOverlay').classList.add('active');
+      // Spec F.3 : le graphe ne peut être créé qu'une fois le canvas dans le DOM (donc après innerHTML).
+      // Le helper est tolérant : il ne fait rien si le canvas ou la série manquent.
+      if (kind === 'dotationsRetraitees') _crRenderTrajectoire(d.retraite, d.year);
     }
 
     // Detail "Charges d'exploitation" (ligne du compte de resultat) : deux volets avec leur
@@ -17275,6 +17501,9 @@
 
     function closeTresoMoisDetailModal() {
       document.getElementById('tresoMoisDetailModalOverlay').classList.remove('active');
+      // Modale ouvrable/fermable en boucle : sans cette destruction, chaque ouverture de la modale
+      // « dotations hors capitalisation » (spec F.3) laisserait une instance Chart derriere elle.
+      _crDetruireTrajectoire();
     }
 
     document.getElementById('tresoMoisDetailModalOverlay').addEventListener('click', function(e) {
