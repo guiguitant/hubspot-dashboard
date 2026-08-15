@@ -24,6 +24,7 @@ const chargesPerimetre = require('./utils/chargesPerimetre');
 const { classifyProduitSubvention, CATEGORIE_SUBVENTIONS } = require('./utils/produitsSubventions'); // Feature A produits-et-suivis : classification credits Qonto "Subventions et aides"
 const { computeProductionImmobilisee } = require('./utils/productionImmobilisee'); // Feature E produits-et-suivis : produit d'exploitation "Production immobilisee" (compte 72)
 const { computeCrRetraite, computeEffetCumule, verifierInvariantImmos } = require('./utils/crRetraite'); // CR hors capitalisation : vue economique affichee A COTE du CR comptable (spec 2026-08-13-cr-retraite-design)
+const { normaliserPostesByImmo, nomImmoAffichage, estImmoAPostes, buildDotationsDetail } = require('./utils/dotationsDetail'); // detail des dotations par immo + repli d'annee des postes (module pur, helpers de calcul injectes depuis ce fichier)
 const { buildCoupleKey, buildIndexExactKey, buildIndexExactTVA, montantHT } = require('./utils/tvaCharges'); // cle categorie/sous-categorie partagee avec le parser Categories TVA (evite toute divergence) ; montantHT = conversion TTC->HT du reel (Tache 6) ; buildIndexExactTVA = jointure pure lettrage Pennylane (extraite en utils, revue C1)
 const cron = require('node-cron');
 const MASSE_TAB = 'Masse_salariale';
@@ -921,64 +922,15 @@ function computeBasesParAnnee(immo, postes, aides) {
   return result;
 }
 
-// --- Normalisation de l'annee des postes (correctif de coherence, spec CR hors capitalisation B.2) ---
-// Un poste sans `annee` etait lu de TROIS facons differentes selon l'endroit : _prorataPoste (base
-// amortissable) renvoyait 1, donc montant PLEIN ; utils/productionImmobilisee.js le rattache a l'annee
-// de mise en service avec un vrai prorata ; sumCreditsForYear (~953) applique deja ce meme repli.
-// Correctif : une SEULE lecture de l'annee, faite en amont, partagee par la base amortissable, les
-// dotations, l'invariant de survie et l'effet cumule. ATTENTION (assume par la spec) : si des postes a
-// annee NULL existent en base, les dotations du CR COMPTABLE bougent aussi, puisque sumDotationsForYear
-// consomme desormais ces postes normalises. C'est voulu : les trois lectures convergent.
-function normaliserPostesImmo(immo, postes) {
-  const d = immo && immo.date_mise_en_service ? new Date(immo.date_mise_en_service) : null;
-  const fallbackYear = (d && !isNaN(d.getTime())) ? d.getFullYear() : new Date().getFullYear();
-  return (postes || []).map(p => ({ ...p, annee: p.annee != null ? p.annee : fallbackYear }));
-}
-
-// Meme normalisation, appliquee a la map complete rendue par fetchPostesByImmo : { immoId: [postes] }.
-// Les consommateurs (detail des dotations, computeProductionImmobilisee, invariant) travaillent tous
-// sur cette map normalisee, jamais sur les postes bruts.
-function normaliserPostesByImmo(immos, postesByImmo) {
-  const out = {};
-  for (const immo of (immos || [])) {
-    if (!immo) continue;
-    out[immo.id] = normaliserPostesImmo(immo, (postesByImmo && postesByImmo[immo.id]) || []);
-  }
-  return out;
-}
-
-// Nom d'affichage d'une immobilisation : MEME repli que utils/productionImmobilisee.js (_nomImmo, non
-// exporte), pour que les libelles du detail des dotations et ceux de la production immobilisee se
-// correspondent ligne a ligne dans le pont de reconciliation du compte de resultat.
-function nomImmoAffichage(immo) {
-  const n = ((immo && (immo.libelle || immo.nom || immo.titre)) || '').toString().trim();
-  return n || 'Immobilisation sans libelle';
-}
-
-// Detail des dotations d'une annee, une ligne par immobilisation (calcul PUR, donnees deja chargees).
-// Meme formule que l'ancienne boucle de sumDotationsForYear : elle garde le detail au lieu de le jeter.
-//   - `aPostes` : l'immo a au moins un poste, toutes annees confondues. Critere reel : "cet actif
-//     a-t-il produit du compte 72", donc "sa dotation est-elle neutralisee dans la vue hors
-//     capitalisation". BOOLEEN STRICT : le module pur teste `=== true`, jamais une longueur.
-//   - `assietteCredit` : 'depenses' (methode A, defaut) ou 'amortissement' (methode B, migration 40),
-//     lu tel quel pour alimenter la garde creditAdosseAuxDotations du module pur.
-function buildDotationsDetail(immos, postesNormalisesByImmo, year) {
-  const parImmo = [];
-  let total = 0;
-  for (const immo of (immos || [])) {
-    if (!immo) continue;
-    const postes = (postesNormalisesByImmo && postesNormalisesByImmo[immo.id]) || [];
-    const dotation = computeDotationForYear({ ...immo, montant: montantAmortissable(immo, postes) }, year);
-    total += dotation;
-    parImmo.push({
-      nom: nomImmoAffichage(immo),
-      dotation,
-      aPostes: Boolean(postes.length > 0),
-      assietteCredit: immo.assiette_credit || 'depenses',
-    });
-  }
-  return { total, parImmo };
-}
+// --- Detail des dotations par immobilisation (spec B.1 + correctif d'annee B.2) ---
+// L'orchestration (normalisation de l'annee des postes, construction du detail, perimetre
+// "immo a postes") vit dans le module pur utils/dotationsDetail.js, qui ne calcule RIEN lui-meme : il
+// recoit ci-dessous les deux helpers de calcul de ce fichier (montantAmortissable,
+// computeDotationForYear), qui restent la source unique des formules d'amortissement.
+// ATTENTION (assume par la spec) : le correctif d'annee peut faire bouger les dotations du CR
+// COMPTABLE si des postes a annee NULL existent en base, puisque sumDotationsForYear consomme
+// desormais ces postes normalises. C'est voulu : les trois lectures de l'annee convergent enfin.
+const DOTATIONS_HELPERS = { montantAmortissable, computeDotationForYear };
 
 // Detail des dotations d'une annee, avec chargement (spec B.1). Source unique du total affiche par le
 // compte de resultat (cf sumDotationsForYear juste en dessous, simple passe-plat sur `.total`).
@@ -989,7 +941,7 @@ async function computeDotationsDetailForYear(year) {
     const { data, error } = await supabaseAdmin.from('immobilisations').select('*');
     if (error || !data) return vide;
     const postesByImmo = await fetchPostesByImmo();
-    return buildDotationsDetail(data, normaliserPostesByImmo(data, postesByImmo), year);
+    return buildDotationsDetail(data, normaliserPostesByImmo(data, postesByImmo), year, DOTATIONS_HELPERS);
   } catch (e) {
     return vide;
   }
@@ -9325,20 +9277,25 @@ async function computeRetraiteForYear(year, ctx) {
   try {
     // Une seule lecture de l'annee des postes (correctif B.2), partagee par TOUT ce qui suit.
     const postesN = normaliserPostesByImmo(immos, postesBruts);
-    const detail = buildDotationsDetail(immos, postesN, year);
+    const detail = buildDotationsDetail(immos, postesN, year, DOTATIONS_HELPERS);
     const cr = computeCrRetraite({
       ebe: entreeEbe,
-      amortissements: c.amortissements, // garde de coherence ecartDotations (source independante du detail)
+      // Garde de coherence ecartDotations. Precision (revue T2) : `c.amortissements` et `detail` sortent
+      // tous deux de buildDotationsDetail, mais via DEUX LECTURES BASE DISTINCTES (sumDotationsForYear
+      // en amont dans /api/ebe, et le fetch de cette fonction). Ce que la garde detecte est donc une
+      // divergence de LECTURE : echec partiel d'un des deux fetchs, ou modification concurrente entre
+      // les deux. Elle ne doit JAMAIS etre "optimisee" en fetch unique partage : elle deviendrait un
+      // 0 === 0 permanent, c'est-a-dire une garde morte.
+      amortissements: c.amortissements,
       productionImmobilisee: entreeProd,
       dotationsParImmo: detail.parImmo,
       creditTotal,                      // credit inchange en phase 1 (garde B.4 = creditAdosseAuxDotations)
       isFn: computeIS,                  // source unique du bareme IS : le module pur n'en duplique pas les seuils
     });
 
-    // Immos "a postes" au sens du perimetre de la spec : traitement 'immobilise' ET au moins un poste.
-    // Une immo passee en charge ne produit aucun compte 72 et n'a aucune dotation : l'inclure ferait
-    // hurler l'invariant en permanence sans qu'aucun montant ne soit en jeu.
-    const immosAPostes = immos.filter(i => i && i.traitement === 'immobilise' && (postesN[i.id] || []).length > 0);
+    // Immos "a postes" au sens du perimetre de la spec (precision B.5) : DEFINITION UNIQUE, partagee
+    // avec le drapeau aPostes du detail ci-dessus (utils/dotationsDetail.js : estImmoAPostes).
+    const immosAPostes = immos.filter(i => estImmoAPostes(i, postesN[i && i.id]));
 
     // Invariant sur donnees reelles (B.3 / I8, garde-fou de survie) : pour chaque immo a postes, la
     // somme de sa production immobilisee sur TOUTES ses annees civiles doit egaler sa base amortissable.
@@ -9361,26 +9318,30 @@ async function computeRetraiteForYear(year, ctx) {
     }));
 
     // Effet cumule depuis l'origine (B.5) : serie annuelle (production immobilisee projetee moins
-    // dotations neutralisees), de la premiere annee de poste jusqu'a la fin des plans d'amortissement.
-    // C'est ce qui materialise le retour a zero de la limite n° 4 de la spec, invisible dans un compte
-    // de resultat qui n'affiche que N et N-1.
+    // dotations neutralisees), de l'origine jusqu'a la fin des plans d'amortissement. C'est ce qui
+    // materialise le retour a zero de la limite n° 4 de la spec, invisible dans un compte de resultat
+    // qui n'affiche que N et N-1.
+    // BORNE BASSE (precision B.5, revue T2) : min(premiere annee de POSTE, premiere annee de DOTATION
+    // des plans). Les deux sont necessaires : un poste ajoute tardivement a un actif deja amorti (mise
+    // en service anterieure a ses postes) laisserait sinon hors serie les premieres annees de dotation,
+    // donc un solde cumule residuel permanent et une annee de bascule retardee.
     let anneeDebut = null, anneeFinPlans = null;
+    const majDebut = (a) => { if (a && (anneeDebut === null || a < anneeDebut)) anneeDebut = a; };
     for (const immo of immosAPostes) {
       const postes = postesN[immo.id];
-      for (const p of postes) {
-        const a = Number(p.annee);
-        if (a && (anneeDebut === null || a < anneeDebut)) anneeDebut = a;
-      }
+      for (const p of postes) majDebut(Number(p.annee));
       const plan = computePlanAmortissement({ ...immo, montant: montantAmortissable(immo, postes) }).plan;
       if (plan.length) {
+        majDebut(plan[0].annee);
         const derniere = plan[plan.length - 1].annee;
         if (anneeFinPlans === null || derniere > anneeFinPlans) anneeFinPlans = derniere;
       }
     }
     const serie = [];
     if (anneeDebut !== null) {
-      // Repli year + 5 si aucun plan exploitable ; l'annee demandee est toujours incluse, sinon le
-      // cumul affiche pour cette annee serait tronque.
+      // Repli year + 5 si aucun plan exploitable ; l'annee demandee est incluse dans la serie, sauf si
+      // le garde-fou ci-dessous mord (donnee corrompue). Sans consequence numerique : computeEffetCumule
+      // somme les entrees dont l'annee est <= cible, une serie plus courte donne juste un cumul partiel.
       let fin = Math.max(anneeFinPlans === null ? year + 5 : anneeFinPlans, year);
       if (fin - anneeDebut > 60) fin = anneeDebut + 60; // garde-fou : une date corrompue ne doit pas boucler sans fin
       for (let y = anneeDebut; y <= fin; y++) {
