@@ -4249,6 +4249,11 @@
         <button class="cr-year-btn active" data-cryear="current" onclick="setCrYear('current')">Exercice courant</button>
         <button class="cr-year-btn" data-cryear="previous" onclick="setCrYear('previous')">Exercice precedent</button>
       </div>
+      <!-- Badge « exercice clos · liasse du ... » (spec 2026-08-15-liasse-exercice-clos-design, point 1).
+           Rempli par renderCompteResultat quand /api/ebe renvoie une liasse pour l'exercice affiche,
+           vide sinon : un exercice en cours ne montre rien de plus qu'avant. Cliquable, il ouvre la
+           modale de reconciliation Pilot / liasse. -->
+      <span id="crLiasseBadge"></span>
       <!-- Bascule de vue (spec C.1) : orthogonale aux onglets d'exercice et a la case projetee.
            Aucun refetch au clic : les deux vues se rendent depuis le meme crData deja charge. -->
       <div style="display:inline-flex;gap:0.25rem;background:var(--bg-secondary);padding:0.25rem;border-radius:8px">
@@ -15143,6 +15148,10 @@
       if (errEl) errEl.textContent = '';
       document.querySelectorAll('.cr-year-btn[data-cryear]').forEach(b => b.classList.toggle('active', b.dataset.cryear === crYearMode));
       document.getElementById('crTable').innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:1rem">Chargement...</p>';
+      // Badge d'exercice clos vidé pendant le chargement : sinon la liasse de l'exercice précédent
+      // resterait affichée au-dessus du tableau de l'exercice courant le temps de la requête.
+      const badgeEnCours = document.getElementById('crLiasseBadge');
+      if (badgeEnCours) badgeEnCours.innerHTML = '';
       const annee = _crYear();
       try {
         const res = await fetch('/api/ebe?year=' + annee);
@@ -15243,6 +15252,56 @@
       }
       if (html) html = '<div style="margin-top:0.8rem;padding-top:0.6rem;border-top:1px dashed var(--border)">' + html + '</div>';
       return html;
+    }
+
+    // --- Liasse fiscale de l'exercice clos (spec 2026-08-15-liasse-exercice-clos-design) -----------
+    // Passthrough pur de d.liasse (/api/ebe -> data/liasses/NNNN.json) : aucun calcul côté front, ces
+    // chiffres sont ceux du cabinet et font foi. `null` tant que l'exercice n'est pas clos et sa liasse
+    // saisie : tous les helpers ci-dessous rendent alors une chaîne vide et le compte de résultat
+    // s'affiche exactement comme avant.
+    function _crLiasse(d) {
+      return (d && d.liasse && d.liasse.chiffres) ? d.liasse : null;
+    }
+
+    // '2025-12-31' -> '31/12/2025'. Repli sur la chaîne brute (échappée) si le format n'est pas celui
+    // attendu : une date de clôture exotique doit s'afficher telle quelle, jamais « NaN/NaN/NaN ».
+    function _crDateFr(iso) {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+      return m ? m[3] + '/' + m[2] + '/' + m[1] : escapeHtml(iso || '');
+    }
+
+    // escapeHtml passe par textContent : il neutralise < > & mais PAS le guillemet double. Pour un texte
+    // inséré dans un attribut title="...", il faut le faire en plus (la source de la liasse est saisie
+    // à la main dans un JSON versionné).
+    function _crAttr(s) {
+      return escapeHtml(s).replace(/"/g, '&quot;');
+    }
+
+    // Badge d'exercice clos, à côté des pastilles d'exercice. Même patron que le badge TVA. Passe en
+    // « warn » si la liasse porte des anomalies de saisie : l'anomalie doit être visible AVANT d'ouvrir
+    // quoi que ce soit.
+    function _crLiasseBadgeHtml(d) {
+      const l = _crLiasse(d);
+      if (!l) return '';
+      const anomalies = Array.isArray(l.anomalies) ? l.anomalies : [];
+      const titre = 'Chiffres officiels déposés par le cabinet'
+        + (l.source ? ' · ' + l.source : '')
+        + (l.depot ? ' · dépôt du ' + _crDateFr(l.depot) : '')
+        + '. Cliquer pour la réconciliation avec les chiffres Pilot.';
+      return '<span class="cr-tva-badge' + (anomalies.length ? ' warn' : '') + '" style="cursor:pointer;margin-left:0"'
+        + ' onclick="openCrDetailModal(\'liasse\')" title="' + _crAttr(titre) + '">'
+        + (anomalies.length ? '&#9888; ' : '') + 'exercice clos · liasse du ' + _crDateFr(l.cloture) + '</span>';
+    }
+
+    // Bandeau d'anomalies de SAISIE de la liasse (gardes du module utils/liasses.js). La liasse reste
+    // affichée telle quelle : on ne corrige jamais un chiffre officiel côté front, on signale.
+    function _crLiasseAnomaliesHtml(l) {
+      const anomalies = (l && Array.isArray(l.anomalies)) ? l.anomalies : [];
+      if (!anomalies.length) return '';
+      const items = anomalies.map(a => escapeHtml((a && a.message) || String(a))).join(' · ');
+      return _crAlerteHtml('Anomalie de saisie de la liasse ' + (l.exercice || '') + ' : ' + items
+        + ' Les chiffres restent affichés tels qu\'ils ont été saisis : corriger data/liasses/'
+        + (l.exercice || '') + '.json.', true);
     }
 
     // --- Vue « CR hors capitalisation » (spec C.2 à C.5) -------------------------------------
@@ -15430,38 +15489,73 @@
       // retraitements fiscaux). Le style italique gris du bloc « Estimatif » du crédit d'impôt est
       // étendu à toute la zone, l'IS et le résultat net compris.
       const resNetApresIS = resExploit - isBrut;
-      html += '<div style="margin-top:0.7rem;padding-top:0.5rem;border-top:1px dashed var(--border);font-style:italic;color:var(--text-secondary)">';
-      html += '<div style="font-size:0.74rem;margin-bottom:0.4rem">Estimation fiscale simplifiée (base = résultat d\'exploitation, barème PME). La référence est la liasse du cabinet. Points en attente : option 236-I, étalement des aides.</div>';
-      // `neg` conditionnel : un IS a 0 (exercice contrefactuel deficitaire, computeIS plafonne a 0)
-      // s'afficherait sinon « − 0 € », comme si l'impot etait juste tres petit.
-      html += row('Impot sur les societes (IS)' + (horsCapi ? ' théorique' : ''), isBrut, { neg: isBrut > 0, onclick: "openCrDetailModal('is')" });
-      // Resultat net "solide" : apres IS, SANS le credit d'impot (qui n'est qu'une estimation).
-      // Etiquette contrefactuelle en vue hors capitalisation (spec C.6, precision revue T3) : jamais
-      // un montant contrefactuel sous un libelle identique a celui du CR comptable.
-      html += row(horsCapi
-        ? '= Resultat net hors capitalisation' + (credit ? ' (apres IS theorique)' : '')
-        : '= Resultat net' + (credit ? ' (apres IS)' : ''), resNetApresIS, { total: true });
-      if (credit) {
-        // Le credit CII/CIR reste une estimation (chiffres calcules en interne) mais la methode a ete
-        // validee par l'expert-comptable. Il est INCHANGE dans les deux vues (spec B.4, phase 1) : la
-        // garde creditAdosseAuxDotations signale le seul cas ou cette hypothese serait incoherente.
-        const badgeCredit = (horsCapi && r.creditAdosseAuxDotations)
-          ? ' <span class="cr-tva-badge warn" title="Un actif neutralisé est en assiette « amortissement » : son crédit d\'impôt est adossé aux dotations que cette vue retire. Le crédit affiché reste celui du CR comptable, non retraité.">crédit adossé aux dotations neutralisées : crédit non retraité</span>'
+      // Zone fiscale, DEUX régimes (spec 2026-08-15-liasse-exercice-clos-design, point 2) :
+      //  - exercice clos ET vue comptable : zone ANCRÉE sur la liasse. Les chiffres officiels
+      //    remplacent les estimations, en plein (plus d'italique grisé) : ils font foi. Les estimations
+      //    Pilot de ces mêmes lignes restent consultables dans la modale de réconciliation, jamais côte
+      //    à côte dans le tableau (un seul chiffre par ligne).
+      //  - sinon (exercice en cours, ou vue hors capitalisation) : estimation Pilot comme avant. Le
+      //    contrefactuel reste un contrefactuel : son IS THÉORIQUE ne peut pas être remplacé par l'IS
+      //    réellement dû, seule la mention de ce dernier s'ajoute au rappel.
+      const liasseCr = _crLiasse(d);
+      const zoneAncree = !!liasseCr && !horsCapi;
+      html += '<div style="margin-top:0.7rem;padding-top:0.5rem;border-top:1px dashed var(--border)'
+        + (zoneAncree ? '' : ';font-style:italic;color:var(--text-secondary)') + '">';
+      if (zoneAncree) {
+        const lc = liasseCr.chiffres || {};
+        const isReel = Number(lc.impotSurBenefices) || 0;
+        html += '<div style="font-size:0.74rem;margin-bottom:0.4rem;color:var(--text-secondary)">Chiffres fiscaux réels · liasse du '
+          + _crDateFr(liasseCr.cloture) + (liasseCr.source ? ' · ' + escapeHtml(liasseCr.source) : '')
+          + '. Ces lignes viennent de la liasse : elles ne se déduisent pas du résultat d\'exploitation Pilot ci-dessus. '
+          + '<span style="cursor:pointer;text-decoration:underline" onclick="openCrDetailModal(\'liasse\')">Réconciliation avec les chiffres Pilot</span></div>';
+        html += _crLiasseAnomaliesHtml(liasseCr);
+        html += row('Impôt sur les sociétés (réel, après CIR)', isReel, { neg: isReel > 0, onclick: "openCrDetailModal('liasse')",
+          title: "Montant porté sur la liasse (2033-B) : IS de l'exercice APRÈS imputation du crédit d'impôt recherche (2069-RCI)." });
+        html += subRow('dont CIR', formatEuro(Number(lc.cir) || 0));
+        html += row('= Résultat net (liasse)', Number(lc.resultatNet) || 0, { total: true, onclick: "openCrDetailModal('liasse')" });
+      } else {
+        // Rappel de la zone estimative. Quand l'exercice est clos mais que la vue affichée est le
+        // contrefactuel, l'IS réel est RAPPELÉ ici (il ne remplace rien : il n'est pas comparable à un
+        // IS théorique calculé sur une base contrefactuelle).
+        const rappelIsReel = liasseCr
+          ? ' IS réel (liasse) : ' + formatEuro(Number(liasseCr.chiffres.impotSurBenefices) || 0) + '.'
           : '';
-        html += '<div style="font-size:0.74rem;margin:0.55rem 0 0.35rem">Le credit d\'impot CII/CIR (chiffres calcules en interne, methode validee par l\'expert-comptable) reduit l\'IS ; l\'exces est restitue (PME).</div>';
-        html += '<div class="cr-row clickable" onclick="openCrDetailModal(\'credit\')"><span>+ Credit d\'impot estime (CII / CIR) <span style="font-size:0.68rem">detail</span>' + badgeCredit + '</span><span style="color:var(--primary)">+ ' + formatEuro(credit) + '</span></div>';
-        // Meme convention de signe que row() (revue T3) : sans elle, un resultat net estimatif negatif
-        // affichait le tiret par defaut d'Intl, en noir, alors que toutes les autres lignes negatives
-        // du tableau portent un « − » rouge.
-        const resNetNegatif = resNet < 0;
-        html += '<div class="cr-row" style="font-weight:700"><span>= Resultat net estimatif'
-          + (horsCapi ? ' hors capitalisation' : '') + ' (apres credit)</span><span'
-          + (resNetNegatif ? ' style="color:var(--danger)"' : '') + '>'
-          + (resNetNegatif ? '− ' : '') + formatEuro(Math.abs(resNet)) + '</span></div>';
+        html += '<div style="font-size:0.74rem;margin-bottom:0.4rem">Estimation fiscale simplifiée (base = résultat d\'exploitation, barème PME). La référence est la liasse du cabinet. Points en attente : option 236-I, étalement des aides.' + rappelIsReel + '</div>';
+        // `neg` conditionnel : un IS a 0 (exercice contrefactuel deficitaire, computeIS plafonne a 0)
+        // s'afficherait sinon « − 0 € », comme si l'impot etait juste tres petit.
+        html += row('Impot sur les societes (IS)' + (horsCapi ? ' théorique' : ''), isBrut, { neg: isBrut > 0, onclick: "openCrDetailModal('is')" });
+        // Resultat net "solide" : apres IS, SANS le credit d'impot (qui n'est qu'une estimation).
+        // Etiquette contrefactuelle en vue hors capitalisation (spec C.6, precision revue T3) : jamais
+        // un montant contrefactuel sous un libelle identique a celui du CR comptable.
+        html += row(horsCapi
+          ? '= Resultat net hors capitalisation' + (credit ? ' (apres IS theorique)' : '')
+          : '= Resultat net' + (credit ? ' (apres IS)' : ''), resNetApresIS, { total: true });
+        if (credit) {
+          // Le credit CII/CIR reste une estimation (chiffres calcules en interne) mais la methode a ete
+          // validee par l'expert-comptable. Il est INCHANGE dans les deux vues (spec B.4, phase 1) : la
+          // garde creditAdosseAuxDotations signale le seul cas ou cette hypothese serait incoherente.
+          const badgeCredit = (horsCapi && r.creditAdosseAuxDotations)
+            ? ' <span class="cr-tva-badge warn" title="Un actif neutralisé est en assiette « amortissement » : son crédit d\'impôt est adossé aux dotations que cette vue retire. Le crédit affiché reste celui du CR comptable, non retraité.">crédit adossé aux dotations neutralisées : crédit non retraité</span>'
+            : '';
+          html += '<div style="font-size:0.74rem;margin:0.55rem 0 0.35rem">Le credit d\'impot CII/CIR (chiffres calcules en interne, methode validee par l\'expert-comptable) reduit l\'IS ; l\'exces est restitue (PME).</div>';
+          html += '<div class="cr-row clickable" onclick="openCrDetailModal(\'credit\')"><span>+ Credit d\'impot estime (CII / CIR) <span style="font-size:0.68rem">detail</span>' + badgeCredit + '</span><span style="color:var(--primary)">+ ' + formatEuro(credit) + '</span></div>';
+          // Meme convention de signe que row() (revue T3) : sans elle, un resultat net estimatif negatif
+          // affichait le tiret par defaut d'Intl, en noir, alors que toutes les autres lignes negatives
+          // du tableau portent un « − » rouge.
+          const resNetNegatif = resNet < 0;
+          html += '<div class="cr-row" style="font-weight:700"><span>= Resultat net estimatif'
+            + (horsCapi ? ' hors capitalisation' : '') + ' (apres credit)</span><span'
+            + (resNetNegatif ? ' style="color:var(--danger)"' : '') + '>'
+            + (resNetNegatif ? '− ' : '') + formatEuro(Math.abs(resNet)) + '</span></div>';
+        }
       }
       html += '</div>';
 
       document.getElementById('crTable').innerHTML = html;
+      // Badge d'exercice clos, à côté des pastilles d'exercice (spec liasse, point 1) : réécrit à
+      // CHAQUE rendu, donc vidé de lui-même dès qu'on revient sur un exercice sans liasse.
+      const badgeLiasse = document.getElementById('crLiasseBadge');
+      if (badgeLiasse) badgeLiasse.innerHTML = _crLiasseBadgeHtml(d);
       const fresh = document.getElementById('crFreshness');
       if (fresh) fresh.textContent = 'Exercice ' + d.year + (d.fetchedAt ? ' · maj ' + new Date(d.fetchedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '');
       // Comparatif N-1 vs N (spec F.2) : rendu APRES le tableau, dans les deux vues. Section autonome,
@@ -15774,6 +15868,52 @@
         body += '<div style="font-size:0.76rem;color:var(--text-secondary);line-height:1.45;margin-top:0.4rem">Tant que de nouvelles quote-parts sont immobilisées, la production immobilisée de l\'année dépasse les dotations neutralisées et le cumul monte. Une fois la capitalisation terminée, l\'écart annuel s\'inverse (plus rien à retirer, mais des dotations à reprendre) : le cumul redescend et revient vers zéro à la fin des plans d\'amortissement. C\'est le même euro de charge, seulement décalé dans le temps.</div>';
         body += '</div>';
         body += '<div style="font-size:0.72rem;color:var(--text-secondary);margin-top:0.5rem"><a onclick="navigateTo(\'immobilisations\')" style="cursor:pointer;text-decoration:underline">Plans d\'amortissement et postes dans le module Immobilisations</a></div>';
+      } else if (kind === 'liasse') {
+        // Réconciliation Pilot / liasse (spec 2026-08-15-liasse-exercice-clos-design, point 3).
+        // Trois colonnes : ce que Pilot calcule, ce que le cabinet a déposé, l'écart. Aucun des deux
+        // n'est corrigé : les écarts sont STRUCTURELS (périmètre et convention), pas des erreurs, et le
+        // texte sous le tableau les nomme un par un.
+        const l = _crLiasse(d);
+        if (!l) return;
+        const lc = l.chiffres || {};
+        // Colonne Pilot TOUJOURS factuelle : l'exercice est clos, le projeté (année complète + pipeline
+        // pondéré) n'a plus d'objet et ne serait pas comparable à une liasse déposée.
+        const fac = (o) => (o ? (Number(o.factuel) || 0) : 0);
+        const num = (v) => Number(v) || 0;
+        const ecartTexte = (v) => (v === 0 ? formatEuro(0) : (v > 0 ? '+ ' : '− ') + formatEuro(Math.abs(v)));
+        const cel = (contenu, style) => '<span style="flex:0 0 22%;text-align:right;' + (style || '') + '">' + contenu + '</span>';
+        const ligneRec = (label, pilot, liasseVal, fort) => {
+          const e = Math.round(pilot - liasseVal);
+          return '<div style="display:flex;align-items:baseline;padding:0.35rem 0;border-bottom:1px solid var(--border)'
+            + (fort ? ';font-weight:700' : '') + '"><span style="flex:1 1 34%">' + label + '</span>'
+            + cel(formatEuro(pilot)) + cel(formatEuro(liasseVal))
+            + cel(ecartTexte(e), 'color:var(--text-secondary)') + '</div>';
+        };
+
+        title = 'Réconciliation avec la liasse ' + (l.exercice || d.year);
+        body = '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.6rem">Liasse du '
+          + _crDateFr(l.cloture) + (l.depot ? ', déposée le ' + _crDateFr(l.depot) : '')
+          + (l.source ? ' · ' + escapeHtml(l.source) : '')
+          + '. Les chiffres de la liasse font foi ; Pilot garde sa méthode pour rester comparable d\'un exercice à l\'autre.</div>';
+        body += _crLiasseAnomaliesHtml(l);
+        body += '<div style="display:flex;align-items:baseline;padding:0.25rem 0;border-bottom:1px solid var(--border);font-size:0.74rem;color:var(--text-secondary)">'
+          + '<span style="flex:1 1 34%">Poste</span>' + cel('Pilot') + cel('Liasse') + cel('Écart') + '</div>';
+        body += ligneRec('CA facturé (Notion)', num(d.ca && d.ca.facture), num(lc.productionVendue));
+        body += ligneRec('Subventions et aides', (d.financements ? (Number(d.financements.totalSubv) || 0) + (Number(d.financements.totalAide) || 0) : 0), num(lc.subventionsExploitation));
+        body += ligneRec('Production immobilisée', fac(d.productionImmobilisee), num(lc.productionImmobilisee));
+        body += ligneRec('Charges d\'exploitation', (d.charges ? Number(d.charges.total) || 0 : 0), num(lc.chargesExploitation));
+        body += ligneRec('Résultat d\'exploitation', fac(d.resultatExploitation), num(lc.resultatExploitation), true);
+        body += ligneRec('IS estimé (après crédit d\'impôt)', fac(d.impotNet), num(lc.impotSurBenefices));
+        body += ligneRec('Résultat net estimatif', fac(d.resultatNet), num(lc.resultatNet), true);
+        body += '<div style="font-size:0.74rem;color:var(--text-secondary);margin-top:0.5rem">Colonne Pilot : montants factuels de l\'exercice clos (la case « Colonne projetée » ne change rien ici). Écart = Pilot moins liasse.</div>';
+        body += '<div style="margin-top:0.8rem;padding-top:0.6rem;border-top:1px dashed var(--border);font-size:0.78rem;line-height:1.5;color:var(--text-secondary)">';
+        body += '<strong>Pourquoi les colonnes diffèrent</strong> · Ce sont des écarts de convention, pas des erreurs :';
+        body += '<div style="margin-top:0.35rem">· <strong>CA</strong> : Pilot compte le chiffre d\'affaires à la facture Notion, la liasse retient la production vendue comptable (factures à établir, produits constatés d\'avance, avoirs) : le même euro peut tomber d\'un exercice sur l\'autre.</div>';
+        body += '<div>· <strong>Charges</strong> : Pilot additionne le réel Qonto des mois clos et le budget des mois restants, converti HT sur un périmètre de pilotage (exclusions PCG, TVA estimée) ; la liasse agrège les rubriques fiscales, dotations aux amortissements ('
+          + formatEuro(num(lc.dontDotationsAmortissements)) + ') et autres charges de gestion (' + formatEuro(num(lc.dontAutresCharges)) + ') comprises.</div>';
+        body += '<div>· <strong>IS et résultat net</strong> : Pilot les estime au barème PME sur son résultat d\'exploitation, sans retraitements fiscaux ni déficits reportables ; la liasse porte l\'impôt réellement dû, après imputation du CIR ('
+          + formatEuro(num(lc.cir)) + ').</div>';
+        body += '</div>';
       } else if (kind === 'credit') {
         const c = d.creditImpot || { cii: 0, cir: 0, total: 0 };
         const isBrut = projete ? d.is.projete : d.is.factuel;
