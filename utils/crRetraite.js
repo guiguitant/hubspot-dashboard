@@ -140,16 +140,26 @@ function computeCrRetraite(input) {
 
 /**
  * Effet cumule de la capitalisation depuis l'origine (spec B.5) : somme, annee par annee jusqu'a
- * l'annee cible, de (production immobilisee - dotations neutralisees), et premiere annee (toutes
- * annees confondues, y compris futures) ou cet ecart annuel devient negatif -- l'annee ou l'effort
- * de developpement "rembourse" au resultat d'exploitation ce qu'il lui avait retire.
+ * l'annee cible, de (production immobilisee - dotations neutralisees), et annee de BASCULE, celle ou
+ * l'effort de developpement commence a "rembourser" au resultat d'exploitation ce qu'il lui avait
+ * retire.
+ *
+ * REGLE DE BASCULE (spec B.5, redefinie a la revue de la phase 2a du 2026-08-15) : premier ecart
+ * annuel strictement NEGATIF situe APRES la DERNIERE annee a ecart strictement POSITIF. `null` si
+ * aucune annee n'a d'ecart positif (rien n'a jamais ete capitalise), ou si plus aucune annee negative
+ * ne suit la derniere positive (la capitalisation est encore en cours en fin de serie).
+ * L'ancienne regle (« premier ecart negatif de la serie ») designait une annee ANTERIEURE a la fin
+ * des investissements des qu'un actif etait mis en service avant les derniers millesimes de
+ * quote-parts : elle annoncait un retour a zero alors que le cumul montait encore.
  *
  * Phase 2a (spec F.1) : renvoie EN PLUS la serie annuelle detaillee `serie`, champ PUREMENT ADDITIF
- * qui alimente le graphe de trajectoire de l'effet cote front. `montant` et `anneeBascule` sont
- * inchanges (verrouilles par les tests existants).
+ * qui alimente le graphe de trajectoire de l'effet cote front. `montant` est inchange.
  *
  * @param {Array<{annee:number, productionImmobilisee:number, dotationsNeutralisees:number}>} serie
- *   - une entree par annee, non necessairement triee.
+ *   - non necessairement triee. PRECONDITION : UNE SEULE entree par annee (l'appelant agrege avant
+ *   d'appeler ; c'est ce que fait la boucle annuelle de server.js). Aucun dedoublonnage n'est fait
+ *   ici : avec des doublons d'annee, la serie de sortie porterait plusieurs entrees pour la meme
+ *   annee et le contrat « cumul de l'entree `anneeCible` = `montant` » ne tiendrait plus.
  * @param {number} anneeCible - derniere annee incluse dans le cumul.
  * @returns {{
  *   montant:number,
@@ -163,13 +173,12 @@ function computeCrRetraite(input) {
  */
 function computeEffetCumule(serie, anneeCible) {
   const arr = Array.isArray(serie) ? serie.filter(Boolean) : [];
-  // Copie triee par annee croissante (sans muter l'entree) : l'annee de bascule doit etre la
-  // PREMIERE chronologiquement, quel que soit l'ordre de la serie fournie.
+  // Copie triee par annee croissante (sans muter l'entree) : la regle de bascule raisonne sur l'ordre
+  // CHRONOLOGIQUE, quel que soit l'ordre de la serie fournie.
   const triee = arr.slice().sort((a, b) => _n(a.annee) - _n(b.annee));
   const cible = _n(anneeCible);
 
   let montant = 0;
-  let anneeBascule = null;
   let cumul = 0; // cumul GLISSANT sur toute la serie (independant de la cible), pour le champ serie
   const detail = [];
   for (const entree of triee) {
@@ -180,8 +189,22 @@ function computeEffetCumule(serie, anneeCible) {
     cumul += ecart;
     detail.push({ annee, productionImmobilisee, dotationsNeutralisees, ecart, cumul });
     if (annee <= cible) montant += ecart;
-    if (anneeBascule === null && ecart < 0) anneeBascule = annee;
   }
+
+  // Bascule en deux temps sur la serie deja triee (cf. regle B.5 ci-dessus). Separer les deux passes
+  // est ce qui rend la regle lisible : on ne peut pas connaitre la derniere annee de capitalisation
+  // avant d'avoir parcouru toute la serie, donc aucune decision de bascule ne peut etre prise en vol.
+  let indexDernierePositive = -1;
+  for (let i = 0; i < detail.length; i++) {
+    if (detail[i].ecart > 0) indexDernierePositive = i;
+  }
+  let anneeBascule = null;
+  if (indexDernierePositive !== -1) {
+    for (let i = indexDernierePositive + 1; i < detail.length; i++) {
+      if (detail[i].ecart < 0) { anneeBascule = detail[i].annee; break; }
+    }
+  }
+
   return { montant, anneeBascule, serie: detail };
 }
 

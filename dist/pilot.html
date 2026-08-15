@@ -15069,6 +15069,12 @@
     // Etat de la case « Colonne projetee » au moment ou la vue hors capitalisation a ete activee
     // (null = rien a restaurer) : voir setCrView, la vue comptable doit revenir telle qu'elle etait.
     let crProjeteAvantHorsCapi = null;
+    // Drapeau EXPLICITE du decochage en attente (revue phase 2a) : pose par setCrView quand l'activation
+    // de la vue hors capitalisation n'a PAS pu appliquer le decochage (donnees pas encore chargees, ou
+    // exercice affiche sans bloc `retraite`), consomme par renderCompteResultat des qu'un exercice
+    // porteur de `retraite` est rendu. Il remplace l'inference « memo a null » de ff1637b, qui
+    // confondait deux situations distinctes (jamais active / active sans donnees).
+    let crDecochageEnAttente = false;
     // Phase 2a (spec F.2) : cache des reponses /api/ebe par annee, alimente par refreshCompteResultat
     // ET par le fetch paresseux du comparatif. Evite de recharger l'exercice de comparaison a chaque
     // rendu (changement de vue, case projetee) et le partage entre les deux onglets d'exercice.
@@ -15108,12 +15114,26 @@
       // Deux gardes (revue T3) : on memorise l'etat de la case pour le RESTAURER au retour en vue
       // comptable (un aller-retour ne doit jamais modifier la vue comptable de l'utilisateur), et on
       // ne touche a rien si `retraite` est absent, puisque c'est alors la vue comptable qui s'affiche.
-      if (activation && cb && crData && crData.retraite) {
-        crProjeteAvantHorsCapi = cb.checked;
-        cb.checked = false;
-      } else if (retour && cb && crProjeteAvantHorsCapi !== null) {
-        cb.checked = crProjeteAvantHorsCapi;
-        crProjeteAvantHorsCapi = null;
+      if (activation && cb) {
+        if (crData && crData.retraite) {
+          crProjeteAvantHorsCapi = cb.checked;
+          cb.checked = false;
+          crDecochageEnAttente = false;
+        } else {
+          // Donnees absentes (premier chargement en vol) ou exercice sans bloc `retraite` : le decochage
+          // ne peut pas s'appliquer maintenant. On l'ARME explicitement au lieu de le deduire plus tard
+          // de l'etat du memo : renderCompteResultat le consommera des qu'un exercice porteur de
+          // `retraite` sera rendu, y compris apres un changement d'onglet d'exercice.
+          crDecochageEnAttente = true;
+        }
+      } else if (retour && cb) {
+        if (crProjeteAvantHorsCapi !== null) {
+          cb.checked = crProjeteAvantHorsCapi;
+          crProjeteAvantHorsCapi = null;
+        }
+        // Retour en vue comptable : un decochage arme mais jamais applique n'a plus aucune raison de
+        // se declencher (sinon il tomberait a la PROCHAINE activation, sur une case deja restauree).
+        crDecochageEnAttente = false;
       }
       renderCompteResultat();
     }
@@ -15130,7 +15150,7 @@
         crData = await res.json();
         // Cache partage avec le comparatif (F.2) : l'exercice courant sert de N-1 des que l'utilisateur
         // bascule sur l'onglet « Exercice precedent » ... et inversement, sans nouvelle requete.
-        crDataByYear[annee] = crData;
+        _crMettreEnCache(annee, crData);
         renderCompteResultat();
       } catch (err) {
         console.error('Erreur compte de resultat:', err);
@@ -15303,14 +15323,17 @@
 
     function renderCompteResultat() {
       if (!crData) return;
-      // Rattrapage du décochage (résiduel revue T3) : si la vue hors capitalisation a été activée
-      // PENDANT le tout premier chargement (crData encore nul dans setCrView), la mémorisation et le
-      // décochage de la colonne projetée n'ont pas eu lieu : le mémo est alors resté à null, ce qui
-      // identifie exactement ce cas (toute activation normale pose un booléen). On rejoue l'opération
-      // au premier rendu avec données, AVANT de lire la case.
-      if (crViewMode === 'horsCapi' && crData.retraite && crProjeteAvantHorsCapi === null) {
+      // Rattrapage du décochage (résiduel revue T3, rendu explicite à la revue phase 2a) : setCrView
+      // arme `crDecochageEnAttente` quand l'activation de la vue n'a pas pu décocher la colonne
+      // projetée (données pas encore chargées, ou exercice sans bloc `retraite`). On rejoue ici
+      // l'opération au premier rendu porteur de `retraite`, AVANT de lire la case. Le drapeau dit
+      // exactement ce qu'il se passe, là où l'ancienne inférence « mémo à null » ne distinguait pas
+      // « vue jamais activée » de « activée sans données » : le parcours exercice sans `retraite` ->
+      // exercice avec `retraite` -> retour laissait un état incohérent.
+      if (crViewMode === 'horsCapi' && crData.retraite && crDecochageEnAttente) {
         const cbRattrapage = document.getElementById('crProjete');
         if (cbRattrapage) { crProjeteAvantHorsCapi = cbRattrapage.checked; cbRattrapage.checked = false; }
+        crDecochageEnAttente = false;
       }
       const projete = document.getElementById('crProjete').checked;
       const d = crData;
@@ -15457,6 +15480,15 @@
       if (crComparaisonChart) { crComparaisonChart.destroy(); crComparaisonChart = null; }
     }
 
+    // Point d'écriture UNIQUE du cache des exercices : quelle que soit la voie par laquelle la donnée
+    // arrive (chargement de la page par refreshCompteResultat, ou fetch paresseux du comparatif), un
+    // échec antérieur sur cette année n'a plus lieu d'être. Sans cette purge, un échec transitoire
+    // masquait le comparatif jusqu'au rechargement complet de la page.
+    function _crMettreEnCache(annee, d) {
+      crDataByYear[annee] = d;
+      delete crComparaisonEchecs[annee];
+    }
+
     // Lit le couple d'agrégats d'une réponse /api/ebe dans la vue demandée. Renvoie null si la vue hors
     // capitalisation est demandée alors que la réponse ne porte pas de bloc `retraite` (réponse d'une
     // version antérieure encore en cache, ou bloc indisponible côté serveur) : l'appelant affiche alors
@@ -15475,7 +15507,7 @@
       if (crComparaisonEnVol[annee]) return;
       crComparaisonEnVol[annee] = fetch('/api/ebe?year=' + annee)
         .then(res => { if (!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
-        .then(d => { crDataByYear[annee] = d; })
+        .then(d => { _crMettreEnCache(annee, d); })
         .catch(err => {
           // Échec silencieux (spec F.2) : le comparatif est un complément, jamais un bloquant.
           console.warn('Comparatif CR : exercice ' + annee + ' indisponible, section masquée.', err);
@@ -15498,10 +15530,14 @@
       const cb = document.getElementById('crProjete');
       const projete = !!(cb && cb.checked);
 
-      // Échec déjà constaté sur l'exercice de comparaison : rien à montrer, aucune nouvelle tentative.
-      if (crComparaisonEchecs[anneeNm1]) { masquer(); return; }
-
+      // Le cache est lu AVANT le drapeau d'échec : un échec est un état transitoire, la donnée peut
+      // très bien être arrivée depuis, par l'onglet « Exercice précédent » qui la charge pour lui-même
+      // (_crMettreEnCache purge alors le drapeau). Tester l'échec d'abord condamnerait le comparatif
+      // jusqu'au rechargement de la page.
       const dNm1 = crDataByYear[anneeNm1] || null;
+      // Échec déjà constaté ET toujours pas de donnée : rien à montrer, aucune nouvelle tentative.
+      if (!dNm1 && crComparaisonEchecs[anneeNm1]) { masquer(); return; }
+
       const titreTexte = 'Exercice ' + anneeNm1 + ' vs ' + anneeN + (horsCapi ? ' · hors capitalisation' : '');
       if (!dNm1) {
         section.style.display = '';
@@ -15514,12 +15550,10 @@
         return;
       }
 
+      // `horsCapi` n'est vrai que si crData.retraite existe : agN est donc toujours exploitable ici.
       const agN = _crAgregats(crData, horsCapi, projete);
       // N-1 : colonne factuelle imposée (exercice clos), quelle que soit la case « Colonne projetée ».
       const agNm1 = _crAgregats(dNm1, horsCapi, false);
-      // Exercice affiché sans agrégats exploitables : rien à comparer. Ne peut survenir qu'en vue hors
-      // capitalisation sur une réponse tronquée, cas déjà signalé par le bandeau du tableau.
-      if (!agN) { masquer(); return; }
 
       section.style.display = '';
       wrap.style.display = '';
@@ -15564,6 +15598,10 @@
     // cumul depuis l'origine. C'est la matérialisation du « retour à zéro » : le cumul monte tant que
     // de nouvelles quote-parts sont immobilisées, puis redescend vers zéro à la fin des plans.
     // Aucun calcul ici : la série vient telle quelle de /api/ebe (retraite.effetCumule.serie).
+    // Les deux couleurs de barres sont des constantes partagées : le graphe les applique, et la légende
+    // texte de la modale les reprend pour que le lecteur sache ce que chaque couleur signifie.
+    const CR_COUL_CAPI = '#7A9BBF';    // années de capitalisation (écart positif)
+    const CR_COUL_REPRISE = '#C0B8DC'; // années de reprise (écart négatif)
 
     function _crDetruireTrajectoire() {
       if (crTrajectoireChart) { crTrajectoireChart.destroy(); crTrajectoireChart = null; }
@@ -15577,8 +15615,6 @@
       // Tolérance F.3 : pas de canvas inséré si la série est absente ou vide (texte seul, comme avant).
       if (!cv || !serie.length) return;
       const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-      const COUL_CAPI = '#7A9BBF';    // années de capitalisation (écart >= 0) : l'effort part à l'actif
-      const COUL_REPRISE = '#C0B8DC'; // années de reprise (écart < 0) : les dotations neutralisées reviennent
       const courante = Number(anneeAffichee);
       crTrajectoireChart = new Chart(cv, {
         type: 'bar',
@@ -15588,7 +15624,7 @@
             {
               label: 'Écart annuel',
               data: serie.map(e => Number(e.ecart) || 0),
-              backgroundColor: serie.map(e => ((Number(e.ecart) || 0) >= 0 ? COUL_CAPI : COUL_REPRISE)),
+              backgroundColor: serie.map(e => ((Number(e.ecart) || 0) >= 0 ? CR_COUL_CAPI : CR_COUL_REPRISE)),
               // L'exercice affiché est cerné d'une bordure épaisse : le lecteur se situe sur la trajectoire.
               borderColor: serie.map(e => (Number(e.annee) === courante ? (isDark ? '#ffffff' : '#37352f') : 'transparent')),
               borderWidth: serie.map(e => (Number(e.annee) === courante ? 2 : 0)),
@@ -15601,7 +15637,12 @@
               type: 'line',
               borderColor: isDark ? '#F0B429' : '#D9730D',
               borderWidth: 2,
-              pointRadius: 2,
+              // L'exercice affiché est repéré DEUX fois : bordure épaisse sur sa barre (ci-dessus) et
+              // point grossi sur la courbe de cumul, qui est la lecture la plus utile (« où en est-on
+              // du retour à zéro ? »). Sans ce point, l'année courante n'existait pas sur la ligne.
+              pointRadius: serie.map(e => (Number(e.annee) === courante ? 5 : 2)),
+              pointBorderColor: serie.map(e => (Number(e.annee) === courante ? (isDark ? '#ffffff' : '#37352f') : 'transparent')),
+              pointBorderWidth: serie.map(e => (Number(e.annee) === courante ? 2 : 0)),
               fill: false,
               order: 1,
             },
@@ -15716,7 +15757,17 @@
         if (serieEffet.length) {
           body += '<div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:0.35rem">Trajectoire de l\'effet · bascule estimée : '
             + (ec.anneeBascule ? ec.anneeBascule : 'aucune') + '</div>';
-          body += '<div style="height:200px;margin-bottom:0.7rem"><canvas id="crTrajectoireChart"></canvas></div>';
+          body += '<div style="height:200px"><canvas id="crTrajectoireChart"></canvas></div>';
+          // Légende des DEUX couleurs de barres : la légende Chart.js ne nomme que les datasets
+          // (« Écart annuel », « Cumul »), elle ne peut pas expliquer une couleur qui varie d'une barre
+          // à l'autre. Sans cette ligne, le lecteur voit deux teintes sans savoir ce qui les sépare.
+          const pastille = (couleur, texte, avant) =>
+            '<span style="display:inline-block;width:0.62rem;height:0.62rem;border-radius:2px;background:'
+            + couleur + ';vertical-align:middle;margin:0 0.32rem 0 ' + (avant || '0') + '"></span>' + texte;
+          body += '<div style="font-size:0.73rem;color:var(--text-secondary);margin:0.45rem 0 0.7rem">'
+            + pastille(CR_COUL_CAPI, 'années de capitalisation (écart positif)')
+            + pastille(CR_COUL_REPRISE, 'années de reprise (écart négatif)', '0.9rem')
+            + '</div>';
         }
         body += '<div style="display:flex;justify-content:space-between;padding:0.35rem 0"><span>Effet de la capitalisation depuis l\'origine</span><strong>' + formatEuro(ec.montant) + '</strong></div>';
         body += '<div style="display:flex;justify-content:space-between;padding:0.35rem 0"><span>Année de bascule estimée</span><span>' + (ec.anneeBascule ? ec.anneeBascule : 'aucune : la capitalisation en cours domine encore') + '</span></div>';

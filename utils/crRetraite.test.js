@@ -425,13 +425,14 @@ describe('computeEffetCumule', () => {
     expect(computeEffetCumule(serie, 2027)).toEqual({ montant: 65, anneeBascule: null, serie: expect.any(Array) });
   });
 
-  it('une annee a ecart exactement 0 suivie d une annee negative : la bascule est l annee negative, pas l annee a 0 (regle stricte < 0)', () => {
+  it('une annee a ecart exactement 0 entre la derniere positive et une negative : la bascule est l annee negative, pas l annee a 0 (regle stricte < 0)', () => {
     const serie = [
-      { annee: 2026, productionImmobilisee: 100, dotationsNeutralisees: 100 }, // ecart 0
-      { annee: 2027, productionImmobilisee: 40, dotationsNeutralisees: 50 }, // ecart -10
+      { annee: 2025, productionImmobilisee: 100, dotationsNeutralisees: 0 }, // ecart +100 (derniere positive)
+      { annee: 2026, productionImmobilisee: 100, dotationsNeutralisees: 100 }, // ecart 0 : PAS une bascule
+      { annee: 2027, productionImmobilisee: 40, dotationsNeutralisees: 50 }, // ecart -10 : la bascule
     ];
-    // montant cumule = 0 (2026) + (-10) (2027) = -10.
-    expect(computeEffetCumule(serie, 2027)).toEqual({ montant: -10, anneeBascule: 2027, serie: expect.any(Array) });
+    // montant cumule = 100 (2025) + 0 (2026) + (-10) (2027) = 90.
+    expect(computeEffetCumule(serie, 2027)).toEqual({ montant: 90, anneeBascule: 2027, serie: expect.any(Array) });
   });
 
   it('serie vide : montant 0, annee de bascule null', () => {
@@ -446,6 +447,85 @@ describe('computeEffetCumule', () => {
     const desordonnee = [serieI1[3], serieI1[0], serieI1[5], serieI1[1], serieI1[4], serieI1[2]];
     expect(computeEffetCumule(desordonnee, 2031)).toEqual(computeEffetCumule(serieI1, 2031));
     expect(computeEffetCumule(desordonnee, 2026)).toEqual({ montant: 100000, anneeBascule: 2027, serie: expect.any(Array) });
+  });
+});
+
+// Revue phase 2a (spec B.5, redefinition du 2026-08-15) : l'annee de bascule est le PREMIER ecart
+// annuel strictement negatif POSTERIEUR a la DERNIERE annee a ecart strictement positif. L'ancienne
+// regle (« premier ecart negatif de la serie ») designait une annee ANTERIEURE a la capitalisation
+// des qu'un actif etait mis en service avant la fin des investissements : elle annoncait un retour a
+// zero deja commence alors que le cumul montait encore.
+describe('computeEffetCumule · annee de bascule (regle B.5 : derniere positive puis premiere negative)', () => {
+  it('multi-millesimes : la bascule suit le DERNIER millesime capitalise, pas le premier creux', () => {
+    // Deux vagues d'investissement separees par deux annees de dotations seules.
+    //   2024 : +60 000 (capitalisation)      2027 : +38 000 (capitalisation, DERNIERE positive)
+    //   2025 : -12 000                        2028 : -22 000  <- bascule attendue
+    //   2026 : -12 000                        2029 : -22 000
+    // L'ancienne regle repondait 2025 : un creux interne a la periode d'investissement.
+    const serie = [
+      { annee: 2024, productionImmobilisee: 60000, dotationsNeutralisees: 0 },
+      { annee: 2025, productionImmobilisee: 0, dotationsNeutralisees: 12000 },
+      { annee: 2026, productionImmobilisee: 0, dotationsNeutralisees: 12000 },
+      { annee: 2027, productionImmobilisee: 50000, dotationsNeutralisees: 12000 },
+      { annee: 2028, productionImmobilisee: 0, dotationsNeutralisees: 22000 },
+      { annee: 2029, productionImmobilisee: 0, dotationsNeutralisees: 22000 },
+    ];
+    const r = computeEffetCumule(serie, 2029);
+    expect(r.anneeBascule).toBe(2028);
+    // montant = 60 000 - 12 000 - 12 000 + 38 000 - 22 000 - 22 000 = 30 000.
+    expect(r.montant).toBe(30000);
+  });
+
+  it('mise en service precoce : la dotation qui precede le gros millesime n est pas la bascule', () => {
+    // Un actif deja amorti en 2025 alors que l'essentiel des quote-parts arrive en 2026.
+    //   2025 : -20 000 (dotation seule)   2026 : +80 000 (DERNIERE positive)
+    //   2027 : -20 000  <- bascule attendue    2028 : -20 000
+    const serie = [
+      { annee: 2025, productionImmobilisee: 0, dotationsNeutralisees: 20000 },
+      { annee: 2026, productionImmobilisee: 100000, dotationsNeutralisees: 20000 },
+      { annee: 2027, productionImmobilisee: 0, dotationsNeutralisees: 20000 },
+      { annee: 2028, productionImmobilisee: 0, dotationsNeutralisees: 20000 },
+    ];
+    expect(computeEffetCumule(serie, 2028).anneeBascule).toBe(2027);
+  });
+
+  it('cas nominal I1 (une seule vague) : la regle B.5 donne la meme reponse que l ancienne', () => {
+    const serie = [
+      { annee: 2026, productionImmobilisee: 100000, dotationsNeutralisees: 0 },
+      { annee: 2027, productionImmobilisee: 0, dotationsNeutralisees: 20000 },
+      { annee: 2028, productionImmobilisee: 0, dotationsNeutralisees: 20000 },
+    ];
+    expect(computeEffetCumule(serie, 2028).anneeBascule).toBe(2027);
+  });
+
+  it('aucune annee a ecart strictement positif : bascule null (rien n a jamais ete capitalise)', () => {
+    const serie = [
+      { annee: 2026, productionImmobilisee: 100, dotationsNeutralisees: 100 }, // ecart 0, pas > 0
+      { annee: 2027, productionImmobilisee: 40, dotationsNeutralisees: 50 }, // ecart -10
+    ];
+    expect(computeEffetCumule(serie, 2027).anneeBascule).toBeNull();
+  });
+
+  it('derniere annee positive en fin de serie : bascule null (aucune negative apres)', () => {
+    const serie = [
+      { annee: 2026, productionImmobilisee: 50, dotationsNeutralisees: 0 }, // +50
+      { annee: 2027, productionImmobilisee: 0, dotationsNeutralisees: 10 }, // -10
+      { annee: 2028, productionImmobilisee: 30, dotationsNeutralisees: 0 }, // +30, DERNIERE positive
+    ];
+    expect(computeEffetCumule(serie, 2028).anneeBascule).toBeNull();
+  });
+
+  it('serie desordonnee : la regle s applique dans l ordre chronologique, pas dans l ordre fourni', () => {
+    // Memes entrees que le cas multi-millesimes, melangees : la reponse doit rester 2028.
+    const desordonnee = [
+      { annee: 2028, productionImmobilisee: 0, dotationsNeutralisees: 22000 },
+      { annee: 2024, productionImmobilisee: 60000, dotationsNeutralisees: 0 },
+      { annee: 2027, productionImmobilisee: 50000, dotationsNeutralisees: 12000 },
+      { annee: 2025, productionImmobilisee: 0, dotationsNeutralisees: 12000 },
+      { annee: 2029, productionImmobilisee: 0, dotationsNeutralisees: 22000 },
+      { annee: 2026, productionImmobilisee: 0, dotationsNeutralisees: 12000 },
+    ];
+    expect(computeEffetCumule(desordonnee, 2029).anneeBascule).toBe(2028);
   });
 });
 
