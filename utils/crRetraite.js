@@ -40,10 +40,14 @@ function _n(x) {
  * @param {function(number): number} [input.isFn] - bareme IS (computeIS de server.js), applique par
  *   colonne au resultat d'exploitation hors capitalisation. Absent -> IS force a 0 (jamais d'appel a
  *   une fonction indefinie).
+ * @param {number} [input.amortissements] - total des dotations aux amortissements affiche par le CR
+ *   classique (source independante du detail par immo), utilise uniquement pour la garde
+ *   ecartDotations ci-dessous. Absent -> garde a 0 (rien a comparer).
  * @returns {{
  *   ebe: {factuel:number, projete:number},
  *   dotationsNeutralisees: {montant:number, parImmo: Array<{nom:string, dotation:number}>},
  *   amortissements: number,
+ *   ecartDotations: number,
  *   resultatExploitation: {factuel:number, projete:number},
  *   is: {factuel:number, projete:number},
  *   impotNet: {factuel:number, projete:number},
@@ -84,6 +88,16 @@ function computeCrRetraite(input) {
     }
   }
 
+  // 2b. Garde de coherence produit (decision de revue) : si l'appelant fournit le total des dotations
+  // affiche par le CR classique (input.amortissements, source independante du detail par immo), on le
+  // compare a la reconstitution neutralisees + conservees issue de la boucle ci-dessus. Ecart non nul
+  // = les deux sources divergent (bug de donnees en amont) ; 0 est la valeur attendue en fonctionnement
+  // normal. Champ absent (null/undefined) -> rien a comparer, ecart force a 0.
+  const amortissementsInput = inp.amortissements;
+  const ecartDotations = amortissementsInput === null || amortissementsInput === undefined
+    ? 0
+    : Number(amortissementsInput) - (dotationsNeutraliseesMontant + amortissements);
+
   // 3. Resultat d'exploitation hors capitalisation = EBE hors capitalisation moins dotations
   // conservees (les dotations neutralisees ont deja disparu avec la production immobilisee).
   const resultatExploitation = {
@@ -115,6 +129,7 @@ function computeCrRetraite(input) {
     ebe,
     dotationsNeutralisees: { montant: dotationsNeutraliseesMontant, parImmo },
     amortissements,
+    ecartDotations,
     resultatExploitation,
     is,
     impotNet,

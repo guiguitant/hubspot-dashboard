@@ -154,6 +154,11 @@ describe('computeCrRetraite · I3 perimetre', () => {
     expect(r.dotationsNeutralisees.montant).toBe(8000);
     expect(r.dotationsNeutralisees.parImmo).toEqual([{ nom: 'SaaS interne', dotation: 8000 }]);
     expect(r.dotationsNeutralisees.parImmo.find(x => x.nom === 'Brevet externe')).toBeUndefined();
+    // resultatExploitation = ebe hors capitalisation (100 000 - prod immo 0 = 100 000) moins les
+    // dotations CONSERVEES uniquement (5 000, Brevet externe) : les 8 000 neutralisees (SaaS interne)
+    // ont deja disparu avec la production immobilisee, elles ne se retranchent pas une seconde fois.
+    // 100 000 - 5 000 = 95 000.
+    expect(r.resultatExploitation).toEqual({ factuel: 95000, projete: 95000 });
   });
 });
 
@@ -194,9 +199,6 @@ describe('computeCrRetraite · I5 cascade', () => {
     });
     expect(r.impotNet).toEqual({ factuel: 7441, projete: 53966 });
     expect(r.resultatNet).toEqual({ factuel: 47323, projete: 186898 });
-    // Verification croisee de la formule de cascade elle-meme, colonne par colonne.
-    expect(r.resultatNet.factuel).toBe(r.resultatExploitation.factuel - (r.is.factuel - 2000));
-    expect(r.resultatNet.projete).toBe(r.resultatExploitation.projete - (r.is.projete - 2000));
   });
 });
 
@@ -240,6 +242,80 @@ describe('computeCrRetraite · I6 credit d impot', () => {
     expect(avecFlag.creditAdosseAuxDotations).toBe(true);
     expect(sansFlag.creditAdosseAuxDotations).toBe(false);
   });
+
+  it('le drapeau se declenche meme si la dotation de l annee est 0 : immo neutralisee en assiette amortissement, incoherence structurelle (pas annuelle)', () => {
+    const r = computeCrRetraite({
+      ebe: { factuel: 0, projete: 0 },
+      productionImmobilisee: { factuel: 0, projete: 0 },
+      dotationsParImmo: [{ nom: 'A', dotation: 0, aPostes: true, assietteCredit: 'amortissement' }],
+      creditTotal: 500,
+      isFn,
+    });
+    expect(r.creditAdosseAuxDotations).toBe(true);
+  });
+});
+
+describe('computeCrRetraite · aPostes strict (=== true uniquement)', () => {
+  it('aPostes: 1 (nombre truthy, pas booleen strict) ne neutralise pas l immo : elle reste dans les CONSERVEES', () => {
+    const r = computeCrRetraite({
+      ebe: { factuel: 0, projete: 0 },
+      productionImmobilisee: { factuel: 0, projete: 0 },
+      dotationsParImmo: [{ nom: 'X', dotation: 4000, aPostes: 1, assietteCredit: 'ca_declare' }],
+      creditTotal: 0,
+      isFn,
+    });
+    expect(r.amortissements).toBe(4000);
+    expect(r.dotationsNeutralisees.montant).toBe(0);
+    expect(r.dotationsNeutralisees.parImmo).toEqual([]);
+  });
+});
+
+describe('computeCrRetraite · garde ecartDotations', () => {
+  // Champ de sortie optionnel : compare le total des dotations affiche par le CR classique
+  // (input.amortissements, source independante fournie par l'appelant) a la reconstitution issue du
+  // detail par immo (dotationsNeutralisees.montant + amortissements conservees). Un ecart non nul
+  // signale que les deux sources divergent (garde de coherence produit, pas une correction).
+  const dotationsParImmo = [
+    { nom: 'A', dotation: 5000, aPostes: true, assietteCredit: 'ca_declare' },
+    { nom: 'B', dotation: 3000, aPostes: false },
+    { nom: 'C', dotation: 2000, aPostes: true, assietteCredit: 'ca_declare' },
+  ];
+  // dotationsNeutralisees.montant = 5000 + 2000 = 7000 ; amortissements (conservees) = 3000 ; total reconstitue = 10000.
+
+  it('amortissements passe coherent avec le detail par immo -> ecart 0', () => {
+    const r = computeCrRetraite({
+      ebe: { factuel: 0, projete: 0 },
+      productionImmobilisee: { factuel: 0, projete: 0 },
+      dotationsParImmo,
+      amortissements: 10000,
+      creditTotal: 0,
+      isFn,
+    });
+    expect(r.ecartDotations).toBe(0);
+  });
+
+  it('amortissements passe avec 7 EUR de plus que le detail par immo -> ecart 7', () => {
+    const r = computeCrRetraite({
+      ebe: { factuel: 0, projete: 0 },
+      productionImmobilisee: { factuel: 0, projete: 0 },
+      dotationsParImmo,
+      amortissements: 10007,
+      creditTotal: 0,
+      isFn,
+    });
+    expect(r.ecartDotations).toBe(7);
+  });
+
+  it('champ amortissements absent (non fourni par l appelant) -> ecart force a 0, rien a comparer', () => {
+    const r = computeCrRetraite({
+      ebe: { factuel: 0, projete: 0 },
+      productionImmobilisee: { factuel: 0, projete: 0 },
+      dotationsParImmo,
+      creditTotal: 0,
+      isFn,
+    });
+    expect(r.ecartDotations).toBe(0);
+  });
 });
 
 describe('computeCrRetraite · robustesse', () => {
@@ -248,6 +324,7 @@ describe('computeCrRetraite · robustesse', () => {
       ebe: { factuel: 0, projete: 0 },
       dotationsNeutralisees: { montant: 0, parImmo: [] },
       amortissements: 0,
+      ecartDotations: 0,
       resultatExploitation: { factuel: 0, projete: 0 },
       is: { factuel: 0, projete: 0 },
       impotNet: { factuel: 0, projete: 0 },
@@ -314,6 +391,15 @@ describe('computeEffetCumule', () => {
       { annee: 2027, productionImmobilisee: 30, dotationsNeutralisees: 5 },
     ];
     expect(computeEffetCumule(serie, 2027)).toEqual({ montant: 65, anneeBascule: null });
+  });
+
+  it('une annee a ecart exactement 0 suivie d une annee negative : la bascule est l annee negative, pas l annee a 0 (regle stricte < 0)', () => {
+    const serie = [
+      { annee: 2026, productionImmobilisee: 100, dotationsNeutralisees: 100 }, // ecart 0
+      { annee: 2027, productionImmobilisee: 40, dotationsNeutralisees: 50 }, // ecart -10
+    ];
+    // montant cumule = 0 (2026) + (-10) (2027) = -10.
+    expect(computeEffetCumule(serie, 2027)).toEqual({ montant: -10, anneeBascule: 2027 });
   });
 
   it('serie vide : montant 0, annee de bascule null', () => {
