@@ -12,7 +12,9 @@ Pour rappel : nous capitalisons des quote-parts de salaires sur deux projets de 
 
 Le nom prête à confusion : cette immobilisation ne porte PAS l'achat du logiciel SimaPro. Elle porte les **coûts de développement interne** (quote-parts de salaires) d'un outil que nous avons construit en amont et en aval du champ d'action de SimaPro, d'où la reprise du nom. C'est donc, comme le SaaS, un développement créé en interne.
 
-Question : où doit être comptabilisée la **licence SimaPro elle-même** (l'abonnement ou l'achat du logiciel du commerce) : en charges d'exploitation, ou en immobilisation acquise distincte ?
+Question : où doit être comptabilisée la **licence SimaPro elle-même** : en charges d'exploitation, ou en immobilisation acquise distincte ?
+
+*Décision temporaire en attendant votre retour (15/08/2026) : il s'agit d'une **licence annuelle** (pas d'un achat de logiciel) ; nous continuons à la comptabiliser **en charges**, comme jusqu'à présent. Merci de confirmer ou corriger.*
 
 ## 2 · Option de l'article 236-I du CGI (déduction fiscale immédiate des dépenses de développement)
 
