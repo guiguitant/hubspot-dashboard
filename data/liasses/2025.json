@@ -1,0 +1,21 @@
+{
+  "exercice": 2025,
+  "cloture": "2025-12-31",
+  "depot": "2026-04-16",
+  "source": "Liasse fiscale 2033/2065, SARL BDM Expertise & Audit",
+  "chiffres": {
+    "productionVendue": 409064,
+    "subventionsExploitation": 11667,
+    "autresProduits": 3,
+    "totalProduitsExploitation": 420733,
+    "chargesExploitation": 346794,
+    "dontDotationsAmortissements": 1046,
+    "dontAutresCharges": 13559,
+    "productionImmobilisee": 0,
+    "resultatExploitation": 73940,
+    "impotSurBenefices": 3848,
+    "cir": 10739,
+    "resultatNet": 70092,
+    "resultatFiscal": 75347
+  }
+}
