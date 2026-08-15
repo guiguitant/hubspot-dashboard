@@ -50,8 +50,11 @@ Signature :
 //      is: {factuel, projete},
 //      impotNet: {factuel, projete},
 //      resultatNet: {factuel, projete},      // estimatif, après crédit (même clé que /api/ebe)
-//      creditAdosseAuxDotations: bool }      // garde B.4 : un actif neutralisé est en assiette 'amortissement'
+//      creditAdosseAuxDotations: bool,       // garde B.4 : un actif neutralisé est en assiette 'amortissement'
+//      ecartDotations: number }              // garde I2 produit : amortissements (entrée) − (neutralisées + conservées), 0 attendu
 ```
+
+Notes de contrat (revue T1 du 2026-08-15) : le champ d'entrée `amortissements` sert UNIQUEMENT de garde de cohérence (`ecartDotations`, affiché comme anomalie au même titre que `invariantCasse` si non nul : si les dotations affichées au CR comptable et le détail par immo divergeaient un jour, le pont C.2 ne bouclerait plus silencieusement). Le « résultat net après IS » affiché (C.6) n'est PAS un champ : le front le dérive comme aujourd'hui (`resultatExploitation − is`), seule la clé `resultatNet` (estimatif) est exposée. `aPostes` est un booléen STRICT (`=== true`) : le serveur (B.1) doit convertir, jamais passer `postes.length`.
 
 `isFn` = `computeIS` de server.js passé en paramètre : la source unique du barème (env-configurable) reste server.js, le module pur n'en duplique pas les seuils. Les tests utilisent un barème identique aux valeurs par défaut.
 
@@ -113,7 +116,7 @@ Signature :
 
 ## Découpage prévu (plan à venir)
 
-T1 module pur `utils/crRetraite.js` + tests (TDD, I1 à I8) · T2 serveur (détail dotations + correctif année NULL mesuré + invariant données réelles + garde crédit + branchement `/api/ebe`, miroir intouché) · T3 front (bascule, pont de réconciliation, zone fiscale estimative des deux vues, renommage de la case « Projeté » en « Colonne projetée (année complète + pipeline pondéré) », modales, bandeaux, parité dist).
+T1 module pur `utils/crRetraite.js` + tests (TDD, I1 à I6) · I7 (gouvernance) et I8 (données réelles) sont PORTÉS PAR T2 (non testables dans le module pur) · T2 serveur (détail dotations + correctif année NULL mesuré + invariant données réelles + garde crédit + branchement `/api/ebe`, miroir intouché) · T3 front (bascule, pont de réconciliation, zone fiscale estimative des deux vues, renommage de la case « Projeté » en « Colonne projetée (année complète + pipeline pondéré) », modales, bandeaux, parité dist).
 
 ## Hors lot
 - **Réglage « option art. 236-I exercée » (extension conditionnelle, idée utilisateur du 2026-08-13)** : un paramètre UNIQUE et assumé, PAS une case cochable à la volée : l'option est une décision de gestion prise dans la liasse fiscale (un fait, exercée ou non), pas une préférence d'affichage, et le remboursement de crédit d'impôt N+1 de la trésorerie en dépend. Activable seulement après la réponse du cabinet (question n° 3). Effet quand actif : l'IS des DEUX vues (et le miroir trésorerie) se calcule sur la base fiscale = résultat d'exploitation comptable − production immobilisée de l'année + dotations des actifs déduits (c'est exactement la base de la vue hors capitalisation dans la configuration actuelle) ; les étiquettes « réel »/« théorique » s'inversent. Défaut : non exercée (comportement actuel).
