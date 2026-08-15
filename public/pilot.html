@@ -16043,6 +16043,11 @@
           + '<span style="flex:1 1 34%">Poste</span>' + cel('Pilot') + cel('Liasse') + cel('Écart') + '</div>';
         body += ligneRec('CA facturé (Notion)', num(d.ca && d.ca.facture), num(lc.productionVendue));
         body += ligneRec('Subventions et aides', (d.financements ? (Number(d.financements.totalSubv) || 0) + (Number(d.financements.totalAide) || 0) : 0), num(lc.subventionsExploitation));
+        // Ligne ajoutée en re-revue pour la COMPLÉTUDE des produits de la liasse : sans elle, la
+        // colonne Liasse ne retombe pas sur son propre résultat d'exploitation (3 € manquants en
+        // 2025). Pilot n'a pas d'équivalent (0). NB : les rubriques de la liasse étant arrondies à
+        // l'euro, le bouclage exact n'est pas garanti sur tout exercice (incise sous le tableau).
+        body += ligneRec('Autres produits', 0, num(lc.autresProduits));
         body += ligneRec('Production immobilisée', fac(d.productionImmobilisee), num(lc.productionImmobilisee));
         body += ligneRec('Charges d\'exploitation', (d.charges ? Number(d.charges.total) || 0 : 0), num(lc.chargesExploitation));
         // Ligne ajoutée en revue pour que les deux colonnes BOUCLENT : côté Pilot les dotations sont une
@@ -16054,7 +16059,7 @@
         body += ligneRec('Résultat d\'exploitation', fac(d.resultatExploitation), num(lc.resultatExploitation), true);
         body += ligneRec('IS estimé (après CII et CIR)', fac(d.impotNet), num(lc.impotSurBenefices));
         body += ligneRec('Résultat net estimatif', fac(d.resultatNet), num(lc.resultatNet), true);
-        body += '<div style="font-size:0.74rem;color:var(--text-secondary);margin-top:0.5rem">Colonne Pilot : montants factuels de l\'exercice clos (la case « Colonne projetée » ne change rien ici). Écart = Pilot moins liasse.</div>';
+        body += '<div style="font-size:0.74rem;color:var(--text-secondary);margin-top:0.5rem">Colonne Pilot : montants factuels de l\'exercice clos (la case « Colonne projetée » ne change rien ici). Écart = Pilot moins liasse. Rubriques de la liasse arrondies à l\'euro par le cabinet : un écart résiduel de 1 à 2 € entre la somme des rubriques et les totaux déclarés est normal.</div>';
         body += '<div style="margin-top:0.8rem;padding-top:0.6rem;border-top:1px dashed var(--border);font-size:0.78rem;line-height:1.5;color:var(--text-secondary)">';
         body += '<strong>Pourquoi les colonnes diffèrent</strong> · Ce sont des écarts de convention, pas des erreurs :';
         body += '<div style="margin-top:0.35rem">· <strong>CA</strong> : Pilot compte le chiffre d\'affaires à la facture Notion, la liasse retient la production vendue comptable (factures à établir, produits constatés d\'avance, avoirs) : le même euro peut tomber d\'un exercice sur l\'autre.</div>';
