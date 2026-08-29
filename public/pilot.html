@@ -6696,8 +6696,8 @@
             {
               label: 'CA 2026',
               data: currentValues,
-              backgroundColor: 'rgba(35,131,226,0.65)',
-              hoverBackgroundColor: 'rgba(35,131,226,0.85)',
+              backgroundColor: 'rgba(89,141,196,0.65)',
+              hoverBackgroundColor: 'rgba(89,141,196,0.85)',
               borderRadius: { topLeft: 4, topRight: 4 },
               borderSkipped: false,
               barPercentage: 0.7,
@@ -6764,8 +6764,8 @@
             {
               label: '2025',
               data: prevValues,
-              backgroundColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(200,200,197,0.4)',
-              hoverBackgroundColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(200,200,197,0.6)',
+              backgroundColor: isDark ? 'rgba(184,137,58,0.12)' : 'rgba(184,137,58,0.4)',
+              hoverBackgroundColor: isDark ? 'rgba(184,137,58,0.2)' : 'rgba(184,137,58,0.6)',
               borderRadius: 4,
               borderSkipped: false,
               barPercentage: 0.7,
@@ -10785,7 +10785,7 @@
       patternCanvas.width = 10;
       patternCanvas.height = 10;
       const pctx = patternCanvas.getContext('2d');
-      pctx.strokeStyle = 'rgba(35,131,226,0.35)';
+      pctx.strokeStyle = 'rgba(89,141,196,0.35)'; // #598DC4 (paire d'exercice, spec F.2 ter) : décline la teinte de la série N pour son état forecast
       pctx.lineWidth = 2;
       pctx.beginPath();
       pctx.moveTo(0, 10);
@@ -11263,8 +11263,8 @@
       // calculee localement (mois courant), sans dependre d'un champ API.
       const now = new Date();
       const moisCourantKey = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
-      const nColors = comp.mois.map(k => (k >= moisCourantKey) ? makeHatchPattern('#7A9BBF') : '#7A9BBF');
-      const nBorders = comp.mois.map(k => (k >= moisCourantKey) ? '#7A9BBF' : 'transparent');
+      const nColors = comp.mois.map(k => (k >= moisCourantKey) ? makeHatchPattern('#598DC4') : '#598DC4');
+      const nBorders = comp.mois.map(k => (k >= moisCourantKey) ? '#598DC4' : 'transparent');
 
       comparaisonChart = new Chart(document.getElementById('analyticsChargesComparaison'), {
         type: 'bar',
@@ -11273,7 +11273,7 @@
           labels,
           datasets: [
             { label: anneeN,   data: comp.N.map(v => Math.round(v / 1000)),   backgroundColor: nColors, borderColor: nBorders, borderWidth: 1.5, borderRadius: 4 },
-            { label: anneeNm1, data: comp.Nm1.map(v => Math.round(v / 1000)), backgroundColor: '#C0B8DC', borderRadius: 4 },
+            { label: anneeNm1, data: comp.Nm1.map(v => Math.round(v / 1000)), backgroundColor: '#B8893A', borderRadius: 4 },
           ],
         },
         options: {
@@ -11705,8 +11705,8 @@
         data: {
           labels,
           datasets: [
-            { label: anneeN,   data: comp.N.map(v => Math.round(v / 1000)),   backgroundColor: '#7A9BBF', borderRadius: 4 },
-            { label: anneeNm1, data: comp.Nm1.map(v => Math.round(v / 1000)), backgroundColor: '#C0B8DC', borderRadius: 4 },
+            { label: anneeN,   data: comp.N.map(v => Math.round(v / 1000)),   backgroundColor: '#598DC4', borderRadius: 4 },
+            { label: anneeNm1, data: comp.Nm1.map(v => Math.round(v / 1000)), backgroundColor: '#B8893A', borderRadius: 4 },
           ],
         },
         options: {
@@ -15574,19 +15574,22 @@
     //   N-1 = l'exercice qui le précède, TOUJOURS en colonne factuelle (exercice clos).
     // En onglet « Exercice précédent », N vaut donc l'année précédente et le comparatif montre N-2 vs N-1.
 
-    // ===== Direction artistique commune des graphes du CR (spec F.2 bis) =====
-    // Couleurs d'exercice : la couleur suit l'entité « exercice » (N-1 en teinte atténuée, N en accent).
-    // La paire est VALIDÉE par le script du guide dataviz (validate_palette.js, mode light, surface de
-    // page) : les teintes historiques du comparatif Analytics (#C0B8DC / #7A9BBF) échouaient trois
-    // contrôles (clarté hors bande, chroma sous le plancher 0,10 « lit comme du gris », séparation
-    // normale ΔE 13,1 < 15). On a donc gardé les DEUX MÊMES teintes (mauve 295°, bleu 251°) en les
-    // recalant sur le pas passant le plus proche : ΔE normal 15,4, CVD 10,9. Reste un WARN de contraste
-    // sur la teinte atténuée (2,11:1 < 3:1), explicitement toléré par le guide dès lors que le graphe
-    // porte des étiquettes directes visibles, ce qui est le cas ici.
-    // Les comparatifs Analytics gardent pour l'instant les pas historiques des mêmes teintes : ils
-    // n'ont pas d'étiquettes directes, la relaxe de contraste ne s'y appliquerait pas telle quelle.
-    const CR_COUL_EX_N = '#598DC4';   // exercice courant : accent
-    const CR_COUL_EX_NM1 = '#B7A6EC'; // exercice précédent : teinte atténuée
+    // ===== Direction artistique commune des graphes du CR (spec F.2 bis, harmonisée en F.2 ter) =====
+    // Couleurs d'exercice : la couleur suit l'entité « exercice » dans TOUTE l'app (N-1 en teinte
+    // atténuée, N en accent). Constat validateur (validate_palette.js) : aucune paire mauve/bleu ne
+    // passe le contraste sans étiquettes directes (la séparation daltonienne y reposait sur le seul
+    // écart de clarté). Décision (go utilisateur du 2026-08-19) : l'entité « exercice » change de
+    // paire : N = #598DC4 (bleu accent, inchangé), N-1 = #B8893A (ambre atténué) ; ALL CHECKS PASS en
+    // mode clair ET sombre, SANS réserve de contraste : utilisable sur les graphes sans étiquettes.
+    // Appliquée PARTOUT où deux exercices se comparent : ce comparatif, les comparatifs Analytics
+    // « CA N vs N-1 » et « Charges N vs N-1 », le graphe Commercial « CA mensuel N vs N-1 ».
+    // Chaque entité a désormais SA paire : les exercices en ambre/bleu partout dans l'app ; les phases
+    // de la trajectoire (F.3, ci-dessous) gardent le mauve/bleu, légitimé par ses étiquettes sélectives
+    // qui couvrent son WARN de contraste. L'ancienne mise en garde « même paire, deux entités, aucune
+    // couleur ne se lit d'un graphe à l'autre » n'a plus lieu d'être : les deux paires sont désormais
+    // distinctes.
+    const CR_COUL_EX_N = '#598DC4';   // exercice courant : accent (inchangé)
+    const CR_COUL_EX_NM1 = '#B8893A'; // exercice précédent : ambre atténué (spec F.2 ter)
 
     // Chart.js dessine dans un canvas : il ne comprend pas « var(--text) ». On lit donc la valeur
     // calculée du thème actif (clair ou sombre) au moment du rendu, avec un repli si la variable manque.
@@ -15805,15 +15808,17 @@
     // cumul depuis l'origine. C'est la matérialisation du « retour à zéro » : le cumul monte tant que
     // de nouvelles quote-parts sont immobilisées, puis redescend vers zéro à la fin des plans.
     // Aucun calcul ici : la série vient telle quelle de /api/ebe (retraite.effetCumule.serie).
-    // Les deux couleurs de barres sont des constantes partagées : le graphe les applique, et la légende
-    // texte de la modale les reprend pour que le lecteur sache ce que chaque couleur signifie.
-    // Elles reprennent les PAS DE COULEUR VALIDÉS du comparatif (spec F.2 bis) : même paire de teintes
-    // (une seule à valider en accessibilité pour toute la page), mais elle encode une ENTITÉ DIFFÉRENTE
-    // dans chaque graphe : l'exercice (N / N-1) dans le comparatif, la phase (capitalisation / reprise)
-    // ici. Une couleur ne se lit donc jamais d'un graphe à l'autre : chacun porte sa propre légende,
-    // et c'est elle qui fait foi.
-    const CR_COUL_CAPI = CR_COUL_EX_N;      // années de capitalisation (écart positif) : accent
-    const CR_COUL_REPRISE = CR_COUL_EX_NM1; // années de reprise (écart négatif) : teinte atténuée
+    // Les deux couleurs de barres sont des constantes dédiées à CETTE entité : la phase (capitalisation
+    // / reprise), distincte de l'entité « exercice » du comparatif ci-dessus (spec F.2 ter, chaque
+    // entité a SA paire). CR_COUL_CAPI réutilise la valeur de CR_COUL_EX_N (le bleu accent est commun
+    // aux deux entités et reste inchangé par F.2 ter). CR_COUL_REPRISE porte en revanche SA PROPRE
+    // valeur littérale (mauve #B7A6EC), plutôt que de référencer CR_COUL_EX_NM1 : depuis F.2 ter,
+    // l'exercice précédent est passé à l'ambre #B8893A, et les deux constantes auraient sinon divergé
+    // silencieusement en pointant vers la même variable, cassant la trajectoire (qui doit rester
+    // mauve/bleu, intouchée). La légende texte de la modale reprend ces deux couleurs pour que le
+    // lecteur sache ce que chacune signifie.
+    const CR_COUL_CAPI = CR_COUL_EX_N;  // années de capitalisation (écart positif) : bleu accent (partagé avec l'exercice N)
+    const CR_COUL_REPRISE = '#B7A6EC';  // années de reprise (écart négatif) : mauve atténué, propre à la trajectoire (spec F.2 ter)
 
     function _crDetruireTrajectoire() {
       if (crTrajectoireChart) { crTrajectoireChart.destroy(); crTrajectoireChart = null; }
