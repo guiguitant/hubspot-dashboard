@@ -729,10 +729,11 @@
     .kanban-board {
       display: grid;
       /* 4 stages + 4 colonnes repliables (À trier, Gelés, Perdus, Gagné).
-         minmax(170px, 1fr) : sans le min explicite, les colonnes de stages
-         refusaient de descendre sous leur min-content, et chaque panneau
-         déplié poussait les précédents hors de l'écran, sans ascenseur.
-         D'où l'impression qu'en ouvrir un repliait les autres. */
+         Un seul bac est ouvert à la fois (openSideColumn), donc le pipe garde
+         de la place. minmax(170px, 1fr) + overflow-x restent le filet de
+         sécurité en fenêtre étroite : sans eux, les colonnes de stages
+         refusaient de descendre sous leur min-content et le panneau ouvert
+         partait hors de l'écran, sans ascenseur pour aller le chercher. */
       grid-template-columns: repeat(4, minmax(170px, 1fr)) auto auto auto auto;
       gap: 0.75rem;
       overflow-x: auto;
@@ -1400,9 +1401,10 @@
       transition: width 0.2s ease, min-width 0.2s ease;
       overflow: hidden;
     }
+    /* Un seul panneau ouvert : on peut se permettre du large et lisible. */
     .kanban-column-won.expanded {
-      width: 260px;
-      min-width: 260px;
+      width: 400px;
+      min-width: 400px;
     }
     .kanban-column-won .kanban-header {
       cursor: pointer;
@@ -7239,13 +7241,7 @@
       }
     }
 
-    function toggleWonColumn() {
-      wonColumnOpen = !wonColumnOpen;
-      renderWonColumn();
-      if (wonColumnOpen && !wonDealsCache[wonCacheKey(wonColumnYear, wonColumnMonth)]) {
-        loadWonDeals(wonColumnYear, wonColumnMonth);
-      }
-    }
+    function toggleWonColumn() { openSideColumn(wonColumnOpen ? null : 'won'); }
 
     function changeWonMonth(delta) {
       let y = wonColumnYear;
@@ -7263,10 +7259,7 @@
     let relancerColumnOpen = false;
     const RELANCER_STAGE_LABEL = 'À relancer plus tard';
 
-    function toggleRelancerColumn() {
-      relancerColumnOpen = !relancerColumnOpen;
-      renderRelancerColumn();
-    }
+    function toggleRelancerColumn() { openSideColumn(relancerColumnOpen ? null : 'relancer'); }
 
     function renderRelancerColumn() {
       const col = document.getElementById('kanbanRelancerColumn');
@@ -7433,13 +7426,7 @@
       }
     }
 
-    function toggleLostColumn() {
-      lostColumnOpen = !lostColumnOpen;
-      renderLostColumn();
-      if (lostColumnOpen && !lostDealsCache[wonCacheKey(lostColumnYear, lostColumnMonth)]) {
-        loadLostDeals(lostColumnYear, lostColumnMonth);
-      }
-    }
+    function toggleLostColumn() { openSideColumn(lostColumnOpen ? null : 'lost'); }
 
     function changeLostMonth(delta) {
       let y = lostColumnYear;
@@ -7510,6 +7497,72 @@
         <div class="kanban-cards">${cardsHtml}</div>`;
     }
 
+    // Un seul bac ouvert à la fois. Quatre panneaux de front écrasaient les
+    // colonnes du pipe à leur largeur minimale : le panneau ouvert vaut mieux
+    // large que nombreux. `which` = 'dormant' | 'relancer' | 'lost' | 'won',
+    // ou null pour tout replier. Point de passage unique : c'est ici, et nulle
+    // part ailleurs, qu'on décide quel bac est ouvert.
+    function openSideColumn(which) {
+      dormantColumnOpen  = which === 'dormant';
+      relancerColumnOpen = which === 'relancer';
+      lostColumnOpen     = which === 'lost';
+      wonColumnOpen      = which === 'won';
+
+      renderDormantColumn();
+      renderRelancerColumn();
+      renderLostColumn();
+      renderWonColumn();
+
+      // Les deux bacs de deals clos vont chercher leur mois à la demande.
+      if (wonColumnOpen && !wonDealsCache[wonCacheKey(wonColumnYear, wonColumnMonth)]) {
+        loadWonDeals(wonColumnYear, wonColumnMonth);
+      }
+      if (lostColumnOpen && !lostDealsCache[wonCacheKey(lostColumnYear, lostColumnMonth)]) {
+        loadLostDeals(lostColumnYear, lostColumnMonth);
+      }
+
+      // Sur un écran étroit, les 400 px du panneau dépassent du board : on va
+      // le chercher plutôt que de laisser l'utilisateur deviner qu'il faut
+      // faire défiler. Après la transition de largeur, sinon on mesure trop tôt.
+      if (which) _revelerColonneOuverte(SIDE_COLUMN_IDS[which]);
+      else {
+        // Tout replié : le board tient à nouveau, on revient au début du pipe.
+        const board = document.getElementById('kanbanBoard');
+        if (board) board.scrollLeft = 0;
+      }
+    }
+
+    const SIDE_COLUMN_IDS = {
+      dormant:  'kanbanDormantColumn',
+      relancer: 'kanbanRelancerColumn',
+      lost:     'kanbanLostColumn',
+      won:      'kanbanWonColumn',
+    };
+
+    // On mesure une fois la largeur du panneau stabilisée, sinon on calcule le
+    // débordement sur la largeur d'avant. transitionend pour le cas normal,
+    // délai de secours parce qu'il ne se déclenche pas si la largeur ne bouge
+    // pas (panneau déjà ouvert, ou transitions coupées).
+    function _revelerColonneOuverte(id) {
+      const board = document.getElementById('kanbanBoard');
+      const el = id && document.getElementById(id);
+      if (!board || !el) return;
+      let fait = false;
+      const aller = () => {
+        if (fait) return;
+        fait = true;
+        el.removeEventListener('transitionend', aller);
+        const bRect = board.getBoundingClientRect();
+        const eRect = el.getBoundingClientRect();
+        const debordDroite = eRect.right - bRect.right;
+        const debordGauche = bRect.left - eRect.left;
+        if (debordDroite > 0) board.scrollLeft += debordDroite + 8;
+        else if (debordGauche > 0) board.scrollLeft -= debordGauche + 8;
+      };
+      el.addEventListener('transitionend', aller);
+      setTimeout(aller, 400);
+    }
+
     // Vider les caches des deux colonnes de deals clos (Gagné, Perdus) et
     // recharger celles qui sont ouvertes. À appeler dès qu'un deal change de
     // camp, se renomme, se supprime ou voit sa date de clôture bouger.
@@ -7553,7 +7606,7 @@
       }
       return out;
     }
-    function toggleDormantColumn() { dormantColumnOpen = !dormantColumnOpen; renderDormantColumn(); }
+    function toggleDormantColumn() { openSideColumn(dormantColumnOpen ? null : 'dormant'); }
     function renderDormantColumn() {
       const col = document.getElementById('kanbanDormantColumn');
       if (!col) return;
@@ -8777,7 +8830,7 @@
         // Le deal quitte sa colonne : sans un mot, il a juste l'air d'avoir
         // disparu. On dit où il est parti, jusqu'à quand, et on ouvre la
         // colonne des gelés pour qu'il soit visible à l'arrivée.
-        relancerColumnOpen = true;
+        openSideColumn('relancer');
         renderKanban();
         closeDealSidebar();
         const quand = new Date(wakeIso).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
