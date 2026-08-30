@@ -728,8 +728,15 @@
     /* --- Kanban --- */
     .kanban-board {
       display: grid;
-      grid-template-columns: repeat(4, 1fr) auto auto auto; /* 4 stages + 3 colonnes repliables (À trier, À relancer, Gagné) */
+      /* 4 stages + 4 colonnes repliables (À trier, Gelés, Perdus, Gagné).
+         minmax(170px, 1fr) : sans le min explicite, les colonnes de stages
+         refusaient de descendre sous leur min-content, et chaque panneau
+         déplié poussait les précédents hors de l'écran, sans ascenseur.
+         D'où l'impression qu'en ouvrir un repliait les autres. */
+      grid-template-columns: repeat(4, minmax(170px, 1fr)) auto auto auto auto;
       gap: 0.75rem;
+      overflow-x: auto;
+      padding-bottom: 0.35rem;
     }
 
     .kanban-column {
@@ -737,6 +744,7 @@
       border-radius: var(--radius);
       border: 1px solid var(--border);
       min-height: 80px;
+      min-width: 0;
       display: flex;
       flex-direction: column;
     }
@@ -1577,6 +1585,37 @@
       cursor: pointer;
       border-left: 3px solid var(--warning);
       position: relative;
+    }
+
+    /* Variant "Perdus" — rouge */
+    .kanban-column-lost.expanded .kanban-header {
+      background: var(--danger-bg);
+    }
+    .kanban-column-lost.collapsed .won-collapsed-label,
+    .kanban-column-lost.collapsed .won-toggle-icon {
+      color: var(--danger);
+    }
+    .kanban-column-lost.expanded .kanban-header-label {
+      color: var(--danger) !important;
+    }
+    .kanban-card-lost {
+      cursor: pointer;
+      border-left: 3px solid var(--danger);
+    }
+    .kanban-card-lost .kanban-card-name {
+      color: var(--text);
+      font-weight: 600;
+    }
+    /* Motif de perte renseigné dans HubSpot : c'est l'info qui rend la
+       colonne utile, pas le montant. */
+    .kanban-card-lost-reason {
+      font-size: 0.68rem;
+      color: var(--text-secondary);
+      margin-top: 0.2rem;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
     }
 
     /* --- Gel / réveil --- */
@@ -7366,6 +7405,121 @@
         <div class="kanban-cards">${cardsHtml}</div>`;
     }
 
+    // --- Colonne Perdus (repliable) ---
+    // Même mécanique que Gagné : les deals clos ne vivent pas dans
+    // dashboardData.pipelineDeals, on va les chercher mois par mois.
+    let lostColumnOpen = false;
+    let lostColumnYear = _nowWon.getFullYear();
+    let lostColumnMonth = _nowWon.getMonth();
+    const lostDealsCache = {};
+    let lostDealsLoading = false;
+
+    async function loadLostDeals(year, month) {
+      const key = wonCacheKey(year, month);
+      if (lostDealsCache[key]) return lostDealsCache[key];
+      lostDealsLoading = true;
+      renderLostColumn();
+      try {
+        const res = await fetch(`/api/lost-deals?year=${year}&month=${month}`);
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        lostDealsCache[key] = data;
+        return data;
+      } catch {
+        return null;
+      } finally {
+        lostDealsLoading = false;
+        renderLostColumn();
+      }
+    }
+
+    function toggleLostColumn() {
+      lostColumnOpen = !lostColumnOpen;
+      renderLostColumn();
+      if (lostColumnOpen && !lostDealsCache[wonCacheKey(lostColumnYear, lostColumnMonth)]) {
+        loadLostDeals(lostColumnYear, lostColumnMonth);
+      }
+    }
+
+    function changeLostMonth(delta) {
+      let y = lostColumnYear;
+      let m = lostColumnMonth + delta;
+      if (m < 0) { m = 11; y--; }
+      if (m > 11) { m = 0; y++; }
+      lostColumnYear = y;
+      lostColumnMonth = m;
+      const key = wonCacheKey(y, m);
+      if (lostDealsCache[key]) renderLostColumn();
+      else loadLostDeals(y, m);
+    }
+
+    function renderLostColumn() {
+      const col = document.getElementById('kanbanLostColumn');
+      if (!col) return;
+      col.classList.toggle('expanded', lostColumnOpen);
+      col.classList.toggle('collapsed', !lostColumnOpen);
+
+      const key = wonCacheKey(lostColumnYear, lostColumnMonth);
+      const data = lostDealsCache[key];
+      const monthLabel = `${MONTH_LABELS_FR[lostColumnMonth]} ${lostColumnYear}`;
+
+      if (!lostColumnOpen) {
+        col.innerHTML = `
+          <div class="kanban-header" onclick="toggleLostColumn()" title="Voir les deals perdus">
+            <span class="won-toggle-icon">&#9654;</span>
+            <span class="won-collapsed-label">Perdus</span>
+          </div>`;
+        return;
+      }
+
+      let cardsHtml = '';
+      if (lostDealsLoading && !data) {
+        cardsHtml = `<div class="won-empty">Chargement…</div>`;
+      } else if (!data) {
+        cardsHtml = `<div class="won-empty" style="color:var(--danger)">Erreur de chargement</div>`;
+      } else if (data.deals.length === 0) {
+        cardsHtml = `<div class="won-empty">Aucun deal perdu ce mois-ci</div>`;
+      } else {
+        for (const d of data.deals) {
+          const dt = d.closedate ? formatShortDate(d.closedate) : '';
+          cardsHtml += `<div class="kanban-card kanban-card-lost" onclick="openDealSidebar('${d.id}')">
+            <div class="kanban-card-name">${d.name}</div>
+            ${d.lostReason ? `<div class="kanban-card-lost-reason" title="${_escapeHtml(d.lostReason)}">${_escapeHtml(d.lostReason)}</div>` : ''}
+            <div class="kanban-card-meta">
+              <span class="kanban-card-amount">${formatEuro(d.amount)}</span>
+              <span class="kanban-card-won-date">${dt}</span>
+            </div>
+          </div>`;
+        }
+      }
+
+      const headerCount = data
+        ? `${data.count} &middot; ${formatEuro(data.total)}`
+        : (lostDealsLoading ? '…' : '');
+
+      col.innerHTML = `
+        <div class="kanban-header" onclick="toggleLostColumn()" title="Replier">
+          <span class="kanban-header-label">&#9660; Perdus</span>
+          <span class="kanban-header-count">${headerCount}</span>
+        </div>
+        <div class="won-month-picker" onclick="event.stopPropagation()">
+          <button class="won-month-btn" onclick="changeLostMonth(-1)" title="Mois précédent">&#8249;</button>
+          <span class="won-month-label">${monthLabel}</span>
+          <button class="won-month-btn" onclick="changeLostMonth(1)" title="Mois suivant">&#8250;</button>
+        </div>
+        <div class="kanban-cards">${cardsHtml}</div>`;
+    }
+
+    // Vider les caches des deux colonnes de deals clos (Gagné, Perdus) et
+    // recharger celles qui sont ouvertes. À appeler dès qu'un deal change de
+    // camp, se renomme, se supprime ou voit sa date de clôture bouger.
+    function _invalidateClosedDealsCaches() {
+      for (const k of Object.keys(wonDealsCache)) delete wonDealsCache[k];
+      for (const k of Object.keys(lostDealsCache)) delete lostDealsCache[k];
+      if (wonColumnOpen) loadWonDeals(wonColumnYear, wonColumnMonth);
+      if (lostColumnOpen) loadLostDeals(lostColumnYear, lostColumnMonth);
+    }
+
     // === Colonne "À trier / En sommeil" : deals >90j sans relance (ni RDV/tâche futur), exclus du pipeline pondéré ===
     const DORMANT_DAYS = 90;
     let dormantDeals = [];
@@ -7570,11 +7724,13 @@
       // Colonnes repliables (fermées par défaut)
       html += `<div id="kanbanDormantColumn" class="kanban-column-won kanban-column-relancer ${dormantColumnOpen ? 'expanded' : 'collapsed'}"></div>`;
       html += `<div id="kanbanRelancerColumn" class="kanban-column-won kanban-column-relancer ${relancerColumnOpen ? 'expanded' : 'collapsed'}"></div>`;
+      html += `<div id="kanbanLostColumn" class="kanban-column-won kanban-column-lost ${lostColumnOpen ? 'expanded' : 'collapsed'}"></div>`;
       html += `<div id="kanbanWonColumn" class="kanban-column-won ${wonColumnOpen ? 'expanded' : 'collapsed'}"></div>`;
 
       board.innerHTML = html;
       renderDormantColumn();
       renderRelancerColumn();
+      renderLostColumn();
       renderWonColumn();
 
       // Activity summary
@@ -9566,11 +9722,8 @@
             if (d) { d.amount = amount; break; }
           }
         }
-        // Si on a touché au closedate, vider le cache "Gagné" pour que la colonne se re-fetch
-        if (closedate) {
-          for (const k of Object.keys(wonDealsCache)) delete wonDealsCache[k];
-          if (wonColumnOpen) loadWonDeals(wonColumnYear, wonColumnMonth);
-        }
+        // Si on a touché au closedate, vider les caches "Gagné"/"Perdus" pour que les colonnes se re-fetchent
+        if (closedate) _invalidateClosedDealsCaches();
         renderKanban();
         btn.textContent = 'Enregistré ✓';
         setTimeout(() => { if (btn) btn.textContent = 'Enregistrer'; btn.disabled = false; }, 1500);
@@ -9614,7 +9767,7 @@
           body: JSON.stringify({ stage: targetStage }),
         });
         if (!r.ok) throw new Error();
-        for (const k of Object.keys(wonDealsCache)) delete wonDealsCache[k];
+        _invalidateClosedDealsCaches();
         await refreshData();               // le deal rouvert réapparaît dans le pipeline
         if (typeof renderKanban === 'function') renderKanban();
         openDealSidebar(dealId);           // recharge la fiche avec le nouveau statut
@@ -9638,7 +9791,7 @@
         if (titleEl) titleEl.textContent = trimmed;
         const local = findDealInPipeline(dealId);
         if (local) local.name = trimmed;
-        for (const k of Object.keys(wonDealsCache)) delete wonDealsCache[k];
+        _invalidateClosedDealsCaches();
         renderKanban();
       } catch { alert('Erreur lors du renommage.'); }
     }
@@ -9656,10 +9809,9 @@
           const idx = deals.findIndex(d => d.id === dealId);
           if (idx !== -1) deals.splice(idx, 1);
         }
-        for (const k of Object.keys(wonDealsCache)) delete wonDealsCache[k];
+        _invalidateClosedDealsCaches();
         closeDealSidebar();
         renderKanban();
-        if (typeof wonColumnOpen !== 'undefined' && wonColumnOpen) loadWonDeals(wonColumnYear, wonColumnMonth);
       } catch { alert('Erreur lors de la suppression.'); }
     }
 
@@ -9706,11 +9858,8 @@
           if (idx !== -1) { deals.splice(idx, 1); break; }
         }
         selectedDealIds.delete(dealId);
-        // Invalider le cache des deals gagnés (au cas où le deal vient d'y entrer)
-        if (outcome === 'closedwon') {
-          for (const k of Object.keys(wonDealsCache)) delete wonDealsCache[k];
-          if (wonColumnOpen) loadWonDeals(wonColumnYear, wonColumnMonth);
-        }
+        // Le deal vient d'entrer dans Gagné ou dans Perdus : on invalide les deux.
+        _invalidateClosedDealsCaches();
         closeDealSidebar();
         renderKanban();
         updateForecastBar();

@@ -1279,6 +1279,70 @@ app.get('/api/won-deals', async (req, res) => {
   }
 });
 
+// --- Deals perdus d'un mois donné (pipeline default) ---
+// Symétrique de fetchWonDealsForMonth. `closed_lost_reason` est la propriété
+// HubSpot standard du motif de perte : si le portail ne la renseigne pas, elle
+// revient simplement vide, la colonne reste lisible.
+async function fetchLostDealsForMonth(year, month) {
+  const from = new Date(Date.UTC(year, month, 1)).toISOString();
+  const to = new Date(Date.UTC(year, month + 1, 1)).toISOString();
+  const allDeals = [];
+  let after;
+
+  while (true) {
+    const body = {
+      filterGroups: [
+        {
+          filters: [
+            { propertyName: 'hs_is_closed_lost', operator: 'EQ', value: 'true' },
+            { propertyName: 'closedate', operator: 'GTE', value: from },
+            { propertyName: 'closedate', operator: 'LT', value: to },
+          ],
+        },
+      ],
+      properties: ['dealname', 'amount', 'closedate', 'createdate', 'pipeline', 'closed_lost_reason'],
+      sorts: [{ propertyName: 'closedate', direction: 'DESCENDING' }],
+      limit: 100,
+    };
+    if (after) body.after = after;
+
+    const result = await hubspotSearch(body);
+    if (result.results) allDeals.push(...result.results);
+
+    if (result.paging && result.paging.next && result.paging.next.after) {
+      after = result.paging.next.after;
+    } else {
+      break;
+    }
+  }
+
+  return allDeals
+    .filter(d => !d.properties.pipeline || d.properties.pipeline === 'default')
+    .map(d => ({
+      id: d.id,
+      name: d.properties.dealname || 'Sans nom',
+      amount: parseFloat(d.properties.amount) || 0,
+      closedate: d.properties.closedate || null,
+      createdate: d.properties.createdate || null,
+      lostReason: d.properties.closed_lost_reason || null,
+    }));
+}
+
+app.get('/api/lost-deals', async (req, res) => {
+  const year = parseInt(req.query.year, 10);
+  const month = parseInt(req.query.month, 10);
+  if (Number.isNaN(year) || Number.isNaN(month) || month < 0 || month > 11) {
+    return res.status(400).json({ error: 'year et month (0-11) requis' });
+  }
+  try {
+    const deals = await fetchLostDealsForMonth(year, month);
+    const total = deals.reduce((s, d) => s + d.amount, 0);
+    res.json({ year, month, count: deals.length, total, deals });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // --- Deals gagnés sur une plage de dates (pour export), avec tags ---
 app.get('/api/won-deals/range', async (req, res) => {
   const { from, to } = req.query;
