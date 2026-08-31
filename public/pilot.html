@@ -14096,7 +14096,7 @@
       const exPrec = ex - 1;
 
       let html = '<p style="font-size:0.8rem;color:var(--text-secondary);margin-top:0;margin-bottom:0.9rem">'
-        + 'Exercice ' + ex + ' : CA reconnu = CA de la mission x (avancement au 31/12/' + ex + ' moins avancement au 31/12/' + exPrec + ').'
+        + 'Exercice ' + ex + ' : CA reconnu = CA de la mission × (avancement au 31/12/' + ex + ' moins avancement au 31/12/' + exPrec + ').'
         + '</p>';
 
       if (!d.disponible) {
@@ -14118,7 +14118,10 @@
         html += _crAlerteHtml('Exercice ' + ex + ' figé : les pourcentages ci-dessous sont définitifs et ne sont plus modifiables depuis Pilot.', false);
       }
 
-      // Tableau des missions suivies
+      // Tableau des missions suivies. Enveloppe overflow-x:auto : meme patron que le tableau
+      // "Ressources mobilisees" (ligne ~17057) pour que le tableau defile dans son propre conteneur
+      // au lieu de faire deborder la modale si des noms de mission Notion sont longs.
+      html += '<div style="overflow-x:auto;margin-top:0.7rem">';
       html += '<table style="width:100%;border-collapse:collapse;font-size:0.82rem;margin-bottom:1rem">';
       html += '<thead><tr style="text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary)">'
         + '<th style="padding:0.4rem">Mission</th><th style="padding:0.4rem;text-align:right">CA HT</th>'
@@ -14150,6 +14153,7 @@
         html += '<tr><td colspan="6" style="padding:0.6rem;color:var(--text-secondary)">Aucune mission suivie à l\'avancement pour ' + ex + '.</td></tr>';
       }
       html += '</tbody></table>';
+      html += '</div>';
 
       // Ajout d'une mission au suivi : désactivé dès que l'exercice courant est figé (une écriture
       // serait de toute façon refusée par le serveur, autant l'expliquer plutôt que de laisser
@@ -14160,7 +14164,7 @@
         const suiviesIds = new Set((d.suivies || []).map(s => s.missionId));
         const dispo = (d.missions || []).filter(m => !suiviesIds.has(String(m.id)));
         html += '<div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:1rem">'
-          + '<select id="avancementNouvelle" style="flex:1;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:0.8rem">'
+          + '<select id="avancementNouvelle" style="flex:1;min-width:0;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:0.8rem">'
           + '<option value="">Ajouter une mission au suivi...</option>'
           + dispo.map(m => '<option value="' + m.id + '">' + escapeHtml(m.nom || '') + ' · ' + escapeHtml(m.client || '') + ' · ' + formatEuro(m.ca || 0) + '</option>').join('')
           + '</select>'
