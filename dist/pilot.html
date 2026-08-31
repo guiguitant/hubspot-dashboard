@@ -12483,6 +12483,16 @@
         tileBar('signe', 'CA ' + (kpiData.year || '') + ' HT', kpiFmtEur(caFact), factPct, 'openKpiFactureDetail()', subFact) +
         tileBar('av', 'CA signé ' + (kpiData.year || ''), kpiFmtEur(caSigne), avPct, 'openKpiAvancementDetail()', subSigne) +
         tile('pool', 'Prime pool estimée', poolVal, poolSub);
+      // Infobulle « à l'avancement », même patron que le Cockpit et Analytics : posée si l'ajustement
+      // est actif, effacée sinon (sinon elle survit à un changement d'exercice via le sélecteur KPI).
+      const _elKpiCa = box.querySelector('.kpi-ov.signe');
+      if (_elKpiCa) {
+        if (kpiData.avancement && kpiData.avancement.actif && kpiData.avancement.delta !== 0) {
+          _elKpiCa.title = "CA à l'avancement : ajustement de " + formatEuro(kpiData.avancement.delta) + ' sur ' + kpiData.avancement.suivies.length + ' mission(s) à cheval sur deux exercices.';
+        } else {
+          _elKpiCa.title = '';
+        }
+      }
     }
 
     // Clic sur la tuile « CA HT » : explique l'avancement COLLECTIF (CA facturé ÷ objectif de CA facturé).
@@ -12493,7 +12503,14 @@
       const pct = objFact > 0 ? Math.round(caFact / objFact * 100) : null;
       document.getElementById('kpiDetailTitle').textContent = 'CA facturé · avancement collectif';
       let html = '<p class="kpi-detail-total">' + (pct === null ? 'Pas d\'objectif de CA facturé défini' : pct + ' % de l\'objectif de CA facturé') + '</p>';
-      html += '<div class="kpi-detail-row"><div><div class="kpi-detail-nom">CA ' + (kpiData.year || '') + ' HT</div><div class="kpi-detail-client">Source Notion · daté à la facture</div></div><div class="kpi-detail-montant">' + kpiFmtEur(caFact) + '</div></div>';
+      // Source affichée : la modale disait toujours « daté à la facture », devenu faux dès qu'un
+      // ajustement d'avancement est actif sur l'exercice (missions à cheval, cf. infobulle de la tuile).
+      const _avKpiDetail = kpiData.avancement || null;
+      const _avKpiDetailActif = !!(_avKpiDetail && _avKpiDetail.actif && _avKpiDetail.delta !== 0);
+      const _avKpiDetailSource = _avKpiDetailActif
+        ? "Source Notion · à l'avancement (" + _avKpiDetail.suivies.length + ' mission(s) à cheval, ajustement de ' + formatEuro(_avKpiDetail.delta) + ')'
+        : 'Source Notion · daté à la facture';
+      html += '<div class="kpi-detail-row"><div><div class="kpi-detail-nom">CA ' + (kpiData.year || '') + ' HT</div><div class="kpi-detail-client">' + _avKpiDetailSource + '</div></div><div class="kpi-detail-montant">' + kpiFmtEur(caFact) + '</div></div>';
       html += '<div class="kpi-detail-row"><div><div class="kpi-detail-nom">Objectif de CA facturé</div><div class="kpi-detail-client">Réglable via « Réglages primes »</div></div><div class="kpi-detail-montant">' + kpiFmtEur(objFact) + '</div></div>';
       html += '<p style="color:var(--text-secondary);font-size:0.82rem;margin-top:0.6rem">Avancement collectif = CA ' + (kpiData.year || '') + ' HT ÷ objectif de CA facturé. C\'est la base de la prime collective (paliers, étage 2). Distinct de l\'avancement individuel, qui porte sur le CA signé.</p>';
       document.getElementById('kpiDetailBody').innerHTML = html;
@@ -16098,12 +16115,27 @@
       const _avBadge = _avActif
         ? ' <span style="font-size:0.68rem;padding:0.05rem 0.35rem;border:1px solid var(--border);border-radius:10px;color:var(--text-secondary)">à l\'avancement</span>'
         : '';
+      // Détail par mission dans l'infobulle (spec 5.2) : title ne peut pas porter de HTML, donc des
+      // lignes de texte séparées par des sauts de ligne. Noms Notion échappés via _crAttr (même
+      // helper que le titre de la ligne « liasse ») : ils peuvent contenir des guillemets, qui
+      // casseraient l'attribut title="..." s'ils étaient insérés tels quels. Tronqué au-delà de
+      // _AV_DETAIL_MAX lignes pour rester lisible avec beaucoup de missions suivies.
+      const _AV_DETAIL_MAX = 8;
       const _avTitre = _avActif
-        ? "CA à l'avancement : " + _av.suivies.length + ' mission(s) à cheval, ajustement de ' + formatEuro(_av.delta) + ' par rapport aux dates de facturation.'
+        ? _crAttr("CA à l'avancement : " + _av.suivies.length + ' mission(s) à cheval, ajustement de ' + formatEuro(_av.delta) + " par rapport aux dates de facturation.\n"
+            + _av.suivies.slice(0, _AV_DETAIL_MAX).map(s =>
+                (s.nom || 'Mission') + ' : ' + s.pctPrecedent + ' % → ' + s.pctCourant + ' %, ' + formatEuro(s.ca) + ' → ' + formatEuro(s.caAvancement)
+              ).join('\n')
+            + (_av.suivies.length > _AV_DETAIL_MAX ? '\n... et ' + (_av.suivies.length - _AV_DETAIL_MAX) + ' autre(s) mission(s).' : ''))
         : '';
       html += row("Chiffre d'affaires" + (projete ? ' (facture + pipeline)' : ' facture'), ca, { onclick: "openCrDetailModal('ca')", badge: _avBadge, title: _avTitre });
       if (_avActif) {
-        html += subRow("dont ajustement d'avancement (FAE/PCA)", formatEuro(_av.delta));
+        // Harmonisation avec le signe/couleur de row() (même caractère moins, même variable de
+        // couleur) : formatEuro seul ne colore pas les montants négatifs, contrairement au reste du CR.
+        const _avDeltaNeg = _av.delta < 0;
+        const _avDeltaSign = _avDeltaNeg ? '− ' : (_av.delta > 0 ? '+ ' : '');
+        const _avDeltaColor = _avDeltaNeg ? 'color:var(--danger)' : '';
+        html += subRow("dont ajustement d'avancement (FAE/PCA)", '<span style="' + _avDeltaColor + '">' + _avDeltaSign + formatEuro(Math.abs(_av.delta)) + '</span>');
       }
       if (projete && d.ca.pipelinePondere) {
         html += subRow('dont CA facture (Notion)', formatEuro(d.ca.facture));
@@ -16577,12 +16609,29 @@
       if (kind === 'charges') { openCrChargesDetailModal(d.year); return; }
       let title = '', body = '';
       if (kind === 'ca') {
+        // L'utilisateur arrive ici en cliquant sur la ligne CA badgée « à l'avancement » (CR) : la
+        // modale doit expliquer l'ajustement, pas se contenter du texte « CA facture depuis Notion »
+        // devenu faux pour un exercice ajusté (spec 5.2, ronde de correctifs 1).
+        const _avCa = d.avancement || null;
+        const _avCaActif = !!(_avCa && _avCa.actif && _avCa.delta !== 0);
         title = "Chiffre d'affaires " + d.year;
-        body = '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.6rem">CA facture depuis Notion' + (projete ? ', + pipeline pondere HubSpot (barème par etape) si projete.' : '.') + '</div>';
-        body += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid var(--border)"><span>CA facture (Notion)</span><strong>' + formatEuro(d.ca.facture) + '</strong></div>';
+        body = '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.6rem">'
+          + (_avCaActif
+              ? "CA à l'avancement : les missions à cheval sur deux exercices sont réparties selon leur avancement au 31/12, pas selon leurs dates de facturation."
+              : 'CA facture depuis Notion')
+          + (projete ? ', + pipeline pondere HubSpot (barème par etape) si projete.' : '.') + '</div>';
+        body += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid var(--border)"><span>' + (_avCaActif ? "CA retenu (à l'avancement)" : 'CA facture (Notion)') + '</span><strong>' + formatEuro(d.ca.facture) + '</strong></div>';
         if (projete) {
           body += '<div style="display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid var(--border)"><span>+ Pipeline pondere (HubSpot)</span><span>' + formatEuro(d.ca.pipelinePondere) + '</span></div>';
           body += '<div style="display:flex;justify-content:space-between;padding:0.5rem 0"><strong>CA projete</strong><strong>' + formatEuro(d.ca.projete) + '</strong></div>';
+        }
+        if (_avCaActif) {
+          body += '<div style="margin-top:0.6rem;padding-top:0.5rem;border-top:1px dashed var(--border)">';
+          body += '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.4rem">Ajustement d\'avancement : ' + _avCa.suivies.length + ' mission(s) à cheval, ' + formatEuro(_avCa.delta) + ' par rapport aux dates de facturation (FAE/PCA).</div>';
+          for (const s of _avCa.suivies) {
+            body += '<div style="display:flex;justify-content:space-between;padding:0.3rem 0;border-bottom:1px solid var(--border);font-size:0.82rem"><span>' + escapeHtml(s.nom || 'Mission') + ' <span style="color:var(--text-secondary)">(' + s.pctPrecedent + ' % → ' + s.pctCourant + ' %)</span></span><span>' + formatEuro(s.caAvancement) + '</span></div>';
+          }
+          body += '</div>';
         }
       } else if (kind === 'subventions' || kind === 'aides') {
         const list = kind === 'subventions' ? d.financements.subventions : d.financements.aides;
@@ -16703,6 +16752,18 @@
         body += '<div style="display:flex;align-items:baseline;padding:0.25rem 0;border-bottom:1px solid var(--border);font-size:0.74rem;color:var(--text-secondary)">'
           + '<span style="flex:1 1 34%">Poste</span>' + cel('Pilot') + cel('Liasse') + cel('Écart') + '</div>';
         body += ligneRec('CA facturé (Notion)', num(d.ca && d.ca.facture), num(lc.productionVendue));
+        // Ligne explicative, colonne Pilot uniquement (spec 5.2) : si l'exercice affiché porte un
+        // ajustement d'avancement actif, le dire ICI, dans le tableau, pas seulement dans la note de
+        // convention plus bas. Latent aujourd'hui (aucun exercice ≥ 2026 n'a encore de liasse), posé
+        // maintenant pour ne pas être oublié à la clôture 2026. Pas d'équivalent côté liasse ni
+        // d'écart à calculer : colonnes Liasse et Écart marquées « n/a » plutôt qu'un chiffre inventé.
+        const _avLiasse = d.avancement || null;
+        const _avLiasseActif = !!(_avLiasse && _avLiasse.actif && _avLiasse.delta !== 0);
+        if (_avLiasseActif) {
+          body += '<div style="display:flex;align-items:baseline;padding:0.3rem 0;border-bottom:1px solid var(--border);font-size:0.78rem;color:var(--text-secondary)">'
+            + '<span style="flex:1 1 34%">dont ajustement d\'avancement (' + _avLiasse.suivies.length + ' mission(s) à cheval)</span>'
+            + cel(formatEuro(_avLiasse.delta)) + cel('n/a') + cel('n/a') + '</div>';
+        }
         body += ligneRec('Subventions et aides', (d.financements ? (Number(d.financements.totalSubv) || 0) + (Number(d.financements.totalAide) || 0) : 0), num(lc.subventionsExploitation));
         // Ligne ajoutée en re-revue pour la COMPLÉTUDE des produits de la liasse : sans elle, la
         // colonne Liasse ne retombe pas sur son propre résultat d'exploitation (3 € manquants en
