@@ -35,6 +35,7 @@ const {
   exerciceFige,
   PREMIER_EXERCICE_AVANCEMENT,
   contributionsDepuisVolets,
+  contributionsDepuisFonction,
 } = require('./utils/caAvancement'); // CA a l'avancement (FAE/PCA) : spec docs/superpowers/specs/2026-08-31-ca-avancement-design.md
 const cron = require('node-cron');
 const MASSE_TAB = 'Masse_salariale';
@@ -9401,13 +9402,10 @@ async function caAnneeAvecAvancement(missions, year) {
     return { caAnnee: base, avancement: { actif: false, delta: 0, base, suivies: [] } };
   }
   // Contribution a CETTE base : signedAmountForYear (qui replie sur "Annee final" quand la facture
-  // n'est pas emise), et non les seules factures emises du CR.
-  const contributions = new Map();
-  for (const m of missions || []) {
-    const id = m && m.id != null ? String(m.id) : null;
-    if (!id || !calcul.parMission.has(id)) continue;
-    contributions.set(id, signedAmountForYear(m, year));
-  }
+  // n'est pas emise), et non les seules factures emises du CR. contributionsDepuisFonction est la
+  // fonction PURE (utils/caAvancement.js, testee) qui applique cette base mission par mission :
+  // c'est elle qui est couverte par les tests de non-regression sur la divergence des deux bases.
+  const contributions = contributionsDepuisFonction(missions, new Set(calcul.parMission.keys()), year, signedAmountForYear);
   const caAnnee = ajusterTotal(base, contributions, calcul.parMission);
   return { caAnnee, avancement: { actif: true, delta: caAnnee - base, base, suivies: calcul.suivies } };
 }

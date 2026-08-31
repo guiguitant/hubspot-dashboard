@@ -172,7 +172,27 @@ function contributionsDepuisVolets(missions, missionIds, exercice) {
     let total = 0;
     if (acompte > 0 && anneeDe(m.dateFactureAcompte) === ex) total += acompte;
     if (solde > 0 && anneeDe(m.dateFactureFinale) === ex) total += solde;
-    contributions.set(id, Math.round(total));
+    // Pas d'arrondi par mission : la base a laquelle on retire cette contribution n'est arrondie
+    // qu'une fois, au total (voir ajusterTotal). Arrondir ici serait moins exact pour rien.
+    contributions.set(id, total);
+  }
+  return contributions;
+}
+
+// Generalisation de contributionsDepuisVolets : ce qu'une mission suivie apporte a UNE BASE
+// QUELCONQUE, ou la base est fournie par l'appelant sous forme d'une fonction pure
+// fnMontant(mission, exercice) -> montant. Le module reste sans aucune dependance : c'est
+// l'appelant (server.js) qui injecte la fonction de base (par exemple signedAmountForYear de
+// utils/kpiCompute.js), jamais un require ici. Sert notamment a batir la base "CA signe" (celle du
+// Cockpit/Analytics/KPI), qui replie sur "Annee final" quand la facture n'est pas emise, une regle
+// differente de celle de contributionsDepuisVolets (base du compte de resultat, factures emises
+// seulement) : deux bases, deux fonctions, jamais de delta global unique entre les deux.
+function contributionsDepuisFonction(missions, missionIds, exercice, fnMontant) {
+  const contributions = new Map();
+  for (const m of missions || []) {
+    const id = m && m.id != null ? String(m.id) : null;
+    if (!id || !missionIds || !missionIds.has(id)) continue;
+    contributions.set(id, fnMontant(m, exercice));
   }
   return contributions;
 }
@@ -189,4 +209,5 @@ module.exports = {
   validerSaisieAvancement,
   exerciceFige,
   contributionsDepuisVolets,
+  contributionsDepuisFonction,
 };

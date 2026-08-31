@@ -9,7 +9,14 @@ const {
   validerSaisieAvancement,
   exerciceFige,
   contributionsDepuisVolets,
+  contributionsDepuisFonction,
 } = require('./caAvancement');
+// Vraie fonction de base "CA signe" (Cockpit/Analytics/KPI), utilisee en production par
+// caAnneeAvecAvancement (server.js) au meme titre que contributionsDepuisVolets l'est par /api/ebe.
+// La reutiliser ici (et non un mock local) reproduit fidelement le scenario de divergence des deux
+// bases que la ronde de revue a demande de couvrir. utils/kpiCompute.js n'est pas modifie : on le
+// lit seulement, comme server.js le fait deja.
+const { signedAmountForYear } = require('./kpiCompute');
 
 describe('pctFin : avancement au 31/12 avec report en avant', () => {
   test('aucune ligne : 0 %', () => {
@@ -298,5 +305,42 @@ describe('contributionsDepuisVolets : ce qu une mission apporte a la base "factu
   test('solde negatif ou nul ignore (acompte >= ca)', () => {
     const m = { id: 'm1', ca: 5000, montantAcompte: 5000, dateFactureAcompte: '2026-03-01', dateFactureFinale: '2026-09-01' };
     expect(contributionsDepuisVolets([m], new Set(['m1']), 2026).get('m1')).toBe(5000);
+  });
+});
+
+describe('contributionsDepuisFonction : generalisation parametree par la fonction de base (filet de securite server.js)', () => {
+  test('somme ce que renvoie fnMontant pour chaque mission suivie', () => {
+    const m1 = { id: 'm1', ca: 1000 };
+    const m2 = { id: 'm2', ca: 2000 };
+    const fnMontant = (m) => m.ca / 2;
+    const res = contributionsDepuisFonction([m1, m2], new Set(['m1', 'm2']), 2026, fnMontant);
+    expect(res.get('m1')).toBe(500);
+    expect(res.get('m2')).toBe(1000);
+  });
+
+  test('mission hors de la selection : absente de la Map', () => {
+    const m = { id: 'm2', ca: 10000 };
+    expect(contributionsDepuisFonction([m], new Set(['m1']), 2026, () => 999).has('m2')).toBe(false);
+  });
+
+  // Les deux tests suivants prouvent, avec la VRAIE base signee (signedAmountForYear, celle que
+  // server.js injecte reellement dans caAnneeAvecAvancement), que contributionsDepuisFonction ne
+  // se comporte PAS comme contributionsDepuisVolets (base du compte de resultat). C'est exactement
+  // la divergence que la ronde de revue a demande de couvrir : avant l'extraction en fonction pure,
+  // rien ne detectait un echange accidentel des deux bases (les 518 tests restaient verts). Voir
+  // le rapport de tache pour la preuve par mutation.
+  test('mission jamais facturee mais rattachee par "Annee final" : la base signee la compte en entier, la base facturee compte zero', () => {
+    const m = { id: 'm1', ca: 8000, montantAcompte: 0, dateFactureAcompte: null, dateFactureFinale: null, anneeFinal: 2026 };
+    const baseSignee = contributionsDepuisFonction([m], new Set(['m1']), 2026, signedAmountForYear);
+    expect(baseSignee.get('m1')).toBe(8000);
+    expect(contributionsDepuisVolets([m], new Set(['m1']), 2026).get('m1')).toBe(0);
+  });
+
+  test('acompte et solde a cheval sur deux exercices : la base signee ne compte que la part de l exercice demande', () => {
+    const m = { id: 'm1', ca: 10000, montantAcompte: 4000, dateFactureAcompte: '2025-11-01', dateFactureFinale: '2026-05-01' };
+    const base2026 = contributionsDepuisFonction([m], new Set(['m1']), 2026, signedAmountForYear);
+    expect(base2026.get('m1')).toBe(6000); // solde seul : l acompte est rattache a 2025
+    const base2025 = contributionsDepuisFonction([m], new Set(['m1']), 2025, signedAmountForYear);
+    expect(base2025.get('m1')).toBe(4000); // acompte seul
   });
 });
