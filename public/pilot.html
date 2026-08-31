@@ -728,13 +728,13 @@
     /* --- Kanban --- */
     .kanban-board {
       display: grid;
-      /* 4 stages + 4 colonnes repliables (À trier, Gelés, Perdus, Gagné).
+      /* 4 stages + 3 colonnes repliables (À relancer, Perdus, Gagné).
          Un seul bac est ouvert à la fois (openSideColumn), donc le pipe garde
          de la place. minmax(170px, 1fr) + overflow-x restent le filet de
          sécurité en fenêtre étroite : sans eux, les colonnes de stages
          refusaient de descendre sous leur min-content et le panneau ouvert
          partait hors de l'écran, sans ascenseur pour aller le chercher. */
-      grid-template-columns: repeat(4, minmax(170px, 1fr)) auto auto auto auto;
+      grid-template-columns: repeat(4, minmax(170px, 1fr)) auto auto auto;
       gap: 0.75rem;
       overflow-x: auto;
       padding-bottom: 0.35rem;
@@ -1587,6 +1587,24 @@
       cursor: pointer;
       border-left: 3px solid var(--warning);
       position: relative;
+    }
+
+    /* Le bac "À relancer" mélange gelés et en sommeil : la carte en sommeil se
+       distingue par un liseré plus terne, elle n'a pas de date de retour. */
+    .kanban-card-sommeil {
+      border-left-color: var(--text-light);
+    }
+    .kanban-card-wake.sommeil {
+      color: var(--text-secondary);
+      background: rgba(100,116,139,0.08);
+      border-color: rgba(100,116,139,0.18);
+    }
+    .relancer-legende {
+      padding: 0.3rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.68rem;
+      color: var(--text-light);
+      background: var(--bg);
     }
 
     /* Variant "Perdus" — rouge */
@@ -3931,9 +3949,9 @@
       </div>
 
       <!-- Barre de tri : agit sur le Kanban ET le Tableau.
-           Pas de filtres ici : le tri des deals à reprendre passe par les
-           colonnes dédiées (En sommeil, Gelés), qui se voient sans qu'on ait
-           à penser à les activer. -->
+           Pas de filtres ici : le tri des deals à reprendre passe par le bac
+           dédié (À relancer), qui se voit sans qu'on ait à penser à
+           l'activer. -->
       <div class="pipeline-chipbar">
         <span class="pchip-label">Trier</span>
         <div class="pchip-group" id="pipelineSortChips"></div>
@@ -6202,8 +6220,9 @@
     // Volontairement PAS de filtres ici. Une première version en proposait
     // quatre, cumulables : trop de charge visuelle pour un gain qu'on n'obtient
     // qu'en pensant à les activer puis à les désactiver. Les deals à reprendre
-    // sont ramassés par des COLONNES dédiées (En sommeil, Gelés) : une colonne
-    // se voit sans effort, un filtre demande qu'on s'en souvienne.
+    // sont ramassés par un BAC dédié (À relancer, qui réunit les deals en
+    // sommeil et les gelés) : un bac se voit sans effort, un filtre demande
+    // qu'on s'en souvienne.
     // ═══════════════════════════════════════════════════════════════════════
 
     const PIPELINE_SORTS = {
@@ -7261,41 +7280,88 @@
 
     function toggleRelancerColumn() { openSideColumn(relancerColumnOpen ? null : 'relancer'); }
 
+    // Le bac « À relancer » réunit deux populations de nature différente, que
+    // Guillaume traite pourtant d'un même geste :
+    //  - les GELÉS : déplacés pour de vrai dans le stage HubSpot
+    //    « À relancer plus tard », avec une date de réveil choisie ;
+    //  - les EN SOMMEIL : restés dans leur stage HubSpot, mais sans relance
+    //    depuis plus de 90 jours, donc extraits de l'affichage du pipe et du
+    //    pipeline pondéré (voir isDealDormant).
+    // La distinction reste lisible sur chaque carte : l'un a une date de
+    // retour, l'autre attend une décision.
+    function _collectRelancerDeals() {
+      const gelesBruts = (dashboardData && dashboardData.pipelineDeals && dashboardData.pipelineDeals[RELANCER_STAGE_LABEL]) || [];
+      let geles = kanbanAssigneeFilter ? gelesBruts.filter(d => _dealMatchesAssignee(d.id)) : gelesBruts;
+      if (kanbanSearchQuery) geles = geles.filter(_dealMatchesSearch);
+
+      // dormantDeals porte déjà les filtres assigné/recherche (_collectDormantDeals).
+      const sommeil = dormantDeals;
+
+      const _wake = d => {
+        const w = (dealMetadata[d.id] || {}).wake_up_at;
+        return w ? new Date(w).getTime() : Infinity;
+      };
+
+      // File de traitement, du plus urgent au plus dormant :
+      // 1. gelés dont le réveil est passé, 2. en sommeil (le plus vieux d'abord),
+      // 3. gelés qui reviendront tout seuls, 4. gelés sans date : les oubliés.
+      const dus     = geles.filter(d => _isDueToWake(dealMetadata[d.id])).sort((a, b) => _wake(a) - _wake(b));
+      const aVenir  = geles.filter(d => !_isDueToWake(dealMetadata[d.id])).sort((a, b) => _wake(a) - _wake(b));
+      const dormants = sommeil.slice().sort((a, b) => (b.daysSinceTouch || 0) - (a.daysSinceTouch || 0));
+
+      return {
+        deals: [
+          ...dus.map(d => ({ ...d, _type: 'gele' })),
+          ...dormants.map(d => ({ ...d, _type: 'sommeil' })),
+          ...aVenir.map(d => ({ ...d, _type: 'gele' })),
+        ],
+        nbDus: dus.length,
+        nbGeles: geles.length,
+        nbSommeil: dormants.length,
+      };
+    }
+
     function renderRelancerColumn() {
       const col = document.getElementById('kanbanRelancerColumn');
       if (!col) return;
       col.classList.toggle('expanded', relancerColumnOpen);
       col.classList.toggle('collapsed', !relancerColumnOpen);
 
-      const allRelancer = (dashboardData && dashboardData.pipelineDeals && dashboardData.pipelineDeals[RELANCER_STAGE_LABEL]) || [];
-      let deals = kanbanAssigneeFilter ? allRelancer.filter(d => _dealMatchesAssignee(d.id)) : allRelancer;
-      if (kanbanSearchQuery) deals = deals.filter(_dealMatchesSearch);
+      const { deals, nbDus, nbGeles, nbSommeil } = _collectRelancerDeals();
       const total = deals.reduce((s, d) => s + d.amount, 0);
-
-      // Tri : à réveiller d'abord, puis par date de réveil la plus proche.
-      // Les gelés sans date ferment la marche : ce sont les oubliés du système.
-      const _wake = d => {
-        const w = (dealMetadata[d.id] || {}).wake_up_at;
-        return w ? new Date(w).getTime() : Infinity;
-      };
-      deals = [...deals].sort((a, b) => _wake(a) - _wake(b));
-      const dueCount = deals.filter(d => _isDueToWake(dealMetadata[d.id])).length;
 
       if (!relancerColumnOpen) {
         col.innerHTML = `
-          <div class="kanban-header" onclick="toggleRelancerColumn()" title="${dueCount ? dueCount + ' deal(s) à réveiller aujourd\'hui' : 'Deals mis de côté volontairement, avec une date de réveil'}">
+          <div class="kanban-header" onclick="toggleRelancerColumn()" title="${nbDus ? nbDus + ' deal(s) à réveiller aujourd\'hui' : 'Deals sortis du pipe : gelés avec une date de retour, ou sans relance depuis plus de ' + DORMANT_DAYS + ' jours'}">
             <span class="won-toggle-icon">&#9654;</span>
-            <span class="won-collapsed-label">🧊 Gelés · ${deals.length}${dueCount ? ` <span class="wake-pill">⏰ ${dueCount}</span>` : ''}</span>
+            <span class="won-collapsed-label">À relancer · ${deals.length}${nbDus ? ` <span class="wake-pill">⏰ ${nbDus}</span>` : ''}</span>
           </div>`;
         return;
       }
 
       let cardsHtml = '';
       if (deals.length === 0) {
-        cardsHtml = `<div class="won-empty">Aucun deal gelé</div>`;
+        cardsHtml = `<div class="won-empty">Rien à relancer</div>`;
       } else {
         for (const d of deals) {
           const m = dealMetadata[d.id] || {};
+
+          if (d._type === 'sommeil') {
+            // Pas de date de retour : ce deal attend un arbitrage, relancer ou lâcher.
+            cardsHtml += `<div class="kanban-card kanban-card-relancer kanban-card-sommeil"
+                data-deal-id="${d.id}"
+                onclick="openDealSidebar('${d.id}')" style="cursor:pointer">
+              <div class="kanban-card-name">${d.name}</div>
+              <span class="kanban-card-wake sommeil" title="Sans relance depuis ${d.daysSinceTouch} jours, resté dans « ${d.stage} ». Il ne reviendra pas tout seul.">💤 ${d.daysSinceTouch != null ? d.daysSinceTouch + 'j sans relance' : 'en sommeil'}</span>
+              <div class="kanban-card-meta">
+                <span class="kanban-card-amount">${formatEuro(d.amount)}</span>
+                <span class="kanban-card-won-date" title="Étape où il dort">${d.stage || ''}</span>
+                ${assigneeAvatarHtml(d.id, m.assignee)}
+              </div>
+            </div>`;
+            continue;
+          }
+
           const due = _isDueToWake(m);
           const wakeShort = m.wake_up_at ? formatShortDate(m.wake_up_at) : null;
           const since = d.stageEnteredAt ? formatShortDate(d.stageEnteredAt) : '';
@@ -7329,9 +7395,10 @@
 
       col.innerHTML = `
         <div class="kanban-header" onclick="toggleRelancerColumn()" title="Replier">
-          <span class="kanban-header-label">&#9660; 🧊 Gelés</span>
-          <span class="kanban-header-count">${deals.length}${dueCount ? ` <span class="wake-pill">⏰ ${dueCount}</span>` : ''} &middot; ${formatEuro(total)}</span>
+          <span class="kanban-header-label">&#9660; À relancer</span>
+          <span class="kanban-header-count">${deals.length}${nbDus ? ` <span class="wake-pill">⏰ ${nbDus}</span>` : ''} &middot; ${formatEuro(total)}</span>
         </div>
+        <div class="relancer-legende">${nbSommeil} en sommeil &middot; ${nbGeles} gelé${nbGeles > 1 ? 's' : ''}</div>
         <div class="kanban-cards">${cardsHtml}</div>`;
 
       // Drop zone : on attache les handlers sur la colonne quand elle est ouverte
@@ -7499,16 +7566,14 @@
 
     // Un seul bac ouvert à la fois. Quatre panneaux de front écrasaient les
     // colonnes du pipe à leur largeur minimale : le panneau ouvert vaut mieux
-    // large que nombreux. `which` = 'dormant' | 'relancer' | 'lost' | 'won',
-    // ou null pour tout replier. Point de passage unique : c'est ici, et nulle
-    // part ailleurs, qu'on décide quel bac est ouvert.
+    // large que nombreux. `which` = 'relancer' | 'lost' | 'won', ou null pour
+    // tout replier. Point de passage unique : c'est ici, et nulle part
+    // ailleurs, qu'on décide quel bac est ouvert.
     function openSideColumn(which) {
-      dormantColumnOpen  = which === 'dormant';
       relancerColumnOpen = which === 'relancer';
       lostColumnOpen     = which === 'lost';
       wonColumnOpen      = which === 'won';
 
-      renderDormantColumn();
       renderRelancerColumn();
       renderLostColumn();
       renderWonColumn();
@@ -7533,7 +7598,6 @@
     }
 
     const SIDE_COLUMN_IDS = {
-      dormant:  'kanbanDormantColumn',
       relancer: 'kanbanRelancerColumn',
       lost:     'kanbanLostColumn',
       won:      'kanbanWonColumn',
@@ -7573,10 +7637,11 @@
       if (lostColumnOpen) loadLostDeals(lostColumnYear, lostColumnMonth);
     }
 
-    // === Colonne "À trier / En sommeil" : deals >90j sans relance (ni RDV/tâche futur), exclus du pipeline pondéré ===
+    // === Deals en sommeil : >90j sans relance (ni RDV/tâche futur), extraits des
+    // colonnes de stages et du pipeline pondéré. Ils s'affichent dans le bac
+    // « À relancer », aux côtés des gelés (voir _collectRelancerDeals). ===
     const DORMANT_DAYS = 90;
     let dormantDeals = [];
-    let dormantColumnOpen = false;
     // ATTENTION — le test a changé de nature avec computeDealHealth.
     // Avant : daysSinceTouch valait null quand un RDV futur / une tâche future /
     // un deal récent désamorçait l'alerte, et le null servait de sentinelle.
@@ -7606,47 +7671,6 @@
       }
       return out;
     }
-    function toggleDormantColumn() { openSideColumn(dormantColumnOpen ? null : 'dormant'); }
-    function renderDormantColumn() {
-      const col = document.getElementById('kanbanDormantColumn');
-      if (!col) return;
-      col.classList.toggle('expanded', dormantColumnOpen);
-      col.classList.toggle('collapsed', !dormantColumnOpen);
-      let deals = kanbanAssigneeFilter ? dormantDeals.filter(d => _dealMatchesAssignee(d.id)) : dormantDeals;
-      if (kanbanSearchQuery) deals = deals.filter(_dealMatchesSearch);
-      deals = deals.slice().sort((a, b) => (b.daysSinceTouch || 0) - (a.daysSinceTouch || 0));
-      const total = deals.reduce((s, d) => s + d.amount, 0);
-      if (!dormantColumnOpen) {
-        col.innerHTML = `
-          <div class="kanban-header" onclick="toggleDormantColumn()" title="Deals en sommeil (>${DORMANT_DAYS}j sans relance) — exclus du pipeline pondéré">
-            <span class="won-toggle-icon">&#9654;</span>
-            <span class="won-collapsed-label">À trier · ${deals.length}</span>
-          </div>`;
-        return;
-      }
-      let cardsHtml = '';
-      if (deals.length === 0) {
-        cardsHtml = `<div class="won-empty">Aucun deal en sommeil</div>`;
-      } else {
-        for (const d of deals) {
-          cardsHtml += `<div class="kanban-card kanban-card-relancer" data-deal-id="${d.id}" onclick="openDealSidebar('${d.id}')" style="cursor:pointer">
-            <div class="kanban-card-name">${d.name}</div>
-            <div class="kanban-card-meta">
-              <span class="kanban-card-amount">${formatEuro(d.amount)}</span>
-              <span class="kanban-card-won-date">${d.daysSinceTouch != null ? d.daysSinceTouch + 'j sans relance' : ''}</span>
-              ${assigneeAvatarHtml(d.id, (dealMetadata[d.id] || {}).assignee)}
-            </div>
-          </div>`;
-        }
-      }
-      col.innerHTML = `
-        <div class="kanban-header" onclick="toggleDormantColumn()" title="Replier">
-          <span class="kanban-header-label">&#9660; À trier · en sommeil</span>
-          <span class="kanban-header-count">${deals.length} &middot; ${formatEuro(total)}</span>
-        </div>
-        <div class="kanban-cards">${cardsHtml}</div>`;
-    }
-
     function renderKanban() {
       if (!dashboardData || !dashboardData.pipelineDeals) return;
       if (repeatClientsData) renderRepeatKpis();
@@ -7775,13 +7799,11 @@
       }
 
       // Colonnes repliables (fermées par défaut)
-      html += `<div id="kanbanDormantColumn" class="kanban-column-won kanban-column-relancer ${dormantColumnOpen ? 'expanded' : 'collapsed'}"></div>`;
       html += `<div id="kanbanRelancerColumn" class="kanban-column-won kanban-column-relancer ${relancerColumnOpen ? 'expanded' : 'collapsed'}"></div>`;
       html += `<div id="kanbanLostColumn" class="kanban-column-won kanban-column-lost ${lostColumnOpen ? 'expanded' : 'collapsed'}"></div>`;
       html += `<div id="kanbanWonColumn" class="kanban-column-won ${wonColumnOpen ? 'expanded' : 'collapsed'}"></div>`;
 
       board.innerHTML = html;
-      renderDormantColumn();
       renderRelancerColumn();
       renderLostColumn();
       renderWonColumn();
@@ -8835,7 +8857,7 @@
         closeDealSidebar();
         const quand = new Date(wakeIso).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
         if (typeof showToast === 'function') {
-          showToast('success', `${deal.name} est gelé jusqu'au ${quand}. Il est dans la colonne 🧊 Gelés, à droite, et revient tout seul ce jour-là.`, 6000);
+          showToast('success', `${deal.name} est gelé jusqu'au ${quand}. Il est dans le bac À relancer, à droite, et revient tout seul ce jour-là.`, 6000);
         }
       } catch (e) {
         if (btn) { btn.disabled = false; btn.textContent = '🧊 Geler'; }
