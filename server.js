@@ -31,6 +31,7 @@ const {
   computeAvancement,
   verifierInvariantAvancement,
   validerSaisieAvancement,
+  exerciceFige,
   PREMIER_EXERCICE_AVANCEMENT,
 } = require('./utils/caAvancement'); // CA a l'avancement (FAE/PCA) : spec docs/superpowers/specs/2026-08-31-ca-avancement-design.md
 const cron = require('node-cron');
@@ -9388,7 +9389,6 @@ app.get('/api/avancement', async (req, res) => {
       fetchMissionAvancements(),
     ]);
     const calcul = computeAvancement(missions, lignes, exercice);
-    const lignesExercice = lignes.filter(l => l.exercice === exercice);
     res.json({
       disponible,
       exercice,
@@ -9396,7 +9396,7 @@ app.get('/api/avancement', async (req, res) => {
       lignes,
       suivies: calcul.suivies,
       anomalies: verifierInvariantAvancement(missions, lignes),
-      figee: lignesExercice.length > 0 && lignesExercice.every(l => !!l.fige_le),
+      figee: exerciceFige(lignes, exercice),
       missions: missions
         .filter(m => m.etat !== 'Annulé')
         .map(m => ({ id: m.id, nom: m.nom, client: m.client, ca: m.ca })),
@@ -9416,8 +9416,10 @@ app.post('/api/avancement', async (req, res) => {
 
     const { lignes, disponible } = await fetchMissionAvancements();
     if (!disponible) return res.status(503).json({ error: `Table ${MISSION_AVANCEMENTS_TABLE} absente : exécuter ${MISSION_AVANCEMENTS_SQL_PATH}` });
-    const existante = lignes.find(l => l.mission_id === String(missionId) && l.exercice === Number(exercice));
-    if (existante && existante.fige_le) {
+    // Garde sur l'EXERCICE ENTIER (pas seulement la ligne du couple mission/exercice) : sinon une
+    // mission jamais suivie pourrait etre saisie sur un exercice deja figé (aucune ligne existante
+    // a trouver pour ce couple), ce qui rouvrirait silencieusement un exercice clos.
+    if (exerciceFige(lignes, Number(exercice))) {
       return res.status(409).json({ error: `Exercice ${exercice} figé : cette saisie n'est plus modifiable` });
     }
 
@@ -9454,8 +9456,9 @@ app.delete('/api/avancement', async (req, res) => {
 
     const { lignes, disponible } = await fetchMissionAvancements();
     if (!disponible) return res.status(503).json({ error: `Table ${MISSION_AVANCEMENTS_TABLE} absente : exécuter ${MISSION_AVANCEMENTS_SQL_PATH}` });
-    const existante = lignes.find(l => l.mission_id === String(missionId) && l.exercice === ex);
-    if (existante && existante.fige_le) {
+    // Meme garde sur l'exercice entier que POST (voir commentaire ci-dessus) : une suppression sur
+    // un exercice figé doit etre refusee meme si la ligne exacte n'existe pas.
+    if (exerciceFige(lignes, ex)) {
       return res.status(409).json({ error: `Exercice ${ex} figé : cette saisie n'est plus supprimable` });
     }
 

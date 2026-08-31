@@ -6,6 +6,8 @@ const {
   computeAvancement,
   ajusterTotal,
   verifierInvariantAvancement,
+  validerSaisieAvancement,
+  exerciceFige,
 } = require('./caAvancement');
 
 describe('pctFin : avancement au 31/12 avec report en avant', () => {
@@ -195,8 +197,6 @@ describe('verifierInvariantAvancement : l avancement deplace du CA, il n en cree
   });
 });
 
-const { validerSaisieAvancement } = require('./caAvancement');
-
 describe('validerSaisieAvancement : gardes de saisie', () => {
   const ANNEE = 2026;
 
@@ -228,5 +228,47 @@ describe('validerSaisieAvancement : gardes de saisie', () => {
 
   test('exercice 2025 accepte : c est l ancre du fichier cut-off', () => {
     expect(validerSaisieAvancement({ missionId: 'm1', exercice: 2025, pct: 90 }, ANNEE).ok).toBe(true);
+  });
+});
+
+describe('exerciceFige : un exercice est fige des qu une ligne au moins porte un fige_le', () => {
+  test('aucune ligne pour cet exercice : non fige', () => {
+    expect(exerciceFige([], 2026)).toBe(false);
+    expect(exerciceFige([{ mission_id: 'm1', exercice: 2025, fige_le: '2026-01-01T00:00:00Z' }], 2026)).toBe(false);
+  });
+
+  test('lignes toutes non figees : non fige', () => {
+    const lignes = [
+      { mission_id: 'm1', exercice: 2026, fige_le: null },
+      { mission_id: 'm2', exercice: 2026, fige_le: null },
+    ];
+    expect(exerciceFige(lignes, 2026)).toBe(false);
+  });
+
+  test('lignes toutes figees : fige', () => {
+    const lignes = [
+      { mission_id: 'm1', exercice: 2026, fige_le: '2026-01-01T00:00:00Z' },
+      { mission_id: 'm2', exercice: 2026, fige_le: '2026-01-02T00:00:00Z' },
+    ];
+    expect(exerciceFige(lignes, 2026)).toBe(true);
+  });
+
+  test('melange d une ligne figee et d une non figee : fige quand meme (some, pas every)', () => {
+    const lignes = [
+      { mission_id: 'm1', exercice: 2026, fige_le: '2026-01-01T00:00:00Z' },
+      { mission_id: 'm2', exercice: 2026, fige_le: null },
+    ];
+    expect(exerciceFige(lignes, 2026)).toBe(true);
+  });
+
+  test('lignes figees d un autre exercice : ne contamine pas l exercice demande', () => {
+    const lignes = [{ mission_id: 'm1', exercice: 2025, fige_le: '2026-01-01T00:00:00Z' }];
+    expect(exerciceFige(lignes, 2026)).toBe(false);
+  });
+
+  test('entree null, undefined ou vide : non fige', () => {
+    expect(exerciceFige(null, 2026)).toBe(false);
+    expect(exerciceFige(undefined, 2026)).toBe(false);
+    expect(exerciceFige([], 2026)).toBe(false);
   });
 });

@@ -131,8 +131,8 @@ function verifierInvariantAvancement(missions, lignes) {
 // fichier de cut-off transmis a l'expert-comptable), meme si aucun CA 2025 n'est jamais ajuste.
 const EXERCICE_ANCRE = 2025;
 
-// Validation d'une saisie, hors HTTP pour rester testable. anneeCourante = new Date().getFullYear()
-// cote appelant (le module reste pur : il ne lit jamais l'horloge).
+// Validation d'une saisie, hors HTTP pour rester testable. L'annee courante est fournie par
+// l'appelant (parametre anneeCourante) : le module ne lit jamais l'horloge.
 function validerSaisieAvancement(saisie, anneeCourante) {
   const s = saisie || {};
   const id = s.missionId != null ? String(s.missionId).trim() : '';
@@ -146,6 +146,16 @@ function validerSaisieAvancement(saisie, anneeCourante) {
   return { ok: true };
 }
 
+// Un exercice est fige des qu'AU MOINS UNE de ses lignes porte un fige_le non nul (some, pas
+// every) : un exercice clos doit se lire comme clos meme si une ligne parasite non figee existe
+// pour ce meme exercice. Le garde d'ecriture de POST/DELETE /api/avancement s'appuie desormais sur
+// cette meme fonction avant toute recherche de ligne : une fois l'exercice figé via some(), plus
+// aucune nouvelle ligne non figee ne peut y apparaitre, donc le cas "parasite" ne peut plus se
+// creer a partir d'ici ; some() protege le passe (donnees deja en base) plutot que le futur seul.
+function exerciceFige(lignes, exercice) {
+  return (lignes || []).some(l => l && Number(l.exercice) === Number(exercice) && !!l.fige_le);
+}
+
 module.exports = {
   PREMIER_EXERCICE_AVANCEMENT,
   TOLERANCE_INVARIANT,
@@ -156,4 +166,5 @@ module.exports = {
   ajusterTotal,
   verifierInvariantAvancement,
   validerSaisieAvancement,
+  exerciceFige,
 };
