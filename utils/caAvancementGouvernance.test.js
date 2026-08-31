@@ -8,6 +8,10 @@ const path = require('path');
 // un symbole de l'avancement apparait dans ces zones.
 
 const RACINE = path.join(__dirname, '..');
+// 'ajusterTotal' est le seul symbole ci-dessous sans marqueur de domaine (pas de prefixe/suffixe
+// evoquant l'avancement) : une collision future avec un utilitaire sans rapport portant ce nom est
+// possible. Aucune collision aujourd'hui (verifie). Si ca arrive, la bonne reponse est de renommer
+// l'utilitaire fautif, pas de retirer ce symbole de la liste : la garde D7/D8 doit rester complete.
 const SYMBOLES_AVANCEMENT = [
   'caAvancement',
   'computeAvancement',
@@ -47,15 +51,26 @@ describe('gouvernance : la remuneration ne depend jamais de l avancement (D7)', 
     for (const s of SYMBOLES_AVANCEMENT) expect(src).not.toContain(s);
   });
 
-  test('utils/kpiCompute.js : ni signedAmountForYear ni totalCaAnnee ni signedByQuarter ne referencent l avancement', () => {
+  // Scan du fichier ENTIER (comme billing.js), pas seulement des trois fonctions de calcul du CA :
+  // un scan borne aux corps de fonctions peut etre contourne par une importation aliasee en tete de
+  // fichier (ex. `const { ajusterTotal: miroirCalc } = require('./caAvancement');` puis
+  // `miroirCalc(...)` dans le corps) qui echapperait a extraireFonction. kpiCompute.js est un module
+  // pur sans raison legitime de connaitre l'avancement : la regle "jamais nulle part dans ce fichier"
+  // est a la fois plus simple, plus stricte et plus honnete.
+  test('utils/kpiCompute.js ne reference aucun symbole d avancement, nulle part dans le fichier', () => {
     const src = lire('utils/kpiCompute.js');
-    for (const nom of ['function signedAmountForYear', 'function totalCaAnnee', 'function signedByQuarter']) {
-      const corps = extraireFonction(src, nom);
-      for (const s of SYMBOLES_AVANCEMENT) expect(corps).not.toContain(s);
-    }
+    for (const s of SYMBOLES_AVANCEMENT) expect(src).not.toContain(s);
   });
 });
 
+// Limite assumee : contrairement a kpiCompute.js, le scan ci-dessous reste borne au CORPS de
+// computeResultatFactuelForYear (extraireFonction), pas au fichier server.js entier. Un scan global
+// serait un faux positif garanti : server.js importe legitimement ces symboles en tete de fichier et
+// les utilise ailleurs (ex. app.get('/api/ebe', ...) juste apres cette fonction). Consequence : une
+// importation aliasee en tete de server.js (meme contournement que celui corrige pour kpiCompute.js)
+// echapperait theoriquement a cette garde si elle etait ensuite appelee depuis le corps de la fonction
+// sous un nom different. Ce risque residuel est accepte : mieux vaut une garde qui annonce sa limite
+// qu'une garde qui pretend a tort couvrir tout le fichier.
 describe('gouvernance : la tresorerie reste a la facture (D8)', () => {
   test('computeResultatFactuelForYear ne reference aucun symbole d avancement', () => {
     const src = lire('server.js');
