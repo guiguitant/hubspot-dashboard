@@ -27,6 +27,12 @@ const { computeCrRetraite, computeEffetCumule, verifierInvariantImmos } = requir
 const { normaliserPostesByImmo, nomImmoAffichage, estImmoAPostes, buildDotationsDetail } = require('./utils/dotationsDetail'); // detail des dotations par immo + repli d'annee des postes (module pur, helpers de calcul injectes depuis ce fichier)
 const { chargerLiasses, verifierLiasse } = require('./utils/liasses'); // Liasses fiscales des exercices clos : chiffres OFFICIELS affiches par le CR (spec 2026-08-15-liasse-exercice-clos-design), aucun calcul modifie
 const { buildCoupleKey, buildIndexExactKey, buildIndexExactTVA, montantHT } = require('./utils/tvaCharges'); // cle categorie/sous-categorie partagee avec le parser Categories TVA (evite toute divergence) ; montantHT = conversion TTC->HT du reel (Tache 6) ; buildIndexExactTVA = jointure pure lettrage Pennylane (extraite en utils, revue C1)
+const {
+  computeAvancement,
+  verifierInvariantAvancement,
+  validerSaisieAvancement,
+  PREMIER_EXERCICE_AVANCEMENT,
+} = require('./utils/caAvancement'); // CA a l'avancement (FAE/PCA) : spec docs/superpowers/specs/2026-08-31-ca-avancement-design.md
 const cron = require('node-cron');
 const MASSE_TAB = 'Masse_salariale';
 const upload = multer({
@@ -9200,12 +9206,18 @@ let dealsNotionTableAbsenteWarned = false; // console.warn une seule fois, pas a
 // volontairement : un ancien repli `/does not exist|schema cache/i` attrapait AUSSI une colonne
 // manquante (42703 Postgres, PGRST204 PostgREST), la deguisant a tort en "table absente" au lieu de
 // la laisser remonter comme une vraie erreur. Le repli regex ne matche desormais que le libelle
-// propre a une RELATION absente, jamais une colonne.
-function isDealsNotionTableAbsente(error) {
+// propre a une RELATION absente, jamais une colonne. Generique : partage par toutes les tables a
+// creation manuelle (deals-notion, mission_avancements, ...), une seule logique a faire evoluer.
+function isTableAbsente(error) {
   if (!error) return false;
   const code = String(error.code || '');
   if (code === '42P01' || code === 'PGRST205') return true;
   return /relation .* does not exist|find the table .* in the schema cache/i.test(String(error.message || ''));
+}
+
+// Alias historique de isTableAbsente, conserve pour ses appelants existants de cette section.
+function isDealsNotionTableAbsente(error) {
+  return isTableAbsente(error);
 }
 
 // Ensemble des dealId valides manuellement. { ids: Set, disponible: bool }. Ne leve JAMAIS sur une
@@ -9332,6 +9344,153 @@ app.post('/api/coherence/deals-notion/annuler', async (req, res) => {
     }
     res.json({ ok: true, dealId });
   } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// --- CA a l'avancement (FAE/PCA) : spec docs/superpowers/specs/2026-08-31-ca-avancement-design.md ---
+const MISSION_AVANCEMENTS_TABLE = 'mission_avancements';
+const MISSION_AVANCEMENTS_SQL_PATH = 'migrations/44_mission_avancements.sql';
+let missionAvancementsTableAbsenteWarned = false;
+
+// Lignes d'avancement. Degradation douce si la table n'existe pas encore ; toute autre erreur
+// Supabase remonte (une panne reelle doit rester visible).
+async function fetchMissionAvancements() {
+  const { data, error } = await supabaseAdmin
+    .from(MISSION_AVANCEMENTS_TABLE)
+    .select('mission_id, exercice, pct, nom, fige_le');
+  if (error) {
+    if (!isTableAbsente(error)) throw new Error(error.message);
+    if (!missionAvancementsTableAbsenteWarned) {
+      missionAvancementsTableAbsenteWarned = true;
+      console.warn(`[avancement] Table ${MISSION_AVANCEMENTS_TABLE} absente : exécuter le SQL ${MISSION_AVANCEMENTS_SQL_PATH} (CA à l'avancement désactivé)`);
+    }
+    return { lignes: [], disponible: false };
+  }
+  const lignes = (data || []).map(r => ({
+    mission_id: String(r.mission_id),
+    exercice: Number(r.exercice),
+    pct: Number(r.pct),
+    nom: r.nom || '',
+    fige_le: r.fige_le || null,
+  }));
+  return { lignes, disponible: true };
+}
+
+// Etat d'avancement pour la modale de saisie : lignes brutes, detail calcule de l'exercice demande,
+// anomalies d'invariant, et si l'exercice est deja fige.
+app.get('/api/avancement', async (req, res) => {
+  try {
+    const exercice = parseInt(req.query.year, 10) || new Date().getFullYear();
+    if (exercice < 2000 || exercice > 2100) return res.status(400).json({ error: 'Paramètre year hors bornes (2000 à 2100)' });
+    const [missions, { lignes, disponible }] = await Promise.all([
+      fetchAllNotionMissions(),
+      fetchMissionAvancements(),
+    ]);
+    const calcul = computeAvancement(missions, lignes, exercice);
+    const lignesExercice = lignes.filter(l => l.exercice === exercice);
+    res.json({
+      disponible,
+      exercice,
+      premierExercice: PREMIER_EXERCICE_AVANCEMENT,
+      lignes,
+      suivies: calcul.suivies,
+      anomalies: verifierInvariantAvancement(missions, lignes),
+      figee: lignesExercice.length > 0 && lignesExercice.every(l => !!l.fige_le),
+      missions: missions
+        .filter(m => m.etat !== 'Annulé')
+        .map(m => ({ id: m.id, nom: m.nom, client: m.client, ca: m.ca })),
+    });
+  } catch (e) {
+    console.error('GET /api/avancement error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Saisie ou mise a jour d'un pourcentage d'avancement (upsert idempotent).
+app.post('/api/avancement', async (req, res) => {
+  try {
+    const { missionId, exercice, pct, nom } = req.body || {};
+    const v = validerSaisieAvancement({ missionId, exercice, pct }, new Date().getFullYear());
+    if (!v.ok) return res.status(400).json({ error: v.message });
+
+    const { lignes, disponible } = await fetchMissionAvancements();
+    if (!disponible) return res.status(503).json({ error: `Table ${MISSION_AVANCEMENTS_TABLE} absente : exécuter ${MISSION_AVANCEMENTS_SQL_PATH}` });
+    const existante = lignes.find(l => l.mission_id === String(missionId) && l.exercice === Number(exercice));
+    if (existante && existante.fige_le) {
+      return res.status(409).json({ error: `Exercice ${exercice} figé : cette saisie n'est plus modifiable` });
+    }
+
+    // Le missionId doit correspondre a une mission Notion connue : une saisie orpheline
+    // n'ajusterait rien et resterait invisible dans la modale.
+    const missions = await fetchAllNotionMissions();
+    const mission = missions.find(m => String(m.id) === String(missionId));
+    if (!mission) return res.status(400).json({ error: 'Mission Notion introuvable' });
+
+    const { error } = await supabaseAdmin
+      .from(MISSION_AVANCEMENTS_TABLE)
+      .upsert({
+        mission_id: String(missionId),
+        exercice: Number(exercice),
+        pct: Number(pct),
+        nom: nom || mission.nom || '',
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'mission_id,exercice' });
+    if (error) throw new Error(error.message);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('POST /api/avancement error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Retrait d'une mission du suivi pour un exercice (idempotent : supprimer l'absent renvoie ok).
+app.delete('/api/avancement', async (req, res) => {
+  try {
+    const { missionId, exercice } = req.body || {};
+    if (!missionId) return res.status(400).json({ error: 'missionId requis' });
+    const ex = Number(exercice);
+    if (!Number.isInteger(ex)) return res.status(400).json({ error: 'exercice requis' });
+
+    const { lignes, disponible } = await fetchMissionAvancements();
+    if (!disponible) return res.status(503).json({ error: `Table ${MISSION_AVANCEMENTS_TABLE} absente : exécuter ${MISSION_AVANCEMENTS_SQL_PATH}` });
+    const existante = lignes.find(l => l.mission_id === String(missionId) && l.exercice === ex);
+    if (existante && existante.fige_le) {
+      return res.status(409).json({ error: `Exercice ${ex} figé : cette saisie n'est plus supprimable` });
+    }
+
+    const { error } = await supabaseAdmin
+      .from(MISSION_AVANCEMENTS_TABLE)
+      .delete()
+      .eq('mission_id', String(missionId))
+      .eq('exercice', ex);
+    if (error) throw new Error(error.message);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('DELETE /api/avancement error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Figeage d'un exercice a la cloture : toutes ses lignes deviennent non modifiables. Action
+// volontaire (aucun couplage automatique a la liasse). Pas de defigeage par l'API : cas
+// exceptionnel, a traiter en SQL.
+app.post('/api/avancement/figer', async (req, res) => {
+  try {
+    const ex = Number((req.body || {}).exercice);
+    if (!Number.isInteger(ex) || ex < 2000 || ex > 2100) return res.status(400).json({ error: 'exercice hors bornes (2000 à 2100)' });
+    const { disponible } = await fetchMissionAvancements();
+    if (!disponible) return res.status(503).json({ error: `Table ${MISSION_AVANCEMENTS_TABLE} absente : exécuter ${MISSION_AVANCEMENTS_SQL_PATH}` });
+    const { data, error } = await supabaseAdmin
+      .from(MISSION_AVANCEMENTS_TABLE)
+      .update({ fige_le: new Date().toISOString() })
+      .eq('exercice', ex)
+      .is('fige_le', null)
+      .select('mission_id');
+    if (error) throw new Error(error.message);
+    res.json({ ok: true, lignesFigees: (data || []).length });
+  } catch (e) {
+    console.error('POST /api/avancement/figer error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });

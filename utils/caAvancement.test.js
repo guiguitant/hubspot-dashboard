@@ -194,3 +194,39 @@ describe('verifierInvariantAvancement : l avancement deplace du CA, il n en cree
     expect(anomalies[0].ecart).toBe(2);
   });
 });
+
+const { validerSaisieAvancement } = require('./caAvancement');
+
+describe('validerSaisieAvancement : gardes de saisie', () => {
+  const ANNEE = 2026;
+
+  test('saisie valide', () => {
+    expect(validerSaisieAvancement({ missionId: 'm1', exercice: 2026, pct: 40 }, ANNEE)).toEqual({ ok: true });
+  });
+
+  test('missionId manquant', () => {
+    const r = validerSaisieAvancement({ exercice: 2026, pct: 40 }, ANNEE);
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/mission/i);
+  });
+
+  test('pct hors bornes', () => {
+    expect(validerSaisieAvancement({ missionId: 'm1', exercice: 2026, pct: -1 }, ANNEE).ok).toBe(false);
+    expect(validerSaisieAvancement({ missionId: 'm1', exercice: 2026, pct: 101 }, ANNEE).ok).toBe(false);
+    expect(validerSaisieAvancement({ missionId: 'm1', exercice: 2026, pct: 'quarante' }, ANNEE).ok).toBe(false);
+  });
+
+  test('pct aux bornes : accepte', () => {
+    expect(validerSaisieAvancement({ missionId: 'm1', exercice: 2026, pct: 0 }, ANNEE).ok).toBe(true);
+    expect(validerSaisieAvancement({ missionId: 'm1', exercice: 2026, pct: 100 }, ANNEE).ok).toBe(true);
+  });
+
+  test('exercice hors bornes : avant 2025 ou apres annee courante + 1', () => {
+    expect(validerSaisieAvancement({ missionId: 'm1', exercice: 2024, pct: 50 }, ANNEE).ok).toBe(false);
+    expect(validerSaisieAvancement({ missionId: 'm1', exercice: 2028, pct: 50 }, ANNEE).ok).toBe(false);
+  });
+
+  test('exercice 2025 accepte : c est l ancre du fichier cut-off', () => {
+    expect(validerSaisieAvancement({ missionId: 'm1', exercice: 2025, pct: 90 }, ANNEE).ok).toBe(true);
+  });
+});

@@ -127,12 +127,33 @@ function verifierInvariantAvancement(missions, lignes) {
   return anomalies;
 }
 
+// Exercice le plus ancien saisissable : 2025 est l'ANCRE (avancement au 31/12/2025 des missions du
+// fichier de cut-off transmis a l'expert-comptable), meme si aucun CA 2025 n'est jamais ajuste.
+const EXERCICE_ANCRE = 2025;
+
+// Validation d'une saisie, hors HTTP pour rester testable. anneeCourante = new Date().getFullYear()
+// cote appelant (le module reste pur : il ne lit jamais l'horloge).
+function validerSaisieAvancement(saisie, anneeCourante) {
+  const s = saisie || {};
+  const id = s.missionId != null ? String(s.missionId).trim() : '';
+  if (!id) return { ok: false, message: 'missionId requis' };
+  const ex = Number(s.exercice);
+  if (!Number.isInteger(ex) || ex < EXERCICE_ANCRE || ex > Number(anneeCourante) + 1) {
+    return { ok: false, message: `exercice hors bornes (${EXERCICE_ANCRE} a ${Number(anneeCourante) + 1})` };
+  }
+  const pct = Number(s.pct);
+  if (!Number.isFinite(pct) || pct < 0 || pct > 100) return { ok: false, message: 'pct doit etre compris entre 0 et 100' };
+  return { ok: true };
+}
+
 module.exports = {
   PREMIER_EXERCICE_AVANCEMENT,
   TOLERANCE_INVARIANT,
+  EXERCICE_ANCRE,
   pctFin,
   caAvancementMission,
   computeAvancement,
   ajusterTotal,
   verifierInvariantAvancement,
+  validerSaisieAvancement,
 };
