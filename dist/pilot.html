@@ -4115,6 +4115,13 @@
     <h1 class="page-title">Facturation</h1>
     <p class="page-desc">Suivi de la facturation des missions Notion.</p>
 
+    <div style="margin-bottom:1rem">
+      <button onclick="openAvancementModal()" style="padding:0.4rem 0.8rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:0.82rem;cursor:pointer">
+        Avancement des missions
+      </button>
+      <span style="font-size:0.75rem;color:var(--text-secondary);margin-left:0.5rem">Répartition du CA des missions à cheval sur deux exercices (factures à établir et produits constatés d'avance).</span>
+    </div>
+
     <div class="kpi-row" id="factKpis">
       <div class="kpi-block kpi-clickable" id="factKpiBlockCA" onclick="toggleKpiFilter('ca2026')">
         <div class="kpi-label">CA 2026 <span class="kpi-unit">HT</span></div>
@@ -14049,6 +14056,182 @@
       refreshAnalytics();
     }
 
+    // --- CA à l'avancement (FAE/PCA) : spec 2026-08-31-ca-avancement-design.md -----------------------
+    // Une mission à cheval sur deux exercices (acompte facturé en N, solde facturé en N+1) ne doit pas
+    // faire apparaître son CA au fil des dates de facturation, mais au fil de l'avancement réel constaté
+    // au 31/12. Cette modale est le SEUL point de saisie de cet avancement : Nathan le met à jour au
+    // jugé, mission par mission, puis fige l'exercice à sa clôture (les pourcentages deviennent
+    // définitifs).
+    let avancementData = null;
+
+    async function openAvancementModal() {
+      document.getElementById('avancementModal').classList.add('active');
+      document.getElementById('avancementBody').innerHTML = '<p style="color:var(--text-secondary)">Chargement...</p>';
+      await loadAvancement();
+    }
+
+    function closeAvancementModal() {
+      document.getElementById('avancementModal').classList.remove('active');
+    }
+
+    async function loadAvancement() {
+      try {
+        const res = await fetch('/api/avancement?year=' + CURRENT_YEAR);
+        const data = await res.json().catch(() => ({}));
+        // Le serveur répond 200 avec disponible:false quand la table est absente : seule une vraie
+        // erreur HTTP (Notion, Supabase...) doit tomber dans le catch, pour ne jamais afficher le
+        // message "table absente" à la place de l'erreur réellement survenue.
+        if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        avancementData = data;
+        renderAvancementModal();
+      } catch (e) {
+        document.getElementById('avancementBody').innerHTML = '<p style="color:var(--danger)">Erreur de chargement : ' + e.message + '</p>';
+      }
+    }
+
+    function renderAvancementModal() {
+      const d = avancementData;
+      if (!d) return;
+      const ex = d.exercice;
+      const exPrec = ex - 1;
+
+      let html = '<p style="font-size:0.8rem;color:var(--text-secondary);margin-top:0;margin-bottom:0.9rem">'
+        + 'Exercice ' + ex + ' : CA reconnu = CA de la mission x (avancement au 31/12/' + ex + ' moins avancement au 31/12/' + exPrec + ').'
+        + '</p>';
+
+      if (!d.disponible) {
+        html += _crAlerteHtml('Table mission_avancements absente : exécuter migrations/44_mission_avancements.sql dans Supabase. La saisie est désactivée, aucun CA n\'est ajusté tant que la migration n\'a pas été jouée.', true);
+        document.getElementById('avancementBody').innerHTML = html;
+        return;
+      }
+
+      // exFigee vient du serveur (exerciceFige) : source de vérité unique pour savoir si l'exercice
+      // demandé est clos. figeePrec doit en revanche être dérivé du tableau brut des lignes (l'API ne
+      // renvoie le champ figee que pour l'exercice demandé, pas pour l'exercice précédent).
+      const exFigee = !!d.figee;
+      const figeePrec = (d.lignes || []).some(l => l.exercice === exPrec && l.fige_le);
+
+      if (d.anomalies && d.anomalies.length) {
+        html += _crAlerteHtml('Incohérence détectée sur ' + d.anomalies.length + ' mission(s) terminée(s) : la somme des CA par exercice ne retombe pas sur le CA de la mission. Vérifier les pourcentages saisis.', true);
+      }
+      if (exFigee) {
+        html += _crAlerteHtml('Exercice ' + ex + ' figé : les pourcentages ci-dessous sont définitifs et ne sont plus modifiables depuis Pilot.', false);
+      }
+
+      // Tableau des missions suivies
+      html += '<table style="width:100%;border-collapse:collapse;font-size:0.82rem;margin-bottom:1rem">';
+      html += '<thead><tr style="text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary)">'
+        + '<th style="padding:0.4rem">Mission</th><th style="padding:0.4rem;text-align:right">CA HT</th>'
+        + '<th style="padding:0.4rem;text-align:right">Av. 31/12/' + exPrec + '</th>'
+        + '<th style="padding:0.4rem;text-align:right">Av. 31/12/' + ex + '</th>'
+        + '<th style="padding:0.4rem;text-align:right">CA ' + ex + '</th>'
+        + '<th style="padding:0.4rem"></th></tr></thead><tbody>';
+
+      for (const s of (d.suivies || [])) {
+        // Toutes les lignes d'un exercice sont figées ensemble (garde serveur "some" sur exerciceFige) :
+        // une mission suivie de l'exercice demandé partage donc forcément l'état exFigee global.
+        const figee = exFigee;
+        html += '<tr style="border-bottom:1px solid var(--border)">'
+          + '<td style="padding:0.4rem">' + escapeHtml(s.nom) + '</td>'
+          + '<td style="padding:0.4rem;text-align:right">' + formatEuro(s.ca) + '</td>'
+          + '<td style="padding:0.4rem;text-align:right;color:var(--text-secondary)">' + s.pctPrecedent + ' %' + (figeePrec ? ' <span style="font-size:0.7rem">(figé)</span>' : '') + '</td>'
+          + '<td style="padding:0.4rem;text-align:right">'
+          + (figee
+              ? s.pctCourant + ' % <span style="font-size:0.7rem;color:var(--text-secondary)">(figé)</span>'
+              : '<input type="number" min="0" max="100" step="1" value="' + s.pctCourant + '" id="av-' + s.missionId + '" style="width:64px;padding:0.2rem;text-align:right;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text)">')
+          + '</td>'
+          + '<td style="padding:0.4rem;text-align:right;font-weight:600">' + formatEuro(s.caAvancement) + '</td>'
+          + '<td style="padding:0.4rem;text-align:right">'
+          + (figee ? '' : '<button onclick="saveAvancementLigne(\'' + s.missionId + '\',' + ex + ')" style="padding:0.2rem 0.5rem;font-size:0.75rem;cursor:pointer">OK</button>'
+             + ' <button onclick="removeAvancementLigne(\'' + s.missionId + '\',' + ex + ')" style="padding:0.2rem 0.5rem;font-size:0.75rem;cursor:pointer">Retirer</button>')
+          + '</td></tr>';
+      }
+      if (!(d.suivies || []).length) {
+        html += '<tr><td colspan="6" style="padding:0.6rem;color:var(--text-secondary)">Aucune mission suivie à l\'avancement pour ' + ex + '.</td></tr>';
+      }
+      html += '</tbody></table>';
+
+      // Ajout d'une mission au suivi : désactivé dès que l'exercice courant est figé (une écriture
+      // serait de toute façon refusée par le serveur, autant l'expliquer plutôt que de laisser
+      // l'utilisateur essayer pour rien).
+      if (exFigee) {
+        html += '<div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:1rem">Exercice ' + ex + ' figé : plus aucune mission ne peut être ajoutée ou retirée du suivi.</div>';
+      } else {
+        const suiviesIds = new Set((d.suivies || []).map(s => s.missionId));
+        const dispo = (d.missions || []).filter(m => !suiviesIds.has(String(m.id)));
+        html += '<div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:1rem">'
+          + '<select id="avancementNouvelle" style="flex:1;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:0.8rem">'
+          + '<option value="">Ajouter une mission au suivi...</option>'
+          + dispo.map(m => '<option value="' + m.id + '">' + escapeHtml(m.nom || '') + ' · ' + escapeHtml(m.client || '') + ' · ' + formatEuro(m.ca || 0) + '</option>').join('')
+          + '</select>'
+          + '<input type="number" min="0" max="100" step="1" id="avancementNouveauPct" placeholder="%" style="width:70px;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text)">'
+          + '<button onclick="addAvancementLigne(' + ex + ')" style="padding:0.35rem 0.7rem;cursor:pointer">Ajouter</button>'
+          + '</div>';
+      }
+
+      // Figeage : action volontaire, non annulable depuis l'interface (confirmation systématique dans
+      // figerAvancement). Le bouton disparaît dès qu'un exercice est déjà figé, remplacé par une mention.
+      html += '<div style="border-top:1px solid var(--border);padding-top:0.75rem;font-size:0.78rem;color:var(--text-secondary)">'
+        + 'À la clôture d\'un exercice, figer ses pourcentages : ils deviennent l\'avancement officiel au 31/12 et ne sont plus modifiables.'
+        + '<div style="margin-top:0.5rem;display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap">'
+        + (figeePrec
+            ? '<span>' + exPrec + ' déjà figé</span>'
+            : '<button onclick="figerAvancement(' + exPrec + ')" style="padding:0.25rem 0.6rem;font-size:0.75rem;cursor:pointer">Figer ' + exPrec + '</button>')
+        + (exFigee
+            ? '<span>' + ex + ' déjà figé</span>'
+            : '<button onclick="figerAvancement(' + ex + ')" style="padding:0.25rem 0.6rem;font-size:0.75rem;cursor:pointer">Figer ' + ex + '</button>')
+        + '</div></div>';
+
+      document.getElementById('avancementBody').innerHTML = html;
+    }
+
+    async function postAvancement(url, method, body) {
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      return data;
+    }
+
+    async function saveAvancementLigne(missionId, exercice) {
+      const input = document.getElementById('av-' + missionId);
+      if (!input) return;
+      try {
+        await postAvancement('/api/avancement', 'POST', { missionId, exercice, pct: Number(input.value) });
+        await loadAvancement();
+      } catch (e) { alert('Enregistrement impossible : ' + e.message); }
+    }
+
+    async function addAvancementLigne(exercice) {
+      const sel = document.getElementById('avancementNouvelle');
+      const pct = document.getElementById('avancementNouveauPct');
+      if (!sel || !sel.value) return;
+      try {
+        await postAvancement('/api/avancement', 'POST', { missionId: sel.value, exercice, pct: Number(pct.value) || 0 });
+        await loadAvancement();
+      } catch (e) { alert('Ajout impossible : ' + e.message); }
+    }
+
+    async function removeAvancementLigne(missionId, exercice) {
+      if (!confirm('Retirer cette mission du suivi à l\'avancement pour ' + exercice + ' ?')) return;
+      try {
+        await postAvancement('/api/avancement', 'DELETE', { missionId, exercice });
+        await loadAvancement();
+      } catch (e) { alert('Suppression impossible : ' + e.message); }
+    }
+
+    async function figerAvancement(exercice) {
+      if (!confirm('Figer définitivement les pourcentages de ' + exercice + ' ? Cette action n\'est pas annulable depuis Pilot.')) return;
+      try {
+        const r = await postAvancement('/api/avancement/figer', 'POST', { exercice });
+        alert(r.lignesFigees + ' ligne(s) figée(s) pour ' + exercice + '.');
+        await loadAvancement();
+      } catch (e) { alert('Figeage impossible : ' + e.message); }
+    }
+
     // --- Facturation ---
     let factData = null;
     let factFilter = 'all';
@@ -20959,6 +21142,17 @@
       <button class="deal-sidebar-won-btn" id="sidebarWonBtn" onclick="markCurrentDeal('closedwon')">&#10003; Marquer Gagné</button>
       <button class="deal-sidebar-lost-btn" id="sidebarLostBtn" onclick="markCurrentDeal('closedlost')">&#10007; Marquer Perdu</button>
       <button id="sidebarDeleteBtn" onclick="deleteCurrentDeal()" title="Supprimer le deal" style="flex:0 0 auto;background:none;border:1px solid rgba(239,68,68,0.35);color:#b91c1c;border-radius:6px;cursor:pointer;padding:0 0.6rem;font-size:0.9rem">&#128465;</button>
+    </div>
+  </div>
+
+  <!-- Modale Avancement des missions (onglet Facturation) : seul point de saisie du pourcentage d'avancement -->
+  <div class="modal-overlay" id="avancementModal" onclick="if(event.target===this) closeAvancementModal()">
+    <div class="modal kpi-modal">
+      <div class="modal-header" style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+        <h2 style="margin:0;">Avancement des missions</h2>
+        <button class="modal-close-x" onclick="closeAvancementModal()" aria-label="Fermer">&times;</button>
+      </div>
+      <div class="modal-body" id="avancementBody"></div>
     </div>
   </div>
 
