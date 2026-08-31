@@ -12119,6 +12119,15 @@
       // CA « de l'année » (facturé ou non, source Notion) : même chiffre que le Cockpit et le KPI.
       // Repli sur data.ca (facturé seul) si le champ n'est pas renvoyé, par sécurité.
       document.getElementById('analyticsCa').textContent = formatEuro(data.caAnnee != null ? data.caAnnee : data.ca);
+      // Même infobulle que le Cockpit : le CA affiché intègre l'avancement des missions à cheval.
+      // Le graphe mensuel ci-dessous reste daté à la facture (un pourcentage d'avancement n'a pas
+      // de mois d'atterrissage) : les deux peuvent donc différer, c'est voulu.
+      const _elAnalyticsCa = document.getElementById('analyticsCa');
+      if (data.avancement && data.avancement.actif && data.avancement.delta !== 0) {
+        _elAnalyticsCa.title = "CA à l'avancement : ajustement de " + formatEuro(data.avancement.delta) + " sur " + data.avancement.suivies.length + " mission(s) à cheval. Le graphe mensuel reste daté à la facture.";
+      } else {
+        _elAnalyticsCa.title = '';
+      }
       const analyticsCaYearEl = document.getElementById('analyticsCaYear');
       if (analyticsCaYearEl) analyticsCaYearEl.textContent = String(data.start).slice(0, 4);
       document.getElementById('analyticsCaSigne').textContent = formatEuro(data.caSigne || 0);
@@ -16082,7 +16091,20 @@
         html += _crAlerteHtml("Exercice contrefactuel déficitaire : l'IS théorique des exercices suivants est surestimé (déficit reportable ignoré).", false);
       }
       if (horsCapi) html += _crPontHtml(d, r, projete);
-      html += row("Chiffre d'affaires" + (projete ? ' (facture + pipeline)' : ' facture'), ca, { onclick: "openCrDetailModal('ca')" });
+      // Badge "à l'avancement" : le CA des missions à cheval est réparti selon leur avancement au
+      // 31/12, pas selon leurs dates de facturation (FAE/PCA). Silencieux si aucun ajustement.
+      const _av = d.avancement || null;
+      const _avActif = !!(_av && _av.actif && _av.delta !== 0);
+      const _avBadge = _avActif
+        ? ' <span style="font-size:0.68rem;padding:0.05rem 0.35rem;border:1px solid var(--border);border-radius:10px;color:var(--text-secondary)">à l\'avancement</span>'
+        : '';
+      const _avTitre = _avActif
+        ? "CA à l'avancement : " + _av.suivies.length + ' mission(s) à cheval, ajustement de ' + formatEuro(_av.delta) + ' par rapport aux dates de facturation.'
+        : '';
+      html += row("Chiffre d'affaires" + (projete ? ' (facture + pipeline)' : ' facture'), ca, { onclick: "openCrDetailModal('ca')", badge: _avBadge, title: _avTitre });
+      if (_avActif) {
+        html += subRow("dont ajustement d'avancement (FAE/PCA)", formatEuro(_av.delta));
+      }
       if (projete && d.ca.pipelinePondere) {
         html += subRow('dont CA facture (Notion)', formatEuro(d.ca.facture));
         html += subRow('dont pipeline pondere (HubSpot)', formatEuro(d.ca.pipelinePondere));
@@ -16701,7 +16723,7 @@
         body += '<div style="font-size:0.74rem;color:var(--text-secondary);margin-top:0.5rem">Colonne Pilot : montants factuels de l\'exercice clos (la case « Colonne projetée » ne change rien ici). Écart = Pilot moins liasse. Rubriques de la liasse arrondies à l\'euro par le cabinet : un écart résiduel de 1 à 2 € entre la somme des rubriques et les totaux déclarés est normal.</div>';
         body += '<div style="margin-top:0.8rem;padding-top:0.6rem;border-top:1px dashed var(--border);font-size:0.78rem;line-height:1.5;color:var(--text-secondary)">';
         body += '<strong>Pourquoi les colonnes diffèrent</strong> · Ce sont des écarts de convention, pas des erreurs :';
-        body += '<div style="margin-top:0.35rem">· <strong>CA</strong> : Pilot compte le chiffre d\'affaires à la facture Notion, la liasse retient la production vendue comptable (factures à établir, produits constatés d\'avance, avoirs) : le même euro peut tomber d\'un exercice sur l\'autre.</div>';
+        body += '<div style="margin-top:0.35rem">· <strong>CA</strong> : à partir de 2026, Pilot compte le chiffre d\'affaires à l\'avancement (missions à cheval réparties selon leur avancement au 31/12), ce qui le rapproche de la production vendue comptable retenue par la liasse ; pour 2025 et les exercices antérieurs, il reste compté à la date de facture Notion, la liasse faisant foi.</div>';
         body += '<div>· <strong>Charges</strong> : Pilot additionne le réel Qonto des mois clos et le budget des mois restants, converti HT sur un périmètre de pilotage (exclusions PCG, TVA estimée), <strong>hors dotations</strong> (ligne distincte du compte de résultat) ; la rubrique fiscale de la liasse, elle, INCLUT les dotations aux amortissements ('
           + formatEuro(num(lc.dontDotationsAmortissements)) + ', isolées sur la ligne dédiée ci-dessus pour que les deux colonnes bouclent) et les autres charges de gestion (' + formatEuro(num(lc.dontAutresCharges)) + ').</div>';
         body += '<div>· <strong>IS et résultat net</strong> : Pilot les estime au barème PME sur son résultat d\'exploitation, sans retraitements fiscaux ni déficits reportables, et son impôt net déduit CII <strong>et</strong> CIR ; la liasse porte l\'impôt réellement dû de la ligne 306, après imputation du CIR seul ('
@@ -20483,7 +20505,16 @@
       if (ckCaAnneeYearEl) ckCaAnneeYearEl.textContent = CURRENT_YEAR;
       fetch('/api/ca-annee?year=' + CURRENT_YEAR)
         .then(r => r.json())
-        .then(d => { document.getElementById('ckCaAnnee').textContent = formatEuro(d.caAnnee || 0); })
+        .then(d => {
+          document.getElementById('ckCaAnnee').textContent = formatEuro(d.caAnnee || 0);
+          // Infobulle si le CA intègre un ajustement d'avancement (missions à cheval, FAE/PCA).
+          const _el = document.getElementById('ckCaAnnee');
+          if (d.avancement && d.avancement.actif && d.avancement.delta !== 0) {
+            _el.title = "CA à l'avancement : ajustement de " + formatEuro(d.avancement.delta) + ' sur ' + d.avancement.suivies.length + ' mission(s) à cheval sur deux exercices.';
+          } else {
+            _el.title = '';
+          }
+        })
         .catch(e => console.error('Erreur CA annee cockpit:', e));
 
       // Pipeline pondere
