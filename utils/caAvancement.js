@@ -156,6 +156,27 @@ function exerciceFige(lignes, exercice) {
   return (lignes || []).some(l => l && Number(l.exercice) === Number(exercice) && !!l.fige_le);
 }
 
+// Ce qu'une mission suivie apporte a la base "factures emises datees dans l'annee" (celle du CR).
+// Sert a retirer exactement sa contribution avant d'ajouter son CA a l'avancement. On compare des
+// annees sur la chaine de date (slice) et non des objets Date, pour rester insensible au fuseau.
+function contributionsDepuisVolets(missions, missionIds, exercice) {
+  const contributions = new Map();
+  const ex = Number(exercice);
+  const anneeDe = (d) => (d ? Number(String(d).slice(0, 4)) : null);
+  for (const m of missions || []) {
+    const id = m && m.id != null ? String(m.id) : null;
+    if (!id || !missionIds || !missionIds.has(id)) continue;
+    const ca = Number(m.ca) || 0;
+    const acompte = Number(m.montantAcompte) || 0;
+    const solde = Math.max(0, ca - acompte);
+    let total = 0;
+    if (acompte > 0 && anneeDe(m.dateFactureAcompte) === ex) total += acompte;
+    if (solde > 0 && anneeDe(m.dateFactureFinale) === ex) total += solde;
+    contributions.set(id, Math.round(total));
+  }
+  return contributions;
+}
+
 module.exports = {
   PREMIER_EXERCICE_AVANCEMENT,
   TOLERANCE_INVARIANT,
@@ -167,4 +188,5 @@ module.exports = {
   verifierInvariantAvancement,
   validerSaisieAvancement,
   exerciceFige,
+  contributionsDepuisVolets,
 };

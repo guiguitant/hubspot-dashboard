@@ -9,7 +9,7 @@ const { authenticator } = require('otplib');
 const { execFile } = require('child_process');
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
-const { computeKpi, totalCaAnnee, signedByQuarter, clawbackCandidates, computePrimePool, computePrimePayments, endOfYearIso, computePrimesChargeMultiExercice } = require('./utils/kpiCompute');
+const { computeKpi, totalCaAnnee, signedAmountForYear, signedByQuarter, clawbackCandidates, computePrimePool, computePrimePayments, endOfYearIso, computePrimesChargeMultiExercice } = require('./utils/kpiCompute');
 const { computeBillingForYear } = require('./utils/billing');
 const { buildSalesNavUrl } = require('./utils/buildSalesNavUrl');
 const multer = require('multer');
@@ -29,10 +29,12 @@ const { chargerLiasses, verifierLiasse } = require('./utils/liasses'); // Liasse
 const { buildCoupleKey, buildIndexExactKey, buildIndexExactTVA, montantHT } = require('./utils/tvaCharges'); // cle categorie/sous-categorie partagee avec le parser Categories TVA (evite toute divergence) ; montantHT = conversion TTC->HT du reel (Tache 6) ; buildIndexExactTVA = jointure pure lettrage Pennylane (extraite en utils, revue C1)
 const {
   computeAvancement,
+  ajusterTotal,
   verifierInvariantAvancement,
   validerSaisieAvancement,
   exerciceFige,
   PREMIER_EXERCICE_AVANCEMENT,
+  contributionsDepuisVolets,
 } = require('./utils/caAvancement'); // CA a l'avancement (FAE/PCA) : spec docs/superpowers/specs/2026-08-31-ca-avancement-design.md
 const cron = require('node-cron');
 const MASSE_TAB = 'Masse_salariale';
@@ -6971,6 +6973,10 @@ app.get('/api/kpi', async (req, res) => {
     if (splErr) throw splErr;
     if (factErr) throw factErr;
     const result = computeKpi({ missions, objectives: objectives || [], splits: splits || [], year });
+    // Tuile "CA {annee} HT" et avancement collectif : meme chiffre que le Cockpit et Analytics.
+    const { caAnnee: _caAnneeKpi, avancement: _avancementKpi } = await caAnneeAvecAvancement(missions, year);
+    result.caAnnee = _caAnneeKpi;
+    result.avancement = _avancementKpi;
     // Base de l'objectif collectif (primes étage 2) : facturation de l'exercice (source : Notion).
     result.facturation = computeBillingForYear(missions, factOverrides || [], year);
     // CA signé (bandeau + primes étage 1) : 100% Notion, déjà calculé par computeKpi (réalisé par partner/type).
@@ -8111,13 +8117,18 @@ app.get('/api/analytics', async (req, res) => {
       cur.setMonth(cur.getMonth() + 1);
     }
 
+    const _anneeAnalytics = parseInt(String(start).slice(0, 4), 10);
+    const { caAnnee: _caAnneeAjuste, avancement: _avancementAnalytics } = await caAnneeAvecAvancement(missions, _anneeAnalytics);
+
     res.json({
       start, end,
       ca: Math.round(ca),
       // CA « de l'année » (source Notion, définition « CA <année> HT ») : facturé + non facturé
       // rattaché à l'année via « Année final ». Calculé par la fonction partagée avec le KPI et le
-      // Cockpit, pour que les trois pages affichent exactement le même chiffre.
-      caAnnee: totalCaAnnee(missions, parseInt(String(start).slice(0, 4), 10)),
+      // Cockpit, pour que les trois pages affichent exactement le même chiffre. Ajuste de l'avancement
+      // (FAE/PCA) via caAnneeAvecAvancement, comme /api/ca-annee et /api/kpi.
+      caAnnee: _caAnneeAjuste,
+      avancement: _avancementAnalytics,
       caSigne: Math.round(caSigne),
       nbSigne,
       caSigneSource,
@@ -8189,7 +8200,8 @@ app.get('/api/ca-annee', async (req, res) => {
     const year = parseInt(req.query.year, 10);
     if (Number.isNaN(year)) return res.status(400).json({ error: 'Paramètre year requis' });
     const missions = await fetchAllNotionMissions();
-    res.json({ year, caAnnee: totalCaAnnee(missions, year) });
+    const { caAnnee, avancement } = await caAnneeAvecAvancement(missions, year);
+    res.json({ year, caAnnee, avancement });
   } catch (err) {
     console.error('Erreur /api/ca-annee:', err.message);
     res.status(500).json({ error: err.message });
@@ -9378,6 +9390,28 @@ async function fetchMissionAvancements() {
   return { lignes, disponible: true };
 }
 
+// CA de l'annee (base totalCaAnnee : facture + non facture rattache par "Annee final") ajuste de
+// l'avancement. Retourne { caAnnee, avancement } pour que les trois pages (Cockpit, Analytics,
+// KPI) affichent exactement le meme chiffre, comme c'etait deja le cas avant l'avancement.
+async function caAnneeAvecAvancement(missions, year) {
+  const base = totalCaAnnee(missions, year);
+  const { lignes } = await fetchMissionAvancements();
+  const calcul = computeAvancement(missions, lignes, year);
+  if (!calcul.actif) {
+    return { caAnnee: base, avancement: { actif: false, delta: 0, base, suivies: [] } };
+  }
+  // Contribution a CETTE base : signedAmountForYear (qui replie sur "Annee final" quand la facture
+  // n'est pas emise), et non les seules factures emises du CR.
+  const contributions = new Map();
+  for (const m of missions || []) {
+    const id = m && m.id != null ? String(m.id) : null;
+    if (!id || !calcul.parMission.has(id)) continue;
+    contributions.set(id, signedAmountForYear(m, year));
+  }
+  const caAnnee = ajusterTotal(base, contributions, calcul.parMission);
+  return { caAnnee, avancement: { actif: true, delta: caAnnee - base, base, suivies: calcul.suivies } };
+}
+
 // Etat d'avancement pour la modale de saisie : lignes brutes, detail calcule de l'exercice demande,
 // anomalies d'invariant, et si l'exercice est deja fige.
 app.get('/api/avancement', async (req, res) => {
@@ -9765,6 +9799,19 @@ app.get('/api/ebe', async (req, res) => {
     }
     caFacture = Math.round(caFacture);
 
+    // CA a l'avancement (FAE/PCA) : pour les missions suivies, la contribution "factures emises
+    // dans l'annee" est REMPLACEE par ca x (avancement fin N - avancement fin N-1). Missions non
+    // suivies et exercices < 2026 : strictement inchange. Le miroir trésorerie
+    // (computeResultatFactuelForYear) reste volontairement a la facture : l'avancement deplace du
+    // CA comptable, pas des encaissements.
+    const { lignes: lignesAvancement } = await fetchMissionAvancements();
+    const calculAvancement = computeAvancement(missions, lignesAvancement, yearParam);
+    const caFactureAvantAvancement = caFacture;
+    if (calculAvancement.actif) {
+      const contributions = contributionsDepuisVolets(missions, new Set(calculAvancement.parMission.keys()), yearParam);
+      caFacture = ajusterTotal(caFacture, contributions, calculAvancement.parMission);
+    }
+
     // 2) Charges projetées sur l'année — appel direct à la logique hybride (pas de fetch HTTP self-référent,
     // qui serait bloqué par le dashboardGate en production et ramènerait les charges à 0)
     const chargesData = await computeChargesHybride(start, end);
@@ -9902,6 +9949,16 @@ app.get('/api/ebe', async (req, res) => {
       // PILOT_QUOTEPARTS_VALIDEES n'est pas 'true', dans les DEUX vues (le CR comptable depend des
       // memes quote-parts que la vue hors capitalisation).
       quotePartsValidees: process.env.PILOT_QUOTEPARTS_VALIDEES === 'true',
+      // CA a l'avancement (FAE/PCA), ADDITIF : combien la base "factures emises dans l'annee"
+      // (caFacture ci-dessus, DEJA ajustee plus haut) a ete deplacee par les missions suivies.
+      // delta = caFacture apres ajustement - base (caFacture avant ajustement). actif = false tant
+      // qu'aucune mission n'est suivie sur l'exercice (table absente ou exercice < 2026).
+      avancement: {
+        actif: calculAvancement.actif,
+        delta: caFacture - caFactureAvantAvancement,
+        base: caFactureAvantAvancement,
+        suivies: calculAvancement.suivies,
+      },
       // Vue economique "CR hors capitalisation", ADDITIVE : affichee A COTE du compte de resultat
       // ci-dessus, jamais a sa place. Sortie du module pur utils/crRetraite.js (ebe,
       // dotationsNeutralisees, amortissements conserves, ecartDotations, resultatExploitation, is,

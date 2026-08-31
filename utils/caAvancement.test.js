@@ -8,6 +8,7 @@ const {
   verifierInvariantAvancement,
   validerSaisieAvancement,
   exerciceFige,
+  contributionsDepuisVolets,
 } = require('./caAvancement');
 
 describe('pctFin : avancement au 31/12 avec report en avant', () => {
@@ -270,5 +271,32 @@ describe('exerciceFige : un exercice est fige des qu une ligne au moins porte un
     expect(exerciceFige(null, 2026)).toBe(false);
     expect(exerciceFige(undefined, 2026)).toBe(false);
     expect(exerciceFige([], 2026)).toBe(false);
+  });
+});
+
+describe('contributionsDepuisVolets : ce qu une mission apporte a la base "factures emises datees dans l annee"', () => {
+  test('acompte et solde dans l annee : les deux comptent', () => {
+    const m = { id: 'm1', ca: 10000, montantAcompte: 5000, dateFactureAcompte: '2026-03-01', dateFactureFinale: '2026-09-01' };
+    expect(contributionsDepuisVolets([m], new Set(['m1']), 2026).get('m1')).toBe(10000);
+  });
+
+  test('acompte en 2025, solde en 2026 : seul le solde compte pour 2026', () => {
+    const m = { id: 'm1', ca: 10000, montantAcompte: 5000, dateFactureAcompte: '2025-12-22', dateFactureFinale: '2026-02-10' };
+    expect(contributionsDepuisVolets([m], new Set(['m1']), 2026).get('m1')).toBe(5000);
+  });
+
+  test('aucune facture emise : contribution nulle', () => {
+    const m = { id: 'm1', ca: 10000, montantAcompte: 5000, dateFactureAcompte: null, dateFactureFinale: null };
+    expect(contributionsDepuisVolets([m], new Set(['m1']), 2026).get('m1')).toBe(0);
+  });
+
+  test('mission hors de la selection : absente de la Map', () => {
+    const m = { id: 'm2', ca: 10000, montantAcompte: 5000, dateFactureAcompte: '2026-03-01' };
+    expect(contributionsDepuisVolets([m], new Set(['m1']), 2026).has('m2')).toBe(false);
+  });
+
+  test('solde negatif ou nul ignore (acompte >= ca)', () => {
+    const m = { id: 'm1', ca: 5000, montantAcompte: 5000, dateFactureAcompte: '2026-03-01', dateFactureFinale: '2026-09-01' };
+    expect(contributionsDepuisVolets([m], new Set(['m1']), 2026).get('m1')).toBe(5000);
   });
 });
