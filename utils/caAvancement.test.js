@@ -61,10 +61,11 @@ describe('caAvancementMission : CA de l exercice = ca x (pct fin N - pct fin N-1
     expect(caAvancementMission(m, lignes, 2026)).toBe(-2000);
   });
 
-  test('arrondi a l euro', () => {
+  test('arrondi a l euro : le brut a une decimale non nulle', () => {
+    // ca 15500, delta 29,7 % -> brut 4603,5 : sans Math.round, le test echouerait (4603.5 !== 4604).
     const m = { ca: 15500 };
-    const lignes = [{ exercice: 2025, pct: 70 }, { exercice: 2026, pct: 100 }];
-    expect(caAvancementMission(m, lignes, 2026)).toBe(4650);
+    const lignes = [{ exercice: 2025, pct: 70 }, { exercice: 2026, pct: 99.7 }];
+    expect(caAvancementMission(m, lignes, 2026)).toBe(4604);
   });
 
   test('ca absent ou non numerique : 0, jamais NaN', () => {
@@ -126,6 +127,7 @@ describe('computeAvancement : selection des missions suivies', () => {
 
   test('une ligne dont le mission_id est inconnu des missions est ignoree', () => {
     const r = computeAvancement(missions, [{ mission_id: 'fantome', exercice: 2026, pct: 50 }], 2026);
+    expect(r.actif).toBe(false);
     expect(r.suivies).toEqual([]);
     expect(r.parMission.size).toBe(0);
   });
@@ -186,7 +188,9 @@ describe('verifierInvariantAvancement : l avancement deplace du CA, il n en cree
     const anomalies = verifierInvariantAvancement(missions, lignes);
     expect(anomalies).toHaveLength(1);
     expect(anomalies[0].missionId).toBe('m1');
+    expect(anomalies[0].nom).toBe('Derive d arrondi');
     expect(anomalies[0].attendu).toBe(1000);
+    expect(anomalies[0].obtenu).toBe(1002);
     expect(anomalies[0].ecart).toBe(2);
   });
 });
