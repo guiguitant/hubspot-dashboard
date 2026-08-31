@@ -1389,6 +1389,39 @@
 
     .forecast-bar strong { color: var(--primary); }
 
+    /* Actions groupées sur la sélection */
+    .bulk-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+    }
+    .bulk-actions select {
+      font-size: 0.78rem;
+      padding: 0.25rem 0.4rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg);
+      color: var(--text);
+    }
+    .bulk-actions .btn-danger {
+      color: var(--danger);
+      border-color: rgba(220,38,38,0.35);
+    }
+    .bulk-actions .btn-danger:hover {
+      background: var(--danger-bg);
+    }
+    .bulk-actions button:disabled,
+    .bulk-actions select:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .bulk-status {
+      margin-left: 0.6rem;
+      font-weight: 600;
+      color: var(--primary);
+    }
+
     /* --- Colonne Gagné repliable --- */
     .kanban-column-won {
       background: var(--bg-secondary);
@@ -3963,8 +3996,14 @@
         <span style="opacity:0.85;font-weight:500;font-size:0.72rem">cliquer pour voir</span>
       </div>
       <div class="forecast-bar" id="forecastBar">
-        <span><strong id="forecastCount">0</strong> deal(s) selectionne(s) &mdash; Forecast : <strong id="forecastAmount">0 €</strong></span>
-        <button class="btn" onclick="clearForecast()">Tout deselectionner</button>
+        <span><strong id="forecastCount">0</strong> deal(s) selectionne(s) &mdash; Forecast : <strong id="forecastAmount">0 €</strong><span id="bulkStatus" class="bulk-status"></span></span>
+        <div class="bulk-actions" id="bulkActions">
+          <select id="bulkStageSelect" title="Étape de destination" aria-label="Étape de destination"></select>
+          <button class="btn" onclick="bulkMoveStage()" title="Déplacer les deals sélectionnés vers l'étape choisie">Déplacer</button>
+          <button class="btn" onclick="bulkRelancer()" title="Sortir les deals sélectionnés du pipe avec une date de retour">À relancer…</button>
+          <button class="btn btn-danger" onclick="bulkMarkLost()" title="Marquer les deals sélectionnés comme perdus">Marquer perdus</button>
+          <button class="btn" onclick="clearForecast()">Tout deselectionner</button>
+        </div>
       </div>
       <div class="kanban-board" id="kanbanBoard"></div>
       <div class="deals-table-wrap" id="dealsTableView" style="display:none"></div>
@@ -9964,6 +10003,182 @@
       render();
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // Actions groupées sur la sélection
+    //
+    // Les mêmes deals cochés pour le forecast peuvent être traités d'un geste :
+    // déplacés dans le pipe, envoyés dans le bac À relancer, ou marqués perdus.
+    //
+    // Les appels partent EN SÉRIE. HubSpot limite le débit et une rafale de
+    // trente PATCH revient en 429. Chaque deal est indépendant : un échec
+    // n'annule pas les précédents, d'où le récapitulatif de fin qui nomme
+    // précisément ce qui est passé et ce qui a échoué. Annoncer « c'est fait »
+    // quand trois deals sur trente ont échoué serait le pire des services.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Photo de la sélection AVANT de la modifier : une fois le deal déplacé ou
+    // fermé, findDealInPipeline ne le retrouve plus et on perdrait son nom pour
+    // le message d'erreur.
+    function _selectionSnapshot() {
+      return [...selectedDealIds].map(id => {
+        const d = findDealInPipeline(id);
+        return { id, nom: (d && d.name) || id, stage: _stageOfDeal(id) };
+      });
+    }
+
+    function _bulkSetBusy(busy, texte) {
+      document.querySelectorAll('#bulkActions button, #bulkActions select')
+        .forEach(el => { el.disabled = busy; });
+      const statut = document.getElementById('bulkStatus');
+      if (statut) statut.textContent = texte || '';
+    }
+
+    // Déroule `action` sur chaque deal, un par un, et rend compte.
+    // `action(deal)` doit lever pour signaler un échec.
+    async function _bulkRun(selection, libelle, action) {
+      const echecs = [];
+      let faits = 0;
+      for (const deal of selection) {
+        _bulkSetBusy(true, `${libelle} ${faits + echecs.length + 1}/${selection.length}…`);
+        try {
+          await action(deal);
+          selectedDealIds.delete(deal.id);
+          faits++;
+        } catch {
+          echecs.push(deal.nom);
+        }
+      }
+
+      _bulkSetBusy(false, '');
+      renderKanban();
+      updateForecastBar();
+      render();
+
+      if (echecs.length === 0) {
+        showToast('success', `${faits} deal${faits > 1 ? 's' : ''} traité${faits > 1 ? 's' : ''}.`, 4000);
+      } else {
+        // Les deals en échec restent cochés : la sélection devient la liste
+        // de ce qu'il reste à faire, on peut relancer l'action sur eux seuls.
+        showToast('error',
+          `${faits} traité${faits > 1 ? 's' : ''}, ${echecs.length} en échec : ${echecs.slice(0, 3).join(', ')}${echecs.length > 3 ? ` et ${echecs.length - 3} autre${echecs.length - 3 > 1 ? 's' : ''}` : ''}. Ils restent sélectionnés.`,
+          9000);
+      }
+    }
+
+    // --- Déplacer vers une étape du pipe ---
+    async function bulkMoveStage() {
+      const select = document.getElementById('bulkStageSelect');
+      const cible = select ? select.value : '';
+      if (!KANBAN_STAGES_ORDER.includes(cible)) { alert('Choisis une étape de destination.'); return; }
+
+      const selection = _selectionSnapshot().filter(d => d.stage !== cible);
+      if (selection.length === 0) {
+        alert('Les deals sélectionnés sont déjà dans cette étape.');
+        return;
+      }
+
+      await _bulkRun(selection, 'Déplacement', async (deal) => {
+        const r = await fetch(`/api/deals/${deal.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stage: cible }),
+        });
+        if (!r.ok) throw new Error();
+        _moveDealLocally(deal.id, cible);
+      });
+    }
+
+    // --- Marquer perdus ---
+    async function bulkMarkLost() {
+      const selection = _selectionSnapshot();
+      if (selection.length === 0) return;
+
+      if (!confirm(`Marquer ${selection.length} deal(s) comme PERDUS dans HubSpot ?\n\n${selection.slice(0, 8).map(d => '· ' + d.nom).join('\n')}${selection.length > 8 ? `\n· … et ${selection.length - 8} autre(s)` : ''}`)) return;
+
+      // HubSpot écrase le closedate au passage en closedlost : on l'impose dans
+      // le même PATCH, comme le fait l'action unitaire de la sidebar.
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const saisie = prompt('Date de clôture (perdus) au format AAAA-MM-JJ :', todayStr);
+      if (saisie === null) return;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(saisie.trim())) { alert('Date invalide. Format attendu : AAAA-MM-JJ'); return; }
+      const closedate = new Date(saisie.trim() + 'T12:00:00Z').toISOString();
+
+      await _bulkRun(selection, 'Clôture', async (deal) => {
+        const r = await fetch(`/api/deals/${deal.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stage: 'closedlost', closedate }),
+        });
+        if (!r.ok) throw new Error();
+        // Le deal quitte le pipe local.
+        for (const deals of Object.values(dashboardData.pipelineDeals)) {
+          const idx = deals.findIndex(d => d.id === deal.id);
+          if (idx !== -1) { deals.splice(idx, 1); break; }
+        }
+      });
+
+      _invalidateClosedDealsCaches();
+    }
+
+    // --- Envoyer dans le bac À relancer (gel avec date de retour) ---
+    async function bulkRelancer() {
+      const selection = _selectionSnapshot().filter(d => d.stage && d.stage !== RELANCER_STAGE_LABEL);
+      if (selection.length === 0) {
+        alert('Aucun deal du pipe dans la sélection.');
+        return;
+      }
+
+      // Règle dure du gel unitaire, conservée ici : pas de gel sans date de
+      // réveil, sinon le deal ne revient jamais tout seul.
+      const saisie = prompt(
+        `Date de réveil pour ${selection.length} deal(s), au format AAAA-MM-JJ.\nIls sortent du pipe et reviennent tout seuls ce jour-là.`,
+        _wakeDateIn(3)
+      );
+      if (saisie === null) return;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(saisie.trim())) { alert('Date invalide. Format attendu : AAAA-MM-JJ'); return; }
+      const wakeIso = new Date(saisie.trim() + 'T09:00:00').toISOString();
+      if (new Date(wakeIso).getTime() <= Date.now()) { alert('La date de réveil doit être dans le futur.'); return; }
+
+      const note = prompt('Pourquoi (facultatif, la même note pour tous) :\nDans trois mois tu auras oublié. C\'est cette phrase qui rendra le réveil utile.', '');
+      if (note === null) return;
+
+      await _bulkRun(selection, 'Mise en attente', async (deal) => {
+        const r1 = await fetch(`/api/deals/${deal.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stage: RELANCER_STAGE_LABEL }),
+        });
+        if (!r1.ok) throw new Error();
+
+        const freeze = {
+          wake_up_at: wakeIso,
+          frozen_from_stage: deal.stage,
+          frozen_note: note.trim(),
+          frozen_at: new Date().toISOString(),
+        };
+        const r2 = await fetch(`/api/deals/${deal.id}/metadata`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(freeze),
+        });
+        if (!r2.ok) {
+          // Un deal au congélateur sans date de réveil est un deal perdu :
+          // on le remet où il était plutôt que de le laisser dans les limbes.
+          await fetch(`/api/deals/${deal.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stage: deal.stage }),
+          }).catch(() => {});
+          throw new Error();
+        }
+
+        dealMetadata[deal.id] = { ...(dealMetadata[deal.id] || {}), ...freeze };
+        _moveDealLocally(deal.id, RELANCER_STAGE_LABEL);
+      });
+
+      openSideColumn('relancer');
+    }
+
     // --- Repeat Clients ---
     let repeatClientsData = null;
     let repeatFilter = 'all';
@@ -11001,6 +11216,14 @@
       bar.classList.add('active');
       document.getElementById('forecastCount').textContent = count;
       document.getElementById('forecastAmount').textContent = formatEuro(getForecastTotal());
+
+      // Destinations du déplacement groupé : les étapes du pipe, remplies une
+      // seule fois (la barre se réaffiche à chaque coche).
+      const select = document.getElementById('bulkStageSelect');
+      if (select && !select.options.length) {
+        select.innerHTML = '<option value="">Déplacer vers…</option>'
+          + KANBAN_STAGES_ORDER.map(s => `<option value="${s}">${s}</option>`).join('');
+      }
     }
 
     // --- Stripe pattern for forecast bars ---
