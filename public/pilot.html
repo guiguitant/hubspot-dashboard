@@ -12124,7 +12124,7 @@
       // de mois d'atterrissage) : les deux peuvent donc différer, c'est voulu.
       const _elAnalyticsCa = document.getElementById('analyticsCa');
       if (data.avancement && data.avancement.actif && data.avancement.delta !== 0) {
-        _elAnalyticsCa.title = "CA à l'avancement : ajustement de " + formatEuro(data.avancement.delta) + " sur " + data.avancement.suivies.length + " mission(s) à cheval. Le graphe mensuel reste daté à la facture.";
+        _elAnalyticsCa.title = "CA à l'avancement : ajustement de " + formatEuro(data.avancement.delta) + " sur " + data.avancement.suivies.length + " mission(s) à cheval, par rapport au rattachement habituel des missions à l'année. Le graphe mensuel reste daté à la facture.";
       } else {
         _elAnalyticsCa.title = '';
       }
@@ -12447,8 +12447,10 @@
       // Deux avancements distincts, chacun sur la base de la prime qu'il pilote :
       //  - INDIVIDUEL : réalisé signé classé (Newsale + Upsale, daté signature) ÷ objectif de CA signé
       //    par associé (kpi_objectives). C'est la base de la prime individuelle (étage 1).
-      //  - COLLECTIF : CA facturé + à facturer (caAnnee) ÷ objectif de CA facturé. Base de la prime
-      //    collective (étage 2, paliers).
+      //  - COLLECTIF : CA facturé + à facturer (caAnnee, affiché ici, désormais à l'avancement) ÷
+      //    objectif de CA facturé. NE PILOTE PAS la prime collective (correctif C3, revue finale) :
+      //    les paliers de l'étage 2 se calculent sur primeState.caFacture (kpiData.facturation,
+      //    computeBillingForYear), qui n'intègre pas l'avancement (D7).
       const signeReal = (a.newsale.realise || 0) + (a.upsale.realise || 0);
       const signeObj  = (a.newsale.objectif || 0) + (a.upsale.objectif || 0);
       const avPct = signeObj > 0 ? Math.round(signeReal / signeObj * 100) : null;
@@ -12488,7 +12490,7 @@
       const _elKpiCa = box.querySelector('.kpi-ov.signe');
       if (_elKpiCa) {
         if (kpiData.avancement && kpiData.avancement.actif && kpiData.avancement.delta !== 0) {
-          _elKpiCa.title = "CA à l'avancement : ajustement de " + formatEuro(kpiData.avancement.delta) + ' sur ' + kpiData.avancement.suivies.length + ' mission(s) à cheval sur deux exercices.';
+          _elKpiCa.title = "CA à l'avancement : ajustement de " + formatEuro(kpiData.avancement.delta) + ' sur ' + kpiData.avancement.suivies.length + ' mission(s) à cheval sur deux exercices, par rapport au rattachement habituel des missions à l\'année.';
         } else {
           _elKpiCa.title = '';
         }
@@ -12512,7 +12514,11 @@
         : 'Source Notion · daté à la facture';
       html += '<div class="kpi-detail-row"><div><div class="kpi-detail-nom">CA ' + (kpiData.year || '') + ' HT</div><div class="kpi-detail-client">' + _avKpiDetailSource + '</div></div><div class="kpi-detail-montant">' + kpiFmtEur(caFact) + '</div></div>';
       html += '<div class="kpi-detail-row"><div><div class="kpi-detail-nom">Objectif de CA facturé</div><div class="kpi-detail-client">Réglable via « Réglages primes »</div></div><div class="kpi-detail-montant">' + kpiFmtEur(objFact) + '</div></div>';
-      html += '<p style="color:var(--text-secondary);font-size:0.82rem;margin-top:0.6rem">Avancement collectif = CA ' + (kpiData.year || '') + ' HT ÷ objectif de CA facturé. C\'est la base de la prime collective (paliers, étage 2). Distinct de l\'avancement individuel, qui porte sur le CA signé.</p>';
+      // Correctif C3 (revue finale) : la phrase disait que ce CA (desormais a l'avancement) est "la
+      // base de la prime collective", ce qui est faux. Les paliers de la prime collective se calculent
+      // sur primeState.caFacture (kpiData.facturation, computeBillingForYear), jamais sur kpiData.caAnnee
+      // affiche ici. D7 (spec) : la remuneration ne depend jamais d'un pourcentage saisi au juge.
+      html += '<p style="color:var(--text-secondary);font-size:0.82rem;margin-top:0.6rem">Avancement collectif = CA ' + (kpiData.year || '') + ' HT ÷ objectif de CA facturé, comme affiché ci-dessus. Les paliers de la prime collective (étage 2) se calculent séparément, sur le chiffre d\'affaires facturé et à facturer, qui n\'intègre pas l\'avancement. Distinct de l\'avancement individuel, qui porte sur le CA signé.</p>';
       document.getElementById('kpiDetailBody').innerHTML = html;
       document.getElementById('kpiDetailModal').classList.add('active');
     }
@@ -14140,6 +14146,9 @@
       if (d.anomalies && d.anomalies.length) {
         html += _crAlerteHtml('Incohérence détectée sur ' + d.anomalies.length + ' mission(s) terminée(s) : la somme des CA par exercice ne retombe pas sur le CA de la mission. Vérifier les pourcentages saisis.', true);
       }
+      if (figeePrec) {
+        html += _crAlerteHtml('Exercice ' + exPrec + ' figé : les pourcentages ci-dessous sont définitifs et ne sont plus modifiables depuis Pilot.', false);
+      }
       if (exFigee) {
         html += _crAlerteHtml('Exercice ' + ex + ' figé : les pourcentages ci-dessous sont définitifs et ne sont plus modifiables depuis Pilot.', false);
       }
@@ -14158,12 +14167,21 @@
 
       for (const s of (d.suivies || [])) {
         // Toutes les lignes d'un exercice sont figées ensemble (garde serveur "some" sur exerciceFige) :
-        // une mission suivie de l'exercice demandé partage donc forcément l'état exFigee global.
+        // une mission suivie de l'exercice demandé partage donc forcément l'état exFigee global. Même
+        // logique pour figeePrec, dérivé plus haut sur les lignes brutes de l'exercice précédent.
         const figee = exFigee;
+        // Colonne N-1 éditable SI l'exercice précédent n'est pas figé (correctif C1, revue finale) :
+        // sans ce chemin, les 7 ancres 2025 (spec 3.4) sont insaisissables et le seul geste possible
+        // (ajouter la mission à 100 % pour l'exercice courant) fabrique du CA fantôme. Id DOM distinct
+        // (av-prec-) de la colonne courante (av-) : il y a désormais deux champs par ligne.
+        const cellPrec = figeePrec
+          ? s.pctPrecedent + ' % <span style="font-size:0.7rem;color:var(--text-secondary)">(figé)</span>'
+          : '<input type="number" min="0" max="100" step="1" value="' + s.pctPrecedent + '" id="av-prec-' + s.missionId + '" style="width:64px;padding:0.2rem;text-align:right;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text)">'
+            + ' <button onclick="saveAvancementLigne(\'' + s.missionId + '\',' + exPrec + ',\'av-prec-' + s.missionId + '\')" style="padding:0.2rem 0.5rem;font-size:0.75rem;cursor:pointer">OK</button>';
         html += '<tr style="border-bottom:1px solid var(--border)">'
           + '<td style="padding:0.4rem">' + escapeHtml(s.nom) + '</td>'
           + '<td style="padding:0.4rem;text-align:right">' + formatEuro(s.ca) + '</td>'
-          + '<td style="padding:0.4rem;text-align:right;color:var(--text-secondary)">' + s.pctPrecedent + ' %' + (figeePrec ? ' <span style="font-size:0.7rem">(figé)</span>' : '') + '</td>'
+          + '<td style="padding:0.4rem;text-align:right">' + cellPrec + '</td>'
           + '<td style="padding:0.4rem;text-align:right">'
           + (figee
               ? s.pctCourant + ' % <span style="font-size:0.7rem;color:var(--text-secondary)">(figé)</span>'
@@ -14171,7 +14189,7 @@
           + '</td>'
           + '<td style="padding:0.4rem;text-align:right;font-weight:600">' + formatEuro(s.caAvancement) + '</td>'
           + '<td style="padding:0.4rem;text-align:right">'
-          + (figee ? '' : '<button onclick="saveAvancementLigne(\'' + s.missionId + '\',' + ex + ')" style="padding:0.2rem 0.5rem;font-size:0.75rem;cursor:pointer">OK</button>'
+          + (figee ? '' : '<button onclick="saveAvancementLigne(\'' + s.missionId + '\',' + ex + ',\'av-' + s.missionId + '\')" style="padding:0.2rem 0.5rem;font-size:0.75rem;cursor:pointer">OK</button>'
              + ' <button onclick="removeAvancementLigne(\'' + s.missionId + '\',' + ex + ')" style="padding:0.2rem 0.5rem;font-size:0.75rem;cursor:pointer">Retirer</button>')
           + '</td></tr>';
       }
@@ -14184,18 +14202,27 @@
       // Ajout d'une mission au suivi : désactivé dès que l'exercice courant est figé (une écriture
       // serait de toute façon refusée par le serveur, autant l'expliquer plutôt que de laisser
       // l'utilisateur essayer pour rien).
-      if (exFigee) {
-        html += '<div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:1rem">Exercice ' + ex + ' figé : plus aucune mission ne peut être ajoutée ou retirée du suivi.</div>';
+      if (exFigee && figeePrec) {
+        html += '<div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:1rem">Exercices ' + exPrec + ' et ' + ex + ' figés : plus aucune mission ne peut être ajoutée ou retirée du suivi.</div>';
       } else {
         const suiviesIds = new Set((d.suivies || []).map(s => s.missionId));
         const dispo = (d.missions || []).filter(m => !suiviesIds.has(String(m.id)));
-        html += '<div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:1rem">'
+        // Choix de l'exercice porté par le % saisi (correctif C1) : seuls les exercices NON figés sont
+        // proposés (un seul si l'autre est déjà figé), ce qui couvre aussi la saisie des 7 ancres 2025
+        // tant que l'exercice précédent n'est pas encore fermé.
+        const anneesDispo = [];
+        if (!figeePrec) anneesDispo.push(exPrec);
+        if (!exFigee) anneesDispo.push(ex);
+        html += '<div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:1rem;flex-wrap:wrap">'
           + '<select id="avancementNouvelle" style="flex:1;min-width:0;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:0.8rem">'
           + '<option value="">Ajouter une mission au suivi...</option>'
           + dispo.map(m => '<option value="' + m.id + '">' + escapeHtml(m.nom || '') + ' · ' + escapeHtml(m.client || '') + ' · ' + formatEuro(m.ca || 0) + '</option>').join('')
           + '</select>'
+          + '<select id="avancementNouvelExercice" title="Exercice porté par le pourcentage saisi" style="padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:0.8rem">'
+          + anneesDispo.map(a => '<option value="' + a + '">' + a + '</option>').join('')
+          + '</select>'
           + '<input type="number" min="0" max="100" step="1" id="avancementNouveauPct" placeholder="%" style="width:70px;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text)">'
-          + '<button onclick="addAvancementLigne(' + ex + ')" style="padding:0.35rem 0.7rem;cursor:pointer">Ajouter</button>'
+          + '<button onclick="addAvancementLigne()" style="padding:0.35rem 0.7rem;cursor:pointer">Ajouter</button>'
           + '</div>';
       }
 
@@ -14226,8 +14253,8 @@
       return data;
     }
 
-    async function saveAvancementLigne(missionId, exercice) {
-      const input = document.getElementById('av-' + missionId);
+    async function saveAvancementLigne(missionId, exercice, elId) {
+      const input = document.getElementById(elId);
       if (!input) return;
       try {
         await postAvancement('/api/avancement', 'POST', { missionId, exercice, pct: Number(input.value) });
@@ -14235,12 +14262,13 @@
       } catch (e) { alert('Enregistrement impossible : ' + e.message); }
     }
 
-    async function addAvancementLigne(exercice) {
+    async function addAvancementLigne() {
       const sel = document.getElementById('avancementNouvelle');
+      const exSel = document.getElementById('avancementNouvelExercice');
       const pct = document.getElementById('avancementNouveauPct');
-      if (!sel || !sel.value) return;
+      if (!sel || !sel.value || !exSel || !exSel.value) return;
       try {
-        await postAvancement('/api/avancement', 'POST', { missionId: sel.value, exercice, pct: Number(pct.value) || 0 });
+        await postAvancement('/api/avancement', 'POST', { missionId: sel.value, exercice: Number(exSel.value), pct: Number(pct.value) || 0 });
         await loadAvancement();
       } catch (e) { alert('Ajout impossible : ' + e.message); }
     }
@@ -16122,24 +16150,39 @@
       // _AV_DETAIL_MAX lignes pour rester lisible avec beaucoup de missions suivies.
       const _AV_DETAIL_MAX = 8;
       const _avTitre = _avActif
-        ? _crAttr("CA à l'avancement : " + _av.suivies.length + ' mission(s) à cheval, ajustement de ' + formatEuro(_av.delta) + " par rapport aux dates de facturation.\n"
+        ? _crAttr("CA à l'avancement : " + _av.suivies.length + ' mission(s) à cheval, ajustement de ' + formatEuro(_av.delta) + " par rapport aux factures émises dans l'année.\n"
+            // Premier terme de la paire = contributionBase (correctif C2, revue finale) : ce que la
+            // mission apportait REELLEMENT a caFacture avant remplacement, pas son CA total (s.ca), qui
+            // suggererait un ajustement bien plus grand que le remplacement reel dans le CR. Tolerance
+            // sur une reponse en cache d'une version anterieure sans ce champ (repli sur s.ca).
             + _av.suivies.slice(0, _AV_DETAIL_MAX).map(s =>
-                (s.nom || 'Mission') + ' : ' + s.pctPrecedent + ' % → ' + s.pctCourant + ' %, ' + formatEuro(s.ca) + ' → ' + formatEuro(s.caAvancement)
+                (s.nom || 'Mission') + ' : ' + s.pctPrecedent + ' % → ' + s.pctCourant + ' %, ' + formatEuro(s.contributionBase != null ? s.contributionBase : s.ca) + ' → ' + formatEuro(s.caAvancement)
               ).join('\n')
             + (_av.suivies.length > _AV_DETAIL_MAX ? '\n... et ' + (_av.suivies.length - _AV_DETAIL_MAX) + ' autre(s) mission(s).' : ''))
         : '';
       html += row("Chiffre d'affaires" + (projete ? ' (facture + pipeline)' : ' facture'), ca, { onclick: "openCrDetailModal('ca')", badge: _avBadge, title: _avTitre });
-      if (_avActif) {
+      // Sous-ligne "ajustement d'avancement" : construite une seule fois, réutilisée dans les deux
+      // branches ci-dessous (factuel seul, ou projeté à côté des deux autres "dont").
+      const _avAjustementSubRow = () => {
         // Harmonisation avec le signe/couleur de row() (même caractère moins, même variable de
         // couleur) : formatEuro seul ne colore pas les montants négatifs, contrairement au reste du CR.
         const _avDeltaNeg = _av.delta < 0;
         const _avDeltaSign = _avDeltaNeg ? '− ' : (_av.delta > 0 ? '+ ' : '');
         const _avDeltaColor = _avDeltaNeg ? 'color:var(--danger)' : '';
-        html += subRow("dont ajustement d'avancement (FAE/PCA)", '<span style="' + _avDeltaColor + '">' + _avDeltaSign + formatEuro(Math.abs(_av.delta)) + '</span>');
-      }
+        return subRow("dont ajustement d'avancement (FAE/PCA)", '<span style="' + _avDeltaColor + '">' + _avDeltaSign + formatEuro(Math.abs(_av.delta)) + '</span>');
+      };
       if (projete && d.ca.pipelinePondere) {
-        html += subRow('dont CA facture (Notion)', formatEuro(d.ca.facture));
+        // Correctif C5 (revue finale) : "dont CA facture (Notion)" affichait d.ca.facture, qui est
+        // DEJA ajusté de l'avancement (server.js applique le remplacement avant de le renvoyer) : les
+        // trois sous-lignes ne s'additionnaient plus (l'ajustement était compté deux fois). Le serveur
+        // expose la base NON ajustée dans avancement.base : on l'affiche ici, l'ajustement ci-dessous
+        // la ramène au CA facturé retenu, si bien que base + ajustement + pipeline = CA projeté ci-dessus.
+        const _avBaseFacture = (_avActif && _av.base != null) ? _av.base : d.ca.facture;
+        html += subRow('dont CA facture (Notion)', formatEuro(_avBaseFacture));
+        if (_avActif) html += _avAjustementSubRow();
         html += subRow('dont pipeline pondere (HubSpot)', formatEuro(d.ca.pipelinePondere));
+      } else if (_avActif) {
+        html += _avAjustementSubRow();
       }
       html += row("Charges d'exploitation", d.charges.total, { neg: true, onclick: "openCrDetailModal('charges')", badge: _crTvaBadgeHtml(d.charges.tvaExacte) });
       if (d.masseSalarialeAnnuelle != null) {
@@ -16627,9 +16670,13 @@
         }
         if (_avCaActif) {
           body += '<div style="margin-top:0.6rem;padding-top:0.5rem;border-top:1px dashed var(--border)">';
-          body += '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.4rem">Ajustement d\'avancement : ' + _avCa.suivies.length + ' mission(s) à cheval, ' + formatEuro(_avCa.delta) + ' par rapport aux dates de facturation (FAE/PCA).</div>';
+          body += '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.4rem">Ajustement d\'avancement : ' + _avCa.suivies.length + ' mission(s) à cheval, ' + formatEuro(_avCa.delta) + ' par rapport aux factures émises dans l\'année (FAE/PCA).</div>';
           for (const s of _avCa.suivies) {
-            body += '<div style="display:flex;justify-content:space-between;padding:0.3rem 0;border-bottom:1px solid var(--border);font-size:0.82rem"><span>' + escapeHtml(s.nom || 'Mission') + ' <span style="color:var(--text-secondary)">(' + s.pctPrecedent + ' % → ' + s.pctCourant + ' %)</span></span><span>' + formatEuro(s.caAvancement) + '</span></div>';
+            // Paire "montant remplacé → montant retenu" (spec 5.2, correctif C2) : contributionBase est
+            // ce que la mission apportait réellement à caFacture avant remplacement, pas son CA total.
+            // Tolérance sur une réponse en cache d'une version antérieure sans ce champ (repli sur s.ca).
+            const _avBase = s.contributionBase != null ? s.contributionBase : s.ca;
+            body += '<div style="display:flex;justify-content:space-between;padding:0.3rem 0;border-bottom:1px solid var(--border);font-size:0.82rem"><span>' + escapeHtml(s.nom || 'Mission') + ' <span style="color:var(--text-secondary)">(' + s.pctPrecedent + ' % → ' + s.pctCourant + ' %)</span></span><span>' + formatEuro(_avBase) + ' → ' + formatEuro(s.caAvancement) + '</span></div>';
           }
           body += '</div>';
         }
@@ -20571,7 +20618,7 @@
           // Infobulle si le CA intègre un ajustement d'avancement (missions à cheval, FAE/PCA).
           const _el = document.getElementById('ckCaAnnee');
           if (d.avancement && d.avancement.actif && d.avancement.delta !== 0) {
-            _el.title = "CA à l'avancement : ajustement de " + formatEuro(d.avancement.delta) + ' sur ' + d.avancement.suivies.length + ' mission(s) à cheval sur deux exercices.';
+            _el.title = "CA à l'avancement : ajustement de " + formatEuro(d.avancement.delta) + ' sur ' + d.avancement.suivies.length + ' mission(s) à cheval sur deux exercices, par rapport au rattachement habituel des missions à l\'année.';
           } else {
             _el.title = '';
           }

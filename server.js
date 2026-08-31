@@ -9407,7 +9407,12 @@ async function caAnneeAvecAvancement(missions, year) {
   // c'est elle qui est couverte par les tests de non-regression sur la divergence des deux bases.
   const contributions = contributionsDepuisFonction(missions, new Set(calcul.parMission.keys()), year, signedAmountForYear);
   const caAnnee = ajusterTotal(base, contributions, calcul.parMission);
-  return { caAnnee, avancement: { actif: true, delta: caAnnee - base, base, suivies: calcul.suivies } };
+  // contributionBase (additif, correctif C2 revue finale) : ce que chaque mission suivie apportait
+  // reellement a CETTE base (signedAmountForYear, repli "Annee final") avant remplacement. Sert au
+  // front (Cockpit/Analytics/KPI) a afficher "montant remplace -> montant retenu" au lieu du CA TOTAL
+  // de la mission, qui n'est pas ce qu'elle apportait a cette base precise (spec 3.3/5.2).
+  const suivies = calcul.suivies.map(s => ({ ...s, contributionBase: contributions.get(s.missionId) || 0 }));
+  return { caAnnee, avancement: { actif: true, delta: caAnnee - base, base, suivies } };
 }
 
 // Etat d'avancement pour la modale de saisie : lignes brutes, detail calcule de l'exercice demande,
@@ -9805,9 +9810,14 @@ app.get('/api/ebe', async (req, res) => {
     const { lignes: lignesAvancement } = await fetchMissionAvancements();
     const calculAvancement = computeAvancement(missions, lignesAvancement, yearParam);
     const caFactureAvantAvancement = caFacture;
+    // Contributions "factures emises dans l'annee" par mission suivie (base du CR) : hissees hors du
+    // bloc actif pour etre reutilisees plus bas lors de la construction de avancement.suivies (champ
+    // additif contributionBase, correctif C2 revue finale : l'infobulle affichait le CA TOTAL de la
+    // mission comme "montant remplace", alors que ce n'est pas ce que la mission apportait a CETTE base).
+    let contributionsCaFacture = new Map();
     if (calculAvancement.actif) {
-      const contributions = contributionsDepuisVolets(missions, new Set(calculAvancement.parMission.keys()), yearParam);
-      caFacture = ajusterTotal(caFacture, contributions, calculAvancement.parMission);
+      contributionsCaFacture = contributionsDepuisVolets(missions, new Set(calculAvancement.parMission.keys()), yearParam);
+      caFacture = ajusterTotal(caFacture, contributionsCaFacture, calculAvancement.parMission);
     }
 
     // 2) Charges projetées sur l'année — appel direct à la logique hybride (pas de fetch HTTP self-référent,
@@ -9955,7 +9965,11 @@ app.get('/api/ebe', async (req, res) => {
         actif: calculAvancement.actif,
         delta: caFacture - caFactureAvantAvancement,
         base: caFactureAvantAvancement,
-        suivies: calculAvancement.suivies,
+        // contributionBase (additif, correctif C2) : ce que CETTE mission apportait reellement a
+        // caFacture (base "factures emises dans l'annee") avant remplacement. Sans ce champ,
+        // l'infobulle front n'a que s.ca (le CA TOTAL de la mission) a afficher comme "montant
+        // remplace", ce qui est faux des qu'une mission a des factures hors de l'annee consideree.
+        suivies: calculAvancement.suivies.map(s => ({ ...s, contributionBase: contributionsCaFacture.get(s.missionId) || 0 })),
       },
       // Vue economique "CR hors capitalisation", ADDITIVE : affichee A COTE du compte de resultat
       // ci-dessus, jamais a sa place. Sortie du module pur utils/crRetraite.js (ebe,
