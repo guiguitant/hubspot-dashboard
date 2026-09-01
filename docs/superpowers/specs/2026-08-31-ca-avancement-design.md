@@ -234,6 +234,53 @@ la forme « Acompte {montant} le {date} · Solde {montant} le {date} », un vole
 « non émis ». Le tableau des missions déjà suivies affiche les mêmes informations, pour que Nathan
 juge l'avancement sans quitter la modale.
 
+### 5.1 ter Refonte de la modale (retours Nathan du 2026-09-01, après mise en service)
+
+Sept demandes, formulées après usage réel. Cette section remplace le contenu de 5.1 et 5.1 bis
+partout où elle les contredit.
+
+**a. Exercices affichés : N et N+1, jamais N−1.** L'exercice d'ancrage 2025 est saisi et figé, il
+n'a plus à encombrer la saisie. La modale affiche donc les colonnes de l'exercice courant N et du
+suivant N+1. Le CALCUL continue d'utiliser l'avancement de fin N−1 par report en avant : c'est le
+sous-onglet « Calcul » (point e) qui rend ce point de départ visible, pas la grille de saisie.
+
+**b. Toutes les missions consultables, y compris celles d'une seule année.** La grille cesse d'être
+la liste des seules missions suivies : chaque mission devient une ligne, qu'elle porte ou non un
+pourcentage. Saisir un pourcentage dans une ligne crée la ligne d'avancement ; le sélecteur
+« ajouter une mission » disparaît, devenu inutile. Périmètre par défaut : les missions ayant une
+activité en N ou N+1, c'est-à-dire une facture datée de ces exercices ou un avancement déjà saisi.
+Une case « toutes les missions » lève ce périmètre. Le drapeau `aCheval` reste calculé et s'affiche
+comme un badge sur la ligne, mais il ne filtre plus par défaut : il informe au lieu d'exclure.
+
+**c. Modale agrandie et alignée sur le design de l'application.** La modale actuelle est décrite
+comme archaïque par l'utilisateur. Reprendre les conventions déjà en place : conteneur
+`<div class="modal kpi-modal" style="max-width:1100px;width:96%">` (la plus large de l'application,
+cf. la modale de détail des ressources), titres de section `kpi-rg-h` avec badge `kpi-rg-badge`,
+tableau `kpi-obj-table`, boutons `kpi-btn` et `kpi-btn--primary`. Aucun style inventé : tout doit
+exister ailleurs dans le fichier.
+
+**d. Sous-onglets.** Reprendre le patron `kpi-signed-tabs` / `kpi-signed-tab` déjà utilisé par les
+primes. Deux onglets : « Saisie » (la grille) et « Calcul » (le pont).
+
+**e. Sous-onglet « Calcul » : le pont du CA.** Il explique, pour l'exercice N, le passage du point de
+départ au résultat : CA Notion aux dates de facture, puis les retraitements mission par mission
+(montant remplacé vers montant retenu), puis le CA à l'avancement, présenté comme **le CA estimé à
+la clôture**. Reprendre le patron visuel de `_crPontHtml` (lignes libellé/valeur, filet et gras sur
+les totaux). Les données viennent du champ `avancement` de `/api/ebe` : `base`, `delta`, et le
+tableau `suivies` où chaque entrée porte `contributionBase` et `caAvancement`.
+
+**f. Figeage à la clôture de N.** Le bouton « Figer {N} » vit dans le sous-onglet Saisie, avec
+confirmation explicite. Le mécanisme serveur existe déjà : une fois figé, l'exercice refuse toute
+écriture (HTTP 409) et son CA à l'avancement devient définitif. Ce CA figé est celui qu'affichent le
+compte de résultat, le Cockpit, l'onglet Analytics et le KPI, sans traitement particulier
+supplémentaire : ils lisent déjà la valeur ajustée.
+
+**g. Infobulle et renvoi vers le calcul, partout.** Chaque endroit affichant un CA à l'avancement
+(ligne du compte de résultat, card Cockpit, card Analytics, tuile KPI) porte déjà une infobulle
+explicative ; elle doit désormais s'accompagner d'un renvoi cliquable qui ouvre la modale
+directement sur le sous-onglet « Calcul ». Cela suppose une fonction globale d'ouverture ciblée,
+appelable depuis n'importe quel onglet, la modale étant une surcouche globale.
+
 ### 5.2 Affichage du CA ajusté
 
 - **CR (onglet Compte de résultat)** : la ligne CA affiche la valeur ajustée ; badge
