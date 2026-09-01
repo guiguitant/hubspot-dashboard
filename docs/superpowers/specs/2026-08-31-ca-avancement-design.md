@@ -281,6 +281,41 @@ explicative ; elle doit désormais s'accompagner d'un renvoi cliquable qui ouvre
 directement sur le sous-onglet « Calcul ». Cela suppose une fonction globale d'ouverture ciblée,
 appelable depuis n'importe quel onglet, la modale étant une surcouche globale.
 
+### 5.1 quater Périmètre strict N/N+1 et lisibilité du calcul (retour Nathan du 2026-09-01, après usage de la v2)
+
+Deux constats de l'utilisateur : « je ne trouve pas que ce soit très compréhensible » et, en exemple,
+une mission dont l'acompte ET le solde tombent en N+1 apparaît quand même dans la modale pendant la
+clôture N. Cette section corrige le point b de 5.1 ter, que Nathan révoque explicitement.
+
+**a. Périmètre strict : seules les missions à cheval sur N et N+1.** La règle du point b de 5.1 ter
+(« toute mission ayant une activité en N ou N+1 ») est abandonnée. Une mission n'apparaît que si l'un
+de ses deux volets est rattaché à N et l'autre à N+1. Une mission dont les deux volets tombent sur le
+même exercice disparaît de la modale, quel que soit cet exercice : c'est le cas de l'exemple donné
+(acompte et solde en N+1), qui n'a rien à faire dans la clôture N.
+
+**Doctrine qui fonde cette règle, à énoncer dans l'interface.** Nathan : « c'est à nous d'être très
+carré sur la date d'émission des factures ; si une mission a ses acompte et solde en N, ça veut dire
+que tout est réalisé en N, sinon le manager modifie la date de facture du solde. » La date d'émission
+fait donc foi, et l'absence d'une mission dans la modale n'est pas un trou de l'outil mais un signal :
+la donnée Notion est à corriger. Le message affiché quand la liste est vide, et la note de bas de
+grille, doivent le dire en clair, sans quoi l'utilisateur croira à un défaut.
+
+**b. Conséquence assumée, et l'échappatoire qui reste.** Cette règle rend invisible le cas du produit
+constaté d'avance : une mission facturée en une fois sur N dont le travail déborde sur N+1 a ses deux
+volets sur N et disparaît, alors qu'elle appelle un retraitement. La case « afficher toutes les
+missions » demeure donc le seul chemin pour ce cas ; son libellé doit expliquer à quoi elle sert
+plutôt que de rester muette.
+
+**c. Rendre chaque montant auto-explicatif.** Le CA d'un exercice vaut
+`prix total × (avancement fin N − avancement fin N−1)`, mais l'avancement de fin N−1 n'est plus
+affiché depuis 5.1 ter point a : un montant peut donc sembler faux. Chaque cellule de CA doit porter
+une infobulle donnant le calcul en toutes lettres avec ses trois nombres. Et lorsque l'avancement de
+départ n'est pas nul, la cellule doit le signaler visiblement, car c'est le seul cas où le montant
+n'est pas déductible de ce qui est à l'écran.
+
+**d. Nettoyage.** Le badge « à cheval » perd son sens puisque toutes les missions affichées le sont
+désormais : le retirer.
+
 ### 5.2 Affichage du CA ajusté
 
 - **CR (onglet Compte de résultat)** : la ligne CA affiche la valeur ajustée ; badge
