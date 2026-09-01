@@ -9,11 +9,17 @@ describe('missionAvancementInfo : champs additifs GET /api/avancement (spec §5.
     expect(infoDepasse.montantSolde).toBe(0);
   });
 
+  // Ronde de correctifs 1 (revue) : chaque cas qui porte des dates asserte desormais explicitement
+  // dateFactureAcompte ET dateFactureFinale (pas seulement les annees/aCheval qui en decoulent).
+  // Preuve que la garde mord : intervertir les deux champs dans missionAvancementInfo fait tomber
+  // ces assertions (voir §"Mutation de controle" du rapport de tache).
   test('annee de rattachement = annee de la date de facture quand le volet est emis', () => {
     const info = missionAvancementInfo({
       ca: 10000, montantAcompte: 4000,
       dateFactureAcompte: '2025-06-01', dateFactureFinale: '2026-01-15',
     });
+    expect(info.dateFactureAcompte).toBe('2025-06-01');
+    expect(info.dateFactureFinale).toBe('2026-01-15');
     expect(info.anneeAcompte).toBe(2025);
     expect(info.anneeSolde).toBe(2026);
   });
@@ -23,12 +29,16 @@ describe('missionAvancementInfo : champs additifs GET /api/avancement (spec §5.
       ca: 10000, montantAcompte: 4000,
       dateFactureAcompte: '2025-06-01', dateFactureFinale: null, anneeFinal: '2026',
     });
+    expect(info.dateFactureAcompte).toBe('2025-06-01');
+    expect(info.dateFactureFinale).toBeNull(); // solde non facture : la DATE reste null, seule l annee replie
     expect(info.anneeAcompte).toBe(2025);
     expect(info.anneeSolde).toBe(2026); // solde non facture -> repli sur Annee final
   });
 
   test('ni date ni "Annee final" : annee null (non rattachable)', () => {
     const info = missionAvancementInfo({ ca: 10000, montantAcompte: 4000, dateFactureFinale: null, anneeFinal: '' });
+    expect(info.dateFactureAcompte).toBeNull();
+    expect(info.dateFactureFinale).toBeNull();
     expect(info.anneeSolde).toBeNull();
   });
 
@@ -38,6 +48,8 @@ describe('missionAvancementInfo : champs additifs GET /api/avancement (spec §5.
         ca: 10000, montantAcompte: 4000,
         dateFactureAcompte: '2025-06-01', dateFactureFinale: '2026-02-10',
       });
+      expect(info.dateFactureAcompte).toBe('2025-06-01');
+      expect(info.dateFactureFinale).toBe('2026-02-10');
       expect(info.aCheval).toBe(true);
     });
 
@@ -46,6 +58,8 @@ describe('missionAvancementInfo : champs additifs GET /api/avancement (spec §5.
         ca: 10000, montantAcompte: 4000,
         dateFactureAcompte: '2026-02-01', dateFactureFinale: '2026-08-20',
       });
+      expect(info.dateFactureAcompte).toBe('2026-02-01');
+      expect(info.dateFactureFinale).toBe('2026-08-20');
       expect(info.aCheval).toBe(false);
     });
 
@@ -55,11 +69,41 @@ describe('missionAvancementInfo : champs additifs GET /api/avancement (spec §5.
         dateFactureAcompte: '2025-12-20', dateFactureFinale: '2026-01-05',
       });
       expect(MIN_MONTANT).toBe(5);
+      expect(info.dateFactureAcompte).toBe('2025-12-20');
+      expect(info.dateFactureFinale).toBe('2026-01-05');
+      expect(info.aCheval).toBe(false);
+    });
+
+    // Cas limite (ronde de correctifs 1, minor) : le seuil est >= 5, pas > 5. A exactement 5 EUR, le
+    // volet compte comme existant. On fige ce comportement pour eviter qu'un futur >= -> > silencieux
+    // le casse sans qu'aucun test ne le remarque.
+    test('montant exactement au seuil (5 EUR pile) : le volet compte comme existant (>=, pas >)', () => {
+      const info = missionAvancementInfo({
+        ca: 10, montantAcompte: 5, // montantSolde = 10 - 5 = 5 : les deux volets pile au seuil
+        dateFactureAcompte: '2025-12-01', dateFactureFinale: '2026-01-10',
+      });
+      expect(info.montantAcompte).toBe(5);
+      expect(info.montantSolde).toBe(5);
+      expect(info.aCheval).toBe(true);
+    });
+
+    // Cas limite (ronde de correctifs 1, minor) : les deux volets existent (montants au-dessus du
+    // seuil) mais AUCUNE des deux annees n'est connue (ni date de facture, ni repli "Annee final").
+    // Ne doit evidemment jamais etre "a cheval" : on n'a rien a comparer.
+    test('les deux annees de rattachement sont inconnues simultanement -> pas a cheval', () => {
+      const info = missionAvancementInfo({
+        ca: 10000, montantAcompte: 4000,
+        dateFactureAcompte: null, dateFactureFinale: null, anneeFinal: '',
+      });
+      expect(info.anneeAcompte).toBeNull();
+      expect(info.anneeSolde).toBeNull();
       expect(info.aCheval).toBe(false);
     });
 
     test('annee de rattachement inconnue d un cote -> pas a cheval', () => {
       const info = missionAvancementInfo({ ca: 10000, montantAcompte: 4000, dateFactureAcompte: '2025-06-01', dateFactureFinale: null, anneeFinal: '' });
+      expect(info.dateFactureAcompte).toBe('2025-06-01');
+      expect(info.dateFactureFinale).toBeNull();
       expect(info.aCheval).toBe(false);
     });
 
@@ -71,6 +115,8 @@ describe('missionAvancementInfo : champs additifs GET /api/avancement (spec §5.
         dateFactureAcompte: null, dateFactureFinale: '2025-04-30', anneeFinal: '2025',
       };
       const info = missionAvancementInfo(alphapro);
+      expect(info.dateFactureAcompte).toBeNull();
+      expect(info.dateFactureFinale).toBe('2025-04-30');
       expect(info.montantSolde).toBe(15500);
       expect(info.anneeSolde).toBe(2025);
       expect(info.aCheval).toBe(false); // c est exactement le cas que l echappatoire front doit couvrir
@@ -83,6 +129,8 @@ describe('missionAvancementInfo : champs additifs GET /api/avancement (spec §5.
     const info = missionAvancementInfo(null);
     expect(info.montantAcompte).toBe(0);
     expect(info.montantSolde).toBe(0);
+    expect(info.dateFactureAcompte).toBeNull();
+    expect(info.dateFactureFinale).toBeNull();
     expect(info.anneeAcompte).toBeNull();
     expect(info.anneeSolde).toBeNull();
     expect(info.aCheval).toBe(false);
