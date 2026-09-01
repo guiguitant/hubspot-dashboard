@@ -37,6 +37,7 @@ const {
   contributionsDepuisVolets,
   contributionsDepuisFonction,
 } = require('./utils/caAvancement'); // CA a l'avancement (FAE/PCA) : spec docs/superpowers/specs/2026-08-31-ca-avancement-design.md
+const { missionAvancementInfo } = require('./utils/avancementMissionInfo'); // champs additifs GET /api/avancement (spec §5.1 bis) : recherche/lecture directe/filtre "a cheval" du selecteur front
 const cron = require('node-cron');
 const MASSE_TAB = 'Masse_salariale';
 const upload = multer({
@@ -9434,9 +9435,13 @@ app.get('/api/avancement', async (req, res) => {
       suivies: calcul.suivies,
       anomalies: verifierInvariantAvancement(missions, lignes),
       figee: exerciceFige(lignes, exercice),
+      // Champs additifs (spec §5.1 bis) pour la recherche/lecture directe/filtre "a cheval" du
+      // selecteur front : missionAvancementInfo (utils/avancementMissionInfo.js, module pur teste)
+      // applique la meme regle de rattachement d'annee que signedAmountForYear (date de facture du
+      // volet si emise, sinon repli "Annee final") et le meme seuil MIN_MONTANT que utils/billing.js.
       missions: missions
         .filter(m => m.etat !== 'Annulé')
-        .map(m => ({ id: m.id, nom: m.nom, client: m.client, ca: m.ca })),
+        .map(m => ({ id: m.id, nom: m.nom, client: m.client, ca: m.ca, ...missionAvancementInfo(m) })),
     });
   } catch (e) {
     console.error('GET /api/avancement error:', e.message);

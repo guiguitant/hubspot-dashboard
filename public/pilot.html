@@ -14095,11 +14095,103 @@
     // jugé, mission par mission, puis fige l'exercice à sa clôture (les pourcentages deviennent
     // définitifs).
     let avancementData = null;
+    // Etat du selecteur "+ suivre une mission" (amendement 2026-09-01, spec §5.1 bis : recherche,
+    // lecture directe, filtre "a cheval"). Remis a zero a chaque ouverture de la modale et apres
+    // chaque ajout reussi, pour repartir d'une liste filtree propre.
+    let avancementSearchQuery = '';
+    let avancementShowAll = false;
+    let avancementSelectedMissionId = null;
 
     async function openAvancementModal() {
       document.getElementById('avancementModal').classList.add('active');
       document.getElementById('avancementBody').innerHTML = '<p style="color:var(--text-secondary)">Chargement...</p>';
+      avancementSearchQuery = '';
+      avancementShowAll = false;
+      avancementSelectedMissionId = null;
       await loadAvancement();
+    }
+
+    // Mission (avec les champs additifs §5.1 bis : montantAcompte, dateFactureAcompte, montantSolde,
+    // dateFactureFinale, aCheval...) retrouvee par id dans d.missions. Sert a enrichir a la fois la
+    // liste du selecteur et le tableau des missions deja suivies (qui, lui, ne porte que missionId/
+    // nom/ca/pct* cote serveur : voir computeAvancement dans utils/caAvancement.js).
+    function avancementMissionById(id) {
+      const d = avancementData;
+      if (!d) return null;
+      return (d.missions || []).find(m => String(m.id) === String(id)) || null;
+    }
+
+    // Lecture directe des deux volets d'une mission, forme demandee par Nathan : "Acompte {montant}
+    // le {date} · Solde {montant} le {date}", un volet non emis (aucune date de facture) affichant
+    // "non émis". Un volet est "emis" des qu'il porte une date de facture, meme si son montant est
+    // sous le seuil MIN_MONTANT (ce seuil ne sert qu'a decider "a cheval", pas l'affichage).
+    function avancementVoletsTexte(m) {
+      if (!m) return '';
+      const acompte = m.dateFactureAcompte
+        ? 'Acompte ' + formatEuro(m.montantAcompte || 0) + ' le ' + formatDateFR(m.dateFactureAcompte)
+        : 'Acompte non émis';
+      const solde = m.dateFactureFinale
+        ? 'Solde ' + formatEuro(m.montantSolde || 0) + ' le ' + formatDateFR(m.dateFactureFinale)
+        : 'Solde non émis';
+      return acompte + ' · ' + solde;
+    }
+
+    // Missions candidates au suivi : exclut celles deja suivies, applique le filtre "a cheval" par
+    // defaut (echappatoire avancementShowAll : necessaire pour les missions facturees en une fois
+    // mais dont le travail deborde sur l'exercice suivant, ex. Alphapro groupe, PCA sans etre "a
+    // cheval" au sens des dates de facture), puis la recherche texte nom/client. normFact (definie
+    // plus bas dans ce fichier, section Facturation) est deja la normalisation casse/accents utilisee
+    // pour la recherche de factSearchInput : reutilisee ici a l'identique plutot que dupliquee.
+    function avancementCandidateMissions() {
+      const d = avancementData;
+      if (!d) return [];
+      const suiviesIds = new Set((d.suivies || []).map(s => s.missionId));
+      let list = (d.missions || []).filter(m => !suiviesIds.has(String(m.id)));
+      if (!avancementShowAll) list = list.filter(m => m.aCheval);
+      const q = normFact((avancementSearchQuery || '').trim());
+      if (q) list = list.filter(m => normFact(m.nom || '').includes(q) || normFact(m.client || '').includes(q));
+      return list;
+    }
+
+    // Rendu (fragment HTML seul) de la liste filtree : appele au premier rendu de la modale ET a
+    // chaque frappe/coche, en ciblant uniquement #avancementMissionListWrap pour ne pas faire perdre
+    // le focus du champ de recherche a chaque caractere tape.
+    function avancementRenderMissionListHtml() {
+      const list = avancementCandidateMissions();
+      if (!list.length) {
+        return '<p style="font-size:0.78rem;color:var(--text-secondary);margin:0.3rem 0 0">Aucune mission '
+          + (avancementShowAll ? '' : 'à cheval sur deux exercices ') + 'ne correspond.</p>';
+      }
+      return '<div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius)">'
+        + list.map(m => {
+            const selected = String(m.id) === String(avancementSelectedMissionId);
+            return '<div onclick="avancementSelectMission(\'' + m.id + '\')" style="padding:0.4rem 0.55rem;cursor:pointer;border-bottom:1px solid var(--border);font-size:0.78rem;'
+              + (selected ? 'background:var(--primary-bg)' : '') + '">'
+              + '<div style="font-weight:600">' + escapeHtml(m.nom || '') + (m.client ? ' · ' + escapeHtml(m.client) : '') + ' · ' + formatEuro(m.ca || 0) + '</div>'
+              + '<div style="color:var(--text-secondary);margin-top:0.1rem">' + avancementVoletsTexte(m) + '</div>'
+              + '</div>';
+          }).join('')
+        + '</div>';
+    }
+
+    function avancementOnSearchInput(v) {
+      avancementSearchQuery = v || '';
+      const wrap = document.getElementById('avancementMissionListWrap');
+      if (wrap) wrap.innerHTML = avancementRenderMissionListHtml();
+    }
+
+    function avancementOnShowAllChange(checked) {
+      avancementShowAll = !!checked;
+      const wrap = document.getElementById('avancementMissionListWrap');
+      if (wrap) wrap.innerHTML = avancementRenderMissionListHtml();
+    }
+
+    function avancementSelectMission(missionId) {
+      avancementSelectedMissionId = missionId;
+      // Re-rendu complet (pas d'appel reseau, avancementData est deja charge) : la surbrillance de la
+      // liste ET le bloc exercice/pourcentage/bouton "Ajouter" en dependent tous les deux, un rendu
+      // cible aurait duplique la logique d'activation du bouton a deux endroits.
+      renderAvancementModal();
     }
 
     function closeAvancementModal() {
@@ -14178,8 +14270,13 @@
           ? s.pctPrecedent + ' % <span style="font-size:0.7rem;color:var(--text-secondary)">(figé)</span>'
           : '<input type="number" min="0" max="100" step="1" value="' + s.pctPrecedent + '" id="av-prec-' + s.missionId + '" style="width:64px;padding:0.2rem;text-align:right;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text)">'
             + ' <button onclick="saveAvancementLigne(\'' + s.missionId + '\',' + exPrec + ',\'av-prec-' + s.missionId + '\')" style="padding:0.2rem 0.5rem;font-size:0.75rem;cursor:pointer">OK</button>';
+        // Lecture directe des volets (spec §5.1 bis) : la meme mission depuis d.missions, qui seul
+        // porte montantAcompte/dateFactureAcompte/montantSolde/dateFactureFinale (d.suivies ne les a
+        // pas). Nathan juge l'avancement sans quitter la modale, ni rouvrir l'onglet Facturation.
+        const missionInfo = avancementMissionById(s.missionId);
         html += '<tr style="border-bottom:1px solid var(--border)">'
-          + '<td style="padding:0.4rem">' + escapeHtml(s.nom) + '</td>'
+          + '<td style="padding:0.4rem"><div>' + escapeHtml(s.nom) + '</div>'
+          + '<div style="font-size:0.72rem;color:var(--text-secondary);margin-top:0.15rem">' + avancementVoletsTexte(missionInfo) + '</div></td>'
           + '<td style="padding:0.4rem;text-align:right">' + formatEuro(s.ca) + '</td>'
           + '<td style="padding:0.4rem;text-align:right">' + cellPrec + '</td>'
           + '<td style="padding:0.4rem;text-align:right">'
@@ -14205,25 +14302,37 @@
       if (exFigee && figeePrec) {
         html += '<div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:1rem">Exercices ' + exPrec + ' et ' + ex + ' figés : plus aucune mission ne peut être ajoutée ou retirée du suivi.</div>';
       } else {
-        const suiviesIds = new Set((d.suivies || []).map(s => s.missionId));
-        const dispo = (d.missions || []).filter(m => !suiviesIds.has(String(m.id)));
         // Choix de l'exercice porté par le % saisi (correctif C1) : seuls les exercices NON figés sont
         // proposés (un seul si l'autre est déjà figé), ce qui couvre aussi la saisie des 7 ancres 2025
         // tant que l'exercice précédent n'est pas encore fermé.
         const anneesDispo = [];
         if (!figeePrec) anneesDispo.push(exPrec);
         if (!exFigee) anneesDispo.push(ex);
-        html += '<div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:1rem;flex-wrap:wrap">'
-          + '<select id="avancementNouvelle" style="flex:1;min-width:0;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:0.8rem">'
-          + '<option value="">Ajouter une mission au suivi...</option>'
-          + dispo.map(m => '<option value="' + m.id + '">' + escapeHtml(m.nom || '') + ' · ' + escapeHtml(m.client || '') + ' · ' + formatEuro(m.ca || 0) + '</option>').join('')
-          + '</select>'
+        const missionSelectionnee = avancementSelectedMissionId ? avancementMissionById(avancementSelectedMissionId) : null;
+        html += '<div style="border:1px solid var(--border);border-radius:var(--radius);padding:0.6rem;margin-bottom:1rem">';
+        html += '<div style="font-size:0.82rem;font-weight:600;margin-bottom:0.5rem">Ajouter une mission au suivi</div>';
+        // Recherche par nom/client + case a cocher "afficher toutes les missions" (amendement
+        // 2026-09-01, retour de Nathan sur la V1 : le <select> simple etait illisible). Par defaut, la
+        // liste ne montre que les missions "a cheval" (aCheval, calcule serveur) : la case leve ce
+        // filtre pour les cas type Alphapro groupe (facturee en une fois mais PCA, spec §5.1 bis).
+        html += '<div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.5rem;flex-wrap:wrap">'
+          + '<input type="text" id="avancementMissionSearch" value="' + escapeHtml(avancementSearchQuery) + '" placeholder="Rechercher une mission, un client..." oninput="avancementOnSearchInput(this.value)" style="flex:1;min-width:180px;padding:0.35rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:0.8rem">'
+          + '<label style="display:flex;align-items:center;gap:0.3rem;font-size:0.78rem;color:var(--text-secondary);white-space:nowrap;cursor:pointer">'
+          + '<input type="checkbox" id="avancementShowAllCheckbox"' + (avancementShowAll ? ' checked' : '') + ' onchange="avancementOnShowAllChange(this.checked)"> Afficher toutes les missions'
+          + '</label>'
+          + '</div>';
+        html += '<div id="avancementMissionListWrap">' + avancementRenderMissionListHtml() + '</div>';
+        html += '<div style="display:flex;gap:0.5rem;align-items:center;margin-top:0.6rem;flex-wrap:wrap">'
+          + (missionSelectionnee
+              ? '<span style="font-size:0.78rem">Sélection : <strong>' + escapeHtml(missionSelectionnee.nom || '') + '</strong></span>'
+              : '<span style="font-size:0.78rem;color:var(--text-secondary)">Sélectionner une mission ci-dessus</span>')
           + '<select id="avancementNouvelExercice" title="Exercice porté par le pourcentage saisi" style="padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:0.8rem">'
           + anneesDispo.map(a => '<option value="' + a + '">' + a + '</option>').join('')
           + '</select>'
           + '<input type="number" min="0" max="100" step="1" id="avancementNouveauPct" placeholder="%" style="width:70px;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text)">'
-          + '<button onclick="addAvancementLigne()" style="padding:0.35rem 0.7rem;cursor:pointer">Ajouter</button>'
+          + '<button onclick="addAvancementLigne()"' + (missionSelectionnee ? '' : ' disabled') + ' style="padding:0.35rem 0.7rem;cursor:pointer">Ajouter</button>'
           + '</div>';
+        html += '</div>';
       }
 
       // Figeage : action volontaire, non annulable depuis l'interface (confirmation systématique dans
@@ -14263,12 +14372,16 @@
     }
 
     async function addAvancementLigne() {
-      const sel = document.getElementById('avancementNouvelle');
+      // La mission vient de la selection faite dans la liste (avancementSelectMission), pas d'un
+      // <select> : voir avancementCandidateMissions/avancementRenderMissionListHtml (spec §5.1 bis).
       const exSel = document.getElementById('avancementNouvelExercice');
       const pct = document.getElementById('avancementNouveauPct');
-      if (!sel || !sel.value || !exSel || !exSel.value) return;
+      if (!avancementSelectedMissionId || !exSel || !exSel.value) return;
       try {
-        await postAvancement('/api/avancement', 'POST', { missionId: sel.value, exercice: Number(exSel.value), pct: Number(pct.value) || 0 });
+        await postAvancement('/api/avancement', 'POST', { missionId: avancementSelectedMissionId, exercice: Number(exSel.value), pct: Number(pct.value) || 0 });
+        avancementSearchQuery = '';
+        avancementShowAll = false;
+        avancementSelectedMissionId = null;
         await loadAvancement();
       } catch (e) { alert('Ajout impossible : ' + e.message); }
     }
