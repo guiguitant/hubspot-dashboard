@@ -3854,7 +3854,7 @@
       <div class="kpi-block">
         <div class="kpi-label">CA <span id="ckCaAnneeYear">2026</span> <span class="kpi-unit">HT</span></div>
         <div class="kpi-value" id="ckCaAnnee">--</div>
-        <div class="kpi-sub">CA affecté à l'année · source Notion</div>
+        <div class="kpi-sub" id="ckCaAnneeSub">CA affecté à l'année · source Notion</div>
       </div>
       <div class="kpi-block" onclick="openCockpitPipelineDetail()" style="cursor:pointer">
         <div class="kpi-label">Pipeline pondere</div>
@@ -12121,13 +12121,16 @@
       document.getElementById('analyticsCa').textContent = formatEuro(data.caAnnee != null ? data.caAnnee : data.ca);
       // Même infobulle que le Cockpit : le CA affiché intègre l'avancement des missions à cheval.
       // Le graphe mensuel ci-dessous reste daté à la facture (un pourcentage d'avancement n'a pas
-      // de mois d'atterrissage) : les deux peuvent donc différer, c'est voulu.
+      // de mois d'atterrissage) : les deux peuvent donc différer, c'est voulu. Renvoi cliquable vers
+      // le sous-onglet "Calcul" de la modale (spec 5.1 ter, point g).
       const _elAnalyticsCa = document.getElementById('analyticsCa');
+      const _subAnalyticsCa = document.getElementById('analyticsCaSub');
       if (data.avancement && data.avancement.actif && data.avancement.delta !== 0) {
         _elAnalyticsCa.title = "CA à l'avancement : ajustement de " + formatEuro(data.avancement.delta) + " sur " + data.avancement.suivies.length + " mission(s) à cheval, par rapport au rattachement habituel des missions à l'année. Le graphe mensuel reste daté à la facture.";
       } else {
         _elAnalyticsCa.title = '';
       }
+      if (_subAnalyticsCa) _subAnalyticsCa.innerHTML = 'CA affecté à l\'année · source Notion' + _avancementBadgeHtml(data.avancement);
       const analyticsCaYearEl = document.getElementById('analyticsCaYear');
       if (analyticsCaYearEl) analyticsCaYearEl.textContent = String(data.start).slice(0, 4);
       document.getElementById('analyticsCaSigne').textContent = formatEuro(data.caSigne || 0);
@@ -12487,6 +12490,9 @@
         tile('pool', 'Prime pool estimée', poolVal, poolSub);
       // Infobulle « à l'avancement », même patron que le Cockpit et Analytics : posée si l'ajustement
       // est actif, effacée sinon (sinon elle survit à un changement d'exercice via le sélecteur KPI).
+      // Renvoi cliquable vers le sous-onglet "Calcul" de la modale (spec 5.1 ter, point g) : injecte le
+      // badge dans .kpi-ov-sub plutôt que de toucher subFact/tileBar, cette tuile étant déjà cliquable
+      // pour ouvrir openKpiFactureDetail() (le badge appelle event.stopPropagation()).
       const _elKpiCa = box.querySelector('.kpi-ov.signe');
       if (_elKpiCa) {
         if (kpiData.avancement && kpiData.avancement.actif && kpiData.avancement.delta !== 0) {
@@ -12494,6 +12500,8 @@
         } else {
           _elKpiCa.title = '';
         }
+        const _subKpiCa = _elKpiCa.querySelector('.kpi-ov-sub');
+        if (_subKpiCa) _subKpiCa.innerHTML += _avancementBadgeHtml(kpiData.avancement);
       }
     }
 
@@ -14088,37 +14096,48 @@
       refreshAnalytics();
     }
 
-    // --- CA à l'avancement (FAE/PCA) : spec 2026-08-31-ca-avancement-design.md -----------------------
+    // --- CA à l'avancement (FAE/PCA) : spec 2026-08-31-ca-avancement-design.md, section 5.1 ter ------
     // Une mission à cheval sur deux exercices (acompte facturé en N, solde facturé en N+1) ne doit pas
     // faire apparaître son CA au fil des dates de facturation, mais au fil de l'avancement réel constaté
     // au 31/12. Cette modale est le SEUL point de saisie de cet avancement : Nathan le met à jour au
     // jugé, mission par mission, puis fige l'exercice à sa clôture (les pourcentages deviennent
     // définitifs).
-    let avancementData = null;
-    // Etat du selecteur "+ suivre une mission" (amendement 2026-09-01, spec §5.1 bis : recherche,
-    // lecture directe, filtre "a cheval"). Remis a zero a chaque ouverture de la modale et apres
-    // chaque ajout reussi, pour repartir d'une liste filtree propre.
-    let avancementSearchQuery = '';
-    let avancementShowAll = false;
-    let avancementSelectedMissionId = null;
+    //
+    // Refonte 5.1 ter (retours Nathan du 2026-09-01, après mise en service) : la grille n'affiche plus
+    // que les exercices N et N+1 (l'ancre 2025 est saisie et figée, elle n'a plus à encombrer la
+    // saisie) ; elle liste TOUTES les missions pertinentes, suivies ou non (saisir un pourcentage crée
+    // la ligne) ; deux sous-onglets "Saisie" (la grille) et "Calcul" (le pont de réconciliation, qui
+    // rend visible le report en avant depuis fin N-1, retiré de l'affichage mais pas du calcul).
+    let avancementData = null;      // reponse /api/avancement?year=N : missions, lignes (tous exercices), anomalies, suivies/figee de N
+    let avancementDataNext = null;  // reponse /api/avancement?year=N+1 : suivies/figee de N+1 (memes missions/lignes/anomalies que ci-dessus)
+    let avancementCalcData = null;  // champ .avancement de /api/ebe?year=N (pont de reconciliation, sous-onglet Calcul)
+    let avancementView = 'saisie';       // sous-onglet actif : 'saisie' | 'calcul' (patron primeView/switchPrimeView)
+    let avancementSearchQuery = '';      // recherche nom/client sur la grille (heritee de l'amendement 5.1 bis)
+    let avancementShowAll = false;       // case "afficher toutes les missions" : leve le perimetre par defaut (point b)
 
-    async function openAvancementModal() {
-      document.getElementById('avancementModal').classList.add('active');
-      document.getElementById('avancementBody').innerHTML = '<p style="color:var(--text-secondary)">Chargement...</p>';
-      avancementSearchQuery = '';
-      avancementShowAll = false;
-      avancementSelectedMissionId = null;
-      await loadAvancement();
+    // Badge cliquable "à l'avancement" (spec 5.1 ter, point g) : renvoi vers le sous-onglet Calcul de
+    // la modale, depuis n'importe quel endroit qui affiche un CA ajusté (CR, Cockpit, Analytics, KPI).
+    // event.stopPropagation() : ces quatre endroits sont eux-memes souvent cliquables (ligne CR, tuile
+    // KPI...) et doivent garder leur propre comportement de clic ; seul le badge ouvre CETTE modale.
+    // Vide (aucun rendu) si l'ajustement n'est pas actif, ce qui preserve l'effacement des infobulles
+    // existantes quand on change d'exercice ou qu'aucune mission n'est a cheval.
+    function _avancementBadgeHtml(av) {
+      if (!av || !av.actif || av.delta === 0) return '';
+      return ' <span onclick="event.stopPropagation(); openAvancementModal(\'calcul\')" title="Voir le détail du calcul" style="cursor:pointer;font-size:0.68rem;padding:0.05rem 0.35rem;border:1px solid var(--border);border-radius:10px;color:var(--text-secondary)">à l\'avancement</span>';
     }
 
-    // Mission (avec les champs additifs §5.1 bis : montantAcompte, dateFactureAcompte, montantSolde,
-    // dateFactureFinale, aCheval...) retrouvee par id dans d.missions. Sert a enrichir a la fois la
-    // liste du selecteur et le tableau des missions deja suivies (qui, lui, ne porte que missionId/
-    // nom/ca/pct* cote serveur : voir computeAvancement dans utils/caAvancement.js).
-    function avancementMissionById(id) {
-      const d = avancementData;
-      if (!d) return null;
-      return (d.missions || []).find(m => String(m.id) === String(id)) || null;
+    // Ouverture ciblee (spec 5.1 ter, point g) : appelable depuis n'importe quel onglet (la modale est
+    // une surcouche globale). openAvancementModal() sans argument ouvre sur "Saisie" (bouton de
+    // l'onglet Facturation) ; openAvancementModal('calcul') ouvre directement sur le pont (badges CR /
+    // Cockpit / Analytics / KPI).
+    async function openAvancementModal(view) {
+      document.getElementById('avancementModal').classList.add('active');
+      avancementView = view === 'calcul' ? 'calcul' : 'saisie';
+      avancementSearchQuery = '';
+      avancementShowAll = false;
+      avancementCalcData = null; // force le rechargement du pont a chaque ouverture (donnees potentiellement changees depuis)
+      document.getElementById('avancementBody').innerHTML = '<p style="color:var(--text-secondary)">Chargement...</p>';
+      await loadAvancement();
     }
 
     // Lecture directe des deux volets d'une mission, forme demandee par Nathan : "Acompte {montant}
@@ -14136,219 +14155,336 @@
       return acompte + ' · ' + solde;
     }
 
-    // Missions candidates au suivi : exclut celles deja suivies, applique le filtre "a cheval" par
-    // defaut (echappatoire avancementShowAll : necessaire pour les missions facturees en une fois
-    // mais dont le travail deborde sur l'exercice suivant, ex. Alphapro groupe, PCA sans etre "a
-    // cheval" au sens des dates de facture), puis la recherche texte nom/client. normFact (definie
-    // plus bas dans ce fichier, section Facturation) est deja la normalisation casse/accents utilisee
-    // pour la recherche de factSearchInput : reutilisee ici a l'identique plutot que dupliquee.
-    function avancementCandidateMissions() {
+    // Regroupe les lignes plates (tous exercices confondus, d.lignes) par mission_id : sert a la fois
+    // a retrouver la ligne exacte d'une cellule (figee ou non) et au perimetre par defaut (point b).
+    function avancementLignesByMission() {
+      const map = new Map();
       const d = avancementData;
-      if (!d) return [];
-      const suiviesIds = new Set((d.suivies || []).map(s => s.missionId));
-      let list = (d.missions || []).filter(m => !suiviesIds.has(String(m.id)));
-      if (!avancementShowAll) list = list.filter(m => m.aCheval);
-      const q = normFact((avancementSearchQuery || '').trim());
-      if (q) list = list.filter(m => normFact(m.nom || '').includes(q) || normFact(m.client || '').includes(q));
-      return list;
+      if (!d) return map;
+      for (const l of (d.lignes || [])) {
+        const id = String(l.mission_id);
+        if (!map.has(id)) map.set(id, []);
+        map.get(id).push(l);
+      }
+      return map;
     }
 
-    // Rendu (fragment HTML seul) de la liste filtree : appele au premier rendu de la modale ET a
-    // chaque frappe/coche, en ciblant uniquement #avancementMissionListWrap pour ne pas faire perdre
-    // le focus du champ de recherche a chaque caractere tape.
-    function avancementRenderMissionListHtml() {
-      const list = avancementCandidateMissions();
-      if (!list.length) {
-        return '<p style="font-size:0.78rem;color:var(--text-secondary);margin:0.3rem 0 0">Aucune mission '
-          + (avancementShowAll ? '' : 'à cheval sur deux exercices ') + 'ne correspond.</p>';
+    // Detail calcule (pctPrecedent/pctCourant/caAvancement) d'une mission pour l'exercice de la
+    // reponse `data` (celle de N ou celle de N+1) : computeAvancement cote serveur inclut TOUTE mission
+    // portant au moins une ligne, quel que soit l'exercice de cette ligne (voir utils/caAvancement.js).
+    function avancementSuivieById(data, missionId) {
+      if (!data) return null;
+      return (data.suivies || []).find(s => String(s.missionId) === String(missionId)) || null;
+    }
+
+    // Missions de la grille (spec 5.1 ter, point b) : par defaut, celles ayant une activite en N ou
+    // N+1 (facture datee de ces exercices, avec repli "Annee final" deja applique cote serveur dans
+    // anneeAcompte/anneeSolde, cf. utils/avancementMissionInfo.js) OU un avancement deja saisi pour un
+    // de ces deux exercices. La case "toutes les missions" leve ce perimetre. Le drapeau aCheval reste
+    // calcule et affiche en badge sur la ligne, mais NE FILTRE PLUS (il informe, spec 5.1 ter point b).
+    function avancementMissionsGrille() {
+      const d = avancementData;
+      if (!d) return [];
+      const n = d.exercice;
+      const n1 = n + 1;
+      const lignesByMission = avancementLignesByMission();
+      let list = d.missions || [];
+      if (!avancementShowAll) {
+        list = list.filter(m => {
+          if (m.anneeAcompte === n || m.anneeAcompte === n1 || m.anneeSolde === n || m.anneeSolde === n1) return true;
+          const lignes = lignesByMission.get(String(m.id));
+          return !!(lignes && lignes.some(l => l.exercice === n || l.exercice === n1));
+        });
       }
-      return '<div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius)">'
-        + list.map(m => {
-            const selected = String(m.id) === String(avancementSelectedMissionId);
-            return '<div onclick="avancementSelectMission(\'' + m.id + '\')" style="padding:0.4rem 0.55rem;cursor:pointer;border-bottom:1px solid var(--border);font-size:0.78rem;'
-              + (selected ? 'background:var(--primary-bg)' : '') + '">'
-              + '<div style="font-weight:600">' + escapeHtml(m.nom || '') + (m.client ? ' · ' + escapeHtml(m.client) : '') + ' · ' + formatEuro(m.ca || 0) + '</div>'
-              + '<div style="color:var(--text-secondary);margin-top:0.1rem">' + avancementVoletsTexte(m) + '</div>'
-              + '</div>';
-          }).join('')
-        + '</div>';
+      const q = normFact((avancementSearchQuery || '').trim());
+      if (q) list = list.filter(m => normFact(m.nom || '').includes(q) || normFact(m.client || '').includes(q));
+      return list.slice().sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr'));
+    }
+
+    // Cellule "% d'avancement" d'une mission pour un exercice donne (N ou N+1) : lecture seule + badge
+    // "figé" si la ligne existe et porte fige_le, input editable sinon (vide si aucune ligne : la
+    // saisir cree la ligne au clic sur "OK", spec 5.1 ter point b). "Retirer" seulement si la ligne
+    // existe et que l'exercice n'est pas figé.
+    function avancementCellPct(m, lignesByMission, exercice, figeeExercice) {
+      const lignes = lignesByMission.get(String(m.id)) || [];
+      const ligne = lignes.find(l => l.exercice === exercice) || null;
+      if (ligne && ligne.fige_le) {
+        return ligne.pct + ' % <span style="font-size:0.68rem;color:var(--text-secondary)">(figé)</span>';
+      }
+      const elId = 'av-' + exercice + '-' + m.id;
+      const val = ligne ? ligne.pct : '';
+      let html = '<input type="number" min="0" max="100" step="1" value="' + val + '" id="' + elId + '" class="kpi-num-input" style="width:64px;padding:0.2rem">';
+      if (!figeeExercice) {
+        html += ' <button class="kpi-btn" onclick="saveAvancementLigne(\'' + m.id + '\',' + exercice + ',\'' + elId + '\')" style="padding:0.15rem 0.45rem;font-size:0.72rem">OK</button>';
+        if (ligne) html += ' <button class="kpi-btn" onclick="removeAvancementLigne(\'' + m.id + '\',' + exercice + ')" style="padding:0.15rem 0.45rem;font-size:0.72rem">Retirer</button>';
+      }
+      return html;
+    }
+
+    // Cellule "CA à l'avancement" : formatEuro du montant calcule cote serveur (report en avant depuis
+    // l'exercice precedent inclus, spec §3.2) si la mission est suivie sur `data` (a au moins une
+    // ligne, quel que soit l'exercice) ; sinon un tiret median, la mission n'apporte alors aucun
+    // remplacement a l'agregat pour cet exercice.
+    function avancementCellCa(data, missionId) {
+      const s = avancementSuivieById(data, missionId);
+      return s ? formatEuro(s.caAvancement) : '<span style="color:var(--text-secondary)">·</span>';
+    }
+
+    // Rendu (fragment HTML seul) de la grille filtree : appele au premier rendu du sous-onglet Saisie
+    // ET a chaque frappe/coche sur la recherche/case, en ciblant uniquement #avancementGridWrap pour ne
+    // pas faire perdre le focus du champ de recherche a chaque caractere tape (meme patron que
+    // l'ancien selecteur, cf. historique du fichier).
+    function avancementRenderGridHtml() {
+      const d = avancementData;
+      const dNext = avancementDataNext;
+      if (!d) return '';
+      const n = d.exercice;
+      const n1 = n + 1;
+      const missions = avancementMissionsGrille();
+      if (!missions.length) {
+        return '<p style="font-size:0.78rem;color:var(--text-secondary);margin:0.3rem 0 0">Aucune mission '
+          + (avancementShowAll ? '' : 'avec une activité en ' + n + ' ou ' + n1 + ' ') + 'ne correspond.</p>';
+      }
+      const lignesByMission = avancementLignesByMission();
+      const figeeN = !!d.figee;
+      const figeeN1 = !!(dNext && dNext.figee);
+
+      let html = '<div style="overflow-x:auto"><table class="kpi-obj-table"><thead><tr>'
+        + '<th>Mission</th><th>CA HT</th>'
+        + '<th>Av. 31/12/' + n + '</th><th>CA ' + n + '</th>'
+        + '<th>Av. 31/12/' + n1 + '</th><th>CA ' + n1 + '</th>'
+        + '</tr></thead><tbody>';
+
+      for (const m of missions) {
+        const cheval = m.aCheval
+          ? ' <span style="font-size:0.65rem;padding:0.05rem 0.35rem;border:1px solid var(--border);border-radius:10px;color:var(--text-secondary)">à cheval</span>'
+          : '';
+        html += '<tr>'
+          + '<td><div class="kpi-obj-name">' + escapeHtml(m.nom || '') + cheval + '</div>'
+          + (m.client ? '<div style="font-size:0.72rem;color:var(--text-secondary)">' + escapeHtml(m.client) + '</div>' : '')
+          + '<div style="font-size:0.7rem;color:var(--text-secondary);margin-top:0.1rem">' + avancementVoletsTexte(m) + '</div></td>'
+          + '<td style="text-align:right">' + formatEuro(m.ca) + '</td>'
+          + '<td style="text-align:right">' + avancementCellPct(m, lignesByMission, n, figeeN) + '</td>'
+          + '<td style="text-align:right;font-weight:600">' + avancementCellCa(d, m.id) + '</td>'
+          + '<td style="text-align:right">' + avancementCellPct(m, lignesByMission, n1, figeeN1) + '</td>'
+          + '<td style="text-align:right;font-weight:600">' + avancementCellCa(dNext, m.id) + '</td>'
+          + '</tr>';
+      }
+      html += '</tbody></table></div>';
+      return html;
     }
 
     function avancementOnSearchInput(v) {
       avancementSearchQuery = v || '';
-      const wrap = document.getElementById('avancementMissionListWrap');
-      if (wrap) wrap.innerHTML = avancementRenderMissionListHtml();
+      const wrap = document.getElementById('avancementGridWrap');
+      if (wrap) wrap.innerHTML = avancementRenderGridHtml();
     }
 
     function avancementOnShowAllChange(checked) {
       avancementShowAll = !!checked;
-      const wrap = document.getElementById('avancementMissionListWrap');
-      if (wrap) wrap.innerHTML = avancementRenderMissionListHtml();
-    }
-
-    function avancementSelectMission(missionId) {
-      avancementSelectedMissionId = missionId;
-      // Re-rendu complet (pas d'appel reseau, avancementData est deja charge) : la surbrillance de la
-      // liste ET le bloc exercice/pourcentage/bouton "Ajouter" en dependent tous les deux, un rendu
-      // cible aurait duplique la logique d'activation du bouton a deux endroits.
-      renderAvancementModal();
+      const wrap = document.getElementById('avancementGridWrap');
+      if (wrap) wrap.innerHTML = avancementRenderGridHtml();
     }
 
     function closeAvancementModal() {
       document.getElementById('avancementModal').classList.remove('active');
     }
 
+    // Charge N et N+1 en parallele (deux appels du meme endpoint, spec 5.1 ter point a) : missions,
+    // lignes (tous exercices), anomalies et disponibilite sont identiques dans les deux reponses (non
+    // filtres par annee cote serveur), seuls `suivies`, `figee` et `exercice` different. avancementData
+    // reste la reponse "primaire" (celle de N) dont la grille et les bandeaux se servent.
     async function loadAvancement() {
       try {
-        const res = await fetch('/api/avancement?year=' + CURRENT_YEAR);
-        const data = await res.json().catch(() => ({}));
+        const n = CURRENT_YEAR;
+        const [resN, resN1] = await Promise.all([
+          fetch('/api/avancement?year=' + n),
+          fetch('/api/avancement?year=' + (n + 1)),
+        ]);
+        const dataN = await resN.json().catch(() => ({}));
+        const dataN1 = await resN1.json().catch(() => ({}));
         // Le serveur répond 200 avec disponible:false quand la table est absente : seule une vraie
         // erreur HTTP (Notion, Supabase...) doit tomber dans le catch, pour ne jamais afficher le
         // message "table absente" à la place de l'erreur réellement survenue.
-        if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
-        avancementData = data;
+        if (!resN.ok) throw new Error(dataN.error || ('HTTP ' + resN.status));
+        if (!resN1.ok) throw new Error(dataN1.error || ('HTTP ' + resN1.status));
+        avancementData = dataN;
+        avancementDataNext = dataN1;
         renderAvancementModal();
       } catch (e) {
-        document.getElementById('avancementBody').innerHTML = '<p style="color:var(--danger)">Erreur de chargement : ' + e.message + '</p>';
+        document.getElementById('avancementBody').innerHTML = '<p style="color:var(--danger)">Erreur de chargement : ' + escapeHtml(e.message) + '</p>';
       }
     }
 
+    // Coquille de la modale (spec 5.1 ter, point c/d) : sous-onglets kpi-signed-tabs, deux conteneurs
+    // (Saisie / Calcul) dont un seul est visible a la fois. Le sous-onglet Saisie est toujours rendu
+    // (donnees deja en memoire) ; le sous-onglet Calcul se recharge depuis /api/ebe des qu'il devient
+    // actif (loadAvancementCalcul), pour ne jamais afficher un pont perime apres une saisie.
     function renderAvancementModal() {
       const d = avancementData;
       if (!d) return;
-      const ex = d.exercice;
-      const exPrec = ex - 1;
-
-      let html = '<p style="font-size:0.8rem;color:var(--text-secondary);margin-top:0;margin-bottom:0.9rem">'
-        + 'Exercice ' + ex + ' : CA reconnu = CA de la mission × (avancement au 31/12/' + ex + ' moins avancement au 31/12/' + exPrec + ').'
-        + '</p>';
-
       if (!d.disponible) {
-        html += _crAlerteHtml('Table mission_avancements absente : exécuter migrations/44_mission_avancements.sql dans Supabase. La saisie est désactivée, aucun CA n\'est ajusté tant que la migration n\'a pas été jouée.', true);
-        document.getElementById('avancementBody').innerHTML = html;
+        document.getElementById('avancementBody').innerHTML = _crAlerteHtml('Table mission_avancements absente : exécuter migrations/44_mission_avancements.sql dans Supabase. La saisie est désactivée, aucun CA n\'est ajusté tant que la migration n\'a pas été jouée.', true);
         return;
       }
+      let html = '<div class="kpi-signed-tabs" id="avancementTabs"></div>';
+      html += '<div id="avancementSaisiePane"' + (avancementView === 'saisie' ? '' : ' style="display:none"') + '></div>';
+      html += '<div id="avancementCalculPane"' + (avancementView === 'calcul' ? '' : ' style="display:none"') + '></div>';
+      document.getElementById('avancementBody').innerHTML = html;
+      renderAvancementTabs();
+      renderAvancementSaisiePane();
+      if (avancementView === 'calcul') loadAvancementCalcul();
+    }
 
-      // exFigee vient du serveur (exerciceFige) : source de vérité unique pour savoir si l'exercice
-      // demandé est clos. figeePrec doit en revanche être dérivé du tableau brut des lignes (l'API ne
-      // renvoie le champ figee que pour l'exercice demandé, pas pour l'exercice précédent).
-      const exFigee = !!d.figee;
-      const figeePrec = (d.lignes || []).some(l => l.exercice === exPrec && l.fige_le);
+    // Sous-onglets « Saisie » / « Calcul » : patron kpi-signed-tabs / kpi-signed-tab deja utilise par
+    // les primes (primeViewTabs / switchPrimeView), spec 5.1 ter point d.
+    function renderAvancementTabs() {
+      const el = document.getElementById('avancementTabs');
+      if (!el) return;
+      const tabs = [['saisie', 'Saisie'], ['calcul', 'Calcul']];
+      el.innerHTML = tabs.map(([k, label]) =>
+        '<button class="kpi-signed-tab' + (avancementView === k ? ' active' : '') + '" onclick="switchAvancementView(\'' + k + '\')">' + label + '</button>'
+      ).join('');
+    }
+
+    function switchAvancementView(view) {
+      avancementView = view;
+      renderAvancementTabs();
+      const saisiePane = document.getElementById('avancementSaisiePane');
+      const calculPane = document.getElementById('avancementCalculPane');
+      if (saisiePane) saisiePane.style.display = (view === 'saisie') ? '' : 'none';
+      if (calculPane) calculPane.style.display = (view === 'calcul') ? '' : 'none';
+      if (view === 'calcul') loadAvancementCalcul();
+    }
+
+    // Sous-onglet « Saisie » (spec 5.1 ter) : bandeaux, recherche + case "toutes les missions", grille
+    // fusionnee (toute mission pertinente est une ligne, point b), bouton de figeage de N (point f).
+    // Plus de colonne N-1 (point a) ni de selecteur "+ suivre une mission" (point b, supprime).
+    function renderAvancementSaisiePane() {
+      const d = avancementData;
+      const dNext = avancementDataNext;
+      const pane = document.getElementById('avancementSaisiePane');
+      if (!d || !pane) return;
+      const n = d.exercice;
+      const n1 = n + 1;
+
+      let html = '<p style="font-size:0.8rem;color:var(--text-secondary);margin-top:0;margin-bottom:0.9rem">'
+        + 'Deux exercices modifiables : ' + n + ' et ' + n1 + '. Le CA ' + n + ' tient compte de l\'avancement de fin '
+        + (n - 1) + ', reporté automatiquement (report en avant) : voir le sous-onglet « Calcul » pour le détail.'
+        + '</p>';
 
       if (d.anomalies && d.anomalies.length) {
         html += _crAlerteHtml('Incohérence détectée sur ' + d.anomalies.length + ' mission(s) terminée(s) : la somme des CA par exercice ne retombe pas sur le CA de la mission. Vérifier les pourcentages saisis.', true);
       }
-      if (figeePrec) {
-        html += _crAlerteHtml('Exercice ' + exPrec + ' figé : les pourcentages ci-dessous sont définitifs et ne sont plus modifiables depuis Pilot.', false);
+      if (d.figee) {
+        html += _crAlerteHtml('Exercice ' + n + ' figé : les pourcentages ci-dessous sont définitifs et ne sont plus modifiables depuis Pilot.', false);
       }
-      if (exFigee) {
-        html += _crAlerteHtml('Exercice ' + ex + ' figé : les pourcentages ci-dessous sont définitifs et ne sont plus modifiables depuis Pilot.', false);
+      if (dNext && dNext.figee) {
+        html += _crAlerteHtml('Exercice ' + n1 + ' figé : les pourcentages ci-dessous sont définitifs et ne sont plus modifiables depuis Pilot.', false);
       }
 
-      // Tableau des missions suivies. Enveloppe overflow-x:auto : meme patron que le tableau
-      // "Ressources mobilisees" (ligne ~17057) pour que le tableau defile dans son propre conteneur
-      // au lieu de faire deborder la modale si des noms de mission Notion sont longs.
-      html += '<div style="overflow-x:auto;margin-top:0.7rem">';
-      html += '<table style="width:100%;border-collapse:collapse;font-size:0.82rem;margin-bottom:1rem">';
-      html += '<thead><tr style="text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary)">'
-        + '<th style="padding:0.4rem">Mission</th><th style="padding:0.4rem;text-align:right">CA HT</th>'
-        + '<th style="padding:0.4rem;text-align:right">Av. 31/12/' + exPrec + '</th>'
-        + '<th style="padding:0.4rem;text-align:right">Av. 31/12/' + ex + '</th>'
-        + '<th style="padding:0.4rem;text-align:right">CA ' + ex + '</th>'
-        + '<th style="padding:0.4rem"></th></tr></thead><tbody>';
+      // Recherche nom/client + case "toutes les missions" (point b) : perimetre par defaut = missions
+      // actives en N ou N+1. Toolbar HORS de #avancementGridWrap : seule la grille est remplacee a
+      // chaque frappe, pour ne pas faire perdre le focus du champ de recherche.
+      html += '<div class="kpi-rg-h">Missions <span class="kpi-rg-badge">' + n + ' et ' + n1 + '</span></div>';
+      html += '<div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.6rem;flex-wrap:wrap">'
+        + '<input type="text" id="avancementSearchInput" value="' + escapeHtml(avancementSearchQuery) + '" placeholder="Rechercher une mission, un client..." oninput="avancementOnSearchInput(this.value)" style="flex:1;min-width:200px;padding:0.35rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:0.8rem">'
+        + '<label style="display:flex;align-items:center;gap:0.3rem;font-size:0.78rem;color:var(--text-secondary);white-space:nowrap;cursor:pointer">'
+        + '<input type="checkbox" id="avancementShowAllCheckbox"' + (avancementShowAll ? ' checked' : '') + ' onchange="avancementOnShowAllChange(this.checked)"> Afficher toutes les missions'
+        + '</label></div>';
 
-      for (const s of (d.suivies || [])) {
-        // Toutes les lignes d'un exercice sont figées ensemble (garde serveur "some" sur exerciceFige) :
-        // une mission suivie de l'exercice demandé partage donc forcément l'état exFigee global. Même
-        // logique pour figeePrec, dérivé plus haut sur les lignes brutes de l'exercice précédent.
-        const figee = exFigee;
-        // Colonne N-1 éditable SI l'exercice précédent n'est pas figé (correctif C1, revue finale) :
-        // sans ce chemin, les 7 ancres 2025 (spec 3.4) sont insaisissables et le seul geste possible
-        // (ajouter la mission à 100 % pour l'exercice courant) fabrique du CA fantôme. Id DOM distinct
-        // (av-prec-) de la colonne courante (av-) : il y a désormais deux champs par ligne.
-        const cellPrec = figeePrec
-          ? s.pctPrecedent + ' % <span style="font-size:0.7rem;color:var(--text-secondary)">(figé)</span>'
-          : '<input type="number" min="0" max="100" step="1" value="' + s.pctPrecedent + '" id="av-prec-' + s.missionId + '" style="width:64px;padding:0.2rem;text-align:right;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text)">'
-            + ' <button onclick="saveAvancementLigne(\'' + s.missionId + '\',' + exPrec + ',\'av-prec-' + s.missionId + '\')" style="padding:0.2rem 0.5rem;font-size:0.75rem;cursor:pointer">OK</button>';
-        // Lecture directe des volets (spec §5.1 bis) : la meme mission depuis d.missions, qui seul
-        // porte montantAcompte/dateFactureAcompte/montantSolde/dateFactureFinale (d.suivies ne les a
-        // pas). Nathan juge l'avancement sans quitter la modale, ni rouvrir l'onglet Facturation.
-        const missionInfo = avancementMissionById(s.missionId);
-        html += '<tr style="border-bottom:1px solid var(--border)">'
-          + '<td style="padding:0.4rem"><div>' + escapeHtml(s.nom) + '</div>'
-          + '<div style="font-size:0.72rem;color:var(--text-secondary);margin-top:0.15rem">' + avancementVoletsTexte(missionInfo) + '</div></td>'
-          + '<td style="padding:0.4rem;text-align:right">' + formatEuro(s.ca) + '</td>'
-          + '<td style="padding:0.4rem;text-align:right">' + cellPrec + '</td>'
-          + '<td style="padding:0.4rem;text-align:right">'
-          + (figee
-              ? s.pctCourant + ' % <span style="font-size:0.7rem;color:var(--text-secondary)">(figé)</span>'
-              : '<input type="number" min="0" max="100" step="1" value="' + s.pctCourant + '" id="av-' + s.missionId + '" style="width:64px;padding:0.2rem;text-align:right;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text)">')
-          + '</td>'
-          + '<td style="padding:0.4rem;text-align:right;font-weight:600">' + formatEuro(s.caAvancement) + '</td>'
-          + '<td style="padding:0.4rem;text-align:right">'
-          + (figee ? '' : '<button onclick="saveAvancementLigne(\'' + s.missionId + '\',' + ex + ',\'av-' + s.missionId + '\')" style="padding:0.2rem 0.5rem;font-size:0.75rem;cursor:pointer">OK</button>'
-             + ' <button onclick="removeAvancementLigne(\'' + s.missionId + '\',' + ex + ')" style="padding:0.2rem 0.5rem;font-size:0.75rem;cursor:pointer">Retirer</button>')
-          + '</td></tr>';
+      html += '<div id="avancementGridWrap">' + avancementRenderGridHtml() + '</div>';
+
+      // Figeage (point f) : action volontaire, non annulable depuis l'interface (confirmation
+      // systematique dans figerAvancement). Un seul bouton, pour N (l'exercice d'ancrage precedent est
+      // suppose deja figé, plus affiche dans la grille).
+      html += '<div class="kpi-rg-h" style="margin-top:1rem">Clôture de l\'exercice</div>';
+      html += '<div style="border-top:1px solid var(--border);padding-top:0.75rem;font-size:0.78rem;color:var(--text-secondary)">';
+      if (d.figee) {
+        html += 'Exercice ' + n + ' déjà figé.';
+      } else {
+        html += 'À la clôture de ' + n + ', figer ses pourcentages : ils deviennent l\'avancement officiel au 31/12 et ne sont plus modifiables.'
+          + '<div style="margin-top:0.5rem"><button class="kpi-btn kpi-btn--primary" onclick="figerAvancement(' + n + ')">Figer ' + n + '</button></div>';
       }
-      if (!(d.suivies || []).length) {
-        html += '<tr><td colspan="6" style="padding:0.6rem;color:var(--text-secondary)">Aucune mission suivie à l\'avancement pour ' + ex + '.</td></tr>';
-      }
-      html += '</tbody></table>';
       html += '</div>';
 
-      // Ajout d'une mission au suivi : désactivé dès que l'exercice courant est figé (une écriture
-      // serait de toute façon refusée par le serveur, autant l'expliquer plutôt que de laisser
-      // l'utilisateur essayer pour rien).
-      if (exFigee && figeePrec) {
-        html += '<div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:1rem">Exercices ' + exPrec + ' et ' + ex + ' figés : plus aucune mission ne peut être ajoutée ou retirée du suivi.</div>';
-      } else {
-        // Choix de l'exercice porté par le % saisi (correctif C1) : seuls les exercices NON figés sont
-        // proposés (un seul si l'autre est déjà figé), ce qui couvre aussi la saisie des 7 ancres 2025
-        // tant que l'exercice précédent n'est pas encore fermé.
-        const anneesDispo = [];
-        if (!figeePrec) anneesDispo.push(exPrec);
-        if (!exFigee) anneesDispo.push(ex);
-        const missionSelectionnee = avancementSelectedMissionId ? avancementMissionById(avancementSelectedMissionId) : null;
-        html += '<div style="border:1px solid var(--border);border-radius:var(--radius);padding:0.6rem;margin-bottom:1rem">';
-        html += '<div style="font-size:0.82rem;font-weight:600;margin-bottom:0.5rem">Ajouter une mission au suivi</div>';
-        // Recherche par nom/client + case a cocher "afficher toutes les missions" (amendement
-        // 2026-09-01, retour de Nathan sur la V1 : le <select> simple etait illisible). Par defaut, la
-        // liste ne montre que les missions "a cheval" (aCheval, calcule serveur) : la case leve ce
-        // filtre pour les cas type Alphapro groupe (facturee en une fois mais PCA, spec §5.1 bis).
-        html += '<div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.5rem;flex-wrap:wrap">'
-          + '<input type="text" id="avancementMissionSearch" value="' + escapeHtml(avancementSearchQuery) + '" placeholder="Rechercher une mission, un client..." oninput="avancementOnSearchInput(this.value)" style="flex:1;min-width:180px;padding:0.35rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:0.8rem">'
-          + '<label style="display:flex;align-items:center;gap:0.3rem;font-size:0.78rem;color:var(--text-secondary);white-space:nowrap;cursor:pointer">'
-          + '<input type="checkbox" id="avancementShowAllCheckbox"' + (avancementShowAll ? ' checked' : '') + ' onchange="avancementOnShowAllChange(this.checked)"> Afficher toutes les missions'
-          + '</label>'
-          + '</div>';
-        html += '<div id="avancementMissionListWrap">' + avancementRenderMissionListHtml() + '</div>';
-        html += '<div style="display:flex;gap:0.5rem;align-items:center;margin-top:0.6rem;flex-wrap:wrap">'
-          + (missionSelectionnee
-              ? '<span style="font-size:0.78rem">Sélection : <strong>' + escapeHtml(missionSelectionnee.nom || '') + '</strong></span>'
-              : '<span style="font-size:0.78rem;color:var(--text-secondary)">Sélectionner une mission ci-dessus</span>')
-          + '<select id="avancementNouvelExercice" title="Exercice porté par le pourcentage saisi" style="padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:0.8rem">'
-          + anneesDispo.map(a => '<option value="' + a + '">' + a + '</option>').join('')
-          + '</select>'
-          + '<input type="number" min="0" max="100" step="1" id="avancementNouveauPct" placeholder="%" style="width:70px;padding:0.35rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text)">'
-          + '<button onclick="addAvancementLigne()"' + (missionSelectionnee ? '' : ' disabled') + ' style="padding:0.35rem 0.7rem;cursor:pointer">Ajouter</button>'
-          + '</div>';
-        html += '</div>';
+      pane.innerHTML = html;
+    }
+
+    // Sous-onglet « Calcul » (spec 5.1 ter, point e) : recharge le pont depuis /api/ebe a chaque
+    // activation (pas de cache) pour ne jamais afficher un pont perime apres une saisie faite dans
+    // l'onglet Saisie.
+    async function loadAvancementCalcul() {
+      const el = document.getElementById('avancementCalculPane');
+      if (!el) return;
+      el.innerHTML = '<p style="color:var(--text-secondary)">Chargement...</p>';
+      try {
+        const res = await fetch('/api/ebe?year=' + CURRENT_YEAR);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        avancementCalcData = data.avancement || null;
+        renderAvancementCalculPane();
+      } catch (e) {
+        el.innerHTML = '<p style="color:var(--danger)">Erreur de chargement : ' + escapeHtml(e.message) + '</p>';
+      }
+    }
+
+    // Pont de réconciliation (spec 5.1 ter, point e) : CA facturé Notion (dates de facture) -> CA
+    // estimé à la clôture, puis le détail mission par mission (montant remplacé -> montant retenu).
+    // Meme patron visuel que _crPontHtml (lignes libellé/valeur, filet et gras sur le total) sans
+    // reutiliser cette fonction telle quelle (elle est specifique aux champs du compte de resultat).
+    function renderAvancementCalculPane() {
+      const el = document.getElementById('avancementCalculPane');
+      if (!el) return;
+      const av = avancementCalcData;
+      const n = avancementData ? avancementData.exercice : CURRENT_YEAR;
+      const nPrec = n - 1;
+
+      let html = '<p style="font-size:0.8rem;color:var(--text-secondary);margin-top:0;margin-bottom:0.9rem">'
+        + 'Passage du CA facturé ' + n + ' (Notion, dates de facture) au CA ' + n + ' estimé à la clôture, mission par mission, tel que retenu dans le compte de résultat.'
+        + '</p>';
+
+      const actif = !!(av && av.actif);
+      if (!actif) {
+        html += '<p style="color:var(--text-secondary);font-size:0.85rem">Aucun ajustement actif pour ' + n + ' : aucune mission à cheval suivie, ou aucun pourcentage encore saisi.</p>';
+        el.innerHTML = html;
+        return;
       }
 
-      // Figeage : action volontaire, non annulable depuis l'interface (confirmation systématique dans
-      // figerAvancement). Le bouton disparaît dès qu'un exercice est déjà figé, remplacé par une mention.
-      html += '<div style="border-top:1px solid var(--border);padding-top:0.75rem;font-size:0.78rem;color:var(--text-secondary)">'
-        + 'À la clôture d\'un exercice, figer ses pourcentages : ils deviennent l\'avancement officiel au 31/12 et ne sont plus modifiables.'
-        + '<div style="margin-top:0.5rem;display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap">'
-        + (figeePrec
-            ? '<span>' + exPrec + ' déjà figé</span>'
-            : '<button onclick="figerAvancement(' + exPrec + ')" style="padding:0.25rem 0.6rem;font-size:0.75rem;cursor:pointer">Figer ' + exPrec + '</button>')
-        + (exFigee
-            ? '<span>' + ex + ' déjà figé</span>'
-            : '<button onclick="figerAvancement(' + ex + ')" style="padding:0.25rem 0.6rem;font-size:0.75rem;cursor:pointer">Figer ' + ex + '</button>')
-        + '</div></div>';
+      const base = Number(av.base) || 0;
+      const delta = Number(av.delta) || 0;
+      const estime = base + delta;
 
-      document.getElementById('avancementBody').innerHTML = html;
+      const ligne = (label, texteValeur, total) =>
+        '<div style="display:flex;justify-content:space-between;align-items:baseline;padding:0.3rem 0'
+        + (total ? ';border-top:1px solid var(--border);margin-top:0.25rem;font-weight:700' : '') + '">'
+        + '<span>' + label + '</span><span>' + texteValeur + '</span></div>';
+
+      html += '<div class="kpi-rg-h">Pont de réconciliation <span class="kpi-rg-badge">CA facturé → CA à l\'avancement</span></div>';
+      html += '<div style="border:1px solid var(--border);border-radius:8px;padding:0.8rem 0.9rem;margin-bottom:0.8rem">';
+      html += ligne('CA facturé ' + n + ' (Notion, dates de facture)', formatEuro(base));
+      const deltaNeg = delta < 0;
+      const deltaSign = deltaNeg ? '− ' : (delta > 0 ? '+ ' : '');
+      const deltaColor = deltaNeg ? 'color:var(--danger)' : '';
+      html += ligne('Ajustement d\'avancement (' + av.suivies.length + ' mission(s) à cheval)', '<span style="' + deltaColor + '">' + deltaSign + formatEuro(Math.abs(delta)) + '</span>');
+      html += ligne('= CA ' + n + ' estimé à la clôture', formatEuro(estime), true);
+      html += '</div>';
+
+      html += '<div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:0.5rem">Le calcul part de l\'avancement de fin '
+        + nPrec + ' (reporté automatiquement, non modifiable ici) : voir le sous-onglet « Saisie » pour ajuster ' + n + ' et ' + (n + 1) + '.</div>';
+
+      html += '<div class="kpi-rg-h">Détail par mission <span class="kpi-rg-badge">' + av.suivies.length + ' mission(s) à cheval</span></div>';
+      html += '<div style="overflow-x:auto"><table class="kpi-obj-table"><thead><tr><th>Mission</th><th>Avancement</th><th>Montant remplacé</th><th>Montant retenu</th></tr></thead><tbody>';
+      for (const s of av.suivies) {
+        const remplace = s.contributionBase != null ? s.contributionBase : s.ca;
+        html += '<tr><td>' + escapeHtml(s.nom || 'Mission') + '</td>'
+          + '<td style="text-align:right">' + s.pctPrecedent + ' % &rarr; ' + s.pctCourant + ' %</td>'
+          + '<td style="text-align:right">' + formatEuro(remplace) + '</td>'
+          + '<td style="text-align:right;font-weight:600">' + formatEuro(s.caAvancement) + '</td></tr>';
+      }
+      html += '</tbody></table></div>';
+
+      el.innerHTML = html;
     }
 
     async function postAvancement(url, method, body) {
@@ -14369,21 +14505,6 @@
         await postAvancement('/api/avancement', 'POST', { missionId, exercice, pct: Number(input.value) });
         await loadAvancement();
       } catch (e) { alert('Enregistrement impossible : ' + e.message); }
-    }
-
-    async function addAvancementLigne() {
-      // La mission vient de la selection faite dans la liste (avancementSelectMission), pas d'un
-      // <select> : voir avancementCandidateMissions/avancementRenderMissionListHtml (spec §5.1 bis).
-      const exSel = document.getElementById('avancementNouvelExercice');
-      const pct = document.getElementById('avancementNouveauPct');
-      if (!avancementSelectedMissionId || !exSel || !exSel.value) return;
-      try {
-        await postAvancement('/api/avancement', 'POST', { missionId: avancementSelectedMissionId, exercice: Number(exSel.value), pct: Number(pct.value) || 0 });
-        avancementSearchQuery = '';
-        avancementShowAll = false;
-        avancementSelectedMissionId = null;
-        await loadAvancement();
-      } catch (e) { alert('Ajout impossible : ' + e.message); }
     }
 
     async function removeAvancementLigne(missionId, exercice) {
@@ -16250,12 +16371,12 @@
       }
       if (horsCapi) html += _crPontHtml(d, r, projete);
       // Badge "à l'avancement" : le CA des missions à cheval est réparti selon leur avancement au
-      // 31/12, pas selon leurs dates de facturation (FAE/PCA). Silencieux si aucun ajustement.
+      // 31/12, pas selon leurs dates de facturation (FAE/PCA). Silencieux si aucun ajustement. Le badge
+      // est desormais cliquable (spec 5.1 ter, point g) : _avancementBadgeHtml ouvre la modale
+      // directement sur le sous-onglet "Calcul", sans declencher le clic de la ligne (onclick="openCrDetailModal('ca')").
       const _av = d.avancement || null;
       const _avActif = !!(_av && _av.actif && _av.delta !== 0);
-      const _avBadge = _avActif
-        ? ' <span style="font-size:0.68rem;padding:0.05rem 0.35rem;border:1px solid var(--border);border-radius:10px;color:var(--text-secondary)">à l\'avancement</span>'
-        : '';
+      const _avBadge = _avancementBadgeHtml(_av);
       // Détail par mission dans l'infobulle (spec 5.2) : title ne peut pas porter de HTML, donc des
       // lignes de texte séparées par des sauts de ligne. Noms Notion échappés via _crAttr (même
       // helper que le titre de la ligne « liasse ») : ils peuvent contenir des guillemets, qui
@@ -20728,13 +20849,16 @@
         .then(r => r.json())
         .then(d => {
           document.getElementById('ckCaAnnee').textContent = formatEuro(d.caAnnee || 0);
-          // Infobulle si le CA intègre un ajustement d'avancement (missions à cheval, FAE/PCA).
+          // Infobulle si le CA intègre un ajustement d'avancement (missions à cheval, FAE/PCA), plus
+          // renvoi cliquable vers le sous-onglet "Calcul" de la modale (spec 5.1 ter, point g).
           const _el = document.getElementById('ckCaAnnee');
+          const _sub = document.getElementById('ckCaAnneeSub');
           if (d.avancement && d.avancement.actif && d.avancement.delta !== 0) {
             _el.title = "CA à l'avancement : ajustement de " + formatEuro(d.avancement.delta) + ' sur ' + d.avancement.suivies.length + ' mission(s) à cheval sur deux exercices, par rapport au rattachement habituel des missions à l\'année.';
           } else {
             _el.title = '';
           }
+          if (_sub) _sub.innerHTML = 'CA affecté à l\'année · source Notion' + _avancementBadgeHtml(d.avancement);
         })
         .catch(e => console.error('Erreur CA annee cockpit:', e));
 
@@ -21401,9 +21525,10 @@
     </div>
   </div>
 
-  <!-- Modale Avancement des missions (onglet Facturation) : seul point de saisie du pourcentage d'avancement -->
+  <!-- Modale Avancement des missions (onglet Facturation) : seul point de saisie du pourcentage d'avancement.
+       Conteneur le plus large de l'application (spec 5.1 ter, point c). -->
   <div class="modal-overlay" id="avancementModal" onclick="if(event.target===this) closeAvancementModal()">
-    <div class="modal kpi-modal">
+    <div class="modal kpi-modal" style="max-width:1100px;width:96%">
       <div class="modal-header" style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
         <h2 style="margin:0;">Avancement des missions</h2>
         <button class="modal-close-x" onclick="closeAvancementModal()" aria-label="Fermer">&times;</button>
