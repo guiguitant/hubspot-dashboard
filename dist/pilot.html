@@ -14114,13 +14114,20 @@
     // saisie) ; elle liste TOUTES les missions pertinentes, suivies ou non (saisir un pourcentage crée
     // la ligne) ; deux sous-onglets "Saisie" (la grille) et "Calcul" (le pont de réconciliation, qui
     // rend visible le report en avant depuis fin N-1, retiré de l'affichage mais pas du calcul).
+    //
+    // Refonte 5.1 quater (retour Nathan du même jour, après usage de la v2) : périmètre par défaut
+    // resserré à N/N+1 strict (une mission dont les deux volets tombent sur le même exercice n'a plus
+    // rien à faire dans la modale, même exemple donné par Nathan : acompte ET solde en N+1) ; chaque
+    // cellule de CA porte désormais une infobulle explicative (l'avancement de fin N-1, retiré de
+    // l'affichage par 5.1 ter, rendait un montant illisible sans elle) ; badge "à cheval" retiré,
+    // devenu sans objet puisque toutes les missions affichées le sont désormais.
     let avancementData = null;      // reponse /api/avancement?year=N : missions, lignes (tous exercices), anomalies, suivies/figee de N
     let avancementDataNext = null;  // reponse /api/avancement?year=N+1 : suivies/figee de N+1 (memes missions/lignes/anomalies que ci-dessus)
     let avancementCalcData = null;  // champ .avancement de /api/ebe?year=avancementCalcYear (pont de reconciliation, sous-onglet Calcul)
     let avancementCalcYear = CURRENT_YEAR; // exercice affiche par le sous-onglet Calcul (correctif Important 1, ronde 1) : porte par l'ouverture, pas fige a CURRENT_YEAR
     let avancementView = 'saisie';       // sous-onglet actif : 'saisie' | 'calcul' (patron primeView/switchPrimeView)
     let avancementSearchQuery = '';      // recherche nom/client sur la grille (heritee de l'amendement 5.1 bis)
-    let avancementShowAll = false;       // case "afficher toutes les missions" : leve le perimetre par defaut (point b)
+    let avancementShowAll = false;       // case d'echappatoire "afficher aussi les facturations en une fois" : leve le perimetre strict N/N+1 (spec 5.1 quater, point b)
 
     // Badge cliquable "à l'avancement" (spec 5.1 ter, point g) : renvoi vers le sous-onglet Calcul de
     // la modale, depuis n'importe quel endroit qui affiche un CA ajusté (CR, Cockpit, Analytics, KPI).
@@ -14170,8 +14177,9 @@
       return acompte + ' · ' + solde;
     }
 
-    // Regroupe les lignes plates (tous exercices confondus, d.lignes) par mission_id : sert a la fois
-    // a retrouver la ligne exacte d'une cellule (figee ou non) et au perimetre par defaut (point b).
+    // Regroupe les lignes plates (tous exercices confondus, d.lignes) par mission_id : sert a
+    // retrouver la ligne exacte d'une cellule (figee ou non). Le perimetre par defaut de la grille ne
+    // s'appuie plus sur ces lignes depuis la 5.1 quater (regle strict N/N+1 sur les volets de facture).
     function avancementLignesByMission() {
       const map = new Map();
       const d = avancementData;
@@ -14192,24 +14200,26 @@
       return (data.suivies || []).find(s => String(s.missionId) === String(missionId)) || null;
     }
 
-    // Missions de la grille (spec 5.1 ter, point b) : par defaut, celles ayant une activite en N ou
-    // N+1 (facture datee de ces exercices, avec repli "Annee final" deja applique cote serveur dans
-    // anneeAcompte/anneeSolde, cf. utils/avancementMissionInfo.js) OU un avancement deja saisi pour un
-    // de ces deux exercices. La case "toutes les missions" leve ce perimetre. Le drapeau aCheval reste
-    // calcule et affiche en badge sur la ligne, mais NE FILTRE PLUS (il informe, spec 5.1 ter point b).
+    // Missions de la grille (spec 5.1 quater, point a : revoque le point b de 5.1 ter, jauge trop
+    // large "activite en N ou N+1"). Perimetre strict desormais : une mission n'apparait que si l'un
+    // de ses deux volets est rattache a N et l'autre a N+1 (acompte et solde EXACTEMENT sur ces deux
+    // exercices, dans un ordre ou l'autre). Deux volets sur le meme exercice, ou un seul volet reel, la
+    // font disparaitre : c'est la doctrine de Nathan (date d'emission des factures qui fait foi), pas
+    // un manque de l'outil. On reutilise directement `aCheval` calcule cote serveur (deja applique le
+    // seuil des 5 euros en dessous duquel un volet est considere inexistant, cf. MIN_MONTANT dans
+    // utils/avancementMissionInfo.js) plutot que de recalculer une regle concurrente ; on y ajoute
+    // seulement la condition que les deux annees de rattachement sont PRECISEMENT {n, n1}, puisque
+    // aCheval a lui seul n'exclut pas un ecart N-1/N ou N/N+2. La case d'echappatoire (avancementShowAll)
+    // leve ce perimetre, necessaire pour le produit constate d'avance (spec 5.1 quater point b).
     function avancementMissionsGrille() {
       const d = avancementData;
       if (!d) return [];
       const n = d.exercice;
       const n1 = n + 1;
-      const lignesByMission = avancementLignesByMission();
       let list = d.missions || [];
       if (!avancementShowAll) {
-        list = list.filter(m => {
-          if (m.anneeAcompte === n || m.anneeAcompte === n1 || m.anneeSolde === n || m.anneeSolde === n1) return true;
-          const lignes = lignesByMission.get(String(m.id));
-          return !!(lignes && lignes.some(l => l.exercice === n || l.exercice === n1));
-        });
+        list = list.filter(m => m.aCheval
+          && ((m.anneeAcompte === n && m.anneeSolde === n1) || (m.anneeAcompte === n1 && m.anneeSolde === n)));
       }
       const q = normFact((avancementSearchQuery || '').trim());
       if (q) list = list.filter(m => normFact(m.nom || '').includes(q) || normFact(m.client || '').includes(q));
@@ -14245,13 +14255,27 @@
       return html;
     }
 
-    // Cellule "CA à l'avancement" : formatEuro du montant calcule cote serveur (report en avant depuis
-    // l'exercice precedent inclus, spec §3.2) si la mission est suivie sur `data` (a au moins une
-    // ligne, quel que soit l'exercice) ; sinon un tiret median, la mission n'apporte alors aucun
-    // remplacement a l'agregat pour cet exercice.
-    function avancementCellCa(data, missionId) {
+    // Cellule "CA à l'avancement" (spec 5.1 quater, point c) : formatEuro du montant calcule cote
+    // serveur (report en avant depuis l'exercice precedent inclus, spec §3.2) si la mission est suivie
+    // sur `data` (a au moins une ligne, quel que soit l'exercice) ; sinon un tiret median, la mission
+    // n'apporte alors aucun remplacement a l'agregat pour cet exercice.
+    // La grille n'affiche plus l'avancement de fin N-1 (retire en 5.1 ter point a) : un montant peut
+    // donc sembler faux sans explication. Chaque montant porte donc une infobulle qui ecrit le calcul
+    // en toutes lettres avec ses trois nombres (CA total, avancement fin exercice, avancement fin
+    // exercice precedent). Quand l'avancement de depart n'est pas nul, un badge visible s'ajoute : c'est
+    // le seul cas ou le montant ne se deduit pas de ce qui est deja affiche a l'ecran.
+    function avancementCellCa(data, missionId, exercice) {
       const s = avancementSuivieById(data, missionId);
-      return s ? formatEuro(s.caAvancement) : '<span style="color:var(--text-secondary)">·</span>';
+      if (!s) return '<span style="color:var(--text-secondary)">·</span>';
+      const precedent = exercice - 1;
+      const title = 'CA ' + exercice + ' = CA total de la mission (' + formatEuro(s.ca) + ') multiplié par l\'avancement fin '
+        + exercice + ' (' + s.pctCourant + ' %) moins l\'avancement fin ' + precedent + ' (' + s.pctPrecedent + ' %), soit '
+        + formatEuro(s.caAvancement) + '.';
+      let html = '<span title="' + title + '">' + formatEuro(s.caAvancement) + '</span>';
+      if (s.pctPrecedent) {
+        html += ' <span title="' + title + '" style="font-size:0.62rem;padding:0.02rem 0.3rem;border:1px solid var(--border);border-radius:8px;color:var(--text-secondary);white-space:nowrap">départ ' + s.pctPrecedent + ' %</span>';
+      }
+      return html;
     }
 
     // Rendu (fragment HTML seul) de la grille filtree : appele au premier rendu du sous-onglet Saisie
@@ -14266,8 +14290,21 @@
       const n1 = n + 1;
       const missions = avancementMissionsGrille();
       if (!missions.length) {
-        return '<p style="font-size:0.78rem;color:var(--text-secondary);margin:0.3rem 0 0">Aucune mission '
-          + (avancementShowAll ? '' : 'avec une activité en ' + n + ' ou ' + n1 + ' ') + 'ne correspond.</p>';
+        const hasQuery = !!(avancementSearchQuery || '').trim();
+        if (hasQuery) {
+          return '<p style="font-size:0.78rem;color:var(--text-secondary);margin:0.3rem 0 0">Aucune mission ne correspond à la recherche.</p>';
+        }
+        if (!avancementShowAll) {
+          // Message doctrine (spec 5.1 quater, point a) : l'absence d'une mission ici n'est pas un
+          // manque de l'outil, c'est un signal que la date de facturation Notion est a corriger.
+          return '<p style="font-size:0.78rem;color:var(--text-secondary);margin:0.3rem 0 0">'
+            + 'Aucune mission n\'a un acompte facturé en ' + n + ' et un solde facturé en ' + n1 + '. '
+            + 'Ce n\'est pas un manque de l\'outil : c\'est la date d\'émission des factures qui fait foi. '
+            + 'Si une mission devrait figurer ici, c\'est la date de sa facture de solde qu\'il faut corriger dans Notion. '
+            + 'Cochez « afficher aussi les facturations en une fois » pour voir aussi les missions facturées en une seule fois '
+            + 'dont le travail déborde sur ' + n1 + '.</p>';
+        }
+        return '<p style="font-size:0.78rem;color:var(--text-secondary);margin:0.3rem 0 0">Aucune mission ne correspond.</p>';
       }
       const lignesByMission = avancementLignesByMission();
       const figeeN = !!d.figee;
@@ -14280,18 +14317,17 @@
         + '</tr></thead><tbody>';
 
       for (const m of missions) {
-        const cheval = m.aCheval
-          ? ' <span style="font-size:0.65rem;padding:0.05rem 0.35rem;border:1px solid var(--border);border-radius:10px;color:var(--text-secondary)">à cheval</span>'
-          : '';
+        // Badge "à cheval" retiré (spec 5.1 quater, point d) : depuis le périmètre strict ci-dessus,
+        // toutes les missions affichées le sont, le badge n'apporte donc plus d'information.
         html += '<tr>'
-          + '<td><div class="kpi-obj-name">' + escapeHtml(m.nom || '') + cheval + '</div>'
+          + '<td><div class="kpi-obj-name">' + escapeHtml(m.nom || '') + '</div>'
           + (m.client ? '<div style="font-size:0.72rem;color:var(--text-secondary)">' + escapeHtml(m.client) + '</div>' : '')
           + '<div style="font-size:0.7rem;color:var(--text-secondary);margin-top:0.1rem">' + avancementVoletsTexte(m) + '</div></td>'
           + '<td style="text-align:right">' + formatEuro(m.ca) + '</td>'
           + '<td style="text-align:right">' + avancementCellPct(m, lignesByMission, n, figeeN) + '</td>'
-          + '<td style="text-align:right;font-weight:600">' + avancementCellCa(d, m.id) + '</td>'
+          + '<td style="text-align:right;font-weight:600">' + avancementCellCa(d, m.id, n) + '</td>'
           + '<td style="text-align:right">' + avancementCellPct(m, lignesByMission, n1, figeeN1) + '</td>'
-          + '<td style="text-align:right;font-weight:600">' + avancementCellCa(dNext, m.id) + '</td>'
+          + '<td style="text-align:right;font-weight:600">' + avancementCellCa(dNext, m.id, n1) + '</td>'
           + '</tr>';
       }
       html += '</tbody></table></div>';
@@ -14381,9 +14417,10 @@
       if (view === 'calcul') loadAvancementCalcul();
     }
 
-    // Sous-onglet « Saisie » (spec 5.1 ter) : bandeaux, recherche + case "toutes les missions", grille
-    // fusionnee (toute mission pertinente est une ligne, point b), bouton de figeage de N (point f).
-    // Plus de colonne N-1 (point a) ni de selecteur "+ suivre une mission" (point b, supprime).
+    // Sous-onglet « Saisie » (spec 5.1 ter, perimetre resserre en 5.1 quater) : bandeaux, recherche +
+    // case d'echappatoire, grille fusionnee (toute mission du perimetre est une ligne), bouton de
+    // figeage de N (point f). Plus de colonne N-1 (5.1 ter point a) ni de selecteur "+ suivre une
+    // mission" (5.1 ter point b, supprime).
     function renderAvancementSaisiePane() {
       const d = avancementData;
       const dNext = avancementDataNext;
@@ -14407,17 +14444,29 @@
         html += _crAlerteHtml('Exercice ' + n1 + ' figé : les pourcentages ci-dessous sont définitifs et ne sont plus modifiables depuis Pilot.', false);
       }
 
-      // Recherche nom/client + case "toutes les missions" (point b) : perimetre par defaut = missions
-      // actives en N ou N+1. Toolbar HORS de #avancementGridWrap : seule la grille est remplacee a
-      // chaque frappe, pour ne pas faire perdre le focus du champ de recherche.
+      // Recherche nom/client + case d'echappatoire (spec 5.1 quater, points a et b) : perimetre par
+      // defaut desormais strict, une mission avec un volet en N et l'autre en N+1 uniquement. La case
+      // leve ce perimetre pour le seul cas ou il exclut a tort une mission a suivre : le produit
+      // constate d'avance (facturation en une fois sur N, travail qui deborde sur N+1). Son libelle
+      // l'explique au lieu de rester muet ("Afficher toutes les missions", version precedente).
+      // Toolbar HORS de #avancementGridWrap : seule la grille est remplacee a chaque frappe, pour ne
+      // pas faire perdre le focus du champ de recherche.
       html += '<div class="kpi-rg-h">Missions <span class="kpi-rg-badge">' + n + ' et ' + n1 + '</span></div>';
       html += '<div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.6rem;flex-wrap:wrap">'
         + '<input type="text" id="avancementSearchInput" value="' + escapeHtml(avancementSearchQuery) + '" placeholder="Rechercher une mission, un client..." oninput="avancementOnSearchInput(this.value)" style="flex:1;min-width:200px;padding:0.35rem 0.6rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:0.8rem">'
-        + '<label style="display:flex;align-items:center;gap:0.3rem;font-size:0.78rem;color:var(--text-secondary);white-space:nowrap;cursor:pointer">'
-        + '<input type="checkbox" id="avancementShowAllCheckbox"' + (avancementShowAll ? ' checked' : '') + ' onchange="avancementOnShowAllChange(this.checked)"> Afficher toutes les missions'
+        + '<label style="display:flex;align-items:center;gap:0.3rem;font-size:0.78rem;color:var(--text-secondary);white-space:nowrap;cursor:pointer" title="Lève le filtre strict N/N+1 : nécessaire pour une mission facturée en une seule fois sur ' + n + ' dont le travail se termine en ' + n1 + ' (produit constaté d\'avance)">'
+        + '<input type="checkbox" id="avancementShowAllCheckbox"' + (avancementShowAll ? ' checked' : '') + ' onchange="avancementOnShowAllChange(this.checked)"> Afficher aussi les facturations en une fois qui débordent sur l\'année suivante'
         + '</label></div>';
 
       html += '<div id="avancementGridWrap">' + avancementRenderGridHtml() + '</div>';
+
+      // Note doctrine permanente (spec 5.1 quater, point a) : rappelle, meme quand la grille n'est pas
+      // vide, pourquoi une mission peut manquer. Sans cette phrase, l'absence d'une mission passerait
+      // pour un defaut de l'outil plutot que pour un signal a corriger dans Notion.
+      html += '<p style="font-size:0.72rem;color:var(--text-secondary);margin:0.4rem 0 0">'
+        + 'Périmètre : seules les missions dont l\'acompte est facturé en ' + n + ' et le solde en ' + n1 + ' apparaissent ici, '
+        + 'car c\'est la date d\'émission des factures qui fait foi. Une mission absente n\'est pas un manque de l\'outil : '
+        + 'c\'est un signal à corriger dans Notion, en général la date de la facture de solde.</p>';
 
       // Figeage (point f) : action volontaire, non annulable depuis l'interface (confirmation
       // systematique dans figerAvancement). Un seul bouton, pour N (l'exercice d'ancrage precedent est
