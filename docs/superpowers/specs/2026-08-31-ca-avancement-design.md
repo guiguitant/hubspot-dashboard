@@ -201,6 +201,39 @@ Contenu :
 - Sauvegarde par bouton explicite par ligne ou « OK » global (patron `savePonderation` : POST puis
   re-fetch, le serveur reste la seule source de vérité).
 
+### 5.1 bis Sélection d'une mission : recherche, lecture directe, filtre à cheval
+
+Amendement du 2026-09-01, après mise en service (retour de Nathan : « le moteur de recherche des
+missions est nul »). Le sélecteur `<select>` simple de la version initiale est remplacé.
+
+**Ce que le serveur expose en plus** (additif, dans le tableau `missions` de `GET /api/avancement`) :
+`montantAcompte`, `dateFactureAcompte`, `montantSolde`, `dateFactureFinale`, `anneeAcompte`,
+`anneeSolde` et `aCheval`. Les deux `annee*` valent l'année de la date de facture du volet quand
+elle est émise, sinon l'année du champ Notion « Année final » (même règle de rattachement que
+`signedAmountForYear`), sinon `null`. `montantSolde` vaut `max(0, ca − montantAcompte)`, comme
+partout ailleurs dans le lot.
+
+**Règle « à cheval »** : `aCheval` est vrai quand les deux volets existent (montants supérieurs au
+seuil de 5 €, cohérent avec le reste du code), que leurs deux années de rattachement sont connues,
+et qu'elles diffèrent. C'est la règle demandée par Nathan : deux volets sur la même année signifient
+mission lancée et terminée dans l'année, sans intérêt pour l'avancement.
+
+**Filtre par défaut et échappatoire** : la liste de sélection n'affiche par défaut que les missions
+`aCheval`. Une case à cocher « afficher toutes les missions » lève le filtre. Cette échappatoire est
+NÉCESSAIRE et non décorative : une mission facturée en une fois sur l'exercice N mais dont le
+travail déborde sur N+1 est un produit constaté d'avance, elle n'est pas « à cheval » au sens des
+dates de facture, et le filtre la masquerait. C'est exactement le cas d'« Alphapro groupe »
+(15 500 €, facturée intégralement le 2025-04-30, avancée à 70 % au 31/12/2025, PCA de 4 650 €),
+l'une des sept missions du fichier de cut-off.
+
+**Recherche** : un champ texte filtre la liste sur le nom de mission et sur le client, sans
+distinction de casse ni d'accents (réutiliser la normalisation déjà présente dans le fichier).
+
+**Lecture directe** : chaque entrée de la liste montre le nom, le client, puis les deux volets sous
+la forme « Acompte {montant} le {date} · Solde {montant} le {date} », un volet non émis affichant
+« non émis ». Le tableau des missions déjà suivies affiche les mêmes informations, pour que Nathan
+juge l'avancement sans quitter la modale.
+
 ### 5.2 Affichage du CA ajusté
 
 - **CR (onglet Compte de résultat)** : la ligne CA affiche la valeur ajustée ; badge
