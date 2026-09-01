@@ -12130,7 +12130,11 @@
       } else {
         _elAnalyticsCa.title = '';
       }
-      if (_subAnalyticsCa) _subAnalyticsCa.innerHTML = 'CA affecté à l\'année · source Notion' + _avancementBadgeHtml(data.avancement);
+      // Exercice reellement affiche par cette carte (correctif Important 1, ronde 1) : deduit de
+      // data.start, meme calcul que analyticsCaYearEl juste en dessous, pas CURRENT_YEAR (Analytics
+      // peut porter sur une periode librement choisie, y compris une annee differente de l'actuelle).
+      const _anneeAnalyticsCa = Number(String(data.start).slice(0, 4));
+      if (_subAnalyticsCa) _subAnalyticsCa.innerHTML = 'CA affecté à l\'année · source Notion' + _avancementBadgeHtml(data.avancement, _anneeAnalyticsCa);
       const analyticsCaYearEl = document.getElementById('analyticsCaYear');
       if (analyticsCaYearEl) analyticsCaYearEl.textContent = String(data.start).slice(0, 4);
       document.getElementById('analyticsCaSigne').textContent = formatEuro(data.caSigne || 0);
@@ -12501,7 +12505,9 @@
           _elKpiCa.title = '';
         }
         const _subKpiCa = _elKpiCa.querySelector('.kpi-ov-sub');
-        if (_subKpiCa) _subKpiCa.innerHTML += _avancementBadgeHtml(kpiData.avancement);
+        // kpiData.year (correctif Important 1, ronde 1) : l'annee du selecteur #kpiYear, qui propose
+        // jusqu'a CURRENT_YEAR+1, pas CURRENT_YEAR fige.
+        if (_subKpiCa) _subKpiCa.innerHTML += _avancementBadgeHtml(kpiData.avancement, kpiData.year);
       }
     }
 
@@ -14110,7 +14116,8 @@
     // rend visible le report en avant depuis fin N-1, retiré de l'affichage mais pas du calcul).
     let avancementData = null;      // reponse /api/avancement?year=N : missions, lignes (tous exercices), anomalies, suivies/figee de N
     let avancementDataNext = null;  // reponse /api/avancement?year=N+1 : suivies/figee de N+1 (memes missions/lignes/anomalies que ci-dessus)
-    let avancementCalcData = null;  // champ .avancement de /api/ebe?year=N (pont de reconciliation, sous-onglet Calcul)
+    let avancementCalcData = null;  // champ .avancement de /api/ebe?year=avancementCalcYear (pont de reconciliation, sous-onglet Calcul)
+    let avancementCalcYear = CURRENT_YEAR; // exercice affiche par le sous-onglet Calcul (correctif Important 1, ronde 1) : porte par l'ouverture, pas fige a CURRENT_YEAR
     let avancementView = 'saisie';       // sous-onglet actif : 'saisie' | 'calcul' (patron primeView/switchPrimeView)
     let avancementSearchQuery = '';      // recherche nom/client sur la grille (heritee de l'amendement 5.1 bis)
     let avancementShowAll = false;       // case "afficher toutes les missions" : leve le perimetre par defaut (point b)
@@ -14121,18 +14128,26 @@
     // KPI...) et doivent garder leur propre comportement de clic ; seul le badge ouvre CETTE modale.
     // Vide (aucun rendu) si l'ajustement n'est pas actif, ce qui preserve l'effacement des infobulles
     // existantes quand on change d'exercice ou qu'aucune mission n'est a cheval.
-    function _avancementBadgeHtml(av) {
+    // `exercice` (correctif Important 1, ronde 1) : l'annee REELLEMENT affichee par l'appelant (CR.year,
+    // periode Analytics, selecteur KPI...), jamais supposee etre CURRENT_YEAR. Repli sur CURRENT_YEAR
+    // seulement si l'appelant ne peut pas fournir d'annee (defense, ne devrait pas arriver en pratique).
+    function _avancementBadgeHtml(av, exercice) {
       if (!av || !av.actif || av.delta === 0) return '';
-      return ' <span onclick="event.stopPropagation(); openAvancementModal(\'calcul\')" title="Voir le détail du calcul" style="cursor:pointer;font-size:0.68rem;padding:0.05rem 0.35rem;border:1px solid var(--border);border-radius:10px;color:var(--text-secondary)">à l\'avancement</span>';
+      const ex = Number.isFinite(Number(exercice)) ? Number(exercice) : CURRENT_YEAR;
+      return ' <span onclick="event.stopPropagation(); openAvancementModal(\'calcul\', ' + ex + ')" title="Voir le détail du calcul" style="cursor:pointer;font-size:0.68rem;padding:0.05rem 0.35rem;border:1px solid var(--border);border-radius:10px;color:var(--text-secondary)">à l\'avancement</span>';
     }
 
     // Ouverture ciblee (spec 5.1 ter, point g) : appelable depuis n'importe quel onglet (la modale est
     // une surcouche globale). openAvancementModal() sans argument ouvre sur "Saisie" (bouton de
-    // l'onglet Facturation) ; openAvancementModal('calcul') ouvre directement sur le pont (badges CR /
-    // Cockpit / Analytics / KPI).
-    async function openAvancementModal(view) {
+    // l'onglet Facturation) ; openAvancementModal('calcul', exercice) ouvre directement sur le pont de
+    // CET exercice (badges CR / Cockpit / Analytics / KPI, correctif Important 1 ronde 1 : avant ce
+    // correctif le pont retombait toujours sur CURRENT_YEAR meme depuis un badge affichant 2027).
+    // `exercice` absent ou invalide -> repli sur CURRENT_YEAR (cas du bouton Facturation, qui n'a pas
+    // d'annee particuliere a proposer).
+    async function openAvancementModal(view, exercice) {
       document.getElementById('avancementModal').classList.add('active');
       avancementView = view === 'calcul' ? 'calcul' : 'saisie';
+      avancementCalcYear = (exercice != null && Number.isFinite(Number(exercice))) ? Number(exercice) : CURRENT_YEAR;
       avancementSearchQuery = '';
       avancementShowAll = false;
       avancementCalcData = null; // force le rechargement du pont a chaque ouverture (donnees potentiellement changees depuis)
@@ -14211,13 +14226,22 @@
       if (ligne && ligne.fige_le) {
         return ligne.pct + ' % <span style="font-size:0.68rem;color:var(--text-secondary)">(figé)</span>';
       }
+      // Exercice figé mais mission jamais suivie pour cet exercice (correctif Important 2, ronde 1) :
+      // la garde ci-dessus ne s'est pas déclenchée (aucune ligne à trouver), mais le serveur refuse
+      // quand même toute écriture (garde POST/DELETE sur l'EXERCICE entier, pas seulement la ligne).
+      // Le champ doit donc être désactivé et l'expliquer, comme une ligne déjà suivie et figée, plutôt
+      // que de laisser un champ qui a l'air saisissable et qui ne fait rien au clic sur "OK". Convention
+      // de verrouillage reprise du Prévisionnel (case "Baseline" toujours cochée, non modifiable) :
+      // disabled + cursor:not-allowed.
+      if (figeeExercice) {
+        return '<input type="number" value="" disabled title="Exercice ' + exercice + ' figé : plus aucune saisie possible" class="kpi-num-input" style="width:64px;padding:0.2rem;cursor:not-allowed;opacity:0.6">'
+          + ' <span style="font-size:0.68rem;color:var(--text-secondary)">figé</span>';
+      }
       const elId = 'av-' + exercice + '-' + m.id;
       const val = ligne ? ligne.pct : '';
       let html = '<input type="number" min="0" max="100" step="1" value="' + val + '" id="' + elId + '" class="kpi-num-input" style="width:64px;padding:0.2rem">';
-      if (!figeeExercice) {
-        html += ' <button class="kpi-btn" onclick="saveAvancementLigne(\'' + m.id + '\',' + exercice + ',\'' + elId + '\')" style="padding:0.15rem 0.45rem;font-size:0.72rem">OK</button>';
-        if (ligne) html += ' <button class="kpi-btn" onclick="removeAvancementLigne(\'' + m.id + '\',' + exercice + ')" style="padding:0.15rem 0.45rem;font-size:0.72rem">Retirer</button>';
-      }
+      html += ' <button class="kpi-btn" onclick="saveAvancementLigne(\'' + m.id + '\',' + exercice + ',\'' + elId + '\')" style="padding:0.15rem 0.45rem;font-size:0.72rem">OK</button>';
+      if (ligne) html += ' <button class="kpi-btn" onclick="removeAvancementLigne(\'' + m.id + '\',' + exercice + ')" style="padding:0.15rem 0.45rem;font-size:0.72rem">Retirer</button>';
       return html;
     }
 
@@ -14413,13 +14437,14 @@
 
     // Sous-onglet « Calcul » (spec 5.1 ter, point e) : recharge le pont depuis /api/ebe a chaque
     // activation (pas de cache) pour ne jamais afficher un pont perime apres une saisie faite dans
-    // l'onglet Saisie.
+    // l'onglet Saisie. Exercice = avancementCalcYear (correctif Important 1, ronde 1), pas CURRENT_YEAR :
+    // sinon un badge pose sur 2027 (tuile KPI, periode Analytics) ouvrirait le pont de 2026.
     async function loadAvancementCalcul() {
       const el = document.getElementById('avancementCalculPane');
       if (!el) return;
       el.innerHTML = '<p style="color:var(--text-secondary)">Chargement...</p>';
       try {
-        const res = await fetch('/api/ebe?year=' + CURRENT_YEAR);
+        const res = await fetch('/api/ebe?year=' + avancementCalcYear);
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
         avancementCalcData = data.avancement || null;
@@ -14437,10 +14462,15 @@
       const el = document.getElementById('avancementCalculPane');
       if (!el) return;
       const av = avancementCalcData;
-      const n = avancementData ? avancementData.exercice : CURRENT_YEAR;
+      const n = avancementCalcYear;
       const nPrec = n - 1;
 
-      let html = '<p style="font-size:0.8rem;color:var(--text-secondary);margin-top:0;margin-bottom:0.9rem">'
+      // En-tete en clair de l'exercice affiche (correctif Important 1, ronde 1) : meme corrige, un pont
+      // sans millesime visible reste ambigu si l'utilisateur est arrive ici depuis un exercice qui n'est
+      // pas celui de la grille de Saisie (ex. 2027 via le selecteur KPI).
+      let html = '<div style="font-weight:700;font-size:0.95rem;margin-bottom:0.4rem">Calcul ' + n + '</div>';
+
+      html += '<p style="font-size:0.8rem;color:var(--text-secondary);margin-top:0;margin-bottom:0.9rem">'
         + 'Passage du CA facturé ' + n + ' (Notion, dates de facture) au CA ' + n + ' estimé à la clôture, mission par mission, tel que retenu dans le compte de résultat.'
         + '</p>';
 
@@ -14470,8 +14500,18 @@
       html += ligne('= CA ' + n + ' estimé à la clôture', formatEuro(estime), true);
       html += '</div>';
 
+      // Renvoi vers "Saisie" seulement s'il dit vrai : la grille de Saisie est TOUJOURS ancrée sur
+      // CURRENT_YEAR/CURRENT_YEAR+1 (spec 5.1 ter point a), pas sur l'exercice affiché ici (n peut être
+      // un exercice antérieur déjà clos si l'on arrive depuis une carte qui montre un vieux badge, ex.
+      // CR ou Analytics sur une période passée). Sans cette garde, la phrase mentirait sur ce que la
+      // Saisie permet réellement d'ajuster (correctif Important 1, ronde 1).
+      const _avCalcDansSaisie = (n === CURRENT_YEAR || n === CURRENT_YEAR + 1);
       html += '<div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:0.5rem">Le calcul part de l\'avancement de fin '
-        + nPrec + ' (reporté automatiquement, non modifiable ici) : voir le sous-onglet « Saisie » pour ajuster ' + n + ' et ' + (n + 1) + '.</div>';
+        + nPrec + ' (reporté automatiquement, non modifiable ici).'
+        + (_avCalcDansSaisie
+            ? ' Voir le sous-onglet « Saisie » pour ajuster ' + n + ' et ' + (n + 1) + '.'
+            : ' Cet exercice ne fait plus partie du sous-onglet « Saisie », qui ne couvre que ' + CURRENT_YEAR + ' et ' + (CURRENT_YEAR + 1) + '.')
+        + '</div>';
 
       html += '<div class="kpi-rg-h">Détail par mission <span class="kpi-rg-badge">' + av.suivies.length + ' mission(s) à cheval</span></div>';
       html += '<div style="overflow-x:auto"><table class="kpi-obj-table"><thead><tr><th>Mission</th><th>Avancement</th><th>Montant remplacé</th><th>Montant retenu</th></tr></thead><tbody>';
@@ -16374,9 +16414,11 @@
       // 31/12, pas selon leurs dates de facturation (FAE/PCA). Silencieux si aucun ajustement. Le badge
       // est desormais cliquable (spec 5.1 ter, point g) : _avancementBadgeHtml ouvre la modale
       // directement sur le sous-onglet "Calcul", sans declencher le clic de la ligne (onclick="openCrDetailModal('ca')").
+      // d.year (correctif Important 1, ronde 1) : l'exercice REELLEMENT affiche par le CR (son propre
+      // selecteur d'annee), pas CURRENT_YEAR.
       const _av = d.avancement || null;
       const _avActif = !!(_av && _av.actif && _av.delta !== 0);
-      const _avBadge = _avancementBadgeHtml(_av);
+      const _avBadge = _avancementBadgeHtml(_av, d.year);
       // Détail par mission dans l'infobulle (spec 5.2) : title ne peut pas porter de HTML, donc des
       // lignes de texte séparées par des sauts de ligne. Noms Notion échappés via _crAttr (même
       // helper que le titre de la ligne « liasse ») : ils peuvent contenir des guillemets, qui
@@ -20858,7 +20900,9 @@
           } else {
             _el.title = '';
           }
-          if (_sub) _sub.innerHTML = 'CA affecté à l\'année · source Notion' + _avancementBadgeHtml(d.avancement);
+          // CURRENT_YEAR explicite (correctif Important 1, ronde 1) : le Cockpit n'a pas de selecteur
+          // d'annee (fetch ci-dessus toujours sur CURRENT_YEAR), donc c'est bien l'exercice affiche ici.
+          if (_sub) _sub.innerHTML = 'CA affecté à l\'année · source Notion' + _avancementBadgeHtml(d.avancement, CURRENT_YEAR);
         })
         .catch(e => console.error('Erreur CA annee cockpit:', e));
 
