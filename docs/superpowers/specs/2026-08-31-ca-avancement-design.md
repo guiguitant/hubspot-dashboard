@@ -356,6 +356,55 @@ exercices que personne n'a encore arrêtés. Une cellule reste modifiable tant q
 ouvert et bascule définitivement en lecture seule au figeage. Aucun code à changer ; l'interface doit
 en revanche le rendre évident, faute de quoi la question se reposera.
 
+### 5.1 sexies On saisit la part réalisée dans l'année, pas le cumul
+
+Retour de Nathan sur la grille livrée, jugée « vraiment pas compréhensible ». Trois demandes, dont la
+troisième invalide le modèle de saisie lui-même. Cette section prime sur 5.1 ter point a.
+
+**a. Le modèle de saisie change : la PART DE L'ANNÉE remplace le CUMUL.** Constat de Nathan, sur la
+mission Wienerberger : « le user remplit 50 pour l'avancement en 2026 ; on s'attend à remplir 50 en
+2027 mais non il faut mettre 100 %, ce qui fait 150 % en lecture directe ». Il a raison : la grille
+demande aujourd'hui l'avancement CUMULÉ au 31/12 de chaque exercice, ce qui se lit comme une somme
+absurde quand on parcourt la ligne.
+
+Désormais l'utilisateur saisit, pour chaque exercice, **la part du travail réalisée dans cet
+exercice**. Wienerberger se lit alors « 50 % en 2026, 50 % en 2027 », dont la somme fait 100 % et se
+vérifie d'un coup d'œil. Le chiffre d'affaires de l'exercice devient la lecture directe de cette
+part : `prix total × part de l'exercice`, sans arithmétique mentale.
+
+**Le stockage ne change pas.** La table continue de porter l'avancement cumulé au 31/12, ce qui
+préserve les ancres 2025 déjà figées et évite toute migration. La conversion est une affaire
+d'affichage : la part affichée pour l'exercice N vaut `cumul(N) − cumul(N−1)`, et à l'enregistrement
+le cumul écrit vaut `cumul(N−1) + part saisie`. Attention au cas qui casse : si l'exercice N+1 porte
+déjà une ligne, modifier la part de N décale son cumul et fausserait sa propre part. Il faut donc
+recalculer et réécrire la ligne N+1 pour préserver la part qu'elle affichait. C'est le seul point
+délicat de cette section, il doit être couvert par un test.
+
+Un total ou un reste doit rester visible sur la ligne, pour que l'utilisateur contrôle que ses parts
+finissent par faire 100 %.
+
+**b. Les missions terminées ne se saisissent plus.** Nathan : « je trouve ça vraiment pas pertinent
+d'afficher BV Cristal Union, BV Domaine Lafage, BV TDF et Alphapro groupe MAJ FDES puisque 100 % du
+CA est en 2025. Soit tu ne les affiches pas, soit tu les affiches grisées pour ne pas qu'on puisse les
+modifier. » Une mission dont l'avancement cumulé atteint déjà 100 % à la fin du dernier exercice figé
+n'a plus rien à reconnaître, jamais : sa ligne entière devient grisée et non modifiable, avec la
+mention qu'elle est terminée. Ce n'est pas seulement du confort, c'est une sécurité : saisir une part
+sur une mission terminée produirait un chiffre d'affaires négatif.
+
+**c. La colonne de l'exercice précédent revient, en lecture seule.** Nathan révoque ici sa demande de
+5.1 ter point a : « pour Alphapro groupe, clairement il manque la colonne 2025 ; on devrait pouvoir
+constater l'avancement 2025 grisé pour ne pas qu'on puisse le modifier ». Ce qui le gênait était la
+possibilité de modifier un chiffre validé par le cabinet, pas sa présence. La grille affiche donc
+trois colonnes : la part de l'exercice précédent en lecture seule et grisée, puis les parts de N et
+N+1 éditables.
+
+**d. Proposer la part restante, laisser l'utilisateur trancher.** Nathan : « le reste de l'avancement
+théorique sur 2026, et c'est au user de confirmer l'avancement théorique ou non ». Quand une mission
+n'est pas terminée et n'a pas encore de part saisie pour l'exercice, la cellule propose en suggestion
+le reste à réaliser, soit `100 % − cumul acquis`. Cette suggestion n'est PAS enregistrée tant que
+l'utilisateur ne la valide pas : elle doit se distinguer visuellement d'une valeur saisie, sans quoi
+elle mentirait sur l'état réel des données.
+
 ### 5.2 Affichage du CA ajusté
 
 - **CR (onglet Compte de résultat)** : la ligne CA affiche la valeur ajustée ; badge
