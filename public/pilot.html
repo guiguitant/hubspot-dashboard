@@ -14250,15 +14250,138 @@
       return list.slice().sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr'));
     }
 
-    // Cellule "% d'avancement" d'une mission pour un exercice donne (N ou N+1) : lecture seule + badge
-    // "figé" si la ligne existe et porte fige_le, input editable sinon (vide si aucune ligne : la
-    // saisir cree la ligne au clic sur "OK", spec 5.1 ter point b). "Retirer" seulement si la ligne
-    // existe et que l'exercice n'est pas figé.
-    function avancementCellPct(m, lignesByMission, exercice, figeeExercice) {
-      const lignes = lignesByMission.get(String(m.id)) || [];
-      const ligne = lignes.find(l => l.exercice === exercice) || null;
+    // --- Conversion CUMUL <-> PART (spec 5.1 sexies, révoque 5.1 ter point a) --------------------
+    // Retour de Nathan sur la grille livrée (cumul au 31/12) : "le user remplit 50 pour l'avancement
+    // en 2026 ; on s'attend à remplir 50 en 2027 mais non il faut mettre 100 %, ce qui fait 150 % en
+    // lecture directe". Désormais l'utilisateur saisit la PART du travail réalisée DANS l'exercice
+    // (Wienerberger se lit "50 % en 2026, 50 % en 2027", somme = 100 %, contrôlable d'un coup d'œil).
+    // Le STOCKAGE ne change pas : la table continue de porter le cumul au 31/12 (POST /api/avancement
+    // attend toujours { pct } CUMULÉ). La conversion est une affaire d'affichage : part(N) =
+    // cumul(N) − cumul(N−1) ; cumul écrit = cumul(N−1) + part saisie.
+    //
+    // Ces cinq fonctions sont la copie inline (le navigateur ne peut pas require()) de
+    // utils/avancementParts.js, module PUR testé par jest (npx jest utils/avancementParts.test.js).
+    // Les deux copies DOIVENT rester identiques ; toute correction va des deux côtés.
+    function avancementCumulAuPlusTard(lignesMission, exercice) {
+      let meilleur = null;
+      for (const l of lignesMission || []) {
+        const ex = Number(l.exercice);
+        if (!Number.isFinite(ex) || ex > exercice) continue;
+        if (meilleur === null || ex > Number(meilleur.exercice)) meilleur = l;
+      }
+      return meilleur ? (Number(meilleur.pct) || 0) : 0;
+    }
+    function avancementLigneExacte(lignesMission, exercice) {
+      return (lignesMission || []).find(l => l && Number(l.exercice) === Number(exercice)) || null;
+    }
+    function avancementPartExercice(lignesMission, exercice) {
+      const ligne = avancementLigneExacte(lignesMission, exercice);
+      if (!ligne) return null;
+      return (Number(ligne.pct) || 0) - avancementCumulAuPlusTard(lignesMission, exercice - 1);
+    }
+    // Suggestion (spec point d) : reste théorique à réaliser = 100 % − cumul déjà acquis. Jamais
+    // enregistrée seule : c'est un placeholder (texte fantôme natif du navigateur), pas une valeur.
+    function avancementSuggestionPart(lignesMission, exercice) {
+      const reste = 100 - avancementCumulAuPlusTard(lignesMission, exercice - 1);
+      return reste > 0 ? Math.round(reste) : 0;
+    }
+    // Le piège (spec point a) : si l'exercice suivant porte déjà une ligne non figée, modifier la
+    // part de `exercice` décale son cumul et fausserait la part que l'exercice suivant affichait. On
+    // réécrit donc AUSSI sa ligne pour préserver cette part (mandat de la spec), sauf si cette
+    // réécriture sort de [0, 100] (cas réel Wienerberger : 50 %/2026 + 50 %/2027, monter 2026 à 60 %
+    // donnerait un cumul 2027 de 110 %) : la saisie ENTIÈRE est alors refusée avant tout appel réseau,
+    // avec un message donnant la marge réelle. Voir utils/avancementParts.js pour la justification
+    // complète et l'alternative écartée (laisser la part suivante se recalculer sans réécriture).
+    function avancementPlanSaisiePart(lignesMission, exercice, partSaisie) {
+      const part = Number(partSaisie);
+      if (!Number.isFinite(part)) return { ok: false, message: 'Part invalide.' };
+      const lignes = lignesMission || [];
+      const cumulPrecedent = avancementCumulAuPlusTard(lignes, exercice - 1);
+      const nouveauCumul = Math.round(cumulPrecedent + part);
+      if (nouveauCumul < 0 || nouveauCumul > 100) {
+        return {
+          ok: false,
+          message: 'Cette part donnerait un cumul de ' + nouveauCumul + ' % au 31/12/' + exercice + ', hors bornes (0 à 100 %). '
+            + 'Part maximale possible : ' + Math.max(0, Math.round(100 - cumulPrecedent)) + ' %.',
+        };
+      }
+      const ecritures = [{ exercice: exercice, pctCumule: nouveauCumul }];
+      const ligneSuivante = avancementLigneExacte(lignes, exercice + 1);
+      if (ligneSuivante && !ligneSuivante.fige_le) {
+        const ancienCumulExercice = avancementCumulAuPlusTard(lignes, exercice); // avant la modification
+        const partSuivantePreservee = (Number(ligneSuivante.pct) || 0) - ancienCumulExercice;
+        const nouveauCumulSuivant = Math.round(nouveauCumul + partSuivantePreservee);
+        if (nouveauCumulSuivant < 0 || nouveauCumulSuivant > 100) {
+          let conseil;
+          if (nouveauCumulSuivant > 100) {
+            const max = Math.max(0, Math.round(100 - partSuivantePreservee - cumulPrecedent));
+            conseil = 'Réduisez d\'abord la part ' + (exercice + 1) + ' (actuellement ' + partSuivantePreservee + ' %), '
+              + 'ou limitez la part ' + exercice + ' à ' + max + ' % au maximum.';
+          } else {
+            const min = Math.min(100, Math.max(0, Math.round(0 - partSuivantePreservee - cumulPrecedent)));
+            conseil = 'Augmentez d\'abord la part ' + (exercice + 1) + ' (actuellement ' + partSuivantePreservee + ' %), '
+              + 'ou portez la part ' + exercice + ' à au moins ' + min + ' %.';
+          }
+          return {
+            ok: false,
+            message: 'Impossible : pour préserver la part ' + (exercice + 1) + ' telle qu\'elle est aujourd\'hui, le cumul '
+              + (exercice + 1) + ' devrait passer à ' + nouveauCumulSuivant + ' %, ce qui est hors bornes (0 à 100 %). ' + conseil,
+          };
+        }
+        ecritures.push({ exercice: exercice + 1, pctCumule: nouveauCumulSuivant });
+      }
+      return { ok: true, ecritures: ecritures, cascade: ecritures.length > 1 };
+    }
+
+    // Dernier exercice figé, TOUTE mission confondue (les exercices se ferment globalement via
+    // "Figer {exercice}", pas mission par mission) : sert au grisage des missions terminées (point b).
+    // null si rien n'a jamais été figé.
+    function avancementDernierExerciceFigeGlobal() {
+      const d = avancementData;
+      if (!d) return null;
+      let max = null;
+      for (const l of (d.lignes || [])) {
+        if (l && l.fige_le) {
+          const ex = Number(l.exercice);
+          if (Number.isFinite(ex) && (max === null || ex > max)) max = ex;
+        }
+      }
+      return max;
+    }
+    // Une mission est TERMINÉE (point b) quand son avancement cumulé atteint déjà 100 % à la fin du
+    // dernier exercice figé : elle n'a plus rien à reconnaître, jamais (saisir une part produirait un
+    // CA négatif). Sa ligne entière est alors grisée et non modifiable (avancementRenderGridHtml).
+    function avancementMissionTerminee(lignesMission, dernierExerciceFige) {
+      if (dernierExerciceFige == null) return false;
+      return avancementCumulAuPlusTard(lignesMission, dernierExerciceFige) >= 100;
+    }
+
+    // Cellule "Part {n-1}" (spec point c, révoque 5.1 ter point a) : TOUJOURS en lecture seule et
+    // grisée dans cette grille, quel que soit son état de figeage réel (clarification 5.1 quinquies
+    // point c : seuls N et N+1 sont éditables ici). "·" si aucune ligne exacte pour cet exercice
+    // (mission non suivie avant N : part et cumul valent 0, mais "0 %" laisserait croire à une saisie
+    // explicite qui n'existe pas).
+    function avancementCellPartLectureSeule(lignesMission, exercice) {
+      const ligne = avancementLigneExacte(lignesMission, exercice);
+      if (!ligne) return '<span style="color:var(--text-secondary)">·</span>';
+      const part = avancementPartExercice(lignesMission, exercice);
+      const badge = ligne.fige_le ? ' <span style="font-size:0.68rem;color:var(--text-secondary)">(figé)</span>' : '';
+      return '<span style="color:var(--text-secondary)" title="Exercice antérieur : affiché pour mémoire, lecture seule dans cette grille.">' + part + ' %</span>' + badge;
+    }
+
+    // Cellule "Part {n}" ou "Part {n+1}" éditable (spec point a et d). Trois états :
+    //  - ligne figée -> lecture seule + badge "(figé)", valeur = la PART calculée (jamais le cumul
+    //    brut, pour que la lecture directe "50 % / 50 %" reste vraie même sur du figé) ;
+    //  - exercice entier figé mais mission jamais suivie sur CET exercice -> input désactivé (garde
+    //    serveur sur l'exercice ENTIER, pas seulement la ligne : cf. historique du fichier) ;
+    //  - sinon éditable : une ligne existante préremplit sa VRAIE part (valeur réellement saisie,
+    //    normale) ; aucune ligne laisse le champ VIDE avec la suggestion (point d) en `placeholder`
+    //    seul (texte fantôme du navigateur, distinct nativement d'une valeur saisie) + une légende
+    //    "suggéré : X %", jamais enregistrée tant que l'utilisateur ne valide pas via OK.
+    function avancementCellPartSaisie(m, lignesMission, exercice, figeeExercice) {
+      const ligne = avancementLigneExacte(lignesMission, exercice);
       if (ligne && ligne.fige_le) {
-        return ligne.pct + ' % <span style="font-size:0.68rem;color:var(--text-secondary)">(figé)</span>';
+        return avancementPartExercice(lignesMission, exercice) + ' % <span style="font-size:0.68rem;color:var(--text-secondary)">(figé)</span>';
       }
       // Exercice figé mais mission jamais suivie pour cet exercice (correctif Important 2, ronde 1) :
       // la garde ci-dessus ne s'est pas déclenchée (aucune ligne à trouver), mais le serveur refuse
@@ -14272,29 +14395,36 @@
           + ' <span style="font-size:0.68rem;color:var(--text-secondary)">figé</span>';
       }
       const elId = 'av-' + exercice + '-' + m.id;
-      const val = ligne ? ligne.pct : '';
-      let html = '<input type="number" min="0" max="100" step="1" value="' + val + '" id="' + elId + '" class="kpi-num-input" style="width:64px;padding:0.2rem">';
+      const cumulPrecedent = avancementCumulAuPlusTard(lignesMission, exercice - 1);
+      const maxPart = Math.max(0, Math.round(100 - cumulPrecedent));
+      if (ligne) {
+        const part = avancementPartExercice(lignesMission, exercice);
+        let html = '<input type="number" min="0" max="' + maxPart + '" step="1" value="' + part + '" id="' + elId + '" class="kpi-num-input" style="width:64px;padding:0.2rem">';
+        html += ' <button class="kpi-btn" onclick="saveAvancementLigne(\'' + m.id + '\',' + exercice + ',\'' + elId + '\')" style="padding:0.15rem 0.45rem;font-size:0.72rem">OK</button>';
+        html += ' <button class="kpi-btn" onclick="removeAvancementLigne(\'' + m.id + '\',' + exercice + ')" style="padding:0.15rem 0.45rem;font-size:0.72rem">Retirer</button>';
+        return html;
+      }
+      const suggestion = avancementSuggestionPart(lignesMission, exercice);
+      let html = '<input type="number" min="0" max="' + maxPart + '" step="1" value="" placeholder="' + suggestion + '" id="' + elId + '" class="kpi-num-input" style="width:64px;padding:0.2rem" title="Suggestion : ' + suggestion + ' % (reste à réaliser). Non enregistrée : validez avec OK pour la retenir, ou saisissez une autre valeur.">';
       html += ' <button class="kpi-btn" onclick="saveAvancementLigne(\'' + m.id + '\',' + exercice + ',\'' + elId + '\')" style="padding:0.15rem 0.45rem;font-size:0.72rem">OK</button>';
-      if (ligne) html += ' <button class="kpi-btn" onclick="removeAvancementLigne(\'' + m.id + '\',' + exercice + ')" style="padding:0.15rem 0.45rem;font-size:0.72rem">Retirer</button>';
+      html += '<div style="font-size:0.65rem;color:var(--text-secondary);font-style:italic;margin-top:0.15rem">suggéré : ' + suggestion + ' %, à valider</div>';
       return html;
     }
 
-    // Cellule "CA à l'avancement" (spec 5.1 quater, point c) : formatEuro du montant calcule cote
-    // serveur (report en avant depuis l'exercice precedent inclus, spec §3.2) si la mission est suivie
-    // sur `data` (a au moins une ligne, quel que soit l'exercice) ; sinon un tiret median, la mission
-    // n'apporte alors aucun remplacement a l'agregat pour cet exercice.
-    // La grille n'affiche plus l'avancement de fin N-1 (retire en 5.1 ter point a) : un montant peut
-    // donc sembler faux sans explication. Chaque montant porte donc une infobulle qui ecrit le calcul
-    // en toutes lettres avec ses trois nombres (CA total, avancement fin exercice, avancement fin
-    // exercice precedent). Quand l'avancement de depart n'est pas nul, un badge visible s'ajoute : c'est
-    // le seul cas ou le montant ne se deduit pas de ce qui est deja affiche a l'ecran.
+    // Cellule "CA à l'avancement" (spec 5.1 quater, point c ; libellé de l'infobulle mis à jour en
+    // 5.1 sexies, qui rend le calcul "lecture directe" : prix total × part de l'exercice). formatEuro
+    // du montant calculé côté serveur (report en avant depuis l'exercice précédent inclus, §3.2) si la
+    // mission est suivie sur `data` (a au moins une ligne, quel que soit l'exercice) ; sinon un tiret
+    // médian, la mission n'apporte alors aucun remplacement à l'agrégat pour cet exercice. Quand
+    // l'avancement de départ n'est pas nul, un badge visible s'ajoute : c'est le seul cas où le montant
+    // ne se déduit pas de la part affichée dans la cellule voisine.
     function avancementCellCa(data, missionId, exercice) {
       const s = avancementSuivieById(data, missionId);
       if (!s) return '<span style="color:var(--text-secondary)">·</span>';
-      const precedent = exercice - 1;
-      const title = 'CA ' + exercice + ' = CA total de la mission (' + formatEuro(s.ca) + ') multiplié par l\'avancement fin '
-        + exercice + ' (' + s.pctCourant + ' %) moins l\'avancement fin ' + precedent + ' (' + s.pctPrecedent + ' %), soit '
-        + formatEuro(s.caAvancement) + '.';
+      const part = s.pctCourant - s.pctPrecedent;
+      const title = 'CA ' + exercice + ' = prix total de la mission (' + formatEuro(s.ca) + ') × part ' + exercice + ' (' + part + ' %), soit '
+        + formatEuro(s.caAvancement) + '.'
+        + (s.pctPrecedent ? ' Avancement déjà acquis avant ' + exercice + ' : ' + s.pctPrecedent + ' %.' : '');
       let html = '<span title="' + title + '">' + formatEuro(s.caAvancement) + '</span>';
       if (s.pctPrecedent) {
         html += ' <span title="' + title + '" style="font-size:0.62rem;padding:0.02rem 0.3rem;border:1px solid var(--border);border-radius:8px;color:var(--text-secondary);white-space:nowrap">départ ' + s.pctPrecedent + ' %</span>';
@@ -14338,32 +14468,61 @@
       const lignesByMission = avancementLignesByMission();
       const figeeN = !!d.figee;
       const figeeN1 = !!(dNext && dNext.figee);
+      const dernierExerciceFige = avancementDernierExerciceFigeGlobal();
 
+      // Trois colonnes de part (spec point c, révoque 5.1 ter point a) : n−1 en lecture seule et
+      // grisée (déjà validée, on ne fait que la rappeler), puis n et n+1 éditables. Colonne "Reste" :
+      // "un total ou un reste doit rester visible sur la ligne, pour que l'utilisateur contrôle que ses
+      // parts finissent par faire 100 %", calculé sur le CUMUL réellement enregistré à la fin de n+1
+      // (report en avant), jamais sur une suggestion non validée.
       let html = '<div style="overflow-x:auto"><table class="kpi-obj-table"><thead><tr>'
         + '<th>Mission</th><th>CA HT</th>'
-        + '<th>Av. 31/12/' + n + '</th><th>CA ' + n + '</th>'
-        + '<th>Av. 31/12/' + n1 + '</th><th>CA ' + n1 + '</th>'
+        + '<th>Part ' + (n - 1) + '</th>'
+        + '<th>Part ' + n + '</th><th>CA ' + n + '</th>'
+        + '<th>Part ' + n1 + '</th><th>CA ' + n1 + '</th>'
+        + '<th>Reste après ' + n1 + '</th>'
         + '</tr></thead><tbody>';
 
       for (const m of missions) {
+        const lignesMission = lignesByMission.get(String(m.id)) || [];
         // Badge "à cheval" retiré (spec 5.1 quater, point d) : depuis le périmètre strict ci-dessus,
         // toutes les missions affichées le sont... sauf celles ajoutées par le correctif §5.1 quinquies
         // point b (missions suivies hors périmètre strict) : celles-là portent une mention dédiée
         // ci-dessous, pour ne pas laisser croire qu'elles sont à cheval sur n/n1.
         const suivieHorsPerimetre = !avancementDansPerimetreStrict(m, n, n1) && lignesByMission.has(String(m.id));
-        html += '<tr>'
-          + '<td><div class="kpi-obj-name">' + escapeHtml(m.nom || '') + '</div>'
+        const nomHtml = '<td><div class="kpi-obj-name">' + escapeHtml(m.nom || '') + '</div>'
           + (m.client ? '<div style="font-size:0.72rem;color:var(--text-secondary)">' + escapeHtml(m.client) + '</div>' : '')
           + '<div style="font-size:0.7rem;color:var(--text-secondary);margin-top:0.1rem">' + avancementVoletsTexte(m) + '</div>'
           + (suivieHorsPerimetre
               ? '<div style="font-size:0.68rem;color:var(--text-secondary);font-style:italic;margin-top:0.15rem">Affichée ici parce qu\'un avancement est déjà saisi pour cette mission, pas parce qu\'elle est à cheval sur ' + n + '/' + n1 + '.</div>'
               : '')
-          + '</td>'
+          + '</td>';
+
+        // Mission terminée (spec point b) : avancement cumulé déjà à 100 % à la fin du dernier
+        // exercice figé. Rien à reconnaître, jamais : ligne entière grisée et non modifiable (saisir
+        // une part produirait un CA négatif). Cas réels en base : BV - Cristal Union, BV - Domaine
+        // Lafage, BV - TDF, Alphapro groupe MAJ FDES (tous 100 % en 2025, exercice figé).
+        if (avancementMissionTerminee(lignesMission, dernierExerciceFige)) {
+          html += '<tr style="opacity:0.6">'
+            + nomHtml
+            + '<td style="text-align:right">' + formatEuro(m.ca) + '</td>'
+            + '<td colspan="5" style="text-align:center;color:var(--text-secondary);font-style:italic">'
+            + 'Mission terminée : 100 % déjà atteint au 31/12/' + dernierExerciceFige + ' (exercice figé). Rien à saisir.</td>'
+            + '<td style="text-align:right;color:var(--text-secondary)">0 %</td>'
+            + '</tr>';
+          continue;
+        }
+
+        const reste = Math.max(0, 100 - avancementCumulAuPlusTard(lignesMission, n1));
+        html += '<tr>'
+          + nomHtml
           + '<td style="text-align:right">' + formatEuro(m.ca) + '</td>'
-          + '<td style="text-align:right">' + avancementCellPct(m, lignesByMission, n, figeeN) + '</td>'
+          + '<td style="text-align:right">' + avancementCellPartLectureSeule(lignesMission, n - 1) + '</td>'
+          + '<td style="text-align:right">' + avancementCellPartSaisie(m, lignesMission, n, figeeN) + '</td>'
           + '<td style="text-align:right;font-weight:600">' + avancementCellCa(d, m.id, n) + '</td>'
-          + '<td style="text-align:right">' + avancementCellPct(m, lignesByMission, n1, figeeN1) + '</td>'
+          + '<td style="text-align:right">' + avancementCellPartSaisie(m, lignesMission, n1, figeeN1) + '</td>'
           + '<td style="text-align:right;font-weight:600">' + avancementCellCa(dNext, m.id, n1) + '</td>'
+          + '<td style="text-align:right;color:var(--text-secondary)">' + reste + ' %</td>'
           + '</tr>';
       }
       html += '</tbody></table></div>';
@@ -14497,29 +14656,30 @@
       const n = d.exercice;
       const n1 = n + 1;
 
-      // Clarification (spec 5.1 quinquies point c, corrigee ronde de correctifs 1 : la revue a releve
-      // une causalite fausse dans la version precedente). Nathan a demande pourquoi les missions
-      // ancrees seraient modifiables alors que le cabinet les a validees. Elles ne le sont pas (aucun
-      // mecanisme ne change ici), mais PAS pour la raison ecrite avant ce correctif : la grille est
-      // ancree sur CURRENT_YEAR (n = d.exercice), une constante independante du figeage. Figer un
-      // exercice bascule ses cellules en lecture seule (bandeau d.figee ci-dessous) mais NE LE FAIT PAS
-      // disparaitre de cette grille ; c'est le passage a l'annee suivante (CURRENT_YEAR qui avance) qui
-      // fait sortir un exercice de la vue N/N+1, pas l'acte de figer.
+      // Explication du modèle de saisie (spec 5.1 sexies point a, révoque 5.1 ter point a) : on
+      // saisit désormais la PART du travail réalisée DANS l'exercice, pas le cumul au 31/12. Une
+      // mission à cheval se lit "50 % en 2026, 50 % en 2027", dont la somme fait 100 % et se contrôle
+      // d'un coup d'œil (colonne "Reste" en bout de ligne). Clarification reprise (spec 5.1 quinquies
+      // point c) : la grille est ancrée sur CURRENT_YEAR (n = d.exercice), indépendante du figeage ;
+      // figer un exercice bascule ses cellules en lecture seule (bandeaux ci-dessous) mais ne le fait
+      // PAS disparaître de cette grille, seul le passage à l'année suivante le fait.
       let html = '<p style="font-size:0.8rem;color:var(--text-secondary);margin-top:0;margin-bottom:0.9rem">'
-        + 'Modifiables ici : les exercices ' + n + ' et ' + n1 + ', tant qu\'ils ne sont pas figés. Figer un exercice rend '
-        + 'définitivement ses pourcentages en lecture seule ; c\'est le passage à l\'année suivante, pas le figeage, qui '
-        + 'fait sortir un exercice de cette grille. Le CA ' + n + ' tient compte de l\'avancement de fin '
-        + (n - 1) + ', reporté automatiquement (report en avant) : voir le sous-onglet « Calcul » pour le détail.'
+        + 'Vous saisissez la part du travail réalisée DANS l\'exercice, pas le cumul au 31/12 : le CA de chaque exercice est '
+        + 'la lecture directe de cette part (prix total × part). ' + (n - 1) + ' est affiché à titre de référence, en lecture '
+        + 'seule et grisé (déjà validé) ; seuls ' + n + ' et ' + n1 + ' sont modifiables, tant qu\'ils ne sont pas figés. '
+        + 'Quand rien n\'est encore saisi pour un exercice, la cellule propose en pointillé le reste théorique à réaliser : '
+        + 'ce n\'est qu\'une suggestion, elle n\'est enregistrée que si vous cliquez sur OK. Une mission déjà à 100 % à la '
+        + 'clôture du dernier exercice figé est terminée : sa ligne est grisée, il n\'y a plus rien à y saisir.'
         + '</p>';
 
       if (d.anomalies && d.anomalies.length) {
-        html += _crAlerteHtml('Incohérence détectée sur ' + d.anomalies.length + ' mission(s) terminée(s) : la somme des CA par exercice ne retombe pas sur le CA de la mission. Vérifier les pourcentages saisis.', true);
+        html += _crAlerteHtml('Incohérence détectée sur ' + d.anomalies.length + ' mission(s) terminée(s) : la somme des CA par exercice ne retombe pas sur le CA de la mission. Vérifier les parts saisies.', true);
       }
       if (d.figee) {
-        html += _crAlerteHtml('Exercice ' + n + ' figé : les pourcentages ci-dessous sont définitifs et ne sont plus modifiables depuis Pilot.', false);
+        html += _crAlerteHtml('Exercice ' + n + ' figé : les parts ci-dessous sont définitives et ne sont plus modifiables depuis Pilot.', false);
       }
       if (dNext && dNext.figee) {
-        html += _crAlerteHtml('Exercice ' + n1 + ' figé : les pourcentages ci-dessous sont définitifs et ne sont plus modifiables depuis Pilot.', false);
+        html += _crAlerteHtml('Exercice ' + n1 + ' figé : les parts ci-dessous sont définitives et ne sont plus modifiables depuis Pilot.', false);
       }
 
       // Recherche nom/client + case d'echappatoire (spec 5.1 quater, points a et b) : perimetre par
@@ -14554,7 +14714,7 @@
       if (d.figee) {
         html += 'Exercice ' + n + ' déjà figé.';
       } else {
-        html += 'À la clôture de ' + n + ', figer ses pourcentages : ils deviennent l\'avancement officiel au 31/12 et ne sont plus modifiables.'
+        html += 'À la clôture de ' + n + ', figer l\'avancement : les parts saisies deviennent l\'avancement officiel au 31/12 et ne sont plus modifiables.'
           + '<div style="margin-top:0.5rem"><button class="kpi-btn kpi-btn--primary" onclick="figerAvancement(' + n + ')">Figer ' + n + '</button></div>';
       }
       html += '</div>';
@@ -14665,17 +14825,56 @@
       return data;
     }
 
+    // Enregistrement d'une PART (spec 5.1 sexies) : convertit en cumul via avancementPlanSaisiePart,
+    // qui gère aussi le piège de l'exercice suivant déjà renseigné (cascade de préservation, ou refus
+    // net si elle sortirait de [0, 100]). Le champ vide (suggestion non validée, cf.
+    // avancementCellPartSaisie) tombe sur son `placeholder` : cliquer OK sans rien taper VALIDE la
+    // suggestion affichée, ce qui compte comme "l'utilisateur valide" (spec point d) : elle n'était
+    // jusque-là qu'un texte fantôme, jamais transmise au serveur.
     async function saveAvancementLigne(missionId, exercice, elId) {
       const input = document.getElementById(elId);
       if (!input) return;
+      const raw = input.value !== '' ? input.value : input.placeholder;
+      if (raw === '' || raw == null) { alert('Aucune part à enregistrer.'); return; }
+      const part = Number(raw);
+      if (!Number.isFinite(part)) { alert('Part invalide.'); return; }
+
+      const lignesMission = avancementLignesByMission().get(String(missionId)) || [];
+      const plan = avancementPlanSaisiePart(lignesMission, exercice, part);
+      if (!plan.ok) { alert(plan.message); return; }
+
+      // Cascade (spec point a) : l'exercice suivant est aussi réécrit pour préserver sa part. Toujours
+      // annoncée avant exécution, même quand elle est mathématiquement neutre (part inchangée) : Nathan
+      // doit savoir qu'une deuxième ligne va être touchée par cette saisie.
+      if (plan.cascade) {
+        const suivant = plan.ecritures[1];
+        const ligneSuivante = avancementLigneExacte(lignesMission, suivant.exercice);
+        const ancienCumulSuivant = ligneSuivante ? Number(ligneSuivante.pct) : 0;
+        const confirmMsg = 'Cette saisie modifie aussi ' + suivant.exercice + ' pour préserver la part qu\'il affichait : '
+          + 'son cumul passera de ' + ancienCumulSuivant + ' % à ' + suivant.pctCumule + ' %. Continuer ?';
+        if (!confirm(confirmMsg)) return;
+      }
+
       try {
-        await postAvancement('/api/avancement', 'POST', { missionId, exercice, pct: Number(input.value) });
+        for (const ecriture of plan.ecritures) {
+          await postAvancement('/api/avancement', 'POST', { missionId, exercice: ecriture.exercice, pct: ecriture.pctCumule });
+        }
         await loadAvancement();
-      } catch (e) { alert('Enregistrement impossible : ' + e.message); }
+      } catch (e) {
+        // Risque résiduel assumé (aucune écriture transactionnelle multi-lignes côté serveur, hors
+        // périmètre du lot) : si la 2e écriture de la cascade échoue après que la 1re a réussi, la
+        // part de l'exercice suivant n'est plus préservée. On le dit explicitement plutôt que de
+        // laisser un message d'erreur muet, et on recharge pour montrer l'état réellement en base.
+        const avertissementCascade = plan.cascade
+          ? ' Vérifiez ' + exercice + ' et ' + plan.ecritures[1].exercice + ' : l\'un des deux a pu être enregistré sans l\'autre.'
+          : '';
+        alert('Enregistrement impossible : ' + e.message + avertissementCascade);
+        await loadAvancement();
+      }
     }
 
     async function removeAvancementLigne(missionId, exercice) {
-      if (!confirm('Retirer cette mission du suivi à l\'avancement pour ' + exercice + ' ?')) return;
+      if (!confirm('Retirer la part enregistrée de ' + exercice + ' pour cette mission ?')) return;
       try {
         await postAvancement('/api/avancement', 'DELETE', { missionId, exercice });
         await loadAvancement();
@@ -14683,7 +14882,7 @@
     }
 
     async function figerAvancement(exercice) {
-      if (!confirm('Figer définitivement les pourcentages de ' + exercice + ' ? Cette action n\'est pas annulable depuis Pilot.')) return;
+      if (!confirm('Figer définitivement les parts de ' + exercice + ' ? Cette action n\'est pas annulable depuis Pilot.')) return;
       try {
         const r = await postAvancement('/api/avancement/figer', 'POST', { exercice });
         alert(r.lignesFigees + ' ligne(s) figée(s) pour ' + exercice + '.');
