@@ -1,5 +1,5 @@
 'use strict';
-const { missionAvancementInfo, MIN_MONTANT } = require('./avancementMissionInfo');
+const { missionAvancementInfo } = require('./avancementMissionInfo');
 
 describe('missionAvancementInfo : champs additifs GET /api/avancement (spec §5.1 bis)', () => {
   test('montantSolde = max(0, ca - montantAcompte), jamais negatif', () => {
@@ -33,6 +33,10 @@ describe('missionAvancementInfo : champs additifs GET /api/avancement (spec §5.
     expect(info.dateFactureFinale).toBeNull(); // solde non facture : la DATE reste null, seule l annee replie
     expect(info.anneeAcompte).toBe(2025);
     expect(info.anneeSolde).toBe(2026); // solde non facture -> repli sur Annee final
+    // Distinction volontaire (spec §5.1 quinquies point a) : anneeSolde replie sur "Annee final" pour
+    // le RATTACHEMENT COMPTABLE, mais aCheval ne suit jamais ce repli, seulement la date d'emission
+    // reelle. Ici le volet solde n'a pas de date de facture -> pas a cheval, meme si anneeSolde est connu.
+    expect(info.aCheval).toBe(false);
   });
 
   test('ni date ni "Annee final" : annee null (non rattachable)', () => {
@@ -42,7 +46,7 @@ describe('missionAvancementInfo : champs additifs GET /api/avancement (spec §5.
     expect(info.anneeSolde).toBeNull();
   });
 
-  describe('aCheval : les deux volets existent, deux annees connues et differentes', () => {
+  describe('aCheval : les deux volets portent une date d emission connue, sur des annees differentes (spec §5.1 quinquies point a, montants hors jeu)', () => {
     test('acompte 2025 / solde 2026 -> a cheval', () => {
       const info = missionAvancementInfo({
         ca: 10000, montantAcompte: 4000,
@@ -63,28 +67,51 @@ describe('missionAvancementInfo : champs additifs GET /api/avancement (spec §5.
       expect(info.aCheval).toBe(false);
     });
 
-    test('un volet sous le seuil MIN_MONTANT ne compte pas comme existant', () => {
+    // Correctif §5.1 quinquies point a (2026-09-02) : le seuil de montant (ex-MIN_MONTANT, herite a
+    // tort de utils/billing.js) est retire de la detection du chevauchement. Ces deux tests prouvent
+    // que le montant ne joue plus AUCUN role, y compris un acompte a zero ou symbolique, tant que la
+    // date d'emission existe.
+    test('un volet a 0 EUR mais avec une date d emission connue compte comme existant : le montant ne joue plus aucun role', () => {
       const info = missionAvancementInfo({
-        ca: 10000, montantAcompte: 3, // < MIN_MONTANT
+        ca: 10000, montantAcompte: 0,
         dateFactureAcompte: '2025-12-20', dateFactureFinale: '2026-01-05',
       });
-      expect(MIN_MONTANT).toBe(5);
+      expect(info.montantAcompte).toBe(0);
       expect(info.dateFactureAcompte).toBe('2025-12-20');
       expect(info.dateFactureFinale).toBe('2026-01-05');
-      expect(info.aCheval).toBe(false);
+      expect(info.aCheval).toBe(true);
     });
 
-    // Cas limite (ronde de correctifs 1, minor) : le seuil est >= 5, pas > 5. A exactement 5 EUR, le
-    // volet compte comme existant. On fige ce comportement pour eviter qu'un futur >= -> > silencieux
-    // le casse sans qu'aucun test ne le remarque.
-    test('montant exactement au seuil (5 EUR pile) : le volet compte comme existant (>=, pas >)', () => {
+    // Cas reel qui a motive le correctif : "Wienerberger - Phaunis", acompte symbolique de 1 EUR au
+    // 01/12/2026, solde au 01/02/2027. Avec l'ancien seuil de 5 EUR, l'acompte etait ignore et la
+    // mission jamais declaree a cheval, ce qui videait entierement la grille de la cloture 2026 alors
+    // que cette mission la concernait au premier chef. L'acompte symbolique est justement le motif
+    // habituel des factures a etablir : la DATE qu'il porte est l'information utile, pas son montant.
+    test('Wienerberger - Phaunis (cas reel, spec §5.1 quinquies point a) : acompte de 1 EUR au 01/12/2026, solde au 01/02/2027 -> a cheval malgre l acompte symbolique', () => {
       const info = missionAvancementInfo({
-        ca: 10, montantAcompte: 5, // montantSolde = 10 - 5 = 5 : les deux volets pile au seuil
-        dateFactureAcompte: '2025-12-01', dateFactureFinale: '2026-01-10',
+        ca: 5000, montantAcompte: 1,
+        dateFactureAcompte: '2026-12-01', dateFactureFinale: '2027-02-01',
       });
-      expect(info.montantAcompte).toBe(5);
-      expect(info.montantSolde).toBe(5);
+      expect(info.montantAcompte).toBe(1);
+      expect(info.dateFactureAcompte).toBe('2026-12-01');
+      expect(info.dateFactureFinale).toBe('2027-02-01');
+      expect(info.anneeAcompte).toBe(2026);
+      expect(info.anneeSolde).toBe(2027);
       expect(info.aCheval).toBe(true);
+    });
+
+    // Exigence explicite de la tache (ronde de correctifs §5.1 quinquies) : un volet sans AUCUNE date
+    // (ni date de facture, ni repli "Annee final") ne doit jamais rendre la mission a cheval, quel que
+    // soit son montant.
+    test('un volet sans aucune date d emission (ni repli "Annee final") -> jamais a cheval', () => {
+      const info = missionAvancementInfo({
+        ca: 8000, montantAcompte: 3000,
+        dateFactureAcompte: '2026-11-01', dateFactureFinale: null, anneeFinal: '',
+      });
+      expect(info.dateFactureAcompte).toBe('2026-11-01');
+      expect(info.dateFactureFinale).toBeNull();
+      expect(info.anneeSolde).toBeNull();
+      expect(info.aCheval).toBe(false);
     });
 
     // Cas limite (ronde de correctifs 1, minor) : les deux volets existent (montants au-dessus du
@@ -108,8 +135,10 @@ describe('missionAvancementInfo : champs additifs GET /api/avancement (spec §5.
     });
 
     test('Alphapro groupe (spec §5.1 bis) : 15 500 EUR factures en une fois le 2025-04-30, avancee a 70 % au 31/12/2025 -> PCA de 4 650 EUR, jamais a cheval au sens des dates de facture', () => {
-      // Mission one-shot : le volet "Acompte" est negligeable (< MIN_MONTANT), tout est sur "Solde"
-      // (meme convention que buildInvoiceLines cote front : "Acompte forcé" ~ 1 EUR ou absent).
+      // Mission one-shot : le volet "Acompte" n'a pas ete facture (aucune date), tout est sur "Solde"
+      // (meme convention que buildInvoiceLines cote front : "Acompte forcé" ~ 1 EUR ou absent). Reste
+      // non a cheval avec la nouvelle regle : ce n'est pas le montant qui l'exclut mais l'absence de
+      // date sur le volet acompte, aCheval exige les DEUX dates.
       const alphapro = {
         ca: 15500, montantAcompte: 0,
         dateFactureAcompte: null, dateFactureFinale: '2025-04-30', anneeFinal: '2025',

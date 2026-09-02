@@ -14164,8 +14164,9 @@
 
     // Lecture directe des deux volets d'une mission, forme demandee par Nathan : "Acompte {montant}
     // le {date} · Solde {montant} le {date}", un volet non emis (aucune date de facture) affichant
-    // "non émis". Un volet est "emis" des qu'il porte une date de facture, meme si son montant est
-    // sous le seuil MIN_MONTANT (ce seuil ne sert qu'a decider "a cheval", pas l'affichage).
+    // "non émis". Un volet est "emis" des qu'il porte une date de facture, quel que soit son montant
+    // (le montant ne sert plus a rien dans la detection "a cheval" depuis le correctif §5.1 quinquies
+    // point a : seule la date d'emission compte, cf. utils/avancementMissionInfo.js).
     function avancementVoletsTexte(m) {
       if (!m) return '';
       const acompte = m.dateFactureAcompte
@@ -14178,8 +14179,9 @@
     }
 
     // Regroupe les lignes plates (tous exercices confondus, d.lignes) par mission_id : sert a
-    // retrouver la ligne exacte d'une cellule (figee ou non). Le perimetre par defaut de la grille ne
-    // s'appuie plus sur ces lignes depuis la 5.1 quater (regle strict N/N+1 sur les volets de facture).
+    // retrouver la ligne exacte d'une cellule (figee ou non), ET (depuis le correctif §5.1 quinquies
+    // point b) a determiner si une mission est "suivie" (au moins une ligne, quel que soit l'exercice)
+    // pour qu'avancementMissionsGrille ne la fasse jamais disparaitre.
     function avancementLignesByMission() {
       const map = new Map();
       const d = avancementData;
@@ -14200,18 +14202,35 @@
       return (data.suivies || []).find(s => String(s.missionId) === String(missionId)) || null;
     }
 
+    // Une mission est dans le perimetre STRICT N/N+1 (spec 5.1 quater point a) quand l'un de ses deux
+    // volets est rattache a N et l'autre a N+1, exactement (acompte et solde EXACTEMENT sur ces deux
+    // exercices, dans un ordre ou l'autre). On reutilise directement `aCheval` calcule cote serveur
+    // (utils/avancementMissionInfo.js, base sur les seules dates d'emission depuis le correctif §5.1
+    // quinquies point a) plutot que de recalculer une regle concurrente ; on y ajoute seulement la
+    // condition que les deux annees de rattachement sont PRECISEMENT {n, n1}, puisque aCheval a lui
+    // seul n'exclut pas un ecart N-1/N ou N/N+2. Extrait en fonction (correctif §5.1 quinquies point b)
+    // pour etre partage entre avancementMissionsGrille (filtre) et le rendu de chaque ligne (mention
+    // "suivie" quand une mission n'est affichee que parce qu'elle est suivie, pas parce qu'elle est a
+    // cheval sur N/N+1).
+    function avancementDansPerimetreStrict(m, n, n1) {
+      return !!(m && m.aCheval
+        && ((m.anneeAcompte === n && m.anneeSolde === n1) || (m.anneeAcompte === n1 && m.anneeSolde === n)));
+    }
+
     // Missions de la grille (spec 5.1 quater, point a : revoque le point b de 5.1 ter, jauge trop
-    // large "activite en N ou N+1"). Perimetre strict desormais : une mission n'apparait que si l'un
-    // de ses deux volets est rattache a N et l'autre a N+1 (acompte et solde EXACTEMENT sur ces deux
-    // exercices, dans un ordre ou l'autre). Deux volets sur le meme exercice, ou un seul volet reel, la
-    // font disparaitre : c'est la doctrine de Nathan (date d'emission des factures qui fait foi), pas
-    // un manque de l'outil. On reutilise directement `aCheval` calcule cote serveur (deja applique le
-    // seuil des 5 euros en dessous duquel un volet est considere inexistant, cf. MIN_MONTANT dans
-    // utils/avancementMissionInfo.js) plutot que de recalculer une regle concurrente ; on y ajoute
-    // seulement la condition que les deux annees de rattachement sont PRECISEMENT {n, n1}, puisque
-    // aCheval a lui seul n'exclut pas un ecart N-1/N ou N/N+2. La case d'echappatoire (avancementShowAll)
-    // leve ce perimetre, necessaire pour le produit constate d'avance (spec 5.1 quater point b).
-    // ignoreSearch (correctif Minor, ronde 2) : permet de recalculer le seul perimetre (aCheval strict
+    // large "activite en N ou N+1"). Perimetre par defaut : le perimetre strict N/N+1 ci-dessus. Deux
+    // volets sur le meme exercice, ou un seul volet reel, la font disparaitre de ce perimetre : c'est
+    // la doctrine de Nathan (date d'emission des factures qui fait foi), pas un manque de l'outil.
+    // Correctif §5.1 quinquies point b : une mission SUIVIE (au moins une ligne d'avancement, quel que
+    // soit son exercice) reste TOUJOURS affichee, meme hors perimetre strict. Sans cette regle, une
+    // mission dont le pourcentage de l'exercice courant n'est pas encore saisi (report en avant = 0,
+    // donc CA a l'avancement = 0) sortait du perimetre en meme temps qu'elle sortait de la grille : le
+    // trou devenait incorrigible, faute de pouvoir la retrouver pour la corriger. Cas reel : "Elise V2",
+    // ancree a 90 % en 2025, apporte 5 000 EUR a 2026 par son solde de janvier ; sans saisie 2026 elle
+    // apporte 0 EUR, et invisible le dirigeant ne pouvait rien y faire. La case d'echappatoire
+    // (avancementShowAll) leve completement le perimetre, necessaire en plus pour le produit constate
+    // d'avance (spec 5.1 quater point b).
+    // ignoreSearch (correctif Minor, ronde 2) : permet de recalculer le seul perimetre (strict + suivies,
     // ou leve) sans le filtre de recherche, pour que l'appelant puisse distinguer "le perimetre est vide"
     // de "la recherche ne trouve rien dans un perimetre non vide" (avancementRenderGridHtml).
     function avancementMissionsGrille(ignoreSearch) {
@@ -14221,8 +14240,8 @@
       const n1 = n + 1;
       let list = d.missions || [];
       if (!avancementShowAll) {
-        list = list.filter(m => m.aCheval
-          && ((m.anneeAcompte === n && m.anneeSolde === n1) || (m.anneeAcompte === n1 && m.anneeSolde === n)));
+        const suivies = avancementLignesByMission();
+        list = list.filter(m => avancementDansPerimetreStrict(m, n, n1) || suivies.has(String(m.id)));
       }
       if (!ignoreSearch) {
         const q = normFact((avancementSearchQuery || '').trim());
@@ -14328,11 +14347,18 @@
 
       for (const m of missions) {
         // Badge "à cheval" retiré (spec 5.1 quater, point d) : depuis le périmètre strict ci-dessus,
-        // toutes les missions affichées le sont, le badge n'apporte donc plus d'information.
+        // toutes les missions affichées le sont... sauf celles ajoutées par le correctif §5.1 quinquies
+        // point b (missions suivies hors périmètre strict) : celles-là portent une mention dédiée
+        // ci-dessous, pour ne pas laisser croire qu'elles sont à cheval sur n/n1.
+        const suivieHorsPerimetre = !avancementDansPerimetreStrict(m, n, n1) && lignesByMission.has(String(m.id));
         html += '<tr>'
           + '<td><div class="kpi-obj-name">' + escapeHtml(m.nom || '') + '</div>'
           + (m.client ? '<div style="font-size:0.72rem;color:var(--text-secondary)">' + escapeHtml(m.client) + '</div>' : '')
-          + '<div style="font-size:0.7rem;color:var(--text-secondary);margin-top:0.1rem">' + avancementVoletsTexte(m) + '</div></td>'
+          + '<div style="font-size:0.7rem;color:var(--text-secondary);margin-top:0.1rem">' + avancementVoletsTexte(m) + '</div>'
+          + (suivieHorsPerimetre
+              ? '<div style="font-size:0.68rem;color:var(--text-secondary);font-style:italic;margin-top:0.15rem">Affichée ici parce qu\'un avancement est déjà saisi pour cette mission, pas parce qu\'elle est à cheval sur ' + n + '/' + n1 + '.</div>'
+              : '')
+          + '</td>'
           + '<td style="text-align:right">' + formatEuro(m.ca) + '</td>'
           + '<td style="text-align:right">' + avancementCellPct(m, lignesByMission, n, figeeN) + '</td>'
           + '<td style="text-align:right;font-weight:600">' + avancementCellCa(d, m.id, n) + '</td>'
@@ -14344,13 +14370,16 @@
       return html;
     }
 
-    // Note doctrine sous la grille (spec 5.1 quater, point a) : son texte depend de l'etat de la case
-    // d'echappatoire (avancementShowAll), car le perimetre affiche par la grille depend de cet etat lui
-    // aussi (correctif Important, ronde 2 : la note affirmait a tort le perimetre strict meme case
-    // cochee). Fonction dediee, appelee au premier rendu ET par avancementOnShowAllChange ci-dessous, et
-    // non un texte fige dans renderAvancementSaisiePane : c'est ce qui garantit sa reevaluation au
-    // changement d'etat de la case (elle ne vit pas dans #avancementGridWrap, qui est le seul conteneur
-    // rafraichi par avancementOnShowAllChange avant ce correctif).
+    // Note doctrine sous la grille (spec 5.1 quater, point a ; corrigee spec 5.1 quinquies point b) :
+    // son texte depend de l'etat de la case d'echappatoire (avancementShowAll), car le perimetre
+    // affiche par la grille depend de cet etat lui aussi (correctif Important, ronde 2 : la note
+    // affirmait a tort le perimetre strict meme case cochee). Correctif §5.1 quinquies point b : la
+    // branche perimetre strict doit aussi mentionner l'exception des missions suivies, sans quoi elle
+    // affirmerait a tort qu'aucune mission hors N/N+1 ne peut apparaitre. Fonction dediee, appelee au
+    // premier rendu ET par avancementOnShowAllChange ci-dessous, et non un texte fige dans
+    // renderAvancementSaisiePane : c'est ce qui garantit sa reevaluation au changement d'etat de la
+    // case (elle ne vit pas dans #avancementGridWrap, qui est le seul conteneur rafraichi par
+    // avancementOnShowAllChange avant ce correctif).
     function avancementPerimetreNoteHtml() {
       const d = avancementData;
       if (!d) return '';
@@ -14360,9 +14389,10 @@
         ? 'Périmètre élargi : toutes les missions non annulées apparaissent ici, y compris celles sans acompte en '
           + n + ' ni solde en ' + n1 + ', afin de retrouver notamment les facturations en une fois sur ' + n
           + ' dont le travail déborde sur ' + n1 + '. Décochez la case ci-dessus pour revenir au périmètre strict.'
-        : 'Périmètre : seules les missions dont l\'acompte est facturé en ' + n + ' et le solde en ' + n1 + ' apparaissent ici, '
-          + 'car c\'est la date d\'émission des factures qui fait foi. Une mission absente n\'est pas un manque de l\'outil : '
-          + 'c\'est un signal à corriger dans Notion, en général la date de la facture de solde.';
+        : 'Périmètre : les missions dont l\'acompte est facturé en ' + n + ' et le solde en ' + n1 + ' apparaissent ici, '
+          + 'car c\'est la date d\'émission des factures qui fait foi. Une mission déjà suivie (un pourcentage saisi) reste '
+          + 'affichée même si elle sort de ce périmètre, pour ne jamais perdre la main dessus. Une mission absente n\'est '
+          + 'pas un manque de l\'outil : c\'est un signal à corriger dans Notion, en général la date de la facture de solde.';
       return '<p style="font-size:0.72rem;color:var(--text-secondary);margin:0.4rem 0 0">' + texte + '</p>';
     }
 
@@ -14467,8 +14497,15 @@
       const n = d.exercice;
       const n1 = n + 1;
 
+      // Clarification (spec 5.1 quinquies point c) : Nathan a demande pourquoi les missions ancrees
+      // seraient modifiables alors que le cabinet les a validees. Elles ne le sont pas (aucun
+      // mecanisme ne change ici) : le serveur refuse toute ecriture sur un exercice figé, et un
+      // exercice figé disparait de cette grille (elle ne montre jamais que N et N+1, spec 5.1 ter point
+      // a). Cette phrase rend ce fonctionnement visible, faute de quoi la question se repose.
       let html = '<p style="font-size:0.8rem;color:var(--text-secondary);margin-top:0;margin-bottom:0.9rem">'
-        + 'Deux exercices modifiables : ' + n + ' et ' + n1 + '. Le CA ' + n + ' tient compte de l\'avancement de fin '
+        + 'Deux exercices modifiables ici : ' + n + ' et ' + n1 + '. Dès qu\'un exercice est figé à la clôture, il disparaît '
+        + 'de cette grille et le serveur refuse toute écriture dessus, définitivement : c\'est pourquoi les exercices déjà '
+        + 'validés par le cabinet ne sont pas modifiables ici. Le CA ' + n + ' tient compte de l\'avancement de fin '
         + (n - 1) + ', reporté automatiquement (report en avant) : voir le sous-onglet « Calcul » pour le détail.'
         + '</p>';
 
