@@ -14211,7 +14211,10 @@
     // seulement la condition que les deux annees de rattachement sont PRECISEMENT {n, n1}, puisque
     // aCheval a lui seul n'exclut pas un ecart N-1/N ou N/N+2. La case d'echappatoire (avancementShowAll)
     // leve ce perimetre, necessaire pour le produit constate d'avance (spec 5.1 quater point b).
-    function avancementMissionsGrille() {
+    // ignoreSearch (correctif Minor, ronde 2) : permet de recalculer le seul perimetre (aCheval strict
+    // ou leve) sans le filtre de recherche, pour que l'appelant puisse distinguer "le perimetre est vide"
+    // de "la recherche ne trouve rien dans un perimetre non vide" (avancementRenderGridHtml).
+    function avancementMissionsGrille(ignoreSearch) {
       const d = avancementData;
       if (!d) return [];
       const n = d.exercice;
@@ -14221,8 +14224,10 @@
         list = list.filter(m => m.aCheval
           && ((m.anneeAcompte === n && m.anneeSolde === n1) || (m.anneeAcompte === n1 && m.anneeSolde === n)));
       }
-      const q = normFact((avancementSearchQuery || '').trim());
-      if (q) list = list.filter(m => normFact(m.nom || '').includes(q) || normFact(m.client || '').includes(q));
+      if (!ignoreSearch) {
+        const q = normFact((avancementSearchQuery || '').trim());
+        if (q) list = list.filter(m => normFact(m.nom || '').includes(q) || normFact(m.client || '').includes(q));
+      }
       return list.slice().sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr'));
     }
 
@@ -14291,7 +14296,12 @@
       const missions = avancementMissionsGrille();
       if (!missions.length) {
         const hasQuery = !!(avancementSearchQuery || '').trim();
-        if (hasQuery) {
+        // La cause reelle d'une liste vide n'est pas forcement la recherche : si le perimetre lui-meme
+        // (sans le filtre de recherche) est deja vide, effacer la recherche n'y changerait rien. On le
+        // verifie explicitement (correctif Minor, ronde 2) pour ne pas accuser la recherche a tort et
+        // pour tomber dans les messages doctrine ci-dessous, qui donnent la vraie raison.
+        const perimetreVide = !avancementMissionsGrille(true).length;
+        if (hasQuery && !perimetreVide) {
           return '<p style="font-size:0.78rem;color:var(--text-secondary);margin:0.3rem 0 0">Aucune mission ne correspond à la recherche.</p>';
         }
         if (!avancementShowAll) {
@@ -14334,16 +14344,44 @@
       return html;
     }
 
+    // Note doctrine sous la grille (spec 5.1 quater, point a) : son texte depend de l'etat de la case
+    // d'echappatoire (avancementShowAll), car le perimetre affiche par la grille depend de cet etat lui
+    // aussi (correctif Important, ronde 2 : la note affirmait a tort le perimetre strict meme case
+    // cochee). Fonction dediee, appelee au premier rendu ET par avancementOnShowAllChange ci-dessous, et
+    // non un texte fige dans renderAvancementSaisiePane : c'est ce qui garantit sa reevaluation au
+    // changement d'etat de la case (elle ne vit pas dans #avancementGridWrap, qui est le seul conteneur
+    // rafraichi par avancementOnShowAllChange avant ce correctif).
+    function avancementPerimetreNoteHtml() {
+      const d = avancementData;
+      if (!d) return '';
+      const n = d.exercice;
+      const n1 = n + 1;
+      const texte = avancementShowAll
+        ? 'Périmètre élargi : toutes les missions non annulées apparaissent ici, y compris celles sans acompte en '
+          + n + ' ni solde en ' + n1 + ', afin de retrouver notamment les facturations en une fois sur ' + n
+          + ' dont le travail déborde sur ' + n1 + '. Décochez la case ci-dessus pour revenir au périmètre strict.'
+        : 'Périmètre : seules les missions dont l\'acompte est facturé en ' + n + ' et le solde en ' + n1 + ' apparaissent ici, '
+          + 'car c\'est la date d\'émission des factures qui fait foi. Une mission absente n\'est pas un manque de l\'outil : '
+          + 'c\'est un signal à corriger dans Notion, en général la date de la facture de solde.';
+      return '<p style="font-size:0.72rem;color:var(--text-secondary);margin:0.4rem 0 0">' + texte + '</p>';
+    }
+
     function avancementOnSearchInput(v) {
       avancementSearchQuery = v || '';
       const wrap = document.getElementById('avancementGridWrap');
       if (wrap) wrap.innerHTML = avancementRenderGridHtml();
     }
 
+    // Rafraichit la grille ET la note de perimetre (correctif Important, ronde 2) : les deux dependent
+    // de avancementShowAll, donc les deux doivent etre reevalues quand la case change d'etat. Avant ce
+    // correctif, seul #avancementGridWrap etait mis a jour ici : la note restait perimee et affirmait le
+    // perimetre strict meme apres avoir coche la case, une phrase fausse a l'ecran.
     function avancementOnShowAllChange(checked) {
       avancementShowAll = !!checked;
       const wrap = document.getElementById('avancementGridWrap');
       if (wrap) wrap.innerHTML = avancementRenderGridHtml();
+      const note = document.getElementById('avancementPerimetreNote');
+      if (note) note.innerHTML = avancementPerimetreNoteHtml();
     }
 
     function closeAvancementModal() {
@@ -14462,11 +14500,11 @@
 
       // Note doctrine permanente (spec 5.1 quater, point a) : rappelle, meme quand la grille n'est pas
       // vide, pourquoi une mission peut manquer. Sans cette phrase, l'absence d'une mission passerait
-      // pour un defaut de l'outil plutot que pour un signal a corriger dans Notion.
-      html += '<p style="font-size:0.72rem;color:var(--text-secondary);margin:0.4rem 0 0">'
-        + 'Périmètre : seules les missions dont l\'acompte est facturé en ' + n + ' et le solde en ' + n1 + ' apparaissent ici, '
-        + 'car c\'est la date d\'émission des factures qui fait foi. Une mission absente n\'est pas un manque de l\'outil : '
-        + 'c\'est un signal à corriger dans Notion, en général la date de la facture de solde.</p>';
+      // pour un defaut de l'outil plutot que pour un signal a corriger dans Notion. Conteneur dedie
+      // #avancementPerimetreNote (correctif Important, ronde 2) : le texte depend de avancementShowAll
+      // (avancementPerimetreNoteHtml ci-dessus) et doit rester vrai apres un clic sur la case, donc etre
+      // reevalue par avancementOnShowAllChange et non fige ici au premier rendu de la pane.
+      html += '<div id="avancementPerimetreNote">' + avancementPerimetreNoteHtml() + '</div>';
 
       // Figeage (point f) : action volontaire, non annulable depuis l'interface (confirmation
       // systematique dans figerAvancement). Un seul bouton, pour N (l'exercice d'ancrage precedent est
