@@ -316,6 +316,46 @@ n'est pas déductible de ce qui est à l'écran.
 **d. Nettoyage.** Le badge « à cheval » perd son sens puisque toutes les missions affichées le sont
 désormais : le retirer.
 
+### 5.1 quinquies Le chevauchement se lit sur les dates, et une mission suivie ne disparaît jamais
+
+Trois constats de Nathan après la mise en service de 5.1 quater, dont deux défauts réels de ma part.
+
+**a. Le seuil de 5 € n'a rien à faire dans la détection du chevauchement (défaut).** `missionAvancementInfo`
+exige aujourd'hui que les DEUX volets dépassent 5 € pour déclarer une mission à cheval. Ce seuil vient
+de `utils/billing.js`, où il sert à décider s'il faut afficher une ligne de facture ; l'appliquer ici
+est un contresens. Conséquence mesurée : « Wienerberger - Phaunis », acompte au 01/12/2026 et solde au
+01/02/2027, est déclarée non à cheval parce que son acompte vaut 1 €, et la grille de la clôture 2026
+se retrouve VIDE alors que cette mission la concerne au premier chef. L'acompte symbolique de 1 € est
+justement le motif employé pour les facturations en une fois : il porte une DATE, qui est
+l'information utile.
+
+Nouvelle règle : une mission est à cheval quand ses deux volets portent une **date d'émission connue**
+et que ces deux dates tombent sur des **années différentes**. Les montants ne participent plus à cette
+décision. C'est la stricte application de la doctrine de Nathan, « la date d'émission fait foi ».
+Effet de bord souhaitable : les missions à acompte symbolique deviennent visibles, or c'est
+précisément le motif des factures à établir.
+
+Le repli sur le champ Notion « Année final » reste en vigueur pour `anneeAcompte` et `anneeSolde`,
+qui servent au rattachement comptable ; mais le drapeau `aCheval` se fonde, lui, sur les seules dates
+de facture réellement émises. Les deux notions sont distinctes et doivent le rester.
+
+**b. Une mission déjà suivie reste toujours affichée (défaut).** Suivre une mission fait que Pilot
+REMPLACE sa contribution au lieu de la compter : tant que le pourcentage de l'exercice courant n'est
+pas saisi, le report en avant donne un écart nul et le chiffre d'affaires de cette mission tombe à
+zéro. La masquer parce qu'elle sort du périmètre reviendrait donc à rendre ce trou incorrigible. Cas
+réel : « Elise V2 », ancrée à 90 % en 2025, apportait 5 000 € à 2026 par son solde de janvier ; sans
+saisie 2026 elle apporte 0. Toute mission portant au moins une ligne d'avancement figure donc dans la
+grille, quel que soit le périmètre, avec une mention expliquant qu'elle y est parce qu'elle est
+suivie et non parce qu'elle est à cheval.
+
+**c. Ce qui est éditable, et ce qui ne l'est pas (clarification, pas un changement).** Question de
+Nathan : pourquoi les missions ancrées seraient-elles modifiables alors que le cabinet les a validées ?
+Elles ne le sont pas. L'ancre 2025 est figée en base, refusée en écriture par le serveur, et n'est même
+plus affichée depuis 5.1 ter point a. Seules les colonnes N et N+1 sont éditables, c'est-à-dire des
+exercices que personne n'a encore arrêtés. Une cellule reste modifiable tant que son exercice est
+ouvert et bascule définitivement en lecture seule au figeage. Aucun code à changer ; l'interface doit
+en revanche le rendre évident, faute de quoi la question se reposera.
+
 ### 5.2 Affichage du CA ajusté
 
 - **CR (onglet Compte de résultat)** : la ligne CA affiche la valeur ajustée ; badge
