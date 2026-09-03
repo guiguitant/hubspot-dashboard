@@ -7313,9 +7313,20 @@
         ...relances.map(r => r && r.at ? new Date(r.at).getTime() : 0),
         ...notesArr.map(n => n && n.at ? new Date(n.at).getTime() : 0),
       ].filter(t => t > 0);
-      const lastTouchTime = touchDates.length ? Math.max(...touchDates) : null;
-      const everTouched = lastTouchTime !== null;
-      const daysSinceTouch = everTouched
+      // Sortir un deal du bac « À relancer » à la main est un traitement : on a
+      // regardé le deal et décidé qu'il repartait. Ce n'est PAS un contact
+      // client, d'où la distinction avec everTouched juste en dessous, qui
+      // continue de dire « sans contact » tant que personne n'a vraiment
+      // appelé. Sans cette date, la carte réveillée retombe en sommeil au
+      // premier re-render et le geste a l'air mort (migration 45).
+      const reveilTime = meta.reveille_at ? new Date(meta.reveille_at).getTime() : 0;
+      const derniersTraitements = reveilTime > 0 ? [...touchDates, reveilTime] : touchDates;
+      const lastTouchTime = derniersTraitements.length ? Math.max(...derniersTraitements) : null;
+      const everTouched = touchDates.length > 0;
+      // Le compteur suit le dernier TRAITEMENT (contact ou arbitrage), pas
+      // seulement le dernier contact : c'est lui qui décide du sommeil.
+      // everTouched, lui, ne sert qu'au libellé « sans relance » / « sans contact ».
+      const daysSinceTouch = lastTouchTime !== null
         ? Math.floor((Date.now() - lastTouchTime) / _DAY_MS)
         : _daysSince(deal.createdate);
 
@@ -7511,6 +7522,7 @@
                 data-deal-id="${d.id}"
                 data-deal-amount="${d.amount}"
                 data-deal-stage="${_escapeHtml(d.stage || '')}"
+                data-deal-sommeil="1"
                 ondragstart="onDragStart(event)"
                 ondragend="onDragEnd(event)"
                 onclick="openDealSidebar('${d.id}')" style="cursor:pointer">
@@ -11313,11 +11325,16 @@
     // --- Drag & drop stage ---
     let dragDealId = null;
     let dragDealStage = null;
+    // Une carte du bac « À relancer » peut être gelée (stage = congélateur) ou
+    // en sommeil (stage réel inchangé, exilée par le compteur de jours). Les
+    // deux sortent du bac par le même geste mais pas par le même chemin.
+    let dragDealSommeil = false;
 
     function onDragStart(e) {
       const card = e.currentTarget;
       dragDealId = card.dataset.dealId;
       dragDealStage = card.dataset.dealStage;
+      dragDealSommeil = card.dataset.dealSommeil === '1';
       card.classList.add('dragging');
       e.dataTransfer.effectAllowed = 'move';
     }
@@ -11330,6 +11347,7 @@
         .forEach(c => c.classList.remove('drag-over'));
       dragDealId = null;
       dragDealStage = null;
+      dragDealSommeil = false;
     }
 
     // Le board défile horizontalement, les bacs sont à droite : sans ça, une
@@ -11362,13 +11380,21 @@
       col.classList.remove('drag-over');
       _annulerOuvertureAuSurvol();
       _arreterAutoScrollBoard();
-      if (!dragDealId || dragDealStage === targetStage) return;
+      if (!dragDealId) return;
       const id = dragDealId;
       const sourceStage = dragDealStage;
+      const sommeil = dragDealSommeil;
       // Le geste est fini. On libère l'état de drag tout de suite : le popover
       // de gel vit plus longtemps que le glisser, et dragend va passer derrière.
       dragDealId = null;
       dragDealStage = null;
+      dragDealSommeil = false;
+
+      // Lâcher une carte dans sa colonne de départ n'a qu'un seul sens utile :
+      // une carte EN SOMMEIL qu'on remet dans son propre stage. Son stage n'a
+      // jamais bougé, c'est le compteur de jours qui l'avait exilée du pipe.
+      // Ailleurs, départ = arrivée est un non-geste.
+      if (sourceStage === targetStage && !sommeil) return;
 
       // 1) Vers le congélateur : on ne déplace RIEN avant d'avoir une date de
       //    réveil. Un deal gelé sans date ne revient jamais tout seul, et le
@@ -11379,7 +11405,16 @@
         return;
       }
 
-      // 2) Sortie du congélateur : c'est un dégel, pas un changement de stage.
+      // 2) Sortie du bac pour une carte EN SOMMEIL. Un simple PATCH de stage ne
+      //    suffit pas : rien n'aurait remis le compteur de jours à zéro, la
+      //    carte serait retournée au bac au re-render suivant, et le geste
+      //    aurait eu l'air mort alors que le stage avait bougé pour de vrai.
+      if (sommeil) {
+        await _reveillerDealEnSommeil(id, sourceStage, targetStage);
+        return;
+      }
+
+      // 3) Sortie du congélateur : c'est un dégel, pas un changement de stage.
       if (sourceStage === RELANCER_STAGE_LABEL) {
         const carte = document.querySelector(`[data-deal-id="${id}"]`);
         if (carte) carte.classList.add('kanban-saving');
@@ -11387,7 +11422,7 @@
         return;
       }
 
-      // 3) Déplacement ordinaire dans le pipe.
+      // 4) Déplacement ordinaire dans le pipe.
       const card = document.querySelector(`[data-deal-id="${id}"]`);
       if (card) card.classList.add('kanban-saving');
       try {
@@ -11410,6 +11445,64 @@
       } catch {
         if (card) card.classList.remove('kanban-saving');
         alert('Erreur lors du changement de stage');
+      }
+    }
+
+    // Réveil d'un deal EN SOMMEIL sorti du bac à la main.
+    //
+    // Le sommeil n'est pas un état stocké : il se recalcule à chaque rendu à
+    // partir du nombre de jours sans traitement. Le seul moyen de faire sortir
+    // durablement la carte du bac est donc de dater l'arbitrage. `reveille_at`
+    // dit exactement ça, sans prétendre à un contact client qui n'a pas eu lieu
+    // (migration 45). Le stage, lui, ne bouge que s'il change vraiment : le cas
+    // le plus courant est de remettre la carte dans sa propre colonne, et ça
+    // n'a pas à écrire un changement de stage fictif dans HubSpot.
+    async function _reveillerDealEnSommeil(dealId, sourceStage, targetStage) {
+      const carte = document.querySelector(`[data-deal-id="${dealId}"]`);
+      if (carte) carte.classList.add('kanban-saving');
+      const nom = (findDealInPipeline(dealId) || {}).name || 'Le deal';
+      const changeDeStage = targetStage !== sourceStage;
+      const reveille_at = new Date().toISOString();
+      try {
+        if (changeDeStage) {
+          const r1 = await fetch(`/api/deals/${dealId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stage: targetStage }),
+          });
+          if (!r1.ok) throw new Error('stage');
+        }
+        const r2 = await fetch(`/api/deals/${dealId}/metadata`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reveille_at }),
+        });
+        if (!r2.ok) {
+          // Sans le marqueur, la carte retourne au bac : on remet le stage
+          // comme il était plutôt que de laisser un déplacement invisible.
+          if (changeDeStage) {
+            await fetch(`/api/deals/${dealId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ stage: sourceStage }),
+            }).catch(() => {});
+          }
+          throw new Error('metadata');
+        }
+
+        dealMetadata[dealId] = { ...(dealMetadata[dealId] || {}), reveille_at };
+        if (changeDeStage) _moveDealLocally(dealId, targetStage);
+        renderKanban();
+        if (typeof showToast === 'function') {
+          showToast('success', `${nom} est de retour dans « ${targetStage} ». Son compteur de suivi repart d'aujourd'hui, sans quoi il serait retombé dans le bac.`, 5000);
+        }
+      } catch (err) {
+        if (carte) carte.classList.remove('kanban-saving');
+        if (typeof showToast === 'function') {
+          showToast('error', err.message === 'metadata'
+            ? `Le réveil de ${nom} n'a pas pu être enregistré. Le deal a été remis à sa place, rien n'est perdu.`
+            : `${nom} n'a pas pu être déplacé.`);
+        }
       }
     }
 

@@ -1768,6 +1768,7 @@ app.put('/api/deals/:id/metadata', async (req, res) => {
   const {
     tags, proposal_sent_at, next_meeting_at, assignee,
     wake_up_at, frozen_from_stage, frozen_note, frozen_at,
+    reveille_at,
   } = req.body;
   const update = { deal_id: id, updated_at: new Date().toISOString() };
   if (tags !== undefined) update.tags = tags;
@@ -1795,7 +1796,9 @@ app.put('/api/deals/:id/metadata', async (req, res) => {
 
   // --- Gel / réveil (migration 43) ---
   // Le dégel envoie explicitement null sur les 4 champs : rien d'irréversible.
-  for (const [key, val] of [['wake_up_at', wake_up_at], ['frozen_at', frozen_at]]) {
+  // reveille_at suit la même règle de parsing : c'est la date à laquelle on a
+  // statué sur un deal en sommeil (migration 45), pas un contact client.
+  for (const [key, val] of [['wake_up_at', wake_up_at], ['frozen_at', frozen_at], ['reveille_at', reveille_at]]) {
     if (val === undefined) continue;
     if (val === null || val === '') { update[key] = null; continue; }
     const d = new Date(val);
