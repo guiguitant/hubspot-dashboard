@@ -1640,6 +1640,111 @@
       background: var(--bg);
     }
 
+    /* Cible de dépôt du bac. Repliée, la colonne ne fait que 44 px de large :
+       sans un signal franc on ne sait pas si on a visé juste. La règle
+       .kanban-column.drag-over ne s'applique pas ici, ce n'est pas la même
+       classe de colonne. */
+    .kanban-column-relancer.drag-over {
+      border-color: var(--warning);
+      background: var(--warning-bg);
+    }
+    .kanban-column-relancer.drag-over .kanban-cards {
+      background: var(--warning-bg);
+      border-radius: var(--radius);
+      outline: 2px dashed rgba(217,115,13,0.35);
+      outline-offset: -2px;
+    }
+    /* Repliée : la bande entière se met en cible, avec l'invite d'ouverture. */
+    .kanban-column-relancer.collapsed.drag-over .won-collapsed-label,
+    .kanban-column-relancer.collapsed.drag-over .won-toggle-icon {
+      color: var(--warning);
+    }
+
+    /* La carte lâchée sur le bac n'a encore rien changé : elle attend sa date
+       de réveil. On la laisse à sa place, marquée, pour que l'annulation soit
+       une évidence plutôt qu'un pari. */
+    .kanban-card-gel-pending {
+      outline: 2px dashed var(--warning);
+      outline-offset: 1px;
+      opacity: 0.75;
+    }
+
+    /* Popover de gel au lâcher. Le formulaire de la sidebar fait le même
+       travail, mais ouvrir un panneau de 400 px pour poser une date casse le
+       rythme dès qu'on enchaîne deux cartes. */
+    .drop-freeze-pop {
+      position: fixed;
+      z-index: 9998;
+      width: 290px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-top: 3px solid var(--warning);
+      border-radius: var(--radius);
+      box-shadow: 0 8px 26px rgba(0,0,0,0.18);
+      padding: 0.7rem;
+      font-size: 0.8rem;
+    }
+    .drop-freeze-pop-title {
+      font-weight: 600;
+      margin-bottom: 0.2rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .drop-freeze-pop-sub {
+      font-size: 0.72rem;
+      color: var(--text-secondary);
+      margin-bottom: 0.55rem;
+    }
+    .drop-freeze-presets {
+      display: flex;
+      gap: 0.3rem;
+      margin-bottom: 0.45rem;
+    }
+    .drop-freeze-pop input[type="date"],
+    .drop-freeze-pop textarea {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 0.3rem 0.4rem;
+      font-size: 0.78rem;
+      font-family: inherit;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      margin-bottom: 0.4rem;
+    }
+    .drop-freeze-pop textarea { resize: vertical; }
+    .drop-freeze-hint {
+      font-size: 0.68rem;
+      color: var(--text-secondary);
+      font-style: italic;
+      margin-bottom: 0.5rem;
+    }
+    .drop-freeze-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.4rem;
+    }
+    .drop-freeze-actions button {
+      padding: 0.3rem 0.7rem;
+      font-size: 0.76rem;
+      font-family: inherit;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .drop-freeze-actions button.primary {
+      background: var(--warning);
+      border-color: var(--warning);
+      color: #fff;
+      font-weight: 600;
+    }
+    [data-theme="dark"] .drop-freeze-actions button.primary { color: #1c1917; }
+    .drop-freeze-actions button:disabled { opacity: 0.6; cursor: default; }
+
     /* Variant "Perdus" — rouge */
     .kanban-column-lost.expanded .kanban-header {
       background: var(--danger-bg);
@@ -7382,6 +7487,9 @@
             <span class="won-toggle-icon">&#9654;</span>
             <span class="won-collapsed-label">À relancer · ${deals.length}${nbDus ? ` <span class="wake-pill">⏰ ${nbDus}</span>` : ''}</span>
           </div>`;
+        // Le bac est replié la plupart du temps : une cible de dépôt qui
+        // n'existe que panneau ouvert n'existe pas. On arme aussi ici.
+        _armerDropRelancer(col);
         return;
       }
 
@@ -7394,8 +7502,17 @@
 
           if (d._type === 'sommeil') {
             // Pas de date de retour : ce deal attend un arbitrage, relancer ou lâcher.
+            // Il est toujours dans son stage HubSpot, c'est l'affichage qui l'a
+            // déménagé ici. `data-deal-stage` porte donc son VRAI stage : le
+            // glisser vers un stage est un déplacement ordinaire, le glisser
+            // vers ce bac est un gel en bonne et due forme.
             cardsHtml += `<div class="kanban-card kanban-card-relancer kanban-card-sommeil"
+                draggable="true"
                 data-deal-id="${d.id}"
+                data-deal-amount="${d.amount}"
+                data-deal-stage="${_escapeHtml(d.stage || '')}"
+                ondragstart="onDragStart(event)"
+                ondragend="onDragEnd(event)"
                 onclick="openDealSidebar('${d.id}')" style="cursor:pointer">
               <div class="kanban-card-name">${d.name}</div>
               <span class="kanban-card-wake sommeil" title="Sans relance depuis ${d.daysSinceTouch} jours, resté dans « ${d.stage} ». Il ne reviendra pas tout seul.">💤 ${d.daysSinceTouch != null ? d.daysSinceTouch + 'j sans relance' : 'en sommeil'}</span>
@@ -7447,9 +7564,41 @@
         <div class="relancer-legende">${nbSommeil} en sommeil &middot; ${nbGeles} gelé${nbGeles > 1 ? 's' : ''}</div>
         <div class="kanban-cards">${cardsHtml}</div>`;
 
-      // Drop zone : on attache les handlers sur la colonne quand elle est ouverte
-      col.ondragover = (e) => { e.preventDefault(); col.classList.add('drag-over'); };
-      col.ondragleave = () => col.classList.remove('drag-over');
+      _armerDropRelancer(col);
+    }
+
+    // Ouverture au survol : on traîne une carte sur la bande repliée, elle
+    // s'ouvre toute seule au bout d'un demi-battement et on vise à l'intérieur.
+    // Le délai sépare le survol volontaire du simple passage vers la colonne
+    // d'à côté.
+    const RELANCER_HOVER_MS = 450;
+    let _relancerHoverTimer = null;
+    function _annulerOuvertureAuSurvol() {
+      if (_relancerHoverTimer) { clearTimeout(_relancerHoverTimer); _relancerHoverTimer = null; }
+    }
+
+    // Handlers de dépôt du bac « À relancer », armés dans ses DEUX états.
+    function _armerDropRelancer(col) {
+      col.ondragover = (e) => {
+        // Rien en main, ou une carte déjà au congélateur : pas de cible.
+        if (!dragDealId || dragDealStage === RELANCER_STAGE_LABEL) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        col.classList.add('drag-over');
+        if (!relancerColumnOpen && !_relancerHoverTimer) {
+          _relancerHoverTimer = setTimeout(() => {
+            _relancerHoverTimer = null;
+            if (dragDealId) openSideColumn('relancer');
+          }, RELANCER_HOVER_MS);
+        }
+      };
+      col.ondragleave = (e) => {
+        // dragleave part aussi en passant d'un enfant à l'autre : on ne
+        // referme que si le curseur a vraiment quitté la colonne.
+        if (e.relatedTarget && col.contains(e.relatedTarget)) return;
+        col.classList.remove('drag-over');
+        _annulerOuvertureAuSurvol();
+      };
       col.ondrop = (e) => onDropStage(e, RELANCER_STAGE_LABEL);
     }
 
@@ -7719,7 +7868,9 @@
     }
     function renderKanban() {
       if (!dashboardData || !dashboardData.pipelineDeals) return;
-      if (repeatClientsData) renderRepeatKpis();
+      // Ceinture et bretelles : le Kanban ne doit jamais tomber à cause d'un
+      // encart annexe. Array.isArray plutôt que truthy (voir fetchRepeatClients).
+      if (Array.isArray(repeatClientsData)) renderRepeatKpis();
       const board = document.getElementById('kanbanBoard');
       let html = '';
       pipelineNewDeals = [];
@@ -7850,6 +8001,14 @@
       html += `<div id="kanbanWonColumn" class="kanban-column-won ${wonColumnOpen ? 'expanded' : 'collapsed'}"></div>`;
 
       board.innerHTML = html;
+      // Le board défile horizontalement et les trois bacs sont tout à droite :
+      // sans défilement automatique, une carte prise à gauche ne peut pas les
+      // atteindre. On ne peut pas tenir une carte et scroller à la molette.
+      // Le board survit aux re-render, on n'attache qu'une fois.
+      if (!board.dataset.autoscrollArme) {
+        board.dataset.autoscrollArme = '1';
+        board.addEventListener('dragover', _autoScrollBoard);
+      }
       renderRelancerColumn();
       renderLostColumn();
       renderWonColumn();
@@ -8836,32 +8995,23 @@
       }
     }
 
-    async function freezeDeal(dealId) {
-      const dateInput = document.getElementById('sbFreezeDate');
-      const noteInput = document.getElementById('sbFreezeNote');
-      const btn = document.getElementById('sbFreezeConfirm');
-      const dateVal = dateInput ? dateInput.value : '';
+    // Une date de formulaire (AAAA-MM-JJ) vers l'ISO de réveil, ou null si elle
+    // est vide, mal formée ou déjà passée. Une seule lecture de la règle, pour
+    // que le formulaire de la sidebar et le lâcher d'une carte la partagent.
+    function _isoReveil(dateVal) {
+      const v = (dateVal || '').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return null;
+      const d = new Date(v + 'T09:00:00');
+      if (isNaN(d.getTime()) || d.getTime() <= Date.now()) return null;
+      return d.toISOString();
+    }
 
-      // Règle dure : pas de gel sans date de réveil.
-      if (!dateVal) {
-        if (dateInput) { dateInput.focus(); dateInput.style.borderColor = '#dc2626'; }
-        return;
-      }
-      const wakeIso = new Date(dateVal + 'T09:00:00').toISOString();
-      if (new Date(wakeIso).getTime() <= Date.now()) {
-        if (dateInput) { dateInput.focus(); dateInput.style.borderColor = '#dc2626'; }
-        alert('La date de réveil doit être dans le futur.');
-        return;
-      }
-
-      const deal = findDealInPipeline(dealId);
-      const fromStage = _stageOfDeal(dealId);
-      if (!fromStage || fromStage === RELANCER_STAGE_LABEL) {
-        if (typeof showToast === 'function') showToast('error', 'Impossible de retrouver le stage de ce deal, gel annulé.');
-        return;
-      }
-
-      if (btn) { btn.disabled = true; btn.textContent = 'Gel en cours…'; }
+    // Cœur du gel, partagé par le formulaire de la sidebar et par le lâcher
+    // d'une carte sur le bac. Un seul endroit écrit au congélateur, donc une
+    // seule règle appliquée : date de réveil obligatoire, et retour à la case
+    // départ si la date ne s'enregistre pas.
+    // Renvoie { ok: true } ou { ok: false, why: 'stage' | 'metadata' }.
+    async function _appliquerGel(dealId, fromStage, wakeIso, note) {
       try {
         // 1) On déplace au congélateur.
         const r1 = await fetch(`/api/deals/${dealId}`, {
@@ -8876,7 +9026,7 @@
         const freeze = {
           wake_up_at: wakeIso,
           frozen_from_stage: fromStage,
-          frozen_note: noteInput ? noteInput.value.trim() : '',
+          frozen_note: (note || '').trim(),
           frozen_at: new Date().toISOString(),
         };
         const r2 = await fetch(`/api/deals/${dealId}/metadata`, {
@@ -8895,22 +9045,59 @@
 
         dealMetadata[dealId] = { ...(dealMetadata[dealId] || {}), ...freeze };
         _moveDealLocally(dealId, RELANCER_STAGE_LABEL);
-        // Le deal quitte sa colonne : sans un mot, il a juste l'air d'avoir
-        // disparu. On dit où il est parti, jusqu'à quand, et on ouvre la
-        // colonne des gelés pour qu'il soit visible à l'arrivée.
-        openSideColumn('relancer');
-        renderKanban();
-        closeDealSidebar();
-        const quand = new Date(wakeIso).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
-        if (typeof showToast === 'function') {
-          showToast('success', `${deal.name} est gelé jusqu'au ${quand}. Il est dans le bac À relancer, à droite, et revient tout seul ce jour-là.`, 6000);
-        }
+        return { ok: true };
       } catch (e) {
-        if (btn) { btn.disabled = false; btn.textContent = '🧊 Geler'; }
-        alert(e.message === 'metadata'
-          ? 'La date de réveil n\'a pas pu être enregistrée. Le deal a été remis à sa place, rien n\'est perdu.'
-          : 'Le deal n\'a pas pu être gelé.');
+        return { ok: false, why: e.message };
       }
+    }
+
+    function _messageEchecGel(why) {
+      return why === 'metadata'
+        ? 'La date de réveil n\'a pas pu être enregistrée. Le deal a été remis à sa place, rien n\'est perdu.'
+        : 'Le deal n\'a pas pu être gelé.';
+    }
+
+    // Le deal quitte sa colonne : sans un mot, il a juste l'air d'avoir disparu.
+    // On dit où il est parti, jusqu'à quand, et on ouvre le bac pour qu'il soit
+    // visible à l'arrivée.
+    function _apresGel(nom, wakeIso) {
+      openSideColumn('relancer');
+      renderKanban();
+      const quand = new Date(wakeIso).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+      if (typeof showToast === 'function') {
+        showToast('success', `${nom} est gelé jusqu'au ${quand}. Il est dans le bac À relancer, à droite, et revient tout seul ce jour-là.`, 6000);
+      }
+    }
+
+    async function freezeDeal(dealId) {
+      const dateInput = document.getElementById('sbFreezeDate');
+      const noteInput = document.getElementById('sbFreezeNote');
+      const btn = document.getElementById('sbFreezeConfirm');
+
+      // Règle dure : pas de gel sans date de réveil.
+      const wakeIso = _isoReveil(dateInput ? dateInput.value : '');
+      if (!wakeIso) {
+        if (dateInput) { dateInput.focus(); dateInput.style.borderColor = '#dc2626'; }
+        if (dateInput && dateInput.value) alert('La date de réveil doit être dans le futur.');
+        return;
+      }
+
+      const deal = findDealInPipeline(dealId);
+      const fromStage = _stageOfDeal(dealId);
+      if (!fromStage || fromStage === RELANCER_STAGE_LABEL) {
+        if (typeof showToast === 'function') showToast('error', 'Impossible de retrouver le stage de ce deal, gel annulé.');
+        return;
+      }
+
+      if (btn) { btn.disabled = true; btn.textContent = 'Gel en cours…'; }
+      const res = await _appliquerGel(dealId, fromStage, wakeIso, noteInput ? noteInput.value : '');
+      if (!res.ok) {
+        if (btn) { btn.disabled = false; btn.textContent = '🧊 Geler'; }
+        alert(_messageEchecGel(res.why));
+        return;
+      }
+      closeDealSidebar();
+      _apresGel(deal ? deal.name : 'Le deal', wakeIso);
     }
 
     // Où atterrit un deal qu'on dégèle. On revalide le stage stocké : les deals
@@ -8921,11 +9108,15 @@
       return KANBAN_STAGES_ORDER.includes(from) ? from : KANBAN_STAGES_ORDER[0];
     }
 
-    // Dégel : le deal retourne dans son stage d'origine et redevient un deal normal.
-    async function unfreezeDeal(dealId, ev) {
+    // Dégel : le deal redevient un deal normal. Par défaut il retourne dans son
+    // stage d'origine (bouton « Réactiver »), mais on peut viser une autre
+    // colonne : c'est ce que fait le glisser du bac vers un stage. Dans les deux
+    // cas les métadonnées de gel sont effacées, sinon le deal revient dans le
+    // pipe en gardant sa date de réveil et sa note.
+    async function unfreezeDeal(dealId, ev, stageVise) {
       if (ev) ev.stopPropagation();
       const meta = dealMetadata[dealId] || {};
-      const target = _unfreezeTarget(meta);
+      const target = KANBAN_STAGES_ORDER.includes(stageVise) ? stageVise : _unfreezeTarget(meta);
       try {
         const r1 = await fetch(`/api/deals/${dealId}`, {
           method: 'PATCH',
@@ -10521,7 +10712,14 @@
       document.getElementById('repeatList').innerHTML = '<div class="repeat-empty">Chargement…</div>';
       try {
         await fetchRepeatState();
-        repeatClientsData = await fetch('/api/repeat-clients').then(r => r.json());
+        // .json() sur une 500 renvoie le corps d'erreur, pas une liste. Sans ce
+        // garde-fou, repeatClientsData vaut { error: … } : truthy, donc
+        // renderRepeatKpis part quand même, jette, et emporte tout renderKanban
+        // avec lui. Le pipe entier cesse alors de se redessiner parce qu'un
+        // encart de KPI n'a pas pu charger.
+        const rep = await fetch('/api/repeat-clients');
+        const brut = await rep.json().catch(() => null);
+        repeatClientsData = (rep.ok && Array.isArray(brut)) ? brut : null;
         renderRepeatKpis();
         renderRepeatList();
         const sumEl = document.getElementById('repeatSummaryCount');
@@ -11126,16 +11324,70 @@
 
     function onDragEnd(e) {
       e.currentTarget.classList.remove('dragging');
-      document.querySelectorAll('.kanban-column').forEach(c => c.classList.remove('drag-over'));
+      _annulerOuvertureAuSurvol();
+      _arreterAutoScrollBoard();
+      document.querySelectorAll('.kanban-column, .kanban-column-won')
+        .forEach(c => c.classList.remove('drag-over'));
+      dragDealId = null;
+      dragDealStage = null;
+    }
+
+    // Le board défile horizontalement, les bacs sont à droite : sans ça, une
+    // carte prise à gauche ne peut pas les atteindre. Direction relue à chaque
+    // dragover, un seul minuteur pour tout le geste.
+    let _boardScrollTimer = null;
+    let _boardScrollDir = 0;
+    function _arreterAutoScrollBoard() {
+      if (_boardScrollTimer) { clearInterval(_boardScrollTimer); _boardScrollTimer = null; }
+      _boardScrollDir = 0;
+    }
+    function _autoScrollBoard(e) {
+      const board = document.getElementById('kanbanBoard');
+      if (!board || !dragDealId) { _arreterAutoScrollBoard(); return; }
+      const r = board.getBoundingClientRect();
+      const ZONE = 70, PAS = 14;
+      _boardScrollDir = e.clientX > r.right - ZONE ? 1
+                      : e.clientX < r.left + ZONE ? -1 : 0;
+      if (!_boardScrollDir) { _arreterAutoScrollBoard(); return; }
+      if (_boardScrollTimer) return;
+      _boardScrollTimer = setInterval(() => {
+        if (!dragDealId || !_boardScrollDir) { _arreterAutoScrollBoard(); return; }
+        board.scrollLeft += _boardScrollDir * PAS;
+      }, 16);
     }
 
     async function onDropStage(e, targetStage) {
       e.preventDefault();
       const col = e.currentTarget;
       col.classList.remove('drag-over');
+      _annulerOuvertureAuSurvol();
+      _arreterAutoScrollBoard();
       if (!dragDealId || dragDealStage === targetStage) return;
       const id = dragDealId;
       const sourceStage = dragDealStage;
+      // Le geste est fini. On libère l'état de drag tout de suite : le popover
+      // de gel vit plus longtemps que le glisser, et dragend va passer derrière.
+      dragDealId = null;
+      dragDealStage = null;
+
+      // 1) Vers le congélateur : on ne déplace RIEN avant d'avoir une date de
+      //    réveil. Un deal gelé sans date ne revient jamais tout seul, et le
+      //    drag n'a pas à contourner la règle que les deux autres chemins
+      //    (bouton Geler, action groupée) imposent tous les deux.
+      if (targetStage === RELANCER_STAGE_LABEL) {
+        _ouvrirGelAuLacher(id, sourceStage, e.clientX, e.clientY);
+        return;
+      }
+
+      // 2) Sortie du congélateur : c'est un dégel, pas un changement de stage.
+      if (sourceStage === RELANCER_STAGE_LABEL) {
+        const carte = document.querySelector(`[data-deal-id="${id}"]`);
+        if (carte) carte.classList.add('kanban-saving');
+        await unfreezeDeal(id, null, targetStage);
+        return;
+      }
+
+      // 3) Déplacement ordinaire dans le pipe.
       const card = document.querySelector(`[data-deal-id="${id}"]`);
       if (card) card.classList.add('kanban-saving');
       try {
@@ -11159,6 +11411,131 @@
         if (card) card.classList.remove('kanban-saving');
         alert('Erreur lors du changement de stage');
       }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // POPOVER DE GEL AU LÂCHER
+    //
+    // Le bac « À relancer » n'accepte pas de deal sans date de réveil. Plutôt
+    // que d'ouvrir le panneau de 400 px pour poser une date, on demande sur
+    // place, là où la carte est tombée. Tant qu'on n'a pas validé, RIEN n'a
+    // bougé : la carte est encore dans sa colonne, marquée en pointillés.
+    // Échap, clic dehors ou Annuler, et il ne s'est rien passé.
+    // ═══════════════════════════════════════════════════════════════════════
+    let _gelDrop = null;   // { dealId, el, onKey, onClickOut }
+
+    function _fermerGelAuLacher() {
+      if (!_gelDrop) return;
+      document.removeEventListener('keydown', _gelDrop.onKey, true);
+      document.removeEventListener('mousedown', _gelDrop.onClickOut, true);
+      const carte = document.querySelector(`[data-deal-id="${_gelDrop.dealId}"]`);
+      if (carte) carte.classList.remove('kanban-card-gel-pending');
+      _gelDrop.el.remove();
+      _gelDrop = null;
+    }
+
+    function _ouvrirGelAuLacher(dealId, stageSource, x, y) {
+      _fermerGelAuLacher();
+
+      // Le stage réel prime sur celui porté par la carte : une carte en sommeil
+      // affiche son stage, une carte de colonne aussi, mais l'état local est la
+      // seule source qui ne ment pas si un re-render est passé entre-temps.
+      const fromStage = _stageOfDeal(dealId) || stageSource;
+      if (!fromStage || fromStage === RELANCER_STAGE_LABEL) {
+        if (typeof showToast === 'function') showToast('error', 'Impossible de retrouver le stage de ce deal, gel annulé.');
+        return;
+      }
+      const deal = findDealInPipeline(dealId);
+      const nom = (deal && deal.name) || 'Ce deal';
+
+      const carte = document.querySelector(`[data-deal-id="${dealId}"]`);
+      if (carte) carte.classList.add('kanban-card-gel-pending');
+
+      const demain = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+      const el = document.createElement('div');
+      el.className = 'drop-freeze-pop';
+      el.innerHTML = `
+        <div class="drop-freeze-pop-title" title="${_escapeHtml(nom)}">&#129482; Mettre ${_escapeHtml(nom)} en attente</div>
+        <div class="drop-freeze-pop-sub">Il sort de « ${_escapeHtml(fromStage)} » et revient tout seul le jour choisi.</div>
+        <div class="drop-freeze-presets">
+          <button type="button" class="relance-btn freeze-preset" data-months="1">+1 mois</button>
+          <button type="button" class="relance-btn freeze-preset" data-months="3">+3 mois</button>
+          <button type="button" class="relance-btn freeze-preset" data-months="6">+6 mois</button>
+        </div>
+        <input type="date" class="pop-date" min="${demain}">
+        <textarea class="pop-note" rows="2" placeholder="Pourquoi ? Ex : budget bloqué jusqu'à la clôture, rappeler le DAF."></textarea>
+        <div class="drop-freeze-hint">Dans 3 mois tu auras oublié. C'est cette phrase qui rendra le réveil utile.</div>
+        <div class="drop-freeze-actions">
+          <button type="button" class="pop-cancel">Annuler</button>
+          <button type="button" class="primary pop-ok">Geler</button>
+        </div>`;
+      document.body.appendChild(el);
+
+      // Placé au point de lâcher, ramené dans la fenêtre s'il déborde.
+      const r = el.getBoundingClientRect();
+      const gauche = Math.max(8, Math.min(x + 8, window.innerWidth - r.width - 8));
+      const haut   = Math.max(8, Math.min(y + 8, window.innerHeight - r.height - 8));
+      el.style.left = gauche + 'px';
+      el.style.top  = haut + 'px';
+
+      const dateInput = el.querySelector('.pop-date');
+      const noteInput = el.querySelector('.pop-note');
+      const btnOk     = el.querySelector('.pop-ok');
+
+      const poserPreset = (mois) => {
+        dateInput.value = _wakeDateIn(mois);
+        dateInput.style.borderColor = '';
+        el.querySelectorAll('.freeze-preset').forEach(b =>
+          b.classList.toggle('active', Number(b.dataset.months) === mois));
+      };
+      el.querySelectorAll('.freeze-preset').forEach(b =>
+        b.addEventListener('click', () => poserPreset(Number(b.dataset.months))));
+      poserPreset(3);
+      dateInput.addEventListener('input', () => {
+        dateInput.style.borderColor = '';
+        el.querySelectorAll('.freeze-preset').forEach(b => b.classList.remove('active'));
+      });
+
+      async function valider() {
+        const wakeIso = _isoReveil(dateInput.value);
+        if (!wakeIso) {
+          dateInput.style.borderColor = '#dc2626';
+          dateInput.focus();
+          if (typeof showToast === 'function') showToast('error', 'La date de réveil doit être dans le futur.');
+          return;
+        }
+        btnOk.disabled = true;
+        btnOk.textContent = 'Gel en cours…';
+        const note = noteInput.value;
+        const res = await _appliquerGel(dealId, fromStage, wakeIso, note);
+        if (!res.ok) {
+          btnOk.disabled = false;
+          btnOk.textContent = 'Geler';
+          alert(_messageEchecGel(res.why));
+          return;
+        }
+        _fermerGelAuLacher();
+        _apresGel(nom, wakeIso);
+      }
+
+      el.querySelector('.pop-cancel').addEventListener('click', _fermerGelAuLacher);
+      btnOk.addEventListener('click', valider);
+
+      // Entrée valide, sauf dans la note où elle sert à aller à la ligne.
+      const onKey = (ev) => {
+        if (ev.key === 'Escape') { ev.preventDefault(); _fermerGelAuLacher(); return; }
+        if (ev.key !== 'Enter') return;
+        const dansLaNote = ev.target === noteInput;
+        if (dansLaNote && !(ev.metaKey || ev.ctrlKey)) return;
+        ev.preventDefault();
+        valider();
+      };
+      const onClickOut = (ev) => { if (!el.contains(ev.target)) _fermerGelAuLacher(); };
+      document.addEventListener('keydown', onKey, true);
+      document.addEventListener('mousedown', onClickOut, true);
+
+      _gelDrop = { dealId, el, onKey, onClickOut };
+      noteInput.focus();
     }
 
     // --- Édition montant inline ---
