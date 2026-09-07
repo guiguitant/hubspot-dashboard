@@ -14817,7 +14817,11 @@
       const premiere = Math.min(...exercices);
       if (premiere <= 2025) return 0; // 2025 = EXERCICE_ANCRE : une ancre y existe déjà, rien d'implicite
       const valeur = avancementPctFactureAvant(mission, premiere);
-      return valeur > 0 ? Math.round(valeur) : 0;
+      // Bornée à [0, 100] (correctif Minor, ronde de revue 1) : une donnée Notion incohérente en amont
+      // (acompte saisi supérieur au prix total de la mission) ferait dépasser 100 %, et sans plafond la
+      // cellule afficherait "150 % (déduit)", absurde à l'écran. Le reste/les suggestions restaient déjà
+      // corrects (protégés par leur propre plafond), seul cet affichage isolé pouvait choquer.
+      return valeur > 0 ? Math.min(100, Math.round(valeur)) : 0;
     }
     // Cumul "effectif" (%) au 31/12/exercice : le cumul stocké (avancementCumulAuPlusTard, INCHANGÉ)
     // plus le point de départ implicite ci-dessus, appliqué à TOUT exercice à partir du "trou" (le

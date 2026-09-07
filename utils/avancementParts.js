@@ -110,6 +110,13 @@ function pctFactureAvant(mission, exercice) {
 // EST deja la verite complete validee par le cabinet (§3.4 du design), il ne faut jamais lui ajouter
 // de la facturation par-dessus (cela ferait double emploi avec une donnee deja exacte). Le "trou" que
 // ce correctif comble n'existe QUE quand la premiere ligne suivie saute par-dessus EXERCICE_ANCRE.
+//
+// Borne a [0, 100] (correctif Minor, ronde de revue 1) : pctFactureAvant peut depasser 100 avec une
+// donnee Notion incoherente en amont (ex. acompte saisi superieur au prix total de la mission) ; sans
+// plafond, la cellule "exercice precedent" afficherait "150 % (deduit)", absurde a l'ecran. Le RESTE
+// (cumulEffectif, suggestionPart) etait deja protege par son propre Math.max(0, ...)/`reste > 0`, donc
+// aucun chiffre du reste de la fonctionnalite n'etait faux ; seul l'affichage isole de cette valeur
+// pouvait choquer. Un test dedie (mission avec acompte > ca) verrouille ce plafond.
 function pointDepartImplicite(lignesMission, mission) {
   const lignes = lignesMission || [];
   if (!lignes.length) return 0;
@@ -118,7 +125,7 @@ function pointDepartImplicite(lignesMission, mission) {
   const premiere = Math.min(...exercices);
   if (premiere <= EXERCICE_ANCRE) return 0; // une ancre existe des le plancher : rien d'implicite
   const valeur = pctFactureAvant(mission, premiere);
-  return valeur > 0 ? Math.round(valeur) : 0;
+  return valeur > 0 ? Math.min(100, Math.round(valeur)) : 0;
 }
 
 // Cumul "effectif" (%) au 31/12/`exercice` : cumulAuPlusTard (le stockage brut, INCHANGE) plus le

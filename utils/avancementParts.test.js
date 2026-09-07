@@ -282,18 +282,39 @@ describe('pointDepartImplicite : combler le trou quand la premiere ligne saute E
     expect(pointDepartImplicite(caféMéoLignesApres2026, caféMéoMission)).toBe(30);
   });
 
-  test('premiere ligne DES EXERCICE_ANCRE (2025) : 0, l\'ancre est deja la verite complete (pas de double emploi)', () => {
-    // Alphapro groupe : ancre 2025 = 70 %, validee par le cabinet. Aucun "trou" a combler puisque
-    // 2025 EST le plancher (EXERCICE_ANCRE) : rien ne precede une ligne a 2025.
+  // CORRECTIF (revue ronde 1, point Important) : la fixture precedente de ce test ("Alphapro groupe",
+  // acompte de 2025, annee EGALE a l'exercice de l'ancre) ne facturait rien AVANT 2025 : la fonction
+  // rendait 0 meme sans la garde `premiere <= EXERCICE_ANCRE`, puisque pctFactureAvant elle-meme
+  // n'aurait rien trouve a additionner (anneeAcompte(2025) < exercice(2025) est FAUX). Le relecteur a
+  // mute la garde en `if (false) return 0;` et les 47 tests sont restes verts : ce test-la ne
+  // l'exercait pas reellement. Preuve par mutation consignee dans le rapport de tache.
+  //
+  // Nouvelle fixture, qui EXERCE reellement la garde : une mission ancree a 70 % en 2025, avec un
+  // ACOMPTE FACTURE EN 2024 (strictement AVANT l'ancre). Sans la garde, pointDepartImplicite
+  // calculerait pctFactureAvant(mission, premiere=2025) = 3 100 / 15 500 x 100 = 20 %, et
+  // cumulEffectif(2025) passerait de 70 % (l'ancre, deja la verite complete validee par le cabinet) a
+  // 90 % : un double comptage sur le point le plus delicat de la fonctionnalite. Avec la garde, le
+  // resultat doit rester 0.
+  test('premiere ligne DES EXERCICE_ANCRE (2025), MEME avec un volet facture avant elle (2024) : 0, l\'ancre est deja la verite complete (pas de double emploi)', () => {
     const lignes = [{ exercice: 2025, pct: 70, fige_le: '2026-01-05T00:00:00Z' }];
-    const missionAvecVoletsAvant2025 = { ca: 15500, montantAcompte: 1550, anneeAcompte: 2025, montantSolde: 13950, anneeSolde: 2026 };
-    expect(pointDepartImplicite(lignes, missionAvecVoletsAvant2025)).toBe(0);
+    const missionAvecFacturationAvantAncre = { ca: 15500, montantAcompte: 3100, anneeAcompte: 2024, montantSolde: 12400, anneeSolde: 2025 };
+    expect(pointDepartImplicite(lignes, missionAvecFacturationAvantAncre)).toBe(0);
   });
 
   test('premiere ligne apres EXERCICE_ANCRE mais rien facture avant : 0 (pas de bruit)', () => {
     const lignes = [{ exercice: 2026, pct: 40 }];
     const missionSansFacturationAvant2026 = { ca: 10000, montantAcompte: 0, anneeAcompte: null, montantSolde: 10000, anneeSolde: 2026 };
     expect(pointDepartImplicite(lignes, missionSansFacturationAvant2026)).toBe(0);
+  });
+
+  // Correctif Minor (revue ronde 1) : avec une donnee Notion incoherente en amont (acompte saisi
+  // superieur au prix total de la mission), pctFactureAvant peut depasser 100. Sans plafond, la
+  // cellule "exercice precedent" afficherait "150 % (deduit)", absurde a l'ecran, meme si le reste et
+  // les suggestions restaient corrects (deja proteges par leur propre Math.max(0, ...)/`reste > 0`).
+  test('donnee incoherente (acompte superieur au prix total) : plafonne a 100 %, jamais "150 %"', () => {
+    const lignes = [{ exercice: 2026, pct: 40 }];
+    const missionAcompteIncoherent = { ca: 10000, montantAcompte: 15000, anneeAcompte: 2025, montantSolde: 0, anneeSolde: null };
+    expect(pointDepartImplicite(lignes, missionAcompteIncoherent)).toBe(100);
   });
 });
 
@@ -308,6 +329,16 @@ describe('cumulEffectif : cumulAuPlusTard + pointDepartImplicite, applique a TOU
     const lignes = [{ exercice: 2025, pct: 70, fige_le: '2026-01-05T00:00:00Z' }, { exercice: 2026, pct: 100 }];
     expect(cumulEffectif(lignes, 2025, undefined)).toBe(cumulAuPlusTard(lignes, 2025));
     expect(cumulEffectif(lignes, 2026, undefined)).toBe(cumulAuPlusTard(lignes, 2026));
+  });
+
+  // Meme scenario que la garde ci-dessus, vu depuis cumulEffectif (celui reellement consomme par la
+  // grille et par suggestionPart) : sans la garde, ce test attendrait 90 (double comptage) ; avec elle,
+  // le cumul effectif de 2025 reste exactement l'ancre (70), jamais majore par de la facturation
+  // anterieure a l'ancre.
+  test('mission ancree AVEC facturation avant l\'ancre : cumul effectif 2025 reste 70 (pas 90, pas de double emploi)', () => {
+    const lignes = [{ exercice: 2025, pct: 70, fige_le: '2026-01-05T00:00:00Z' }];
+    const missionAvecFacturationAvantAncre = { ca: 15500, montantAcompte: 3100, anneeAcompte: 2024, montantSolde: 12400, anneeSolde: 2025 };
+    expect(cumulEffectif(lignes, 2025, missionAvecFacturationAvantAncre)).toBe(70);
   });
 });
 
