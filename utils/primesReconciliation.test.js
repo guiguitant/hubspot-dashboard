@@ -204,3 +204,60 @@ describe('reconcilePrimes . totaux', () => {
     expect(r.totaux.reelHT).toBe(3003);
   });
 });
+
+describe('reconcilePrimes . alertes structurelles', () => {
+  it('alerte quand une ligne de primes n est pas couverte par la liste d exclusion', () => {
+    const r = reconcilePrimes({
+      dettes: [dette('Primes associes 2027', 4000, 4000)],
+      transactions: [],
+      primesSubcats: SUBCATS,
+    });
+    expect(r.lignes[0].couvertParExclusion).toBe(false);
+    const a = r.alertes.find(x => x.type === 'sous_categorie_non_exclue');
+    expect(a).toBeDefined();
+    expect(a.label).toBe('Primes associes 2027');
+    expect(a.message).toMatch(/double compte/i);
+    // Une alerte structurelle ne doit modifier AUCUN statut de ligne (spec section 4.1).
+    expect(r.lignes[0].statut).toBe('sans_reel');
+  });
+
+  it('n alerte pas quand la ligne est bien couverte', () => {
+    const r = reconcilePrimes({
+      dettes: [dette('Primes associes 2025', 10000, 10000)],
+      transactions: [],
+      primesSubcats: SUBCATS,
+    });
+    expect(r.lignes[0].couvertParExclusion).toBe(true);
+    expect(r.alertes.filter(a => a.type === 'sous_categorie_non_exclue')).toHaveLength(0);
+  });
+
+  it('alerte sur des debits de primes sans ligne de dette homonyme', () => {
+    const r = reconcilePrimes({
+      dettes: [dette('Primes associes 2025', 10000, 10000)],
+      transactions: [debit(1200, 'Primes associes 2026')],
+      primesSubcats: SUBCATS,
+    });
+    const a = r.alertes.find(x => x.type === 'reel_orphelin');
+    expect(a).toBeDefined();
+    expect(a.montant).toBe(1200);
+  });
+
+  it('n alerte pas orphelin pour une sous-categorie hors perimetre primes', () => {
+    const r = reconcilePrimes({
+      dettes: [dette('Primes associes 2025', 10000, 10000)],
+      transactions: [debit(900, 'Fournitures de bureau')],
+      primesSubcats: SUBCATS,
+    });
+    expect(r.alertes.filter(a => a.type === 'reel_orphelin')).toHaveLength(0);
+  });
+
+  it('un ecart de montant ne cree aucune alerte', () => {
+    const r = reconcilePrimes({
+      dettes: [dette('Primes associes 2025', 10000, 7000)],
+      transactions: [debit(9999, 'Primes associes 2025')],
+      primesSubcats: SUBCATS,
+    });
+    expect(r.lignes[0].statut).toBe('sous_declare');
+    expect(r.alertes).toHaveLength(0);
+  });
+});

@@ -119,7 +119,44 @@ function reconcilePrimes({
     ecart: acc.ecart + l.ecart,
   }), { declareRembourseHT: 0, reelHT: 0, ecart: 0 });
 
-  return { lignes, totaux, alertes: [] };
+  // --- Alertes STRUCTURELLES, distinctes des statuts de ligne ---
+  // Elles ne portent pas sur des montants qui divergent, mais sur un cablage incoherent entre le
+  // Sheet, Qonto et la liste d'exclusion. Un ecart de montant ne cree jamais d'alerte ici.
+  const alertes = [];
+
+  // 1. Ligne de primes absente de la liste d'exclusion : ses debits Qonto retournent dans le reel
+  // des charges, alors qu'ils y sont deja par le calcul de prime => double compte silencieux au
+  // compte de resultat. C'est le piege ouvert par le nommage libre des sous-categories : il s'est
+  // reellement referme le 2026-09-07, quand la sous-categorie Qonto a ete renommee « Primes
+  // associes 2025 » sans que PRIMES_QONTO_SUBCATS soit mis a jour.
+  for (const l of lignes) {
+    if (l.couvertParExclusion) continue;
+    alertes.push({
+      type: 'sous_categorie_non_exclue',
+      label: l.label,
+      montant: 0,
+      message: 'Ajouter « ' + l.label + ' » a PRIMES_QONTO_SUBCATS puis redemarrer le serveur : '
+        + 'sans cela ces virements creent un double compte dans les charges.',
+    });
+  }
+
+  // 2. Symetrique : des debits classes dans une sous-categorie de primes CONNUE, mais qu'aucune
+  // ligne de dette ne reclame. Typiquement un millesime paye sans ligne au carnet, ou une faute
+  // de frappe sur le libelle d'un des deux cotes.
+  const clesLignes = new Set(lignes.map(l => normalizeLabel(l.label)));
+  for (const [cle, agg] of parSousCat.entries()) {
+    if (!(primesSubcats || []).includes(cle)) continue;
+    if (clesLignes.has(cle)) continue;
+    alertes.push({
+      type: 'reel_orphelin',
+      label: cle,
+      montant: Math.round(agg.montant),
+      message: agg.nb + ' virement(s) de primes (' + Math.round(agg.montant) + ' EUR TTC) sans ligne '
+        + 'de dette correspondante dans le carnet : verifier le libelle des deux cotes.',
+    });
+  }
+
+  return { lignes, totaux, alertes };
 }
 
 module.exports = {
