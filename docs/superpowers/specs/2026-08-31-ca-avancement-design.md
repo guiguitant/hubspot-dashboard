@@ -405,6 +405,47 @@ le reste à réaliser, soit `100 % − cumul acquis`. Cette suggestion n'est PAS
 l'utilisateur ne la valide pas : elle doit se distinguer visuellement d'une valeur saisie, sans quoi
 elle mentirait sur l'état réel des données.
 
+### 5.1 septies Lisibilité de la Saisie, et une suggestion qui ne double-compte pas
+
+Écrit après avoir enfin regardé le rendu réel dans un navigateur. Le sous-onglet « Calcul » est
+propre et remplit son office ; le sous-onglet « Saisie » reste encombré, et il porte un défaut de
+chiffre. Cinq points.
+
+**a. Le pavé d'introduction disparaît.** Il fait aujourd'hui cinq phrases sur quatre lignes pleine
+largeur : personne ne le lit, et c'est l'inverse de l'objectif. Le remplacer par une phrase courte
+qui dit l'essentiel (on saisit la part réalisée dans l'exercice, pas le cumul) et un renvoi vers le
+sous-onglet « Calcul », qui explique déjà le reste en détail. Tout ce qui est retiré doit se
+retrouver soit dans le Calcul, soit dans une infobulle, jamais purement supprimé.
+
+**b. La mention de ligne devient un badge.** La phrase « Affichée ici parce qu'un avancement est
+déjà saisi pour cette mission, pas parce qu'elle est à cheval sur 2026/2027 » est répétée à
+l'identique sur huit lignes, en italique, et double la hauteur de chacune. La remplacer par un badge
+court, du même vocabulaire visuel que les autres badges de l'application, avec la phrase complète en
+infobulle.
+
+**c. Deux affichages parasites.** La ligne de volets affiche « Solde 0 € le 30/09/2025 » quand le
+volet n'existe pas, et une mission sans part affiche un point médian orphelin dans la colonne de
+l'exercice précédent. Ne pas afficher un volet de montant nul, et ne rien afficher plutôt qu'un
+séparateur seul.
+
+**d. Contraindre la hauteur.** Cinq missions visibles sur neuf, la modale déborde. Lui donner une
+hauteur maximale et faire défiler le tableau à l'intérieur, en gardant l'en-tête de colonnes visible.
+
+**e. La suggestion de part ne doit pas provoquer de double comptage (défaut de chiffre).** La
+suggestion vaut aujourd'hui `100 % − cumul des ancres`, ce qui ignore ce qui a déjà été facturé, et
+donc déjà compté, sur les exercices clos sans ancre. Cas réel mesuré : Café Méo, 18 000 € au total,
+acompte de 5 400 € facturé en novembre 2025 et solde de 12 600 € en juillet 2026, sans aucune ancre
+2025. Pilot a compté les 5 400 € dans le CA 2025 à la date de facture. La modale suggère pourtant
+100 % pour 2026, ce qui donnerait 18 000 € en 2026 et recompterait les 5 400 € une seconde fois. La
+valeur juste est 70 %, qui redonne exactement les 12 600 €.
+
+Nouvelle règle de suggestion : le point de départ à retrancher de 100 % est l'ancre reportée quand
+elle existe, et sinon la part déjà facturée sur les exercices antérieurs, soit
+`somme des volets rattachés aux exercices < N ÷ prix total`. Cette règle ne touche QUE la suggestion,
+jamais le calcul, qui continue de reposer sur les ancres. Elle doit être implémentée dans un module
+pur avec ses tests, et couvrir explicitement le cas Café Méo et le cas d'une mission ancrée, où
+l'ancre prime.
+
 ### 5.2 Affichage du CA ajusté
 
 - **CR (onglet Compte de résultat)** : la ligne CA affiche la valeur ajustée ; badge
