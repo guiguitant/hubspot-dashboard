@@ -1,7 +1,7 @@
 'use strict';
 
 // Conversion CUMUL <-> PART pour la saisie de l'avancement des missions.
-// Voir docs/superpowers/specs/2026-08-31-ca-avancement-design.md, section 5.1 sexies.
+// Voir docs/superpowers/specs/2026-08-31-ca-avancement-design.md, sections 5.1 sexies et 5.1 octies.
 //
 // Constat de Nathan sur la grille livree (5.1 ter/quater/quinquies) : elle demandait le CUMUL au
 // 31/12 de chaque exercice, ce qui se lit comme une somme absurde en parcourant une ligne ("50 % en
@@ -11,18 +11,24 @@
 // travail realisee DANS l'exercice) : part(N) = cumul(N) - cumul(N-1) ; cumul(N) = cumul(N-1) +
 // part(N). Le STOCKAGE ne change pas (§5.1 sexies point a) : c'est une affaire de presentation.
 //
+// Ajout §5.1 octies point a : quand la toute premiere ligne suivie d'une mission saute par-dessus
+// EXERCICE_ANCRE (aucune ancre pour combler le trou), le cumul stocke sous-estime l'avancement reel
+// d'autant que ce qui a deja ete facture sur les exercices manques. pointDepartImplicite/
+// cumulEffectif/partAffichee corrigent cette sous-estimation, PUREMENT a l'affichage et dans la
+// suggestion : le stockage, pctFin et le calcul du CA a l'avancement restent strictement inchanges.
+//
 // Duplique inline dans public/pilot.html (fonctions prefixees avancementCumulAuPlusTard,
-// avancementLigneExacte, avancementPartExercice, avancementPctFactureAvant, avancementSuggestionPart,
-// avancementPlanSaisiePart) : pilot.html est un fichier HTML autonome sans bundler, le navigateur ne
-// peut pas require() ce module. Les deux copies DOIVENT rester identiques ; toute correction de la
-// logique ou des messages doit etre reportee des deux cotes (voir le rapport de tache pour la liste
-// des messages exacts).
+// avancementLigneExacte, avancementPartExercice, avancementPctFactureAvant, avancementPointDepartImplicite,
+// avancementCumulEffectif, avancementSuggestionPart, avancementPlanSaisiePart) : pilot.html est un
+// fichier HTML autonome sans bundler, le navigateur ne peut pas require() ce module. Les deux copies
+// DOIVENT rester identiques ; toute correction de la logique ou des messages doit etre reportee des
+// deux cotes (voir le rapport de tache pour la liste des messages exacts).
 //
 // Module PUR : aucune I/O. `pctFin` est repris tel quel de utils/caAvancement.js (meme semantique de
 // report en avant : la ligne de l'exercice le plus recent <= exercice, 0 si aucune) plutot que
 // reimplemente, pour ne jamais diverger de la fonction qui sert au calcul du CA cote serveur. Lecture
 // seule de ce module (require), aucune modification (contrainte du lot).
-const { pctFin } = require('./caAvancement');
+const { pctFin, EXERCICE_ANCRE } = require('./caAvancement');
 
 // Cumul (%) de la mission au plus tard a `exercice`, avec report en avant. Alias direct de pctFin :
 // nomme differemment ici pour rester lisible dans le vocabulaire "cumul" de ce module.
@@ -82,6 +88,78 @@ function pctFactureAvant(mission, exercice) {
   return (total / ca) * 100;
 }
 
+// Point de depart implicite (%) d'une mission SANS ancre sur un exercice anterieur (spec 5.1 octies
+// point a). Cas reel qui a revele le defaut : Café Méo, 18 000 EUR au total, acompte 5 400 EUR
+// facture le 24/11/2025, solde 12 600 EUR facture le 16/07/2026, AUCUNE ancre 2025 (exercice fige).
+// Nathan saisit 70 % pour 2026 (via planSaisiePart, ecrit le cumul 2026 = 0 + 70 = 70, puisque
+// cumulAuPlusTard(2025) = 0 faute d'ancre). Consequence en cascade AVANT ce correctif : la colonne
+// 2025 restait VIDE (aucune ligne exacte a 2025) et suggestionPart proposait 30 % pour 2027 alors que
+// la mission est facturee a 100 % fin 2026 (5 400 + 12 600 = 18 000) et qu'il ne reste rien a
+// reconnaitre -- parce que la premiere ligne (2026, pct=70) a ete calculee sur l'hypothese fausse
+// cumulAuPlusTard(2025) = 0, qui sous-estime de 30 points ce qui etait deja facture.
+//
+// Le stockage et pctFin/caAvancementMission NE BOUGENT PAS (contrainte absolue de la spec) : le cumul
+// stocke a 2026 (70) doit rester tel quel pour que caAvancementMission(2026) = 18000 x (70-0)/100 =
+// 12 600 EUR, exactement le solde facture. C'est PUREMENT un correctif d'affichage/suggestion : ce
+// que Pilot a deja compte au 31/12 de l'exercice qui precede la toute premiere ligne suivie est la
+// part deja FACTUREE cumulee sur les exercices manquants (le CA "hors avancement", avant toute
+// saisie, est compte a la date de facture -- meme regle que pctFactureAvant ci-dessus).
+//
+// Rend 0 si la mission n'a encore AUCUNE ligne (rien a corriger tant que le suivi n'a pas commence),
+// ou si sa toute premiere ligne se situe DES EXERCICE_ANCRE (2025) : une ancre y existe alors, elle
+// EST deja la verite complete validee par le cabinet (§3.4 du design), il ne faut jamais lui ajouter
+// de la facturation par-dessus (cela ferait double emploi avec une donnee deja exacte). Le "trou" que
+// ce correctif comble n'existe QUE quand la premiere ligne suivie saute par-dessus EXERCICE_ANCRE.
+function pointDepartImplicite(lignesMission, mission) {
+  const lignes = lignesMission || [];
+  if (!lignes.length) return 0;
+  const exercices = lignes.map(l => Number(l && l.exercice)).filter(Number.isFinite);
+  if (!exercices.length) return 0;
+  const premiere = Math.min(...exercices);
+  if (premiere <= EXERCICE_ANCRE) return 0; // une ancre existe des le plancher : rien d'implicite
+  const valeur = pctFactureAvant(mission, premiere);
+  return valeur > 0 ? Math.round(valeur) : 0;
+}
+
+// Cumul "effectif" (%) au 31/12/`exercice` : cumulAuPlusTard (le stockage brut, INCHANGE) plus le
+// point de depart implicite ci-dessus, qui corrige une seule fois, pour de bon, la sous-estimation
+// causee par l'absence d'ancre. S'applique uniformement a TOUT exercice (pas seulement celui qui suit
+// immediatement le "trou") : le report en avant de pctFin propage la meme sous-estimation a chaque
+// exercice suivant tant qu'aucune nouvelle ligne ne la corrige, donc la correction doit suivre. Vaut
+// exactement cumulAuPlusTard quand pointDepartImplicite rend 0 (mission ancree normalement, ou non
+// suivie) : aucune regression sur le comportement existant dans ce cas.
+//
+// Utilise par suggestionPart (reste des exercices suivants) ET par la grille (colonne "Reste apres
+// {n+1}", pilot.html) : les deux doivent voir la MEME verite corrigee, jamais pctFin brut seul, sans
+// quoi le "reste" afficherait 30 % pendant que la suggestion afficherait 0 % pour le meme exercice.
+function cumulEffectif(lignesMission, exercice, mission) {
+  return cumulAuPlusTard(lignesMission, exercice) + pointDepartImplicite(lignesMission, mission);
+}
+
+// Part a afficher dans la colonne "exercice precedent" de la grille (spec 5.1 octies point a, corrige
+// 5.1 sexies point c) : jamais VIDE quand une part est deductible de la facturation. Retourne
+// { part, implicite } : `part` est un nombre ou null (rien a afficher, comportement inchange),
+// `implicite` distingue une valeur DEDUITE (jamais enregistree, en lecture seule) d'une vraie ancre.
+//
+// Ne se declenche QUE sur le "trou" precis : l'exercice precedent demande est EXACTEMENT celui qui
+// precede la toute premiere ligne suivie de la mission (premiere - 1) ET aucune ligne exacte n'existe
+// deja pour cet exercice (sinon la vraie ancre prime, gere par l'appelant AVANT d'appeler cette
+// fonction -- voir avancementCellPartLectureSeule dans pilot.html). Une mission pas encore suivie
+// (aucune ligne) ou dont le "trou" ne correspond pas a l'exercice demande ne montre rien : comportement
+// inchange, pas de bruit sur les lignes non concernees (meme doctrine que le correctif §5.1 septies
+// point c : ne rien afficher plutot qu'une valeur qui ne veut rien dire pour cette cellule precise).
+function partAffichee(lignesMission, exercice, mission) {
+  const lignes = lignesMission || [];
+  if (ligneExacte(lignes, exercice)) return { part: partExercice(lignes, exercice), implicite: false };
+  if (!lignes.length) return { part: null, implicite: false };
+  const exercices = lignes.map(l => Number(l && l.exercice)).filter(Number.isFinite);
+  if (!exercices.length) return { part: null, implicite: false };
+  const premiere = Math.min(...exercices);
+  if (exercice !== premiere - 1) return { part: null, implicite: false };
+  const valeur = pointDepartImplicite(lignes, mission);
+  return valeur > 0 ? { part: valeur, implicite: true } : { part: null, implicite: false };
+}
+
 // Suggestion de part (spec point d de 5.1 sexies, CORRIGEE spec 5.1 septies point e : defaut de
 // chiffre, double comptage). Reste theorique a realiser = 100 % moins le point de depart deja acquis
 // avant cet exercice. Ce point de depart est :
@@ -109,10 +187,23 @@ function pctFactureAvant(mission, exercice) {
 // comportement pour une mission jamais facturee (repli 0, donc suggestion 100 %). Jamais negative :
 // une mission deja a 100 % n'a rien a suggerer (en pratique deja intercepte en amont par le grisage
 // des missions terminees, la fonction reste defensive).
+//
+// CORRECTIF (spec 5.1 octies point a) : la branche "ancre reportee" utilisait cumulAuPlusTard brut,
+// qui rate le meme point de depart implicite que la colonne "exercice precedent" (voir
+// pointDepartImplicite ci-dessus) des que la toute premiere ligne suivie de la mission saute par-dessus
+// EXERCICE_ANCRE. Cas reel : Café Méo, une fois 70 % saisi pour 2026 (lignes = [{2026, pct:70}]),
+// suggestionPart(lignes, 2027, caféMéo) prenait aAncreAvant=true (une ligne 2026 < 2027 existe) et
+// pointDepart = cumulAuPlusTard(2026) = 70, donc suggerait 30 % pour 2027 -- alors que la mission est
+// facturee a 100 % fin 2026 et qu'il ne reste rien. cumulEffectif corrige : 70 (stocke) + 30 (implicite,
+// deja facture avant que le suivi ne commence) = 100, donc suggestion 2027 = 0 %. Remplacer
+// cumulAuPlusTard par cumulEffectif ici ne change RIEN quand pointDepartImplicite rend 0 (le cas normal,
+// ancre a EXERCICE_ANCRE ou mission jamais facturee avant son suivi) : tous les tests preexistants
+// de cette branche (Alphapro groupe, mission ancree a 100 %, volets contradictoires) restent inchanges,
+// verifie ci-dessous.
 function suggestionPart(lignesMission, exercice, mission) {
   const lignes = lignesMission || [];
   const aAncreAvant = lignes.some(l => l && Number.isFinite(Number(l.exercice)) && Number(l.exercice) < exercice);
-  const pointDepart = aAncreAvant ? cumulAuPlusTard(lignes, exercice - 1) : pctFactureAvant(mission, exercice);
+  const pointDepart = aAncreAvant ? cumulEffectif(lignes, exercice - 1, mission) : pctFactureAvant(mission, exercice);
   const reste = 100 - pointDepart;
   return reste > 0 ? Math.round(reste) : 0;
 }
@@ -187,6 +278,9 @@ module.exports = {
   cumulAuPlusTard,
   ligneExacte,
   partExercice,
+  pointDepartImplicite,
+  cumulEffectif,
+  partAffichee,
   suggestionPart,
   planSaisiePart,
 };

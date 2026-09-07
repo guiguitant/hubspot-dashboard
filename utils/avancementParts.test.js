@@ -3,9 +3,13 @@ const {
   cumulAuPlusTard,
   ligneExacte,
   partExercice,
+  pointDepartImplicite,
+  cumulEffectif,
+  partAffichee,
   suggestionPart,
   planSaisiePart,
 } = require('./avancementParts');
+const { caAvancementMission } = require('./caAvancement');
 
 describe('cumulAuPlusTard : alias de pctFin (report en avant)', () => {
   test('aucune ligne : 0', () => {
@@ -248,6 +252,143 @@ describe('planSaisiePart : bornes basses (cascade qui descendrait sous 0)', () =
     const plan = planSaisiePart(lignes, 2026, 5); // cumul 2026 -> 5, cumul 2027 -> 5 + (-10) = -5
     expect(plan.ok).toBe(false);
     expect(plan.message).toMatch(/-5/);
+  });
+});
+
+// Spec 5.1 octies point a : le point de depart deduit de la facturation doit etre AFFICHE et compte
+// dans le reste/les suggestions, quand aucune ancre n'existe sur l'exercice qui precede la toute
+// premiere ligne suivie d'une mission. Cas exact remonte par Nathan, verifie sur les donnees reelles :
+// Café Méo, 18 000 EUR au total, acompte 5 400 EUR facture le 24/11/2025, solde 12 600 EUR facture le
+// 16/07/2026, AUCUNE ancre 2025 (exercice fige). Nathan saisit 70 % pour 2026 : la ligne stockee
+// devient { exercice: 2026, pct: 70 } (cumulAuPlusTard(2025) = 0, donc cumul ecrit = 0 + 70 = 70).
+const caféMéoMission = {
+  ca: 18000,
+  montantAcompte: 5400,
+  dateFactureAcompte: '2025-11-24',
+  anneeAcompte: 2025,
+  montantSolde: 12600,
+  dateFactureFinale: '2026-07-16',
+  anneeSolde: 2026,
+};
+const caféMéoLignesApres2026 = [{ exercice: 2026, pct: 70 }];
+
+describe('pointDepartImplicite : combler le trou quand la premiere ligne saute EXERCICE_ANCRE', () => {
+  test('aucune ligne du tout : 0 (rien a corriger tant que le suivi n\'a pas commence)', () => {
+    expect(pointDepartImplicite([], caféMéoMission)).toBe(0);
+    expect(pointDepartImplicite(null, caféMéoMission)).toBe(0);
+  });
+
+  test('Café Méo apres saisie 2026 : 30 % (5 400 / 18 000 deja factures avant 2026, sans ancre)', () => {
+    expect(pointDepartImplicite(caféMéoLignesApres2026, caféMéoMission)).toBe(30);
+  });
+
+  test('premiere ligne DES EXERCICE_ANCRE (2025) : 0, l\'ancre est deja la verite complete (pas de double emploi)', () => {
+    // Alphapro groupe : ancre 2025 = 70 %, validee par le cabinet. Aucun "trou" a combler puisque
+    // 2025 EST le plancher (EXERCICE_ANCRE) : rien ne precede une ligne a 2025.
+    const lignes = [{ exercice: 2025, pct: 70, fige_le: '2026-01-05T00:00:00Z' }];
+    const missionAvecVoletsAvant2025 = { ca: 15500, montantAcompte: 1550, anneeAcompte: 2025, montantSolde: 13950, anneeSolde: 2026 };
+    expect(pointDepartImplicite(lignes, missionAvecVoletsAvant2025)).toBe(0);
+  });
+
+  test('premiere ligne apres EXERCICE_ANCRE mais rien facture avant : 0 (pas de bruit)', () => {
+    const lignes = [{ exercice: 2026, pct: 40 }];
+    const missionSansFacturationAvant2026 = { ca: 10000, montantAcompte: 0, anneeAcompte: null, montantSolde: 10000, anneeSolde: 2026 };
+    expect(pointDepartImplicite(lignes, missionSansFacturationAvant2026)).toBe(0);
+  });
+});
+
+describe('cumulEffectif : cumulAuPlusTard + pointDepartImplicite, applique a TOUT exercice suivant', () => {
+  test('Café Méo : 30 % en 2025, 100 % en 2026 (30 implicite + 70 stocke), 100 % en 2027 (report)', () => {
+    expect(cumulEffectif(caféMéoLignesApres2026, 2025, caféMéoMission)).toBe(30);
+    expect(cumulEffectif(caféMéoLignesApres2026, 2026, caféMéoMission)).toBe(100);
+    expect(cumulEffectif(caféMéoLignesApres2026, 2027, caféMéoMission)).toBe(100);
+  });
+
+  test('mission ancree normalement (Alphapro) : identique a cumulAuPlusTard, aucune regression', () => {
+    const lignes = [{ exercice: 2025, pct: 70, fige_le: '2026-01-05T00:00:00Z' }, { exercice: 2026, pct: 100 }];
+    expect(cumulEffectif(lignes, 2025, undefined)).toBe(cumulAuPlusTard(lignes, 2025));
+    expect(cumulEffectif(lignes, 2026, undefined)).toBe(cumulAuPlusTard(lignes, 2026));
+  });
+});
+
+describe('partAffichee : valeur pour la colonne "exercice precedent" de la grille', () => {
+  test('Café Méo : 2025 affiche 30 %, marque implicite (deduit de la facturation, pas saisi)', () => {
+    expect(partAffichee(caféMéoLignesApres2026, 2025, caféMéoMission)).toEqual({ part: 30, implicite: true });
+  });
+
+  test('une vraie ancre existe pour cet exercice : sa vraie part, jamais marquee implicite', () => {
+    const lignes = [{ exercice: 2025, pct: 70, fige_le: '2026-01-05T00:00:00Z' }];
+    expect(partAffichee(lignes, 2025, caféMéoMission)).toEqual({ part: 70, implicite: false });
+  });
+
+  test('mission jamais suivie (aucune ligne) : rien a afficher, comportement inchange', () => {
+    expect(partAffichee([], 2025, caféMéoMission)).toEqual({ part: null, implicite: false });
+  });
+
+  test('exercice demande different du "trou" (premiere - 1) : rien a afficher', () => {
+    // La premiere ligne de Café Méo est 2026, le trou est donc exactement 2025 ; interroger un autre
+    // exercice (2024, jamais affiche par la grille) ne doit rien inventer.
+    expect(partAffichee(caféMéoLignesApres2026, 2024, caféMéoMission)).toEqual({ part: null, implicite: false });
+  });
+
+  test('rien de facture avant la premiere ligne : rien a afficher (pas de "0 %" parasite)', () => {
+    const lignes = [{ exercice: 2026, pct: 40 }];
+    const missionSansFacturationAvant2026 = { ca: 10000, montantAcompte: 0, anneeAcompte: null, montantSolde: 10000, anneeSolde: 2026 };
+    expect(partAffichee(lignes, 2025, missionSansFacturationAvant2026)).toEqual({ part: null, implicite: false });
+  });
+});
+
+describe('suggestionPart : defaut de cohorence corrige (spec 5.1 octies point a)', () => {
+  test('Café Méo, apres saisie 70 % pour 2026 : suggestion 2027 = 0 % (et non 30 %)', () => {
+    // Avant correctif : aAncreAvant=true (une ligne 2026 < 2027 existe), pointDepart =
+    // cumulAuPlusTard(2026) = 70 (brut, sans le point de depart implicite), reste = 30 -- FAUX, la
+    // mission est facturee a 100 % fin 2026 (5 400 + 12 600 = 18 000), il ne reste rien a realiser.
+    expect(suggestionPart(caféMéoLignesApres2026, 2027, caféMéoMission)).toBe(0);
+  });
+
+  test('Alphapro groupe (ancre normale) : suggestion 2026 = 30 %, toujours inchangee', () => {
+    const lignes = [{ exercice: 2025, pct: 70, fige_le: '2026-01-05T00:00:00Z' }];
+    expect(suggestionPart(lignes, 2026)).toBe(30);
+  });
+});
+
+// Simulation ecrite complete du cas Café Méo (rapport de tache) : les cinq valeurs attendues par la
+// spec, obtenues via les fonctions publiques de ce module, plus le verrou sur le CA 2026 (module
+// utils/caAvancement.js, NON MODIFIE par ce correctif : contrainte absolue de la spec).
+describe('Café Méo : simulation complete des cinq valeurs attendues (5.1 octies point a)', () => {
+  const lignes = caféMéoLignesApres2026; // { exercice: 2026, pct: 70 }, tel qu'ecrit par planSaisiePart
+
+  test('1. Part 2025 (implicite, deduite de la facturation) = 30 %', () => {
+    expect(partAffichee(lignes, 2025, caféMéoMission)).toEqual({ part: 30, implicite: true });
+  });
+
+  test('2. Part 2026 (saisie, stockage inchange) = 70 %', () => {
+    expect(partExercice(lignes, 2026)).toBe(70);
+  });
+
+  test('3. Suggestion 2027 = 0 %', () => {
+    expect(suggestionPart(lignes, 2027, caféMéoMission)).toBe(0);
+  });
+
+  test('4. Reste apres 2027 = 0 % (colonne "Reste apres N+1" de la grille)', () => {
+    const reste = Math.max(0, 100 - cumulEffectif(lignes, 2027, caféMéoMission));
+    expect(reste).toBe(0);
+  });
+
+  test('5. Les parts de la ligne se lisent en faisant 100 % (30 + 70 + 0)', () => {
+    const part2025 = partAffichee(lignes, 2025, caféMéoMission).part;
+    const part2026 = partExercice(lignes, 2026);
+    const suggestion2027 = suggestionPart(lignes, 2027, caféMéoMission);
+    expect(part2025 + part2026 + suggestion2027).toBe(100);
+  });
+
+  // Verrou (contrainte absolue de la spec) : le CA 2026 a l'avancement de Café Méo reste 12 600 EUR
+  // apres ce correctif purement d'affichage. Utilise directement caAvancementMission de
+  // utils/caAvancement.js (module NON TOUCHE par ce lot), avec les MEMES lignes stockees (pct=70 pour
+  // 2026, cumul brut inchange) : si ce test echoue, la regression a touche le calcul du CA, ce qui est
+  // exactement ce que la spec interdit.
+  test('verrou : le CA 2026 a l\'avancement (caAvancementMission, module intouche) reste 12 600 EUR', () => {
+    expect(caAvancementMission(caféMéoMission, lignes, 2026)).toBe(12600);
   });
 });
 
