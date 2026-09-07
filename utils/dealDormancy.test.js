@@ -51,6 +51,24 @@ describe('isDealDormant', () => {
     expect(isDealDormant({ createdate: daysAgo(DORMANT_DAYS - 1) }, {}, NOW)).toBe(false);
   });
 
+  // reveille_at : arbitrage manuel (migration 45). Ce n'est pas un contact client, mais ça remet
+  // le compteur de sommeil à zéro, sinon la carte sortie du bac « À relancer » y retombe aussitôt
+  // et le deal disparaît du pipeline pondéré alors que la carte Commercial l'y compte.
+  it('réveil manuel récent -> pas en sommeil, même sans relance ni note', () => {
+    const meta = { relances: [{ at: daysAgo(200) }], reveille_at: daysAgo(4) };
+    expect(isDealDormant({ createdate: daysAgo(300) }, meta, NOW)).toBe(false);
+  });
+
+  it('réveil manuel trop ancien -> de nouveau en sommeil', () => {
+    const meta = { relances: [{ at: daysAgo(200) }], reveille_at: daysAgo(DORMANT_DAYS + 1) };
+    expect(isDealDormant({ createdate: daysAgo(300) }, meta, NOW)).toBe(true);
+  });
+
+  it('une relance postérieure au réveil prime (on garde le plus récent des deux)', () => {
+    const meta = { relances: [{ at: daysAgo(2) }], reveille_at: daysAgo(200) };
+    expect(isDealDormant({ createdate: daysAgo(300) }, meta, NOW)).toBe(false);
+  });
+
   it('sans date de création ni contact -> pas en sommeil (rien à mesurer)', () => {
     expect(isDealDormant({ createdate: null }, {}, NOW)).toBe(false);
   });

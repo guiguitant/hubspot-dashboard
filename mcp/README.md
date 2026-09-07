@@ -10,9 +10,41 @@ du Q1 2026 », « quels deals sont à risque ? »).
 - Lit **`HUBSPOT_API_KEY`** dans le `.env` à la racine du projet (auth EU/PAT
   auto-détectée, comme `server.js`) pour les deals, et **Supabase**
   (`SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`) pour les **tags**
-  (table `deal_metadata`, jointure par `deal_id`). Aucune dépendance au
-  backend : il fonctionne que le dashboard tourne ou non, et ne modifie pas
-  `server.js`.
+  (table `deal_metadata`, jointure par `deal_id`) pour les **tags, l'assigné et
+  la dormance**, ainsi que le **barème de pondération** (table `kpi_prime_config`,
+  ligne `pipeline_ponderation`). Aucune dépendance au backend en exécution : il
+  fonctionne que le dashboard tourne ou non.
+
+## Périmètre du pipe pondéré — à lire avant d'exploiter `get_pipeline`
+
+Trois chiffres différents ont circulé pour le même portefeuille tant que ces
+règles n'étaient pas explicites. Elles le sont désormais **dans la réponse** :
+les consommateurs (agent quotidien, artifact « Attribution du pipe ») doivent
+lire les champs, jamais redériver les règles de leur côté.
+
+- Chaque deal ouvert est dans **un** de ces trois états, lisible sur le deal :
+  - `frozen` — rangé dans « À relancer plus tard » (gel manuel). Hors projection.
+  - `dormant` — 90 j sans relance ni note, sauf RDV futur, tâche à échéance future,
+    deal créé depuis moins de 7 j, ou réveil manuel récent. Hors projection.
+  - actif — le reste. `counts_in_forecast: true`.
+- **`active_count` / `active_amount` sont les chiffres comparables à la carte
+  « Commercial » de Pilot.** `open_deals` / `total_amount` comptent TOUT, gelés
+  et dormants inclus : les citer donne un pipe gonflé d'un facteur ~2,6.
+- La règle de dormance est définie à **un seul endroit**, `utils/dealDormancy.js`,
+  partagé avec `server.js`. Ne jamais la réécrire ailleurs.
+- Les **probabilités** viennent des réglages de Pilot (écran de pondération),
+  relues à chaud toutes les 60 s, et sont renvoyées dans `stage_probabilities`.
+  Aucune valeur n'est codée en dur dans le serveur.
+- Si le barème est injoignable ou incomplet : `weighted_forecast: null` +
+  `warning: "stage probabilities unavailable"`. **Aucun repli sur des valeurs par
+  défaut** : un pipe pondéré faux ne se voit pas, un pipe pondéré absent se voit.
+
+Les **descriptions** des deals ne sont pas renvoyées par défaut : `include_descriptions: true`
+pour une lecture qualitative deal par deal. `summary.descriptions_included` dit ce qui a été
+renvoyé, pour qu'un champ absent ne se lise pas comme une description vide.
+
+`get_daily_briefing` répond sous **20 s** ; au-delà il renvoie ce qui est prêt
+avec `truncated: true` et `truncated_reasons`. `timings_ms` détaille chaque étape.
 
 ## Outils exposés
 
@@ -20,8 +52,8 @@ du Q1 2026 », « quels deals sont à risque ? »).
 
 | Outil | Usage | Arguments |
 |-------|-------|-----------|
-| `get_pipeline` | Deals **ouverts** par stage + forecast pondéré + ventilation par tag (qualitatif : relances, risques) | `tag?` |
-| `get_deals_analytics` | Deals **clôturés** sur une période : gagné/perdu, taux de conversion, panier moyen, par tag + couverture (chiffré) | `from`, `to` (YYYY-MM-DD, sur `closedate`), `tag?` |
+| `get_pipeline` | Deals **ouverts** par stage + forecast pondéré + assigné + état (actif / dormant / gelé) + ventilation par tag | `tag?`, `include_descriptions?` |
+| `get_deals_analytics` | Deals **clôturés** sur une période : gagné/perdu, taux de conversion, panier moyen, par tag et **par assigné** | `from`, `to` (YYYY-MM-DD, sur `closedate`), `tag?` |
 | `list_deals` | Liste filtrable (statut / période / stage / tag) | `status` (open\|closed\|all), `from?`, `to?`, `stage?`, `tag?` |
 
 ### Écriture
