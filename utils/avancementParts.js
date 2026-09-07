@@ -12,10 +12,11 @@
 // part(N). Le STOCKAGE ne change pas (§5.1 sexies point a) : c'est une affaire de presentation.
 //
 // Duplique inline dans public/pilot.html (fonctions prefixees avancementCumulAuPlusTard,
-// avancementLigneExacte, avancementPartExercice, avancementSuggestionPart, avancementPlanSaisiePart) :
-// pilot.html est un fichier HTML autonome sans bundler, le navigateur ne peut pas require() ce
-// module. Les deux copies DOIVENT rester identiques ; toute correction de la logique ou des messages
-// doit etre reportee des deux cotes (voir le rapport de tache pour la liste des messages exacts).
+// avancementLigneExacte, avancementPartExercice, avancementPctFactureAvant, avancementSuggestionPart,
+// avancementPlanSaisiePart) : pilot.html est un fichier HTML autonome sans bundler, le navigateur ne
+// peut pas require() ce module. Les deux copies DOIVENT rester identiques ; toute correction de la
+// logique ou des messages doit etre reportee des deux cotes (voir le rapport de tache pour la liste
+// des messages exacts).
 //
 // Module PUR : aucune I/O. `pctFin` est repris tel quel de utils/caAvancement.js (meme semantique de
 // report en avant : la ligne de l'exercice le plus recent <= exercice, 0 si aucune) plutot que
@@ -43,11 +44,62 @@ function partExercice(lignesMission, exercice) {
   return (Number(ligne.pct) || 0) - cumulAuPlusTard(lignesMission, exercice - 1);
 }
 
-// Suggestion de part (spec point d) : reste theorique a realiser, 100 - cumul deja acquis avant cet
-// exercice. Jamais negative : une mission deja a 100 % n'a rien a suggerer (en pratique ce cas est
-// intercepte en amont par le grisage des missions terminees, mais la fonction reste defensive).
-function suggestionPart(lignesMission, exercice) {
-  const reste = 100 - cumulAuPlusTard(lignesMission, exercice - 1);
+// Part deja facturee (%) sur les exercices STRICTEMENT anterieurs a `exercice`, a partir des VOLETS
+// REELS de la mission (montant + date d'emission), pas de l'avancement saisi. Sert de repli pour
+// suggestionPart ci-dessous quand aucune ancre n'existe (spec 5.1 septies, point e). Meme regle de
+// rattachement que contributionsDepuisVolets (utils/caAvancement.js, base du CR : "factures emises
+// datees dans l'annee"), reimplementee ici pour rester un module autonome plutot que d'exposer un
+// symbole croise entre modules purs (meme parti pris que utils/avancementMissionInfo.js, qui ne
+// require pas non plus caAvancement.js). Un volet SANS date d'emission ne compte JAMAIS : le repli
+// "Annee final" (utilise ailleurs pour le rattachement comptable des missions suivies) est
+// volontairement exclu ici, ce champ ne dit rien de ce qui a REELLEMENT ete facture.
+function pctFactureAvant(mission, exercice) {
+  const m = mission || {};
+  const ca = Number(m.ca) || 0;
+  if (ca <= 0) return 0;
+  const anneeDe = (d) => (d ? Number(String(d).slice(0, 4)) : null);
+  const acompte = Number(m.montantAcompte) || 0;
+  const solde = Math.max(0, ca - acompte);
+  const anneeAcompte = anneeDe(m.dateFactureAcompte);
+  const anneeSolde = anneeDe(m.dateFactureFinale);
+  let total = 0;
+  if (acompte > 0 && anneeAcompte != null && anneeAcompte < exercice) total += acompte;
+  if (solde > 0 && anneeSolde != null && anneeSolde < exercice) total += solde;
+  return (total / ca) * 100;
+}
+
+// Suggestion de part (spec point d de 5.1 sexies, CORRIGEE spec 5.1 septies point e : defaut de
+// chiffre, double comptage). Reste theorique a realiser = 100 % moins le point de depart deja acquis
+// avant cet exercice. Ce point de depart est :
+//   - l'ANCRE reportee (cumul de l'avancement saisi) des qu'une ligne existe pour un exercice
+//     strictement anterieur a `exercice` : elle prime TOUJOURS, meme si des volets contradictoires
+//     sont fournis (une mission ancree a ete validee par le cabinet, sa part reelle peut differer de
+//     ce que les seules dates de facture donneraient) ;
+//   - a defaut (aucune ligne d'avancement anterieure : mission jamais ancree/suivie avant N), la part
+//     deja FACTUREE sur les exercices anterieurs (pctFactureAvant ci-dessus), pour ne jamais
+//     recompter au numerateur ce que Pilot a deja compte a la date de facture sur un exercice clos
+//     SANS ancre.
+//
+// Defaut avant correctif (cas reel mesure, Café Méo : 18 000 EUR au total, acompte 5 400 EUR facture
+// le 24/11/2025, solde 12 600 EUR facture le 16/07/2026, aucune ancre 2025) : l'ancienne regle valait
+// 100 % - cumul des ANCRES uniquement, soit 100 % - 0 % = 100 % pour 2026 ; validee telle quelle elle
+// aurait donne 18 000 EUR de CA 2026, recomptant les 5 400 EUR deja comptes en CA 2025 (a la date de
+// facture, hors avancement puisque sans ancre). La regle corrigee vaut 100 % - pctFactureAvant(...) =
+// 100 % - (5 400 / 18 000 x 100) = 70 %, ce qui redonne exactement les 12 600 EUR restants.
+//
+// Cette regle ne touche QUE la suggestion (un placeholder jamais enregistre seul) : le CALCUL du CA a
+// l'avancement continue de reposer exclusivement sur les ancres (caAvancementMission, pctFin,
+// utils/caAvancement.js), jamais sur les volets factures.
+//
+// `mission` est optionnel : les rares appelants qui n'ont pas cet objet sous la main gardent l'ancien
+// comportement pour une mission jamais facturee (repli 0, donc suggestion 100 %). Jamais negative :
+// une mission deja a 100 % n'a rien a suggerer (en pratique deja intercepte en amont par le grisage
+// des missions terminees, la fonction reste defensive).
+function suggestionPart(lignesMission, exercice, mission) {
+  const lignes = lignesMission || [];
+  const aAncreAvant = lignes.some(l => l && Number.isFinite(Number(l.exercice)) && Number(l.exercice) < exercice);
+  const pointDepart = aAncreAvant ? cumulAuPlusTard(lignes, exercice - 1) : pctFactureAvant(mission, exercice);
+  const reste = 100 - pointDepart;
   return reste > 0 ? Math.round(reste) : 0;
 }
 

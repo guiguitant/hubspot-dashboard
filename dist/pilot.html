@@ -4723,6 +4723,12 @@
       .kpi-obj-table th { text-align:right; padding:.3rem .5rem; font-size:.68rem; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); font-weight:600; }
       .kpi-obj-table th:first-child { text-align:left; }
       .kpi-obj-table td { padding:.4rem .5rem; border-top:1px solid var(--border); vertical-align:middle; }
+      /* Grille "Avancement des missions" (spec 5.1 septies, point d) : la modale debordait de l'ecran
+         (5 missions visibles sur 9). Hauteur maximale sur le SEUL conteneur de la grille (pas toute la
+         modale, pour que la recherche/case/cloture restent toujours visibles sans defiler), en-tete de
+         colonnes fige en haut via position:sticky pendant le defilement du tableau. */
+      .avancement-grid-scroll { max-height: 55vh; overflow-y: auto; overflow-x: auto; }
+      .avancement-grid-scroll thead th { position: sticky; top: 0; background: var(--card); z-index: 1; }
       .kpi-obj-name { display:flex; align-items:center; gap:.5rem; font-weight:600; font-size:.88rem; }
       .kpi-mini-chip { width:24px; height:24px; border-radius:7px; display:grid; place-items:center; color:#fff; font-size:.72rem; font-weight:700; flex:0 0 auto; }
       .kpi-num-input { width:120px; text-align:right; padding:.35rem .5rem; border:1px solid var(--border); border-radius:var(--radius); background:var(--card); color:var(--text); font-family:inherit; font-size:.85rem; }
@@ -14637,12 +14643,17 @@
     // "non émis". Un volet est "emis" des qu'il porte une date de facture, quel que soit son montant
     // (le montant ne sert plus a rien dans la detection "a cheval" depuis le correctif §5.1 quinquies
     // point a : seule la date d'emission compte, cf. utils/avancementMissionInfo.js).
+    // Correctif §5.1 septies point c : un volet de montant NUL (ex. "Solde 0 € le 30/09/2025", cas
+    // d'une mission facturée en une seule fois où le solde vaut ca − acompte = 0) n'est pas un volet
+    // réel malgré une date renseignée : ne rien facturer à ce titre n'a pas de sens, l'afficher laisse
+    // croire à une seconde facture qui n'existe pas. Condition désormais double (date ET montant > 0),
+    // alors qu'avant seule la date suffisait.
     function avancementVoletsTexte(m) {
       if (!m) return '';
-      const acompte = m.dateFactureAcompte
+      const acompte = (m.dateFactureAcompte && Number(m.montantAcompte) > 0)
         ? 'Acompte ' + formatEuro(m.montantAcompte || 0) + ' le ' + formatDateFR(m.dateFactureAcompte)
         : 'Acompte non émis';
-      const solde = m.dateFactureFinale
+      const solde = (m.dateFactureFinale && Number(m.montantSolde) > 0)
         ? 'Solde ' + formatEuro(m.montantSolde || 0) + ' le ' + formatDateFR(m.dateFactureFinale)
         : 'Solde non émis';
       return acompte + ' · ' + solde;
@@ -14749,10 +14760,41 @@
       if (!ligne) return null;
       return (Number(ligne.pct) || 0) - avancementCumulAuPlusTard(lignesMission, exercice - 1);
     }
-    // Suggestion (spec point d) : reste théorique à réaliser = 100 % − cumul déjà acquis. Jamais
-    // enregistrée seule : c'est un placeholder (texte fantôme natif du navigateur), pas une valeur.
-    function avancementSuggestionPart(lignesMission, exercice) {
-      const reste = 100 - avancementCumulAuPlusTard(lignesMission, exercice - 1);
+    // Part déjà facturée (%) sur les exercices STRICTEMENT antérieurs à `exercice`, à partir des
+    // VOLETS RÉELS de la mission (montant + date d'émission), pas de l'avancement saisi. Copie inline
+    // de utils/avancementParts.js (voir ce fichier pour la justification complète) : repli de
+    // avancementSuggestionPart ci-dessous quand aucune ancre n'existe (spec 5.1 septies, point e).
+    function avancementPctFactureAvant(mission, exercice) {
+      const m = mission || {};
+      const ca = Number(m.ca) || 0;
+      if (ca <= 0) return 0;
+      const anneeDe = (d) => (d ? Number(String(d).slice(0, 4)) : null);
+      const acompte = Number(m.montantAcompte) || 0;
+      const solde = Math.max(0, ca - acompte);
+      const anneeAcompte = anneeDe(m.dateFactureAcompte);
+      const anneeSolde = anneeDe(m.dateFactureFinale);
+      let total = 0;
+      if (acompte > 0 && anneeAcompte != null && anneeAcompte < exercice) total += acompte;
+      if (solde > 0 && anneeSolde != null && anneeSolde < exercice) total += solde;
+      return (total / ca) * 100;
+    }
+    // Suggestion (spec point d de 5.1 sexies, CORRIGÉE spec 5.1 septies point e : défaut de chiffre,
+    // double comptage). Reste théorique à réaliser = 100 % moins le point de départ déjà acquis avant
+    // cet exercice : l'ANCRE reportée si une ligne existe pour un exercice antérieur (elle prime
+    // toujours), sinon la part déjà FACTURÉE sur les exercices antérieurs (avancementPctFactureAvant),
+    // pour ne jamais recompter au numérateur ce que Pilot a déjà compté à la date de facture sur un
+    // exercice clos SANS ancre. Cas réel qui a révélé le défaut : Café Méo, 18 000 €, acompte 5 400 €
+    // facturé le 24/11/2025, solde 12 600 € facturé le 16/07/2026, aucune ancre 2025 ; l'ancienne
+    // règle suggérait 100 % pour 2026 (100 % − 0 % de cumul des ancres), ce qui aurait recompté les
+    // 5 400 € déjà comptés en CA 2025. La règle corrigée suggère 70 % (100 % − 5 400/18 000 × 100),
+    // qui redonne exactement les 12 600 € restants. Ne touche QUE la suggestion (un placeholder jamais
+    // enregistré seul) : le calcul du CA à l'avancement continue de reposer exclusivement sur les
+    // ancres. Voir utils/avancementParts.js et son rapport de tâche pour le détail et les tests.
+    function avancementSuggestionPart(lignesMission, exercice, mission) {
+      const lignes = lignesMission || [];
+      const aAncreAvant = lignes.some(l => l && Number.isFinite(Number(l.exercice)) && Number(l.exercice) < exercice);
+      const pointDepart = aAncreAvant ? avancementCumulAuPlusTard(lignes, exercice - 1) : avancementPctFactureAvant(mission, exercice);
+      const reste = 100 - pointDepart;
       return reste > 0 ? Math.round(reste) : 0;
     }
     // Le piège (spec point a) : si l'exercice suivant porte déjà une ligne non figée, modifier la
@@ -14846,12 +14888,21 @@
     // point c : seuls N et N+1 sont éditables ici). "·" si aucune ligne exacte pour cet exercice
     // (mission non suivie avant N : part et cumul valent 0, mais "0 %" laisserait croire à une saisie
     // explicite qui n'existe pas).
+    // Correctif §5.1 septies point c : une mission sans aucune part sur cet exercice n'affiche plus
+    // rien (avant : un "·" seul, séparateur orphelin sans rien à séparer, laissait croire à une
+    // valeur tronquée). Rien à afficher n'est pas une régression d'information : la ligne de volets et
+    // les autres colonnes disent déjà tout ce qui est connu de cette mission.
     function avancementCellPartLectureSeule(lignesMission, exercice) {
       const ligne = avancementLigneExacte(lignesMission, exercice);
-      if (!ligne) return '<span style="color:var(--text-secondary)">·</span>';
+      if (!ligne) return '';
       const part = avancementPartExercice(lignesMission, exercice);
       const badge = ligne.fige_le ? ' <span style="font-size:0.68rem;color:var(--text-secondary)">(figé)</span>' : '';
-      return '<span style="color:var(--text-secondary)" title="Exercice antérieur : affiché pour mémoire, lecture seule dans cette grille.">' + part + ' %</span>' + badge;
+      // Etat de figeage de CET exercice, repris ici (spec 5.1 septies point a) depuis l'ancien pavé
+      // d'introduction, raccourci : l'information n'est pas perdue, elle vit dans l'infobulle de la
+      // cellule qu'elle concerne plutôt que dans un paragraphe générique en tête de grille. Vérifié à
+      // chaque rendu (avancementExercicePrecedentFige lit l'état réel), jamais affirmé sans preuve.
+      const etat = avancementExercicePrecedentFige(exercice) ? 'exercice figé, définitif' : 'non modifiable ici, même si l\'exercice n\'est pas encore figé';
+      return '<span style="color:var(--text-secondary)" title="Exercice antérieur (' + exercice + ') : affiché pour mémoire, en lecture seule dans cette grille (' + etat + ').">' + part + ' %</span>' + badge;
     }
 
     // Cellule "Part {n}" ou "Part {n+1}" éditable (spec point a et d). Trois états :
@@ -14889,7 +14940,7 @@
         html += ' <button class="kpi-btn" onclick="removeAvancementLigne(\'' + m.id + '\',' + exercice + ')" style="padding:0.15rem 0.45rem;font-size:0.72rem">Retirer</button>';
         return html;
       }
-      const suggestion = avancementSuggestionPart(lignesMission, exercice);
+      const suggestion = avancementSuggestionPart(lignesMission, exercice, m);
       let html = '<input type="number" min="0" max="' + maxPart + '" step="1" value="" placeholder="' + suggestion + '" id="' + elId + '" class="kpi-num-input" style="width:64px;padding:0.2rem" title="Suggestion : ' + suggestion + ' % (reste à réaliser). Non enregistrée : validez avec OK pour la retenir, ou saisissez une autre valeur.">';
       html += ' <button class="kpi-btn" onclick="saveAvancementLigne(\'' + m.id + '\',' + exercice + ',\'' + elId + '\')" style="padding:0.15rem 0.45rem;font-size:0.72rem">OK</button>';
       html += '<div style="font-size:0.65rem;color:var(--text-secondary);font-style:italic;margin-top:0.15rem">suggéré : ' + suggestion + ' %, à valider</div>';
@@ -14962,7 +15013,7 @@
       // "un total ou un reste doit rester visible sur la ligne, pour que l'utilisateur contrôle que ses
       // parts finissent par faire 100 %", calculé sur le CUMUL réellement enregistré à la fin de n+1
       // (report en avant), jamais sur une suggestion non validée.
-      let html = '<div style="overflow-x:auto"><table class="kpi-obj-table"><thead><tr>'
+      let html = '<div class="avancement-grid-scroll"><table class="kpi-obj-table"><thead><tr>'
         + '<th>Mission</th><th>CA HT</th>'
         + '<th>Part ' + (n - 1) + '</th>'
         + '<th>Part ' + n + '</th><th>CA ' + n + '</th>'
@@ -14977,12 +15028,16 @@
         // point b (missions suivies hors périmètre strict) : celles-là portent une mention dédiée
         // ci-dessous, pour ne pas laisser croire qu'elles sont à cheval sur n/n1.
         const suivieHorsPerimetre = !avancementDansPerimetreStrict(m, n, n1) && lignesByMission.has(String(m.id));
-        const nomHtml = '<td><div class="kpi-obj-name">' + escapeHtml(m.nom || '') + '</div>'
+        // Badge court (spec 5.1 septies, point b : révoque la mention en italique répétée sur 8
+        // lignes, qui doublait la hauteur de chacune). Même vocabulaire visuel que le badge "à
+        // l'avancement" (_avancementBadgeHtml ci-dessus) : pilule bordée, texte atténué. La phrase
+        // complète (celle retirée) reste disponible en infobulle, jamais purement supprimée.
+        const badgeSuivie = suivieHorsPerimetre
+          ? ' <span title="Affichée ici parce qu\'un avancement est déjà saisi pour cette mission, pas parce qu\'elle est à cheval sur ' + n + '/' + n1 + '." style="cursor:help;font-size:0.68rem;padding:0.05rem 0.35rem;border:1px solid var(--border);border-radius:10px;color:var(--text-secondary);white-space:nowrap">suivie</span>'
+          : '';
+        const nomHtml = '<td><div class="kpi-obj-name">' + escapeHtml(m.nom || '') + badgeSuivie + '</div>'
           + (m.client ? '<div style="font-size:0.72rem;color:var(--text-secondary)">' + escapeHtml(m.client) + '</div>' : '')
           + '<div style="font-size:0.7rem;color:var(--text-secondary);margin-top:0.1rem">' + avancementVoletsTexte(m) + '</div>'
-          + (suivieHorsPerimetre
-              ? '<div style="font-size:0.68rem;color:var(--text-secondary);font-style:italic;margin-top:0.15rem">Affichée ici parce qu\'un avancement est déjà saisi pour cette mission, pas parce qu\'elle est à cheval sur ' + n + '/' + n1 + '.</div>'
-              : '')
           + '</td>';
 
         // Mission terminée (spec point b) : avancement cumulé déjà à 100 % à la fin du dernier
@@ -15150,22 +15205,19 @@
       // point c) : la grille est ancrée sur CURRENT_YEAR (n = d.exercice), indépendante du figeage ;
       // figer un exercice bascule ses cellules en lecture seule (bandeaux ci-dessous) mais ne le fait
       // PAS disparaître de cette grille, seul le passage à l'année suivante le fait.
-      // Correctif ronde 1 : la mention sur n-1 est désormais CONDITIONNELLE à son état réel de
-      // figeage (avancementExercicePrecedentFige, lue à chaque rendu de cette pane) plutôt que
-      // d'affirmer "déjà validé" sans vérification. Correctif ronde 1 (2e point) : "en pointillé"
-      // décrivait un style qui n'existe pas dans le fichier ; la suggestion est en réalité le
-      // placeholder natif du navigateur, affiché en gris atténué (choix retenu : corriger le texte
-      // pour décrire ce que l'utilisateur voit réellement, plutôt qu'ajouter un style dédié).
-      const n1TexteFigeage = avancementExercicePrecedentFige(n - 1)
-        ? 'exercice figé, définitif'
-        : 'non modifiable ici, même si l\'exercice n\'est pas encore figé';
+      // Pavé d'introduction raccourci (spec 5.1 septies, point a : la version précédente faisait cinq
+      // phrases sur quatre lignes pleine largeur, que personne ne lisait). Une seule phrase dit
+      // l'essentiel (part de l'exercice, pas cumul) et renvoie vers le sous-onglet « Calcul », qui
+      // détaille déjà le passage du facturé à l'estimé. Rien de ce qui est retiré n'est perdu : l'état
+      // de figeage de l'exercice précédent vit désormais dans l'infobulle de sa propre cellule
+      // (avancementCellPartLectureSeule), la non-validité de la suggestion et le calcul du CA (prix
+      // total × part) vivent dans les infobulles de leurs cellules respectives (avancementCellPartSaisie,
+      // avancementCellCa), et une mission terminée l'annonce directement en toutes lettres sur sa
+      // propre ligne (colspan ci-dessous), pas dans un paragraphe générique.
       let html = '<p style="font-size:0.8rem;color:var(--text-secondary);margin-top:0;margin-bottom:0.9rem">'
-        + 'Vous saisissez la part du travail réalisée DANS l\'exercice, pas le cumul au 31/12 : le CA de chaque exercice est '
-        + 'la lecture directe de cette part (prix total × part). ' + (n - 1) + ' est affiché à titre de référence, en lecture '
-        + 'seule et grisé (' + n1TexteFigeage + ') ; seuls ' + n + ' et ' + n1 + ' sont modifiables, tant qu\'ils ne sont pas figés. '
-        + 'Quand rien n\'est encore saisi pour un exercice, la cellule affiche en grisé, comme un texte d\'exemple, le reste '
-        + 'théorique à réaliser : ce n\'est qu\'une suggestion, elle n\'est enregistrée que si vous cliquez sur OK. Une mission '
-        + 'déjà à 100 % à la clôture du dernier exercice figé est terminée : sa ligne est grisée, il n\'y a plus rien à y saisir.'
+        + 'Vous saisissez la part du travail réalisée dans chaque exercice, pas le cumul au 31/12. '
+        + 'Voir le sous-onglet <span onclick="switchAvancementView(\'calcul\')" style="cursor:pointer;text-decoration:underline;color:var(--text)">Calcul</span> '
+        + 'pour le détail du passage du chiffre d\'affaires facturé au chiffre d\'affaires estimé à la clôture.'
         + '</p>';
 
       if (d.anomalies && d.anomalies.length) {
