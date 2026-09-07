@@ -1094,7 +1094,7 @@ async function fetchOpenDeals() {
   try {
     const { data: metaRows, error } = await supabaseAdmin
       .from('deal_metadata')
-      .select('deal_id, relances, notes, tasks, next_meeting_at');
+      .select('deal_id, relances, notes, tasks, next_meeting_at, reveille_at');
     if (error) throw error;
     for (const row of metaRows || []) metaByDeal[row.deal_id] = row;
     metaLoaded = true;

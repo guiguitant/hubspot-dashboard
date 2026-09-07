@@ -18,6 +18,14 @@ const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
 const { createClient } = require('@supabase/supabase-js');
 const { z } = require('zod');
+// Dormance des deals : RÈGLE UNIQUE, partagée avec server.js et miroir de la carte « Commercial »
+// de Pilot. Ne jamais la réécrire ici : elle doit rester définie à un seul endroit.
+const { isDealDormant } = require('../utils/dealDormancy');
+
+// Aucun appel HubSpot ne doit pouvoir bloquer indéfiniment : sans ce délai, une socket qui
+// reste ouverte sans jamais répondre fige l'outil MCP pour toujours (l'appelant n'a aucun moyen
+// de savoir que rien n'arrivera). 30 s, puis erreur explicite.
+const HTTP_TIMEOUT_MS = 30 * 1000;
 
 // --- Config HubSpot (miroir de server.js) ---
 const HUBSPOT_API_KEY = process.env.HUBSPOT_API_KEY;
@@ -34,13 +42,19 @@ const IS_EU = HUBSPOT_API_KEY.includes('eu1');
 const HUBSPOT_HOST = IS_EU ? 'api-eu1.hubapi.com' : 'api.hubapi.com';
 const IS_PAT = HUBSPOT_API_KEY.startsWith('pat-');
 
-// Stages du pipeline "default" suivis dans le kanban (miroir de server.js:467)
+// Stages du pipeline "default" suivis dans le kanban (miroir de server.js:507).
+// `forecast: false` -> stage hors projection : c'est le bac où Pilot range les deals « gelés ».
+//
+// Les PROBABILITÉS NE SONT PAS ICI, volontairement. Elles vivent dans les réglages de Pilot
+// (table kpi_prime_config, ligne 'pipeline_ponderation'), écrits par l'écran de pondération de
+// l'interface, et sont lues à chaud par loadStageProbabilities(). Un pourcentage réécrit ici
+// recréerait un forecast silencieusement faux dès que quelqu'un change le barème dans Pilot.
 const KANBAN_STAGES = [
-  { id: 'qualifiedtobuy', label: 'RDV Qualif', probability: 30 },
-  { id: 'presentationscheduled', label: 'RDV Propale', probability: 50 },
-  { id: 'decisionmakerboughtin', label: 'Négociation', probability: 60 },
-  { id: 'contractsent', label: 'Contrat envoyé', probability: 80 },
-  { id: '2077692138', label: 'À relancer plus tard', probability: 20, forecast: false },
+  { id: 'qualifiedtobuy', label: 'RDV Qualif' },
+  { id: 'presentationscheduled', label: 'RDV Propale' },
+  { id: 'decisionmakerboughtin', label: 'Négociation' },
+  { id: 'contractsent', label: 'Contrat envoyé' },
+  { id: '2077692138', label: 'À relancer plus tard', forecast: false },
 ];
 
 // Label de stage -> id HubSpot (miroir de server.js:572). Inclut les clôtures.
@@ -93,6 +107,7 @@ function hubspotSearch(body) {
         }
       });
     });
+    req.setTimeout(HTTP_TIMEOUT_MS, () => req.destroy(new Error('HubSpot Search : délai de 30 s dépassé')));
     req.on('error', reject);
     req.write(payload);
     req.end();
@@ -125,6 +140,7 @@ function hubspotWrite(method, endpoint, body) {
         }
       });
     });
+    req.setTimeout(HTTP_TIMEOUT_MS, () => req.destroy(new Error(`HubSpot ${method} : délai de 30 s dépassé`)));
     req.on('error', reject);
     req.write(payload);
     req.end();
@@ -146,19 +162,77 @@ async function upsertMeta(update) {
     .from('deal_metadata')
     .upsert({ ...update, updated_at: new Date().toISOString() }, { onConflict: 'deal_id' });
   if (error) throw new Error(`Supabase: ${error.message}`);
+  invalidateMetaCache(); // sinon une lecture juste après l'écriture renverrait l'ancienne valeur
+}
+
+// =====================================================================
+//  Barème de pondération : SOURCE UNIQUE = les réglages de Pilot
+// =====================================================================
+// Même ligne que celle qu'écrit l'écran de pondération de l'interface
+// (server.js, POST /api/pipeline-ponderation -> kpi_prime_config / 'pipeline_ponderation').
+// Cache 60 s : une lecture par appel MCP serait inutile, et une valeur figée au démarrage
+// du serveur serait fausse dès que quelqu'un modifie le barème en cours de journée.
+const PONDERATION_CONFIG_ID = 'pipeline_ponderation';
+const PROBA_CACHE_TTL = 60 * 1000;
+let probaCache = null;
+let probaCacheTime = 0;
+
+// Renvoie { ok, probabilities, reason } où probabilities est { label -> % } pour les seuls
+// stages de projection. ok=false dès que le barème est injoignable OU incomplet : dans ce cas
+// l'appelant DOIT renvoyer weighted_forecast: null. Jamais de repli sur des valeurs codées en
+// dur : un pipe pondéré faux ne se voit pas, un pipe pondéré absent se voit.
+async function loadStageProbabilities() {
+  const now = Date.now();
+  if (probaCache && now - probaCacheTime < PROBA_CACHE_TTL) return probaCache;
+  try {
+    if (!supabase) throw new Error('Supabase non configuré');
+    const { data, error } = await supabase
+      .from('kpi_prime_config').select('config').eq('id', PONDERATION_CONFIG_ID).maybeSingle();
+    if (error) throw new Error(error.message);
+    const saved = data && data.config && data.config.probabilities;
+    if (!saved || typeof saved !== 'object') throw new Error('barème absent des réglages Pilot');
+    const probabilities = {};
+    const missing = [];
+    for (const stage of KANBAN_STAGES) {
+      if (stage.forecast === false) continue; // stage hors projection : pas de % à exposer
+      const n = Number(saved[stage.id]);
+      if (!Number.isFinite(n)) { missing.push(stage.label); continue; }
+      probabilities[stage.label] = Math.max(0, Math.min(100, Math.round(n)));
+    }
+    if (missing.length) throw new Error(`barème incomplet, stages sans % : ${missing.join(', ')}`);
+    // Seul un succès est mis en cache : après un incident, le barème revient dès l'appel suivant.
+    probaCache = { ok: true, probabilities, reason: null };
+    probaCacheTime = now;
+    return probaCache;
+  } catch (e) {
+    console.error('[mcp-deals] barème de pondération illisible :', e.message);
+    return { ok: false, probabilities: {}, reason: e.message };
+  }
 }
 
 // Récupère tous les résultats d'une recherche en suivant la pagination.
+// Deux garde-fous : un curseur qui n'avance pas et un nombre de pages plafonné. Sans eux,
+// une réponse HubSpot dégénérée (même `after` renvoyé en boucle) fait tourner l'outil à l'infini.
+const SEARCH_MAX_PAGES = 100; // 100 pages x 100 résultats = 10 000, la limite de l'API search
 async function searchAll(body) {
   const all = [];
   let after;
+  let pages = 0;
   while (true) {
     const b = after ? { ...body, after } : body;
     const result = await hubspotSearch(b);
     if (result.results) all.push(...result.results);
-    if (result.paging && result.paging.next && result.paging.next.after) {
-      after = result.paging.next.after;
-    } else break;
+    const next = result.paging && result.paging.next && result.paging.next.after;
+    if (!next) break;
+    if (next === after) {
+      console.error('[mcp-deals] pagination HubSpot bloquée (curseur identique), arrêt.');
+      break;
+    }
+    if (++pages >= SEARCH_MAX_PAGES) {
+      console.error('[mcp-deals] pagination HubSpot : plafond de pages atteint, arrêt.');
+      break;
+    }
+    after = next;
   }
   return all;
 }
@@ -205,17 +279,43 @@ function asArray(v) {
   return Array.isArray(v) ? v : [v];
 }
 
-// Charge TOUTE la metadata deal (tags, tasks, relances, assignee, next_meeting_at)
-// en Map deal_id(string) -> row. Complète loadTagsByDeal (qui ne lit que les tags).
+// Charge TOUTE la metadata deal en Map deal_id(string) -> row.
+// `notes` et `reveille_at` sont indispensables au calcul de dormance (dernier traitement =
+// max(relance, note, réveil manuel)) : sans eux, des deals seraient déclarés en sommeil à tort
+// et disparaîtraient du pipe pondéré. `wake_up_at` porte la date de retour d'un deal gelé.
+//
+// Une seule requête groupée, mise en cache 30 s : get_daily_briefing appelle trois collecteurs
+// qui ont tous besoin de la même table. Le cache est jeté à chaque écriture (upsertMeta), donc
+// une lecture qui suit une écriture voit toujours la valeur fraîche.
+const META_CACHE_TTL = 30 * 1000;
+let metaCache = null;
+let metaCacheTime = 0;
+function invalidateMetaCache() { metaCache = null; metaCacheTime = 0; }
+
 async function loadMetaByDeal() {
+  if (metaCache && Date.now() - metaCacheTime < META_CACHE_TTL) return metaCache;
   const map = new Map();
   if (!supabase) return map;
   const { data, error } = await supabase
     .from('deal_metadata')
-    .select('deal_id, tags, tasks, relances, assignee, next_meeting_at');
+    .select('deal_id, tags, tasks, relances, notes, assignee, next_meeting_at, wake_up_at, reveille_at');
   if (error) throw new Error(`Supabase deal_metadata: ${error.message}`);
   for (const row of data || []) map.set(String(row.deal_id), row);
+  metaCache = map;
+  metaCacheTime = Date.now();
   return map;
+}
+
+// Extrait de la ligne Supabase les seuls champs que lit isDealDormant, normalisés.
+// (les colonnes JSON peuvent revenir en chaîne ou en tableau selon l'historique d'écriture)
+function dormancyMeta(m) {
+  return {
+    next_meeting_at: m ? m.next_meeting_at : null,
+    tasks: asArray(m && m.tasks),
+    relances: asArray(m && m.relances),
+    notes: asArray(m && m.notes),
+    reveille_at: m ? m.reveille_at : null,
+  };
 }
 
 // Récupère nom/stage/montant/clôture d'une liste d'IDs deals via batch read HubSpot
@@ -249,8 +349,14 @@ async function fetchDealInfos(ids) {
 async function collectTasks({ status = 'todo', overdue_only = false, assignee, type, open_only = false } = {}) {
   const meta = await loadMetaByDeal();
   const now = Date.now();
+  // Le filtre assigné s'applique AVANT fetchDealInfos : inutile d'aller chercher chez HubSpot
+  // le détail de deals qu'on va jeter juste après. Sur un briefing filtré par personne, cela
+  // divise par trois le volume interrogé.
   const idsWithTasks = [];
-  for (const [dealId, m] of meta) if (asArray(m.tasks).length) idsWithTasks.push(dealId);
+  for (const [dealId, m] of meta) {
+    if (assignee && (m.assignee || '').toLowerCase() !== assignee.toLowerCase()) continue;
+    if (asArray(m.tasks).length) idsWithTasks.push(dealId);
+  }
   const infos = await fetchDealInfos(idsWithTasks);
 
   const rows = [];
@@ -375,17 +481,32 @@ server.registerTool(
   {
     title: 'Pipeline des deals ouverts',
     description:
-      "Renvoie tous les deals OUVERTS du pipeline 'default', groupés par stage, " +
-      "avec montant, dates, description ET tags (EPD, Bilan carbone, Web app, ACV…). " +
+      "Renvoie tous les deals OUVERTS du pipeline 'default', groupés par stage, avec montant, dates, " +
+      "description, tags (EPD, Bilan carbone, Web app, ACV…), ASSIGNÉ et état du deal. " +
       "À utiliser pour les questions qualitatives : quels deals relancer, lesquels sont à risque, " +
-      "où en est le pipeline, répartition par offre/tag. Forecast pondéré inclus. " +
-      "Filtrer par tag avec l'argument 'tag' (ex 'EPD').",
+      "où en est le pipeline, répartition par offre/tag ou par personne. Filtrer par tag avec 'tag'. " +
+      "Les descriptions ne sont PAS renvoyées par défaut : passer include_descriptions=true uniquement " +
+      "quand la question porte sur le contenu d'un deal, pas pour un état du pipe ou un forecast. " +
+      "PÉRIMÈTRE : 'weighted_forecast' ne compte QUE les deals actifs, c'est-à-dire ni gelés " +
+      "(stage 'À relancer plus tard') ni en sommeil (90 j sans relance ni note). C'est exactement " +
+      "le périmètre de la carte « Commercial » de Pilot : utiliser 'active_count' et 'active_amount' " +
+      "pour un chiffre comparable à l'interface, PAS 'open_deals' / 'total_amount' qui comptent tout. " +
+      "Chaque deal porte 'dormant', 'frozen' et 'counts_in_forecast' : ne pas redériver ces règles. " +
+      "PROBABILITÉS : lues dans les réglages de Pilot et renvoyées dans 'stage_probabilities' ; " +
+      "les afficher depuis ce champ, ne jamais les recopier ailleurs. Si 'weighted_forecast' vaut null " +
+      "avec un 'warning', le barème est injoignable : NE PAS calculer de pipe pondéré soi-même, " +
+      "signaler que l'indicateur est indisponible.",
     inputSchema: {
       tag: z.string().optional().describe("Ne garder que les deals portant ce tag, ex 'EPD' (optionnel, insensible à la casse)"),
+      include_descriptions: z.boolean().optional().describe(
+        "Inclure le texte libre de description de chaque deal. Défaut : NON, car il double le poids de la " +
+        "réponse sans servir au pilotage. Ne l'activer que pour une lecture qualitative (« où en est ce deal, " +
+        "qu'est-ce qui bloque ? »). Pour un état du pipe, un forecast, une répartition par personne ou par " +
+        "offre, laisser à false : montants, étapes, assigné et états suffisent."),
     },
   },
-  async ({ tag }) => {
-    const [deals, tagsByDeal] = await Promise.all([
+  async ({ tag, include_descriptions = false }) => {
+    const [deals, metaByDeal, proba] = await Promise.all([
       searchAll({
         filterGroups: [{
           filters: [
@@ -396,33 +517,63 @@ server.registerTool(
         properties: ['dealname', 'amount', 'dealstage', 'closedate', 'createdate', 'description'],
         limit: 100,
       }),
-      loadTagsByDeal(),
+      loadMetaByDeal(),
+      loadStageProbabilities(),
     ]);
 
+    const now = Date.now();
     const byStage = {};
     const byTag = {};
     let weightedForecast = 0;
     let totalAmount = 0;
     let kept = 0;
-    for (const stage of KANBAN_STAGES) byStage[stage.label] = { count: 0, amount: 0, deals: [] };
+    let activeCount = 0, activeAmount = 0;
+    let dormantCount = 0, dormantAmount = 0;
+    let frozenCount = 0, frozenAmount = 0;
+    for (const stage of KANBAN_STAGES) byStage[stage.label] = { count: 0, amount: 0, dormant_count: 0, deals: [] };
 
     for (const d of deals) {
       const stage = KANBAN_STAGES.find((s) => s.id === d.properties.dealstage);
       if (!stage) continue;
-      const tags = tagsByDeal.get(String(d.id)) || [];
+      const m = metaByDeal.get(String(d.id)) || {};
+      const tags = asArray(m.tags).map(String);
       if (!hasTag(tags, tag)) continue;
       const amount = parseFloat(d.properties.amount) || 0;
+      const createdate = d.properties.createdate || null;
+
+      // Trois états, exactement comme la carte « Commercial » de Pilot :
+      //  - gelé   : rangé dans « À relancer plus tard » (geste manuel), hors projection ;
+      //  - dormant : 90 j sans relance ni note, sauf RDV futur / tâche à échéance / deal récent ;
+      //  - actif   : le reste, seul à entrer dans weighted_forecast.
+      // Un deal gelé n'est jamais dit « dormant » : c'est déjà une sortie volontaire du pipe actif.
+      const frozen = stage.forecast === false;
+      const dormant = !frozen && isDealDormant({ createdate }, dormancyMeta(m), now);
+      const countsInForecast = !frozen && !dormant;
+      // Probabilité nulle pour un gelé, null quand le barème de Pilot est injoignable :
+      // on n'invente jamais un pourcentage.
+      const probability = frozen ? 0 : (proba.ok ? proba.probabilities[stage.label] : null);
+
       kept++;
       byStage[stage.label].count++;
       byStage[stage.label].amount += amount;
+      if (dormant) byStage[stage.label].dormant_count++;
       byStage[stage.label].deals.push({
         id: d.id,
         name: d.properties.dealname || 'Sans nom',
         amount,
+        assignee: m.assignee || null,
         tags,
-        createdate: d.properties.createdate || null,
+        dormant,
+        frozen,
+        counts_in_forecast: countsInForecast,
+        probability,
+        weighted: countsInForecast && probability != null ? Math.round(amount * probability / 100) : 0,
+        createdate,
         closedate: d.properties.closedate || null,
-        description: d.properties.description || '',
+        wake_up_at: m.wake_up_at || null,
+        next_meeting_at: m.next_meeting_at || null,
+        // Le texte libre pèse à lui seul la moitié de la réponse : il n'est joint que sur demande.
+        ...(include_descriptions ? { description: d.properties.description || '' } : {}),
       });
       for (const tg of tags) {
         if (!byTag[tg]) byTag[tg] = { count: 0, amount: 0 };
@@ -430,21 +581,51 @@ server.registerTool(
         byTag[tg].amount += amount;
       }
       totalAmount += amount;
-      if (stage.forecast !== false) weightedForecast += amount * (stage.probability / 100);
+      if (frozen) { frozenCount++; frozenAmount += amount; }
+      else if (dormant) { dormantCount++; dormantAmount += amount; }
+      else {
+        activeCount++; activeAmount += amount;
+        if (probability != null) weightedForecast += amount * (probability / 100);
+      }
     }
 
     const summary = {
       filter_tag: tag || null,
+      // Sans ce drapeau, un lecteur pourrait croire que les deals n'ont pas de description.
+      descriptions_included: !!include_descriptions,
       open_deals: kept,
       total_amount: totalAmount,
       total_amount_label: fmtEUR(totalAmount),
-      weighted_forecast: Math.round(weightedForecast),
-      weighted_forecast_label: fmtEUR(weightedForecast),
+      // Le périmètre de projection : actif = ni gelé, ni en sommeil. C'est CE compte
+      // et CE montant qui correspondent à la carte « Commercial » de Pilot.
+      active_count: activeCount,
+      active_amount: activeAmount,
+      active_amount_label: fmtEUR(activeAmount),
+      dormant_count: dormantCount,
+      dormant_amount: dormantAmount,
+      dormant_amount_label: fmtEUR(dormantAmount),
+      frozen_count: frozenCount,
+      frozen_amount: frozenAmount,
+      frozen_amount_label: fmtEUR(frozenAmount),
+      weighted_forecast: proba.ok ? Math.round(weightedForecast) : null,
+      weighted_forecast_label: proba.ok ? fmtEUR(weightedForecast) : null,
+      stage_probabilities: proba.ok ? proba.probabilities : null,
+      stage_probabilities_source: 'Réglages Pilot (écran de pondération)',
+      forecast_excludes: ['À relancer plus tard', 'deals en sommeil'],
       by_stage: Object.fromEntries(
-        KANBAN_STAGES.map((s) => [s.label, { count: byStage[s.label].count, amount: byStage[s.label].amount }])
+        KANBAN_STAGES.map((s) => [s.label, {
+          count: byStage[s.label].count,
+          amount: byStage[s.label].amount,
+          dormant_count: byStage[s.label].dormant_count,
+          probability: s.forecast === false ? 0 : (proba.ok ? proba.probabilities[s.label] : null),
+        }])
       ),
       by_tag: byTag,
     };
+    if (!proba.ok) {
+      summary.warning = 'stage probabilities unavailable';
+      summary.warning_detail = proba.reason;
+    }
 
     return { content: [{ type: 'text', text: JSON.stringify({ summary, pipeline: byStage }, null, 2) }] };
   }
@@ -470,7 +651,7 @@ server.registerTool(
     },
   },
   async ({ from, to, tag }) => {
-    const [deals, tagsByDeal] = await Promise.all([
+    const [deals, metaByDeal] = await Promise.all([
       searchAll({
         filterGroups: [{
           filters: [
@@ -482,7 +663,7 @@ server.registerTool(
         properties: ['dealname', 'amount', 'dealstage', 'closedate', 'createdate', 'hs_is_closed_won'],
         limit: 100,
       }),
-      loadTagsByDeal(),
+      loadMetaByDeal(), // et non loadTagsByDeal : on a besoin de l'assigné, pas seulement des tags
     ]);
 
     let won = { count: 0, amount: 0, deals: [] };
@@ -491,8 +672,11 @@ server.registerTool(
     let closedWithTag = 0;
     let closedTotalInPeriod = 0;
 
+    const byAssignee = {};
     for (const d of deals) {
-      const tags = tagsByDeal.get(String(d.id)) || [];
+      const m = metaByDeal.get(String(d.id)) || {};
+      const tags = asArray(m.tags).map(String);
+      const assignee = m.assignee || null; // null explicite : « non assigné » est une information
       closedTotalInPeriod++;
       if (tags.length) closedWithTag++;
       if (!hasTag(tags, tag)) continue;
@@ -501,7 +685,11 @@ server.registerTool(
       const bucket = isWon ? won : lost;
       bucket.count++;
       bucket.amount += amount;
-      bucket.deals.push({ id: d.id, name: d.properties.dealname || 'Sans nom', amount, tags, closedate: d.properties.closedate || null });
+      bucket.deals.push({ id: d.id, name: d.properties.dealname || 'Sans nom', amount, assignee, tags, closedate: d.properties.closedate || null });
+      const key = assignee || 'Non assigné';
+      if (!byAssignee[key]) byAssignee[key] = { won_count: 0, won_amount: 0, lost_count: 0, lost_amount: 0 };
+      if (isWon) { byAssignee[key].won_count++; byAssignee[key].won_amount += amount; }
+      else { byAssignee[key].lost_count++; byAssignee[key].lost_amount += amount; }
       for (const tg of tags) {
         if (!byTag[tg]) byTag[tg] = { won_count: 0, won_amount: 0, lost_count: 0, lost_amount: 0 };
         if (isWon) { byTag[tg].won_count++; byTag[tg].won_amount += amount; }
@@ -526,6 +714,7 @@ server.registerTool(
       avg_won_deal: Math.round(avgWon),
       avg_won_deal_label: fmtEUR(avgWon),
       by_tag: byTag,
+      by_assignee: byAssignee,
       tag_coverage: {
         closed_in_period: closedTotalInPeriod,
         closed_with_tag: closedWithTag,
@@ -661,6 +850,30 @@ server.registerTool(
 );
 
 // --- Outil 6 : briefing commercial du jour (vue de pilotage en 1 appel) ---
+// Budget de temps EXPLICITE : cet outil alimente le briefing de 9 h 30, il ne doit jamais
+// laisser l'appelant sans réponse. Chaque collecteur court contre le budget ; celui qui
+// dépasse rend une section vide et le briefing part avec truncated: true. Un briefing
+// partiel et honnête vaut mieux qu'un appel qui ne rend pas la main.
+const BRIEFING_BUDGET_MS = 20 * 1000;
+
+// Course entre un collecteur et le budget restant. La promesse perdue continue en arrière-plan
+// (on ne peut pas l'annuler) mais on ne l'attend plus. `incidents` collecte ce qui a manqué,
+// pour que la réponse dise QUELLE section est incomplète et pourquoi.
+function withBudget(promise, ms, fallback, label, incidents) {
+  let timer;
+  const guard = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      incidents.push(`${label} : budget de ${Math.round(ms / 1000)} s dépassé`);
+      resolve(fallback);
+    }, ms);
+    if (timer.unref) timer.unref(); // ne pas maintenir le process en vie pour ce minuteur
+  });
+  return Promise.race([
+    promise.catch((e) => { incidents.push(`${label} : ${e.message}`); return fallback; }),
+    guard,
+  ]).then((v) => { clearTimeout(timer); return v; });
+}
+
 server.registerTool(
   'get_daily_briefing',
   {
@@ -668,18 +881,34 @@ server.registerTool(
     description:
       "Vue de pilotage quotidienne en UN appel, idéale pour démarrer la journée : tâches en retard, tâches dues " +
       "aujourd'hui, deals en retard (closedate/RDV passés) et prochains RDV à venir (fenêtre paramétrable, défaut 7 j). " +
-      "Filtrable par assigné.",
+      "Filtrable par assigné. Répond en moins de 20 s : au-delà, il renvoie ce qui est prêt avec truncated: true " +
+      "et 'truncated_reasons' qui nomme la section manquante. Le champ 'timings_ms' donne le temps de chaque étape.",
     inputSchema: {
       assignee: z.string().optional().describe('Filtrer par assigné : Guillaume | Vincent | Nathan'),
       upcoming_days: z.number().optional().describe('Fenêtre des RDV à venir, en jours (défaut 7)'),
     },
   },
   async ({ assignee, upcoming_days = 7 }) => {
+    const started = Date.now();
+    const incidents = [];
+    const timings = {};
+    // Instrumentation permanente : la prochaine fois qu'une étape ralentit, elle se désigne
+    // toute seule dans la réponse au lieu de se deviner.
+    const timed = (label, promise) => {
+      const s0 = Date.now();
+      return promise.then((r) => { timings[label] = Date.now() - s0; return r; });
+    };
+
     const [tasksRes, overdueRes, meetings] = await Promise.all([
-      collectTasks({ status: 'todo', assignee, open_only: true }),
-      collectOverdueDeals({ assignee }),
-      collectUpcomingMeetings({ assignee, days: upcoming_days }),
+      withBudget(timed('tasks', collectTasks({ status: 'todo', assignee, open_only: true })),
+        BRIEFING_BUDGET_MS, { rows: [], overdue_count: 0 }, 'tâches', incidents),
+      withBudget(timed('overdue_deals', collectOverdueDeals({ assignee })),
+        BRIEFING_BUDGET_MS, { rows: [], total_amount: 0 }, 'deals en retard', incidents),
+      withBudget(timed('upcoming_meetings', collectUpcomingMeetings({ assignee, days: upcoming_days })),
+        BRIEFING_BUDGET_MS, [], 'RDV à venir', incidents),
     ]);
+    timings.total = Date.now() - started;
+
     const endToday = new Date();
     endToday.setHours(23, 59, 59, 999);
     const endTodayMs = endToday.getTime();
@@ -691,6 +920,9 @@ server.registerTool(
     return { content: [{ type: 'text', text: JSON.stringify({
       generated_at: new Date().toISOString(),
       assignee: assignee || null,
+      truncated: incidents.length > 0,
+      truncated_reasons: incidents,
+      timings_ms: timings,
       headline: {
         overdue_tasks: overdueTasks.length,
         due_today_tasks: dueTodayTasks.length,
@@ -941,7 +1173,27 @@ async function main() {
   await server.connect(transport);
   console.error('[mcp-deals] serveur prêt (stdio)');
 }
-main().catch((e) => {
-  console.error('[mcp-deals] erreur fatale:', e);
-  process.exit(1);
-});
+
+// Le transport stdio ne démarre QUE si le fichier est lancé directement (`node mcp/deals-server.js`).
+// Chargé via require(), il expose ses fonctions internes sans ouvrir de transport : c'est ce qui
+// permet de mesurer et de tester la logique de collecte hors Claude Desktop.
+if (require.main === module) {
+  main().catch((e) => {
+    console.error('[mcp-deals] erreur fatale:', e);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  KANBAN_STAGES,
+  loadStageProbabilities,
+  invalidateMetaCache,
+  dormancyMeta,
+  loadMetaByDeal,
+  loadTagsByDeal,
+  collectTasks,
+  collectOverdueDeals,
+  collectUpcomingMeetings,
+  fetchDealInfos,
+  searchAll,
+};
