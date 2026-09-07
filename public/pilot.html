@@ -14760,19 +14760,21 @@
       if (!ligne) return null;
       return (Number(ligne.pct) || 0) - avancementCumulAuPlusTard(lignesMission, exercice - 1);
     }
-    // Part déjà facturée (%) sur les exercices STRICTEMENT antérieurs à `exercice`, à partir des
-    // VOLETS RÉELS de la mission (montant + date d'émission), pas de l'avancement saisi. Copie inline
-    // de utils/avancementParts.js (voir ce fichier pour la justification complète) : repli de
-    // avancementSuggestionPart ci-dessous quand aucune ancre n'existe (spec 5.1 septies, point e).
+    // Part déjà comptée (%) par Pilot sur les exercices STRICTEMENT antérieurs à `exercice`, pour une
+    // mission SANS ancre. Copie inline de utils/avancementParts.js (voir ce fichier pour la
+    // justification complète du correctif de ronde de revue 1) : repli de avancementSuggestionPart
+    // ci-dessous quand aucune ancre n'existe (spec 5.1 septies, point e). CORRIGÉ : lit
+    // `mission.anneeAcompte`/`mission.anneeSolde` (déjà calculés côté serveur avec repli sur « Année
+    // final » quand la facture n'est pas encore émise, exposés par GET /api/avancement), et non plus
+    // les dates d'émission brutes qui ignoraient ce repli et sous-estimaient ce qui était déjà compté.
     function avancementPctFactureAvant(mission, exercice) {
       const m = mission || {};
       const ca = Number(m.ca) || 0;
       if (ca <= 0) return 0;
-      const anneeDe = (d) => (d ? Number(String(d).slice(0, 4)) : null);
       const acompte = Number(m.montantAcompte) || 0;
       const solde = Math.max(0, ca - acompte);
-      const anneeAcompte = anneeDe(m.dateFactureAcompte);
-      const anneeSolde = anneeDe(m.dateFactureFinale);
+      const anneeAcompte = m.anneeAcompte != null ? Number(m.anneeAcompte) : null;
+      const anneeSolde = m.anneeSolde != null ? Number(m.anneeSolde) : null;
       let total = 0;
       if (acompte > 0 && anneeAcompte != null && anneeAcompte < exercice) total += acompte;
       if (solde > 0 && anneeSolde != null && anneeSolde < exercice) total += solde;

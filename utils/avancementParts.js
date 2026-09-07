@@ -44,24 +44,38 @@ function partExercice(lignesMission, exercice) {
   return (Number(ligne.pct) || 0) - cumulAuPlusTard(lignesMission, exercice - 1);
 }
 
-// Part deja facturee (%) sur les exercices STRICTEMENT anterieurs a `exercice`, a partir des VOLETS
-// REELS de la mission (montant + date d'emission), pas de l'avancement saisi. Sert de repli pour
-// suggestionPart ci-dessous quand aucune ancre n'existe (spec 5.1 septies, point e). Meme regle de
-// rattachement que contributionsDepuisVolets (utils/caAvancement.js, base du CR : "factures emises
-// datees dans l'annee"), reimplementee ici pour rester un module autonome plutot que d'exposer un
-// symbole croise entre modules purs (meme parti pris que utils/avancementMissionInfo.js, qui ne
-// require pas non plus caAvancement.js). Un volet SANS date d'emission ne compte JAMAIS : le repli
-// "Annee final" (utilise ailleurs pour le rattachement comptable des missions suivies) est
-// volontairement exclu ici, ce champ ne dit rien de ce qui a REELLEMENT ete facture.
+// Part deja comptee (%) par Pilot sur les exercices STRICTEMENT anterieurs a `exercice`, pour une
+// mission SANS ancre. Sert de repli pour suggestionPart ci-dessous (spec 5.1 septies, point e).
+//
+// CORRECTIF (ronde de revue 1) : la premiere version reconstruisait les annees depuis les dates
+// d'emission BRUTES (dateFactureAcompte/dateFactureFinale), un volet sans date etant alors exclu
+// purement et simplement. C'etait le mauvais rattachement : ce n'est PAS ainsi que Pilot compte deja
+// le CA d'une mission non suivie. `signedAmountForYear`/`totalCaAnnee` (utils/kpiCompute.js, la base
+// "CA signe" partagee par Cockpit/Analytics/KPI/CR) rattachent chaque volet a `anneeAcompte`/
+// `anneeSolde` : l'annee de la date d'emission SI elle est connue, SINON un repli sur le champ Notion
+// « Annee final ». La premiere version de cette fonction ne voyait donc pas ce repli, et sous-estimait
+// ce qui etait deja compte : exactement le meme defaut de double comptage que Café Méo, par un autre
+// chemin (contre-exemple mesure en revue : mission 20 000 EUR, acompte 8 000 EUR facture en mars 2025,
+// solde 12 000 EUR JAMAIS facture mais "Annee final" = 2025, aucune ancre ; Pilot a deja compte les
+// 20 000 EUR en CA 2025 via ce repli ; l'ancienne version de cette fonction ne voyait que l'acompte
+// [dateFactureFinale nulle -> solde exclu a tort] et suggerait 60 % pour 2026, ce qui aurait recompte
+// les 12 000 EUR restants).
+//
+// Corrige : lit directement `mission.anneeAcompte`/`mission.anneeSolde`, deja calcules cote serveur
+// avec ce meme repli (utils/avancementMissionInfo.js, missionAvancementInfo) et deja exposes par
+// GET /api/avancement -- jamais recalcules depuis les dates brutes ici, pour ne jamais diverger de la
+// regle de rattachement reellement utilisee par le CA "hors avancement" (utils/kpiCompute.js,
+// intouche, lu mais jamais require depuis ce module pur, meme parti pris que
+// utils/avancementMissionInfo.js qui reimplemente cette regle plutot que d'exposer un symbole croise
+// entre modules purs).
 function pctFactureAvant(mission, exercice) {
   const m = mission || {};
   const ca = Number(m.ca) || 0;
   if (ca <= 0) return 0;
-  const anneeDe = (d) => (d ? Number(String(d).slice(0, 4)) : null);
   const acompte = Number(m.montantAcompte) || 0;
   const solde = Math.max(0, ca - acompte);
-  const anneeAcompte = anneeDe(m.dateFactureAcompte);
-  const anneeSolde = anneeDe(m.dateFactureFinale);
+  const anneeAcompte = m.anneeAcompte != null ? Number(m.anneeAcompte) : null;
+  const anneeSolde = m.anneeSolde != null ? Number(m.anneeSolde) : null;
   let total = 0;
   if (acompte > 0 && anneeAcompte != null && anneeAcompte < exercice) total += acompte;
   if (solde > 0 && anneeSolde != null && anneeSolde < exercice) total += solde;

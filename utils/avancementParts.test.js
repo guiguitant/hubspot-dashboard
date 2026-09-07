@@ -70,17 +70,27 @@ describe('suggestionPart : reste theorique a realiser', () => {
 
   // Defaut de chiffre corrige (spec 5.1 septies, point e) : cas reel mesure, Café Méo. 18 000 EUR au
   // total, acompte 5 400 EUR facture le 24/11/2025, solde 12 600 EUR facture le 16/07/2026, AUCUNE
-  // ancre 2025. Pilot a deja compte les 5 400 EUR en CA 2025 (a la date de facture). L'ancienne regle
-  // (100 % - cumul des ancres = 100 % - 0 % = 100 %) aurait redonne 18 000 EUR en 2026 et recompte les
-  // 5 400 EUR une seconde fois. La valeur juste est 70 %, qui redonne exactement les 12 600 EUR
-  // restants : 100 % - (5 400 / 18 000 x 100) = 100 % - 30 % = 70 %.
+  // ancre 2025. Pilot a deja compte les 5 400 EUR en CA 2025 (a la date de facture, anneeAcompte 2025
+  // ici puisque le volet est reellement emis). L'ancienne regle (100 % - cumul des ancres = 100 % -
+  // 0 % = 100 %) aurait redonne 18 000 EUR en 2026 et recompte les 5 400 EUR une seconde fois. La
+  // valeur juste est 70 %, qui redonne exactement les 12 600 EUR restants :
+  // 100 % - (5 400 / 18 000 x 100) = 100 % - 30 % = 70 %.
+  //
+  // `anneeAcompte`/`anneeSolde` sont fournis explicitement dans ces missions de test : ce sont les
+  // champs REELLEMENT lus par pctFactureAvant depuis le correctif de ronde de revue 1 (voir ce
+  // fichier), calcules cote serveur par utils/avancementMissionInfo.js (missionAvancementInfo) a
+  // partir des dates ET du repli "Annee final", et exposes par GET /api/avancement. Les dates brutes
+  // (dateFactureAcompte/dateFactureFinale) restent presentes pour realisme (le serveur les envoie
+  // aussi, avancementVoletsTexte les affiche), mais ne sont plus lues par pctFactureAvant.
   describe('cas réel Café Méo (défaut de double comptage corrigé)', () => {
     const caféMéo = {
       ca: 18000,
       montantAcompte: 5400,
       dateFactureAcompte: '2025-11-24',
+      anneeAcompte: 2025,
       montantSolde: 12600,
       dateFactureFinale: '2026-07-16',
+      anneeSolde: 2026,
     };
 
     test('aucune ancre 2025 : suggestion 2026 = 70 % (pas 100 %), redonne 12 600 EUR', () => {
@@ -96,17 +106,37 @@ describe('suggestionPart : reste theorique a realiser', () => {
       expect(suggestionPart([], 2026)).toBe(100);
     });
 
-    test('le volet solde 2026 (posterieur ou egal a l\'exercice) n\'est jamais compte dans le repli', () => {
-      // Si la regle comptait par erreur TOUS les volets factures (pas seulement ceux strictement
+    test('le volet solde 2026 (rattache a l\'exercice lui-meme, pas anterieur) n\'est jamais compte', () => {
+      // Si la regle comptait par erreur TOUS les volets rattaches (pas seulement ceux strictement
       // anterieurs a l'exercice), le solde 2026 s'ajouterait et la suggestion 2026 tomberait a 0 %.
       const suggestion = suggestionPart([], 2026, caféMéo);
       expect(suggestion).not.toBe(0);
     });
 
-    test('volet non encore facture (pas de date) jamais compte, meme s\'il porte un montant', () => {
-      const missionPartielle = { ca: 10000, montantAcompte: 4000, dateFactureAcompte: '2025-03-01', montantSolde: 6000, dateFactureFinale: null };
-      // Solde non facture : ignore. Seul l'acompte 2025 (4 000 / 10 000 = 40 %) est retranche.
+    test('volet non facture ET sans repli "Année final" : jamais compte, meme s\'il porte un montant', () => {
+      const missionPartielle = {
+        ca: 10000, montantAcompte: 4000, dateFactureAcompte: '2025-03-01', anneeAcompte: 2025,
+        montantSolde: 6000, dateFactureFinale: null, anneeSolde: null,
+      };
+      // Solde non facture ET sans "Annee final" connue (anneeSolde null) : ignore. Seul l'acompte 2025
+      // (4 000 / 10 000 = 40 %) est retranche.
       expect(suggestionPart([], 2026, missionPartielle)).toBe(60);
+    });
+
+    // Contre-exemple de la ronde de revue 1 (defaut Important) : un volet NON facture (pas de date
+    // d'emission) mais dont le champ Notion "Annee final" (repli) est deja passe DOIT compter, car
+    // c'est exactement ce que fait deja Pilot pour le CA "hors avancement" d'une mission non suivie
+    // (signedAmountForYear/totalCaAnnee, utils/kpiCompute.js, meme regle de rattachement). Mission
+    // 20 000 EUR, acompte 8 000 EUR facture en mars 2025, solde 12 000 EUR JAMAIS facture mais
+    // "Annee final" = 2025, aucune ancre : Pilot a deja compte les 20 000 EUR en CA 2025 (repli
+    // compris). La suggestion 2026 doit donc valoir 0 %, pas 60 % (ce que donnerait, a tort, une
+    // regle qui ignore le repli et ne voit que l'acompte facture).
+    test('volet non facture MAIS "Année final" (repli) antérieure à l\'exercice : compté quand même', () => {
+      const missionFAE = {
+        ca: 20000, montantAcompte: 8000, dateFactureAcompte: '2025-03-01', anneeAcompte: 2025,
+        montantSolde: 12000, dateFactureFinale: null, anneeSolde: 2025, // repli "Année final" = 2025
+      };
+      expect(suggestionPart([], 2026, missionFAE)).toBe(0);
     });
   });
 
@@ -118,10 +148,12 @@ describe('suggestionPart : reste theorique a realiser', () => {
   test('mission ancrée : l\'ancre prime sur des volets contradictoires', () => {
     const missionAncreeAvecVoletsContradictoires = {
       ca: 15500,
-      montantAcompte: 1550, // 10 % du CA, facture en 2025 : donnerait 90 % de suggestion sans l'ancre
+      montantAcompte: 1550, // 10 % du CA, rattache a 2025 : donnerait 90 % de suggestion sans l'ancre
       dateFactureAcompte: '2025-06-01',
+      anneeAcompte: 2025,
       montantSolde: 13950,
       dateFactureFinale: '2026-05-01',
+      anneeSolde: 2026,
     };
     const lignes = [{ exercice: 2025, pct: 70, fige_le: '2026-01-05T00:00:00Z' }];
     expect(suggestionPart(lignes, 2026, missionAncreeAvecVoletsContradictoires)).toBe(30);
