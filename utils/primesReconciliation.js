@@ -60,10 +60,73 @@ function agregerDebitsParSousCategorie(transactions) {
   return parSousCat;
 }
 
+// Rapprochement principal. Entrees :
+//   dettes        : [{ label, montantInitial, restant, controle }] issues de parseDettes (server.js)
+//   transactions  : transactions Qonto brutes, tous comptes, deja bornees a la fenetre de lecture
+//   primesSubcats : liste normalisee des sous-categories de primes (defaut PRIMES_SUBCATS)
+//   tauxTva       : taux de TVA des factures de primes (defaut PRIMES_TVA_TAUX)
+//   tolerance     : seuil d'ecart en euros (defaut PRIMES_ECART_TOLERANCE)
+//
+// Politique d'arrondi (spec section 4.1) : tous les montants sont arrondis a l'euro AVANT le
+// calcul du statut, pour qu'un badge ne puisse jamais annoncer "ecart de 0 EUR" tout en etant en
+// alerte. Les totaux somment les valeurs de ligne deja arrondies, donc l'invariant est exact.
+function reconcilePrimes({
+  dettes,
+  transactions,
+  primesSubcats = PRIMES_SUBCATS,
+  tauxTva = PRIMES_TVA_TAUX,
+  tolerance = PRIMES_ECART_TOLERANCE,
+} = {}) {
+  const parSousCat = agregerDebitsParSousCategorie(transactions);
+  const lignes = [];
+
+  for (const d of dettes || []) {
+    if (!estLignePrimes(d && d.label)) continue;
+    const cle = normalizeLabel(d.label);
+    const agg = parSousCat.get(cle) || { montant: 0, nb: 0 };
+
+    const declareRembourseHT = Math.round((Number(d.montantInitial) || 0) - (Number(d.restant) || 0));
+    const reelTTC = Math.round(agg.montant);
+    const reelHT = Math.round(agg.montant / (1 + tauxTva));
+    const ecart = reelHT - declareRembourseHT;
+
+    // `sans_reel` prime sur les autres statuts : une ligne sans aucune transaction rattachee
+    // n'est jamais qualifiee de `sur_declare`, les deux cas appelant des actions differentes
+    // (creer la sous-categorie Qonto, ou chercher le virement manquant).
+    let statut;
+    if (agg.nb === 0) statut = 'sans_reel';
+    else if (Math.abs(ecart) <= tolerance) statut = 'ok';
+    else if (ecart > 0) statut = 'sous_declare';
+    else statut = 'sur_declare';
+
+    lignes.push({
+      label: d.label,
+      montantInitial: Math.round(Number(d.montantInitial) || 0),
+      restant: Math.round(Number(d.restant) || 0),
+      declareRembourseHT,
+      reelTTC,
+      reelHT,
+      nbTransactions: agg.nb,
+      ecart,
+      statut,
+      couvertParExclusion: (primesSubcats || []).includes(cle),
+    });
+  }
+
+  const totaux = lignes.reduce((acc, l) => ({
+    declareRembourseHT: acc.declareRembourseHT + l.declareRembourseHT,
+    reelHT: acc.reelHT + l.reelHT,
+    ecart: acc.ecart + l.ecart,
+  }), { declareRembourseHT: 0, reelHT: 0, ecart: 0 });
+
+  return { lignes, totaux, alertes: [] };
+}
+
 module.exports = {
   envNumber,
   estLignePrimes,
   agregerDebitsParSousCategorie,
+  reconcilePrimes,
   PRIMES_TVA_TAUX,
   PRIMES_ECART_TOLERANCE,
   PRIMES_SUBCATS,
