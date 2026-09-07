@@ -21,6 +21,9 @@ const { z } = require('zod');
 // Dormance des deals : RÈGLE UNIQUE, partagée avec server.js et miroir de la carte « Commercial »
 // de Pilot. Ne jamais la réécrire ici : elle doit rester définie à un seul endroit.
 const { isDealDormant } = require('../utils/dealDormancy');
+// Version de CE serveur et comparaison de versions. Voir utils/mcpVersion.js :
+// c'est là qu'on incrémente le numéro à chaque modification.
+const { MCP_SERVER_VERSION, compareVersions } = require('../utils/mcpVersion');
 
 // Aucun appel HubSpot ne doit pouvoir bloquer indéfiniment : sans ce délai, une socket qui
 // reste ouverte sans jamais répondre fige l'outil MCP pour toujours (l'appelant n'a aucun moyen
@@ -208,6 +211,62 @@ async function loadStageProbabilities() {
     console.error('[mcp-deals] barème de pondération illisible :', e.message);
     return { ok: false, probabilities: {}, reason: e.message };
   }
+}
+
+// =====================================================================
+//  Garde-fou d'obsolescence
+// =====================================================================
+// Une copie périmée de ce serveur ne se plaint pas : elle répond des chiffres faux
+// avec assurance, et personne ne le voit. On publie donc la version minimale requise
+// dans la même table de config que le barème (kpi_prime_config, ligne 'mcp_version',
+// `config.min_version`), canal auquel CHAQUE installation a déjà accès. Aucune
+// migration. Toute réponse d'un serveur trop ancien porte alors un avertissement.
+//
+// Limite assumée : ce garde-fou ne protège que l'avenir. Les copies installées AVANT
+// son introduction ne savent pas se plaindre ; seule une redistribution les corrige.
+const MIN_VERSION_CONFIG_ID = 'mcp_version';
+const MIN_VERSION_CACHE_TTL = 5 * 60 * 1000; // change très rarement
+let minVersionCache = null;
+let minVersionCacheTime = 0;
+
+// Version minimale publiée, ou null si injoignable. En cas de panne on ne crie PAS
+// au loup : un faux avertissement d'obsolescence serait vite ignoré, et un
+// avertissement ignoré ne protège plus de rien.
+async function loadMinVersion() {
+  const now = Date.now();
+  if (minVersionCache && now - minVersionCacheTime < MIN_VERSION_CACHE_TTL) return minVersionCache;
+  try {
+    if (!supabase) return null;
+    const { data, error } = await supabase
+      .from('kpi_prime_config').select('config').eq('id', MIN_VERSION_CONFIG_ID).maybeSingle();
+    if (error) throw new Error(error.message);
+    const min = data && data.config && data.config.min_version;
+    if (!min) return null;
+    minVersionCache = { min_version: String(min), message: (data.config.message || null) };
+    minVersionCacheTime = now;
+    return minVersionCache;
+  } catch (e) {
+    console.error('[mcp-deals] version minimale illisible (aucun avertissement émis) :', e.message);
+    return null;
+  }
+}
+
+// Bloc `_mcp` joint à chaque réponse : la version qui tourne, et l'alerte si elle est trop vieille.
+async function versionStamp() {
+  const stamp = { server_version: MCP_SERVER_VERSION };
+  const min = await loadMinVersion();
+  if (min && compareVersions(MCP_SERVER_VERSION, min.min_version) < 0) {
+    stamp.outdated = true;
+    stamp.min_version = min.min_version;
+    // Formulé à destination du modèle qui lit la réponse : il doit le dire à l'utilisateur.
+    stamp.warning =
+      `SERVEUR MCP OBSOLÈTE : version ${MCP_SERVER_VERSION} installée sur ce poste, ` +
+      `${min.min_version} requise. Les chiffres ci-dessous peuvent être FAUX. ` +
+      `PRÉVIENS L'UTILISATEUR AVANT DE RÉPONDRE et dis-lui de demander le kit à jour à Nathan ` +
+      `(remplacer le dossier kit-releaf-deals, puis relancer Claude Desktop).`;
+    if (min.message) stamp.note = min.message;
+  }
+  return stamp;
 }
 
 // Récupère tous les résultats d'une recherche en suivant la pagination.
@@ -473,7 +532,30 @@ async function collectUpcomingMeetings({ assignee, days = 7 } = {}) {
 // =====================================================================
 //  Serveur MCP
 // =====================================================================
-const server = new McpServer({ name: 'releaf-deals', version: '1.0.0' });
+const server = new McpServer({ name: 'releaf-deals', version: MCP_SERVER_VERSION });
+
+// On enveloppe registerTool UNE fois plutôt que d'estampiller douze handlers à la main :
+// tout outil ajouté plus tard hérite du garde-fou sans que personne ait à y penser.
+// La réponse n'est touchée que si c'est un objet JSON ; sinon elle passe telle quelle.
+const _registerTool = server.registerTool.bind(server);
+server.registerTool = (name, spec, handler) =>
+  _registerTool(name, spec, async (...args) => {
+    const result = await handler(...args);
+    try {
+      const first = result && result.content && result.content[0];
+      if (!first || first.type !== 'text') return result;
+      let payload;
+      try { payload = JSON.parse(first.text); } catch { return result; }
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return result;
+      payload._mcp = await versionStamp();
+      const content = [...result.content];
+      content[0] = { ...first, text: JSON.stringify(payload, null, 2) };
+      return { ...result, content };
+    } catch (e) {
+      console.error('[mcp-deals] estampillage de version impossible :', e.message);
+      return result; // jamais au prix de la réponse elle-même
+    }
+  });
 
 // --- Outil 1 : pipeline des deals ouverts (qualitatif) ---
 server.registerTool(
@@ -1185,6 +1267,9 @@ if (require.main === module) {
 }
 
 module.exports = {
+  MCP_SERVER_VERSION,
+  compareVersions,
+  versionStamp,
   KANBAN_STAGES,
   loadStageProbabilities,
   invalidateMetaCache,

@@ -43,6 +43,35 @@ Les **descriptions** des deals ne sont pas renvoyées par défaut : `include_des
 pour une lecture qualitative deal par deal. `summary.descriptions_included` dit ce qui a été
 renvoyé, pour qu'un champ absent ne se lise pas comme une description vide.
 
+## Distribution et versions — à lire avant de modifier `deals-server.js`
+
+Ce serveur est **distribué** : une copie tourne sur le poste de chaque utilisateur, lancée par
+Claude Desktop en stdio. Rien ne la met à jour. Une copie périmée ne tombe pas en panne, elle
+répond des chiffres faux avec assurance : c'est ainsi qu'un forecast erroné a circulé sans
+être vu. D'où le rituel suivant, en trois gestes.
+
+1. **Incrémenter `MCP_SERVER_VERSION`** dans `utils/mcpVersion.js`. Monter le MINEUR dès qu'un
+   chiffre renvoyé peut changer, le CORRECTIF pour le reste.
+2. **`npm run mcp:kit`** fabrique `mcp/kit-releaf-deals.zip` : il copie le serveur et ses
+   dépendances `utils/`, installe les 4 paquets nécessaires, **vérifie que le serveur démarre**
+   puis zippe. Envoyer ce zip aux utilisateurs. Le zip n'est pas suivi par git (artefact).
+3. **`npm run mcp:kit -- --publish`**, une fois le zip envoyé, publie la version comme minimum
+   requis (`kpi_prime_config`, ligne `mcp_version`). Toute copie antérieure ajoute dès lors un
+   `_mcp.warning` à chacune de ses réponses, que le modèle remonte à l'utilisateur.
+
+Publier **après** l'envoi, jamais avant : sinon chacun reçoit l'avertissement avant d'avoir de
+quoi le corriger, et apprend à l'ignorer.
+
+Chaque réponse porte un bloc `_mcp` : `server_version`, et en cas de retard `outdated`,
+`min_version` et `warning`. Si la version minimale est injoignable, **aucun avertissement
+n'est émis** : un faux avertissement serait vite ignoré, et un avertissement ignoré ne
+protège plus de rien.
+
+Limite assumée : ce garde-fou ne protège que l'avenir. Les copies installées avant son
+introduction ne savent pas se plaindre ; seule une redistribution les corrige. La vraie
+réponse au problème (serveur MCP distant, clés qui ne quittent plus le serveur) est au
+parking lot.
+
 `get_daily_briefing` répond sous **20 s** ; au-delà il renvoie ce qui est prêt
 avec `truncated: true` et `truncated_reasons`. `timings_ms` détaille chaque étape.
 
