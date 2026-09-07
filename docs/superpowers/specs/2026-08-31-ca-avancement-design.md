@@ -446,6 +446,42 @@ jamais le calcul, qui continue de reposer sur les ancres. Elle doit être implé
 pur avec ses tests, et couvrir explicitement le cas Café Méo et le cas d'une mission ancrée, où
 l'ancre prime.
 
+### 5.1 octies Point de départ implicite affiché, et colonnes groupées par exercice
+
+Deux retours de Nathan sur la grille, le premier étant un vrai défaut de cohérence qu'il a repéré en
+saisissant une valeur.
+
+**a. Le point de départ déduit de la facturation doit être AFFICHÉ, et compté dans le reste.**
+Cas exact remonté, vérifié sur les données réelles : Café Méo, 18 000 € au total, acompte de 5 400 €
+facturé en novembre 2025 et solde de 12 600 € en juillet 2026, sans ancre 2025 puisque cet exercice
+est figé. Nathan saisit 70 % pour 2026. Résultat aujourd'hui : le CA 2026 vaut bien 12 600 €, mais la
+colonne 2025 reste VIDE et la modale suggère 30 % pour 2027 alors que la mission est facturée à 100 %
+fin 2026 et qu'il ne reste rien.
+
+Origine : la suggestion de 5.1 septies tient compte de la part déjà facturée (elle a bien proposé
+70 %), mais le cumul stocké ne le peut pas. Le calcul du CA repose sur `pctFin`, qui vaut 0 pour 2025
+faute d'ancre ; pour que le CA 2026 donne 12 600 €, le cumul stocké DOIT valoir 70. Et l'exercice 2025
+étant figé, il est impossible d'y enregistrer l'ancre de 30 % qui rendrait le modèle cohérent. Le
+stockage et le calcul sont donc corrects et ne doivent PAS bouger : c'est l'AFFICHAGE qui ment.
+
+Correction, purement à l'affichage : quand une mission n'a aucune ancre sur un exercice antérieur mais
+que des volets y ont été facturés, la colonne de l'exercice précédent affiche cette part déduite de la
+facturation, en lecture seule, visuellement distincte d'une ancre et accompagnée d'une mention disant
+qu'elle est déduite de la facturation et non saisie. Ce point de départ implicite entre ensuite dans
+le calcul du reste et des suggestions des exercices suivants. Sur Café Méo cela donne : 30 % en 2025,
+70 % en 2026, suggestion 2027 à 0 %, reste après 2027 à 0 %, et une ligne dont les parts se lisent en
+faisant 100 %.
+
+Contrainte absolue : ne toucher ni au stockage, ni à `pctFin`, ni au calcul du CA à l'avancement. Un
+test doit verrouiller que le CA 2026 de Café Méo reste 12 600 € après la correction.
+
+**b. Colonnes groupées par exercice.** Nathan : « je trouve l'affichage pas lisible, fais des colonnes
+avec de légers séparateurs pour différencier les années ». Les six colonnes de chiffres se lisent
+aujourd'hui comme une suite indifférenciée. Grouper visuellement chaque exercice (sa part et son CA)
+par un séparateur vertical discret, en reprenant la couleur de bordure déjà utilisée dans le fichier,
+et rendre l'appartenance à l'exercice lisible dès l'en-tête. Aucune couleur nouvelle, aucun trait
+lourd : la lisibilité doit venir du groupement, pas de la décoration.
+
 ### 5.2 Affichage du CA ajusté
 
 - **CR (onglet Compte de résultat)** : la ligne CA affiche la valeur ajustée ; badge
