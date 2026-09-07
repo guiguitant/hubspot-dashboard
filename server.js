@@ -21,6 +21,7 @@ const { computeDepenses } = require('./utils/depensesCompute');
 const gsheets = require('./utils/googleSheets');
 const primesMap = require('./utils/primesSheetMap');
 const chargesPerimetre = require('./utils/chargesPerimetre');
+const primesReconciliation = require('./utils/primesReconciliation');
 const { classifyProduitSubvention, CATEGORIE_SUBVENTIONS } = require('./utils/produitsSubventions'); // Feature A produits-et-suivis : classification credits Qonto "Subventions et aides"
 const { computeProductionImmobilisee } = require('./utils/productionImmobilisee'); // Feature E produits-et-suivis : produit d'exploitation "Production immobilisee" (compte 72)
 const { computeCrRetraite, computeEffetCumule, verifierInvariantImmos } = require('./utils/crRetraite'); // CR hors capitalisation : vue economique affichee A COTE du CR comptable (spec 2026-08-13-cr-retraite-design)
@@ -4979,6 +4980,40 @@ async function fetchAndParseDettes() {
   return data;
 }
 
+// --- Garde-fou : réconciliation "dette de primes" (Sheet) vs débits Qonto (réel) ---
+// Lecture seule, ne corrige AUCUN montant : le restant dû du carnet et la trésorerie nette de
+// dette restent calculés exactement comme avant. Voir la spec :
+// docs/superpowers/specs/2026-08-31-primes-reconciliation-dette-design.md
+//
+// Deux différences volontaires avec le calcul des charges (computeChargesHybride) :
+//   - TOUS les comptes bancaires, pas seulement le compte principal : un virement de prime parti
+//     d'un autre compte produirait sinon un faux "sur_declare". Cohérent avec soldeTousComptes,
+//     qui sert déjà au KPI de trésorerie nette.
+//   - Débits uniquement : filtre appliqué dans le module pur (agregerDebitsParSousCategorie).
+let primesReconCache = null;
+let primesReconCacheTime = 0;
+const PRIMES_RECON_CACHE_TTL = 5 * 60 * 1000;
+
+async function fetchPrimesReconciliation(dettesRes) {
+  if (primesReconCache && (Date.now() - primesReconCacheTime) < PRIMES_RECON_CACHE_TTL) {
+    return primesReconCache;
+  }
+  const dettes = (dettesRes && dettesRes.dettes) || [];
+  const { from, to } = primesReconciliation.fenetreReconciliation(dettes, new Date().toISOString());
+
+  const org = await qontoRequest('/v2/organization');
+  const comptes = (org.organization && org.organization.bank_accounts) || [];
+  const parCompte = await Promise.all(
+    comptes.filter(c => c.iban).map(c => fetchQontoTransactionsRange(c.iban, from, to))
+  );
+  const transactions = parCompte.flat();
+
+  const result = primesReconciliation.reconcilePrimes({ dettes, transactions });
+  primesReconCache = result;
+  primesReconCacheTime = Date.now();
+  return result;
+}
+
 // Find month columns: look for header row with "01/YYYY" pattern
 function findMonthColumns(rows) {
   for (let r = 0; r < Math.min(5, rows.length); r++) {
@@ -6830,6 +6865,17 @@ app.get('/api/tresorerie', async (req, res) => {
         return { ...d, restant, montantEngage: d.restant, reel: true };
       });
     }
+    // Garde-fou lecture seule : n'influence NI totalDettes NI tresorerieNetteDeDette ci-dessous.
+    // Une panne Qonto ne doit jamais casser la page trésorerie : on dégrade en silence.
+    let reconciliationPrimes = null;
+    let reconciliationPrimesError = null;
+    try {
+      reconciliationPrimes = await fetchPrimesReconciliation(dettesRes);
+    } catch (e) {
+      reconciliationPrimesError = e.message;
+      console.warn('[tresorerie] reconciliation primes indisponible : %s', e.message);
+    }
+
     const tresorerieNetteDeDette = (soldeQonto != null && dettesRes)
       ? Math.round(soldeQonto - totalDettes)
       : null;
@@ -6841,6 +6887,8 @@ app.get('/api/tresorerie', async (req, res) => {
       tresorerieNetteDeDette,
       dettes: dettesList,
       totalDettes: Math.round(totalDettes),
+      reconciliationPrimes,
+      reconciliationPrimesError,
       dettesError,
       avanceRemboursableRestante: result.avanceRemboursableRestante || 0,
       avanceTotaleRecue: result.avanceTotaleRecue || 0,
