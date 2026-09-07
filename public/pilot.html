@@ -14953,6 +14953,12 @@
     // qu'elle n'est pas une saisie. Cas réel : Café Méo, 18 000 €, acompte 5 400 € facturé le
     // 24/11/2025, solde 12 600 € facturé le 16/07/2026, aucune ancre 2025 ; une fois 70 % saisi pour
     // 2026, cette cellule affiche désormais "30 %" (déduit) au lieu de rester vide.
+    // Spec 5.1 nonies point b : la colonne "exercice précédent" fusionne désormais elle aussi le
+    // pourcentage ET son montant (prix total × part), stackés sur deux lignes dans la cellule ("il
+    // manque le montant affecté à 2025, là tu n'affiches que le pourcentage" : reproche direct de
+    // Nathan). Même formule que le calcul officiel du CA (Math.round(ca × part / 100), copie inline
+    // de montantPart de utils/avancementParts.js) : purement un ajout d'affichage, jamais un second
+    // calcul concurrent.
     function avancementCellPartLectureSeule(lignesMission, exercice, mission) {
       const ligne = avancementLigneExacte(lignesMission, exercice);
       if (ligne) {
@@ -14963,7 +14969,9 @@
         // cellule qu'elle concerne plutôt que dans un paragraphe générique en tête de grille. Vérifié à
         // chaque rendu (avancementExercicePrecedentFige lit l'état réel), jamais affirmé sans preuve.
         const etat = avancementExercicePrecedentFige(exercice) ? 'exercice figé, définitif' : 'non modifiable ici, même si l\'exercice n\'est pas encore figé';
-        return '<span style="color:var(--text-secondary)" title="Exercice antérieur (' + exercice + ') : affiché pour mémoire, en lecture seule dans cette grille (' + etat + ').">' + part + ' %</span>' + badge;
+        const montant = Math.round((Number(mission && mission.ca) || 0) * part / 100);
+        return '<div><span style="color:var(--text-secondary)" title="Exercice antérieur (' + exercice + ') : affiché pour mémoire, en lecture seule dans cette grille (' + etat + ').">' + part + ' %</span>' + badge + '</div>'
+          + '<div style="margin-top:0.15rem;font-weight:600">' + formatEuro(montant) + '</div>';
       }
       // Aucune ligne exacte : rien à afficher, SAUF si cet exercice est précisément le "trou" qui
       // précède la toute première ligne suivie de la mission ET qu'il y a quelque chose à déduire de
@@ -14979,8 +14987,10 @@
       const titre = 'Aucun avancement saisi pour ' + exercice + ' : cette part n\'est pas une ancre, elle est DÉDUITE de la '
         + 'facturation (' + implicite + ' % du prix total déjà facturé au 31/12/' + exercice + ', sans avancement saisi pour '
         + 'cet exercice). Elle entre dans le calcul du reste et des suggestions des exercices suivants, en lecture seule.';
-      return '<span title="' + titre + '" style="cursor:help;font-style:italic;color:var(--text-secondary)">' + implicite + ' %</span>'
-        + ' <span title="' + titre + '" style="cursor:help;font-size:0.62rem;padding:0.02rem 0.35rem;border:1px dashed var(--border);border-radius:8px;color:var(--text-secondary);white-space:nowrap">déduit</span>';
+      const montantImplicite = Math.round((Number(mission && mission.ca) || 0) * implicite / 100);
+      return '<div><span title="' + titre + '" style="cursor:help;font-style:italic;color:var(--text-secondary)">' + implicite + ' %</span>'
+        + ' <span title="' + titre + '" style="cursor:help;font-size:0.62rem;padding:0.02rem 0.35rem;border:1px dashed var(--border);border-radius:8px;color:var(--text-secondary);white-space:nowrap">déduit</span></div>'
+        + '<div style="margin-top:0.15rem;font-weight:600">' + formatEuro(montantImplicite) + '</div>';
     }
 
     // Cellule "Part {n}" ou "Part {n+1}" éditable (spec point a et d). Trois états :
@@ -14990,8 +15000,11 @@
     //    serveur sur l'exercice ENTIER, pas seulement la ligne : cf. historique du fichier) ;
     //  - sinon éditable : une ligne existante préremplit sa VRAIE part (valeur réellement saisie,
     //    normale) ; aucune ligne laisse le champ VIDE avec la suggestion (point d) en `placeholder`
-    //    seul (texte fantôme du navigateur, distinct nativement d'une valeur saisie) + une légende
-    //    "suggéré : X %", jamais enregistrée tant que l'utilisateur ne valide pas via OK.
+    //    seul (texte fantôme du navigateur, distinct nativement d'une valeur saisie), jamais
+    //    enregistrée tant que l'utilisateur ne valide pas via OK. Spec 5.1 nonies point c : la légende
+    //    "suggéré : X %, à valider" qui doublait la hauteur de la cellule est retirée ; le placeholder
+    //    (visuellement distinct, convention native du navigateur) et l'infobulle du champ suffisent à
+    //    dire qu'il s'agit d'une proposition non enregistrée.
     function avancementCellPartSaisie(m, lignesMission, exercice, figeeExercice) {
       const ligne = avancementLigneExacte(lignesMission, exercice);
       if (ligne && ligne.fige_le) {
@@ -15021,7 +15034,6 @@
       const suggestion = avancementSuggestionPart(lignesMission, exercice, m);
       let html = '<input type="number" min="0" max="' + maxPart + '" step="1" value="" placeholder="' + suggestion + '" id="' + elId + '" class="kpi-num-input" style="width:64px;padding:0.2rem" title="Suggestion : ' + suggestion + ' % (reste à réaliser). Non enregistrée : validez avec OK pour la retenir, ou saisissez une autre valeur.">';
       html += ' <button class="kpi-btn" onclick="saveAvancementLigne(\'' + m.id + '\',' + exercice + ',\'' + elId + '\')" style="padding:0.15rem 0.45rem;font-size:0.72rem">OK</button>';
-      html += '<div style="font-size:0.65rem;color:var(--text-secondary);font-style:italic;margin-top:0.15rem">suggéré : ' + suggestion + ' %, à valider</div>';
       return html;
     }
 
@@ -15029,9 +15041,13 @@
     // 5.1 sexies, qui rend le calcul "lecture directe" : prix total × part de l'exercice). formatEuro
     // du montant calculé côté serveur (report en avant depuis l'exercice précédent inclus, §3.2) si la
     // mission est suivie sur `data` (a au moins une ligne, quel que soit l'exercice) ; sinon un tiret
-    // médian, la mission n'apporte alors aucun remplacement à l'agrégat pour cet exercice. Quand
-    // l'avancement de départ n'est pas nul, un badge visible s'ajoute : c'est le seul cas où le montant
-    // ne se déduit pas de la part affichée dans la cellule voisine.
+    // médian, la mission n'apporte alors aucun remplacement à l'agrégat pour cet exercice.
+    //
+    // Spec 5.1 nonies point a : le badge "départ X %" (le cumul de référence du calcul) est supprimé
+    // SANS remplacement (« je ne comprends pas ton badge départ ») : c'est une notion interne au
+    // modèle de stockage qui n'a rien à faire à l'écran, et de toute façon redondante avec la part de
+    // l'exercice précédent affichée dans la colonne voisine. Le détail reste disponible dans
+    // l'infobulle du montant ci-dessous, jamais purement perdu.
     function avancementCellCa(data, missionId, exercice) {
       const s = avancementSuivieById(data, missionId);
       if (!s) return '<span style="color:var(--text-secondary)">·</span>';
@@ -15039,11 +15055,7 @@
       const title = 'CA ' + exercice + ' = prix total de la mission (' + formatEuro(s.ca) + ') × part ' + exercice + ' (' + part + ' %), soit '
         + formatEuro(s.caAvancement) + '.'
         + (s.pctPrecedent ? ' Avancement déjà acquis avant ' + exercice + ' : ' + s.pctPrecedent + ' %.' : '');
-      let html = '<span title="' + title + '">' + formatEuro(s.caAvancement) + '</span>';
-      if (s.pctPrecedent) {
-        html += ' <span title="' + title + '" style="font-size:0.62rem;padding:0.02rem 0.3rem;border:1px solid var(--border);border-radius:8px;color:var(--text-secondary);white-space:nowrap">départ ' + s.pctPrecedent + ' %</span>';
-      }
-      return html;
+      return '<span title="' + title + '">' + formatEuro(s.caAvancement) + '</span>';
     }
 
     // Rendu (fragment HTML seul) de la grille filtree : appele au premier rendu du sous-onglet Saisie
@@ -15084,28 +15096,29 @@
       const figeeN1 = !!(dNext && dNext.figee);
       const dernierExerciceFige = avancementDernierExerciceFigeGlobal();
 
-      // Trois colonnes de part (spec point c, révoque 5.1 ter point a) : n−1 en lecture seule et
-      // grisée dans tous les cas (correctif ronde 1 : le figeage de n−1 n'est jamais garanti, une
-      // année a pu être sautée ; le badge "(figé)" par mission, lui, reste conditionnel à l'état réel
-      // de chaque ligne, cf. avancementCellPartLectureSeule), puis n et n+1 éditables. Colonne "Reste" :
+      // Une colonne par exercice, pourcentage et montant ensemble (spec 5.1 nonies point b, remplace
+      // la structure à 8 colonnes de 5.1 octies point b et 5.1 sexies point a) : « le visuel est
+      // vraiment cata, ce n'est pas compréhensible facilement (...) fais vraiment un truc plus
+      // simple ». Les colonnes appariées "Part {année}"/"CA {année}" fusionnent en une seule colonne
+      // intitulée par la seule année, dont chaque cellule empile le pourcentage puis le montant
+      // correspondant (avancementCellPartLectureSeule pour n−1, en lecture seule et grisée dans tous
+      // les cas ; avancementCellPartSaisie + avancementCellCa empilés pour n et n+1, éditables). La
+      // grille passe ainsi de huit à six colonnes : mission, prix, n−1, n, n+1, reste. Colonne "Reste" :
       // "un total ou un reste doit rester visible sur la ligne, pour que l'utilisateur contrôle que ses
       // parts finissent par faire 100 %", calculé sur le CUMUL EFFECTIF (report en avant + point de
       // départ implicite, spec 5.1 octies point a) réellement acquis à la fin de n+1, jamais sur une
       // suggestion non validée.
       //
-      // Séparateurs de colonnes par exercice (spec 5.1 octies point b) : "je trouve l'affichage pas
-      // lisible, fais des colonnes avec de légers séparateurs pour différencier les années". Un filet
-      // vertical discret (classe .av-col-sep, même couleur var(--border) que les autres bordures du
-      // fichier, aucune couleur ni trait nouveau) avant le premier champ de chaque exercice (Part n−1 ;
-      // Part n, qui ouvre le groupe [Part n, CA n] ; Part n+1, qui ouvre [Part n+1, CA n+1]) et avant
-      // "Reste", qui clôt la ligne comme un total distinct. Le millésime reste aussi lisible dès
-      // l'en-tête qu'avant (il était déjà dans chaque libellé "Part {année}"/"CA {année}") : le
-      // groupement vient du filet, pas d'un texte nouveau.
+      // Séparateurs de colonnes par exercice (spec 5.1 octies point b, conservés et adaptés à la
+      // nouvelle structure par 5.1 nonies) : un filet vertical discret (classe .av-col-sep, même
+      // couleur var(--border) que les autres bordures du fichier, aucune couleur ni trait nouveau)
+      // avant la colonne de chaque exercice (n−1, n, n+1) et avant "Reste", qui clôt la ligne comme un
+      // total distinct.
       let html = '<div class="avancement-grid-scroll"><table class="kpi-obj-table"><thead><tr>'
         + '<th>Mission</th><th>CA HT</th>'
-        + '<th class="av-col-sep">Part ' + (n - 1) + '</th>'
-        + '<th class="av-col-sep">Part ' + n + '</th><th>CA ' + n + '</th>'
-        + '<th class="av-col-sep">Part ' + n1 + '</th><th>CA ' + n1 + '</th>'
+        + '<th class="av-col-sep">' + (n - 1) + '</th>'
+        + '<th class="av-col-sep">' + n + '</th>'
+        + '<th class="av-col-sep">' + n1 + '</th>'
         + '<th class="av-col-sep">Reste après ' + n1 + '</th>'
         + '</tr></thead><tbody>';
 
@@ -15136,7 +15149,7 @@
           html += '<tr style="opacity:0.6">'
             + nomHtml
             + '<td style="text-align:right">' + formatEuro(m.ca) + '</td>'
-            + '<td class="av-col-sep" colspan="5" style="text-align:center;color:var(--text-secondary);font-style:italic">'
+            + '<td class="av-col-sep" colspan="3" style="text-align:center;color:var(--text-secondary);font-style:italic">'
             + 'Mission terminée : 100 % déjà atteint au 31/12/' + dernierExerciceFige + ' (exercice figé). Rien à saisir.</td>'
             + '<td class="av-col-sep" style="text-align:right;color:var(--text-secondary)">0 %</td>'
             + '</tr>';
@@ -15148,10 +15161,10 @@
           + nomHtml
           + '<td style="text-align:right">' + formatEuro(m.ca) + '</td>'
           + '<td class="av-col-sep" style="text-align:right">' + avancementCellPartLectureSeule(lignesMission, n - 1, m) + '</td>'
-          + '<td class="av-col-sep" style="text-align:right">' + avancementCellPartSaisie(m, lignesMission, n, figeeN) + '</td>'
-          + '<td style="text-align:right;font-weight:600">' + avancementCellCa(d, m.id, n) + '</td>'
-          + '<td class="av-col-sep" style="text-align:right">' + avancementCellPartSaisie(m, lignesMission, n1, figeeN1) + '</td>'
-          + '<td style="text-align:right;font-weight:600">' + avancementCellCa(dNext, m.id, n1) + '</td>'
+          + '<td class="av-col-sep" style="text-align:right">' + avancementCellPartSaisie(m, lignesMission, n, figeeN)
+            + '<div style="margin-top:0.15rem;font-weight:600">' + avancementCellCa(d, m.id, n) + '</div></td>'
+          + '<td class="av-col-sep" style="text-align:right">' + avancementCellPartSaisie(m, lignesMission, n1, figeeN1)
+            + '<div style="margin-top:0.15rem;font-weight:600">' + avancementCellCa(dNext, m.id, n1) + '</div></td>'
           + '<td class="av-col-sep" style="text-align:right;color:var(--text-secondary)">' + reste + ' %</td>'
           + '</tr>';
       }

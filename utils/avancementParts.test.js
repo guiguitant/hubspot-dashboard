@@ -6,6 +6,7 @@ const {
   pointDepartImplicite,
   cumulEffectif,
   partAffichee,
+  montantPart,
   suggestionPart,
   planSaisiePart,
 } = require('./avancementParts');
@@ -438,5 +439,57 @@ describe('planSaisiePart : donnees reelles en base (simulation du rapport de tac
     const lignes = [{ exercice: 2025, pct: 70, fige_le: '2026-01-05T00:00:00Z' }, { exercice: 2026, pct: 100 }];
     expect(partExercice(lignes, 2026)).toBe(30); // part 2026 = 30 %, CA 2026 = 15500 * 0.30 = 4650
     expect(Math.round(15500 * (partExercice(lignes, 2026) / 100))).toBe(4650);
+  });
+});
+
+// Spec 5.1 nonies point b : la grille de saisie fusionne les colonnes "Part {annee}" et "CA {annee}"
+// en une seule colonne par exercice, qui porte le pourcentage ET le montant (prix total x part). Ce
+// lot ne touche QUE la presentation (public/pilot.html) : aucun montant affiche ne doit changer de
+// valeur, seule leur disposition (regroupees dans une colonne au lieu de deux) evolue. Ces tests
+// verrouillent la formule au coeur de ce regroupement (montantPart) sur les DEUX cas reels cites par
+// la spec, avec les valeurs exactes que Nathan doit retrouver a l'ecran.
+describe('montantPart : prix total x part / 100 (spec 5.1 nonies point b, fusion des colonnes)', () => {
+  test('aucune mission ou part : 0', () => {
+    expect(montantPart(null, 50)).toBe(0);
+    expect(montantPart({}, 50)).toBe(0);
+    expect(montantPart({ ca: 15500 }, null)).toBe(0);
+  });
+
+  // Alphapro groupe, prix 15 500 EUR : la colonne 2025 (exercice precedent, ancre a 70 %) doit
+  // desormais porter son montant, alors qu'elle n'affichait avant ce lot qu'un pourcentage nu (le
+  // reproche exact de Nathan : "il manque le montant affecte a 2025").
+  test('Alphapro groupe (15 500 EUR) : 70 % (2025, ancre) -> 10 850 EUR, 30 % (2026) -> 4 650 EUR', () => {
+    expect(montantPart({ ca: 15500 }, 70)).toBe(10850);
+    expect(montantPart({ ca: 15500 }, 30)).toBe(4650);
+  });
+
+  // Café Méo, prix 18 000 EUR : la part 2025 n'est PAS une ancre mais une deduction de la
+  // facturation (partAffichee, spec 5.1 octies point a) ; son montant suit la MEME formule et
+  // coincide avec l'acompte reellement facture (verifie explicitement ci-dessous), preuve que la
+  // colonne fusionnee raconte une histoire coherente meme sur une valeur deduite.
+  test('Café Méo (18 000 EUR) : 30 % (2025, deduit) -> 5 400 EUR, 70 % (2026) -> 12 600 EUR', () => {
+    expect(montantPart(caféMéoMission, 30)).toBe(5400);
+    expect(montantPart(caféMéoMission, 70)).toBe(12600);
+  });
+
+  test('Café Méo : le montant de la part 2025 deduite coincide avec l\'acompte reellement facture', () => {
+    const part2025 = partAffichee(caféMéoLignesApres2026, 2025, caféMéoMission);
+    expect(part2025).toEqual({ part: 30, implicite: true });
+    expect(montantPart(caféMéoMission, part2025.part)).toBe(caféMéoMission.montantAcompte);
+  });
+
+  // Verrou de non-regression du calcul (contrainte absolue de la spec, point d) : sur un exercice
+  // deja couvert par le calcul officiel du CA a l'avancement (caAvancementMission,
+  // utils/caAvancement.js, INTOUCHE), la formule d'affichage de la colonne fusionnee redonne
+  // exactement le meme montant que le calcul serveur. Si ce test echoue, la restructuration de la
+  // grille a fait deriver l'affichage du calcul, ce qui est exactement ce que la spec interdit.
+  test('verrou : montantPart(part de l\'exercice) == caAvancementMission (aucune derive calcul/affichage)', () => {
+    const lignesAlphapro = [{ exercice: 2025, pct: 70, fige_le: '2026-01-05T00:00:00Z' }, { exercice: 2026, pct: 100 }];
+    const missionAlphapro = { ca: 15500 };
+    expect(montantPart(missionAlphapro, partExercice(lignesAlphapro, 2026)))
+      .toBe(caAvancementMission(missionAlphapro, lignesAlphapro, 2026));
+
+    expect(montantPart(caféMéoMission, partExercice(caféMéoLignesApres2026, 2026)))
+      .toBe(caAvancementMission(caféMéoMission, caféMéoLignesApres2026, 2026));
   });
 });

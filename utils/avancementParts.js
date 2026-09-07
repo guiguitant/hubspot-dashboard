@@ -167,6 +167,21 @@ function partAffichee(lignesMission, exercice, mission) {
   return valeur > 0 ? { part: valeur, implicite: true } : { part: null, implicite: false };
 }
 
+// Montant (EUR) correspondant a une part (%) de la mission (spec 5.1 nonies point b) : "le montant
+// d'un exercice vaut toujours prix total x part de l'exercice", pour l'exercice courant comme pour
+// l'exercice precedent affiche en lecture seule (que sa part vienne d'une ancre ou soit deduite de la
+// facturation via partAffichee ci-dessus). Meme arithmetique que caAvancementMission
+// (utils/caAvancement.js, INTOUCHE) : Math.round(ca x part / 100). Cette fonction ne remplace ce
+// module pour aucun exercice deja couvert par caAvancementMission (le calcul du CA continue de
+// reposer exclusivement sur lui) ; elle sert uniquement a l'affichage de la colonne "exercice
+// precedent" de la grille, qui n'a pas d'equivalent cote serveur puisque GET /api/avancement ne
+// couvre que les deux exercices demandes (N et N+1), jamais N-1.
+function montantPart(mission, part) {
+  const ca = Number(mission && mission.ca) || 0;
+  const p = Number(part) || 0;
+  return Math.round((ca * p) / 100);
+}
+
 // Suggestion de part (spec point d de 5.1 sexies, CORRIGEE spec 5.1 septies point e : defaut de
 // chiffre, double comptage). Reste theorique a realiser = 100 % moins le point de depart deja acquis
 // avant cet exercice. Ce point de depart est :
@@ -288,6 +303,7 @@ module.exports = {
   pointDepartImplicite,
   cumulEffectif,
   partAffichee,
+  montantPart,
   suggestionPart,
   planSaisiePart,
 };
