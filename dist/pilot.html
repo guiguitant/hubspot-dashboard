@@ -16950,6 +16950,28 @@
       if (dettes.length === 0) {
         html += '<div style="padding:0.4rem 0;color:var(--text-secondary);font-size:0.85rem">Aucun engagement ferme en cours.</div>';
       }
+      // Garde-fou primes : on explicite les trois montants pour que l'ecart soit lisible sans avoir
+      // a ouvrir le Sheet. Ce bloc n'entre PAS dans le calcul ci-dessous.
+      // Le bloc s'affiche des qu'il y a UNE ligne en ecart OU UNE alerte structurelle : les deux
+      // canaux sont independants, et le cas reel du 2026-09-07 (ecart 0 mais sous-categorie non
+      // exclue) montre qu'une alerte peut exister alors que tous les montants collent.
+      const recon = tresoData.reconciliationPrimes;
+      const lignesAlerte = recon && recon.lignes ? recon.lignes.filter(l => l.statut !== 'ok') : [];
+      const alertesRecon = (recon && recon.alertes) || [];
+      if (lignesAlerte.length || alertesRecon.length) {
+        html += '<div style="margin-top:0.75rem;padding:0.6rem;border:1px solid var(--warning);border-radius:var(--radius-sm);font-size:0.8rem">';
+        html += '<div style="font-weight:600;margin-bottom:0.35rem">Rapprochement des primes avec Qonto</div>';
+        for (const l of lignesAlerte) {
+          html += '<div style="color:var(--text-secondary);padding:0.15rem 0">'
+            + escapeHtml(l.label) + ' : declare rembourse ' + formatEuro(l.declareRembourseHT)
+            + ' HT, reel Qonto ' + formatEuro(l.reelHT) + ' HT, ecart ' + formatEuro(l.ecart) + '</div>';
+        }
+        for (const a of alertesRecon) {
+          html += '<div style="color:var(--warning);padding:0.15rem 0">' + escapeHtml(a.message) + '</div>';
+        }
+        html += '<div style="color:var(--text-secondary);margin-top:0.35rem;font-style:italic">Ce controle ne modifie aucun montant ci-dessus.</div>';
+        html += '</div>';
+      }
       html += '<div style="display:flex;justify-content:space-between;padding:0.6rem 0;margin-top:0.4rem;border-top:2px solid var(--border);font-size:1.05rem"><strong>Trésorerie nette de dette</strong><strong style="color:' + (nette < 0 ? 'var(--danger)' : 'var(--text)') + '">' + formatEuro(nette) + '</strong></div>';
       html += '</div>';
       document.getElementById('tresoMoisDetailBody').innerHTML = html;
@@ -16975,6 +16997,25 @@
       document.getElementById('tresoMoisDetailModalOverlay').classList.add('active');
     }
 
+    // Badge de reconciliation des primes (garde-fou lecture seule) : compare le remboursement
+    // declare dans le Sheet aux virements Qonto reellement partis. N'affiche rien quand tout colle.
+    function badgeReconciliationPrimes(label) {
+      const recon = tresoData && tresoData.reconciliationPrimes;
+      if (!recon || !recon.lignes) return '';
+      const l = recon.lignes.find(x => x.label === label);
+      if (!l || l.statut === 'ok') return '';
+      const txt = {
+        sous_declare: 'verse ' + formatEuro(l.ecart) + ' de plus que declare',
+        sur_declare: 'declare ' + formatEuro(-l.ecart) + ' de plus que le reel Qonto',
+        sans_reel: 'aucun virement rattache',
+      }[l.statut];
+      if (!txt) return '';
+      const titre = 'Rapprochement Qonto (HT) : reel ' + formatEuro(l.reelHT)
+        + ' vs declare rembourse ' + formatEuro(l.declareRembourseHT)
+        + '. Un virement lance aujourd hui n apparait pas encore (Qonto ne renvoie que le regle).';
+      return ' <span class="cr-tva-badge warn" title="' + escapeHtml(titre) + '">' + escapeHtml(txt) + '</span>';
+    }
+
     // Carnet "Dettes & engagements" — photo instant T (onglet Dettes). À distinguer de la projection 13 mois (le "film").
     function renderTresoDettes() {
       const section = document.getElementById('tresoDettesSection');
@@ -16992,7 +17033,7 @@
         const reelTxt = (d.reel && d.montantEngage && d.montantEngage !== d.restant)
           ? ' <span style="font-size:0.7rem;color:var(--text-secondary)">(percu reel ; engage ' + formatEuro(d.montantEngage) + ')</span>' : '';
         html += '<tr style="border-bottom:1px solid rgba(120,119,116,0.15)' + (compte ? '' : ';opacity:0.5') + '">'
-          + '<td style="padding:0.5rem 0.5rem 0.5rem 0">' + escapeHtml(d.label) + reelTxt + (compte ? '' : ' <span style="font-size:0.72rem;color:var(--text-secondary)">(hors photo)</span>') + '</td>'
+          + '<td style="padding:0.5rem 0.5rem 0.5rem 0">' + escapeHtml(d.label) + reelTxt + badgeReconciliationPrimes(d.label) + (compte ? '' : ' <span style="font-size:0.72rem;color:var(--text-secondary)">(hors photo)</span>') + '</td>'
           + '<td style="padding:0.5rem;text-align:right;color:var(--text-secondary)">' + formatEuro(d.montantInitial) + '</td>'
           + '<td style="padding:0.5rem;text-align:right;color:var(--text-secondary)">' + (escapeHtml(d.taux) || '·') + '</td>'
           + '<td style="padding:0.5rem 0 0.5rem 0.5rem;text-align:right;font-weight:600">' + formatEuro(d.restant) + '</td></tr>';
