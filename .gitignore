@@ -13,3 +13,7 @@ tmp/
 
 # Scratch subagent-driven-development
 .superpowers/
+
+# Kit MCP : artefact de construction, regenerable par `npm run mcp:kit`.
+# 6+ Mo de binaire avec node_modules embarque : git ne l oublierait jamais.
+mcp/kit-*.zip

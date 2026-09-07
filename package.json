@@ -9,7 +9,8 @@
     "frontend:dev": "vite",
     "frontend:build": "vite build",
     "frontend:preview": "vite preview",
-    "test": "jest"
+    "test": "jest",
+    "mcp:kit": "node scripts/build-mcp-kit.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
