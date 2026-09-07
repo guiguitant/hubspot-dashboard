@@ -482,6 +482,44 @@ par un séparateur vertical discret, en reprenant la couleur de bordure déjà u
 et rendre l'appartenance à l'exercice lisible dès l'en-tête. Aucune couleur nouvelle, aucun trait
 lourd : la lisibilité doit venir du groupement, pas de la décoration.
 
+### 5.1 nonies Une colonne par exercice, pourcentage et montant ensemble
+
+Verdict de Nathan sur la grille livrée : « le visuel est vraiment cata, ce n'est pas compréhensible
+facilement, je ne comprends pas ton badge départ, fais vraiment un truc plus simple », et « il manque
+le montant affecté à 2025, là tu n'affiches que le pourcentage ». Cette section remplace la structure
+de grille de 5.1 octies point b et de 5.1 sexies point a.
+
+**a. Le badge « départ » disparaît.** Il affichait le cumul de référence du calcul (« départ 70 % »,
+« départ 100 % ») : c'est une notion interne au modèle de stockage, elle n'a rien à faire à l'écran.
+Elle est en outre redondante, puisque la part de l'exercice précédent est déjà affichée juste à côté.
+Supprimer purement, sans remplacement.
+
+**b. Une seule colonne par exercice, portant le pourcentage ET le montant.** Les colonnes appariées
+« PART {année} » et « CA {année} » fusionnent en une colonne par exercice, intitulée par la seule
+année. Chaque cellule porte le pourcentage sur une ligne et le montant correspondant juste en dessous.
+La grille passe de huit à six colonnes : mission, prix, un exercice, un exercice, un exercice, reste.
+
+L'exercice précédent devient donc lui aussi porteur de son montant, ce qui corrige l'incohérence
+relevée : il affichait un pourcentage nu quand les autres affichaient les deux. Exemples réels
+vérifiés, à retrouver à l'écran : Alphapro groupe, prix 15 500 €, lit « 70 % · 10 850 € » pour 2025 et
+« 30 % · 4 650 € » pour 2026 ; Café Méo, prix 18 000 €, lit « 30 % · 5 400 € » pour 2025, ce montant
+coïncidant avec l'acompte réellement facturé, et « 70 % · 12 600 € » pour 2026.
+
+Le montant d'un exercice vaut toujours `prix total × part de l'exercice`. Pour l'exercice précédent
+affiché en lecture seule, c'est la même formule appliquée à sa part, qu'elle vienne d'une ancre ou
+d'une déduction de la facturation (5.1 octies point a) : la mention distinguant ces deux origines
+reste, elle, indispensable.
+
+**c. Alléger ce qui entoure la saisie.** La ligne en italique « suggéré : X %, à valider » double la
+hauteur des cellules éditables et répète une information déjà portée par le texte d'exemple du champ.
+La réduire à un marqueur court, ou la supprimer si le champ suffit à faire comprendre qu'il s'agit
+d'une proposition. Objectif de cette section : moins d'éléments à l'écran, pas plus.
+
+**d. Ce qui ne change pas.** Aucune modification du stockage, de `pctFin`, du calcul du chiffre
+d'affaires, de la règle de suggestion, ni du périmètre d'affichage des missions. Cette section ne
+touche que la présentation de la grille. Un test doit verrouiller qu'aucun montant affiché ne change
+de valeur : seule leur disposition évolue.
+
 ### 5.2 Affichage du CA ajusté
 
 - **CR (onglet Compte de résultat)** : la ligne CA affiche la valeur ajustée ; badge
