@@ -159,11 +159,29 @@ function reconcilePrimes({
   return { lignes, totaux, alertes };
 }
 
+// Fenetre de lecture Qonto : du 1er janvier du plus ancien millesime trouve dans les libelles des
+// lignes de primes, jusqu'a aujourd'hui. Une prime millesimee N est decaissee en N+1 (voire plus
+// tard si le calendrier derive : en 2026, rien n'est parti avant aout alors que le moteur prevoyait
+// avril), donc remonter au 1er janvier du millesime est large a dessein.
+// Sans millesime detectable, repli sur le debut de l'annee courante.
+function fenetreReconciliation(dettes, nowIso) {
+  const annees = [];
+  for (const d of dettes || []) {
+    if (!estLignePrimes(d && d.label)) continue;
+    const m = String(d.label).match(/\b(20\d{2})\b/);
+    if (m) annees.push(Number(m[1]));
+  }
+  const anneeCourante = Number(String(nowIso).slice(0, 4));
+  const debut = annees.length ? Math.min(...annees) : anneeCourante;
+  return { from: debut + '-01-01', to: String(nowIso).slice(0, 10) };
+}
+
 module.exports = {
   envNumber,
   estLignePrimes,
   agregerDebitsParSousCategorie,
   reconcilePrimes,
+  fenetreReconciliation,
   PRIMES_TVA_TAUX,
   PRIMES_ECART_TOLERANCE,
   PRIMES_SUBCATS,

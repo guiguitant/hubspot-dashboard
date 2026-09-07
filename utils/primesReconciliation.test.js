@@ -261,3 +261,33 @@ describe('reconcilePrimes . alertes structurelles', () => {
     expect(r.alertes).toHaveLength(0);
   });
 });
+
+const { fenetreReconciliation } = require('./primesReconciliation');
+
+describe('fenetreReconciliation', () => {
+  it('part du 1er janvier du plus ancien millesime trouve dans les libelles', () => {
+    const f = fenetreReconciliation(
+      [dette('Primes associes 2026', 0, 0), dette('Primes associes 2025', 0, 0)],
+      '2026-08-31T10:00:00.000Z'
+    );
+    expect(f).toEqual({ from: '2025-01-01', to: '2026-08-31' });
+  });
+
+  it('ignore les millesimes des lignes qui ne sont pas des primes', () => {
+    const f = fenetreReconciliation(
+      [dette('Avance remboursable BPI 2021', 0, 0), dette('Primes associes 2026', 0, 0)],
+      '2026-08-31T10:00:00.000Z'
+    );
+    expect(f.from).toBe('2026-01-01');
+  });
+
+  it('replie sur l annee courante si aucun millesime n est detectable', () => {
+    const f = fenetreReconciliation([dette('Primes associes', 0, 0)], '2026-08-31T10:00:00.000Z');
+    expect(f.from).toBe('2026-01-01');
+  });
+
+  it('replie sur l annee courante si aucune ligne de primes n existe', () => {
+    const f = fenetreReconciliation([dette('Emprunt bancaire', 0, 0)], '2026-08-31T10:00:00.000Z');
+    expect(f.from).toBe('2026-01-01');
+  });
+});
