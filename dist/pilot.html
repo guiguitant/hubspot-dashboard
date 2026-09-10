@@ -1793,6 +1793,19 @@
     .kanban-card-wake.none { color: #b91c1c; }
     [data-theme="dark"] .kanban-card-wake.due  { color: #fbbf24; }
     [data-theme="dark"] .kanban-card-wake.none { color: #fca5a5; }
+    /* Date du dernier contact client réel : la question qu'on se pose devant
+       le bac, avant de décider quoi faire de la carte. */
+    .kanban-card-last-relance {
+      font-size: 0.68rem;
+      color: var(--text-secondary);
+      margin-bottom: 0.3rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    /* Le « jamais relancé » est fréquent dans ce bac : en rouge il repeindrait
+       toute la colonne et ne signalerait plus rien. Il reste discret. */
+    .kanban-card-last-relance.none { color: var(--text-light); font-style: italic; }
     /* La raison du gel, écrite à chaud : c'est elle qui rend le réveil utile. */
     .kanban-card-frozen-note {
       font-size: 0.68rem;
@@ -7463,6 +7476,38 @@
     //    pipeline pondéré (voir isDealDormant).
     // La distinction reste lisible sur chaque carte : l'un a une date de
     // retour, l'autre attend une décision.
+    // Devant le bac, la première question est « on lui a parlé quand, la
+    // dernière fois ? ». On ne compte que les vraies relances (email, tél) :
+    // une note interne ou un réveil manuel ne sont pas un contact client, et
+    // les faire passer pour tel donnerait une carte rassurante à tort.
+    function _lastRelanceInfo(meta) {
+      const arr = Array.isArray(meta && meta.relances) ? meta.relances : [];
+      let best = null;
+      for (const r of arr) {
+        const t = r && r.at ? new Date(r.at).getTime() : 0;
+        if (!t || isNaN(t)) continue;
+        if (!best || t > best.t) best = { t, type: r.type, note: r.note || '' };
+      }
+      if (!best) return null;
+      return {
+        at: new Date(best.t).toISOString(),
+        type: best.type,
+        note: best.note,
+        days: Math.floor((Date.now() - best.t) / _DAY_MS),
+      };
+    }
+
+    function _lastRelanceLineHtml(meta) {
+      const last = _lastRelanceInfo(meta);
+      if (!last) {
+        return `<div class="kanban-card-last-relance none" title="Aucune relance enregistrée sur ce deal">Jamais relancé</div>`;
+      }
+      const icon = last.type === 'phone' ? '📞' : '📧';
+      const canal = last.type === 'phone' ? 'Appel' : 'Email';
+      const tip = `${canal} du ${formatShortDate(last.at)}, il y a ${last.days} jour${last.days > 1 ? 's' : ''}${last.note ? ' — ' + last.note : ''}`;
+      return `<div class="kanban-card-last-relance" title="${_escapeHtml(tip)}">${icon} relancé le ${formatShortDate(last.at)} · ${last.days}j</div>`;
+    }
+
     function _collectRelancerDeals() {
       const gelesBruts = (dashboardData && dashboardData.pipelineDeals && dashboardData.pipelineDeals[RELANCER_STAGE_LABEL]) || [];
       let geles = kanbanAssigneeFilter ? gelesBruts.filter(d => _dealMatchesAssignee(d.id)) : gelesBruts;
@@ -7540,6 +7585,7 @@
                 onclick="openDealSidebar('${d.id}')" style="cursor:pointer">
               <div class="kanban-card-name">${d.name}</div>
               <span class="kanban-card-wake sommeil" title="Sans relance depuis ${d.daysSinceTouch} jours, resté dans « ${d.stage} ». Il ne reviendra pas tout seul.">💤 ${d.daysSinceTouch != null ? d.daysSinceTouch + 'j sans relance' : 'en sommeil'}</span>
+              ${_lastRelanceLineHtml(m)}
               <div class="kanban-card-meta">
                 <span class="kanban-card-amount">${formatEuro(d.amount)}</span>
                 <span class="kanban-card-won-date" title="Étape où il dort">${d.stage || ''}</span>
@@ -7569,6 +7615,7 @@
               onclick="openDealSidebar('${d.id}')">
             <div class="kanban-card-name">${d.name}</div>
             ${wakeLine}
+            ${_lastRelanceLineHtml(m)}
             ${m.frozen_note ? `<div class="kanban-card-frozen-note" title="${_escapeHtml(m.frozen_note)}">${_escapeHtml(m.frozen_note)}</div>` : ''}
             <div class="kanban-card-meta">
               <span class="kanban-card-amount">${formatEuro(d.amount)}</span>
