@@ -7355,6 +7355,39 @@
         ? Math.floor((Date.now() - lastTouchTime) / _DAY_MS)
         : _daysSince(deal.createdate);
 
+      // ---- Axe 1 bis : le sommeil, mesuré par le TROU ----------------------
+      // Le sommeil ne se juge pas sur « le dernier traitement date de plus de
+      // DORMANT_DAYS jours ». Avec cette règle-là, une relance suffisait à
+      // ramener un vieux lead dans le pipe : on relançait, le compteur repartait
+      // de zéro, la carte remontait dans sa colonne comme si l'affaire était
+      // repartie. Or relancer n'est pas un signe de vie du prospect, c'est un
+      // signe de vie du commercial.
+      // On cherche donc le dernier TROU de plus de DORMANT_DAYS jours dans
+      // l'historique du deal (création, notes, relances, réveils). Tant qu'aucun
+      // réveil explicite n'a eu lieu APRÈS ce trou, le deal reste au bac
+      // « À relancer », relancé ou pas. Le seul geste qui l'en sort est
+      // l'arbitrage : le bouton « Remettre dans le pipe » ou un glisser vers une
+      // colonne, qui écrivent tous deux reveille_at (voir _reveillerDealEnSommeil).
+      // DORMANT_DAYS est déclaré plus bas dans le même scope : lu à l'exécution.
+      const jalons = [];
+      const creation = deal.createdate ? new Date(deal.createdate).getTime() : 0;
+      if (creation > 0) jalons.push(creation);
+      jalons.push(...touchDates);
+      if (reveilTime > 0) jalons.push(reveilTime);
+      jalons.sort((a, b) => a - b);
+      let trouDebut = null;
+      for (let i = 0; i < jalons.length; i++) {
+        const debut = jalons[i];
+        const fin = i + 1 < jalons.length ? jalons[i + 1] : Date.now();
+        if (fin - debut > DORMANT_DAYS * _DAY_MS) trouDebut = debut;
+      }
+      // reveilTime === trouDebut : réveillé puis plus rien pendant 90 jours.
+      // Ce réveil-là est périmé, le deal doit retomber au bac. D'où le <=.
+      const sommeilNonLeve = trouDebut !== null && reveilTime <= trouDebut;
+      const dormantSinceDays = trouDebut !== null
+        ? Math.floor((Date.now() - trouDebut) / _DAY_MS)
+        : null;
+
       // ---- Axe 2 : stagnation ---------------------------------------------
       const daysInStage = _daysSince(deal.stageEnteredAt || deal.createdate);
       const stallThreshold = STAGE_STALL_DAYS[stage] || STAGE_STALL_FALLBACK;
@@ -7402,6 +7435,8 @@
         score,
         reasons,
         daysSinceTouch,
+        sommeilNonLeve,
+        dormantSinceDays,
         daysInStage,
         stallThreshold,
         silenced,
@@ -7526,7 +7561,7 @@
       // 3. gelés qui reviendront tout seuls, 4. gelés sans date : les oubliés.
       const dus     = geles.filter(d => _isDueToWake(dealMetadata[d.id])).sort((a, b) => _wake(a) - _wake(b));
       const aVenir  = geles.filter(d => !_isDueToWake(dealMetadata[d.id])).sort((a, b) => _wake(a) - _wake(b));
-      const dormants = sommeil.slice().sort((a, b) => (b.daysSinceTouch || 0) - (a.daysSinceTouch || 0));
+      const dormants = sommeil.slice().sort((a, b) => (b.dormantSinceDays || 0) - (a.dormantSinceDays || 0));
 
       return {
         deals: [
@@ -7584,13 +7619,14 @@
                 ondragend="onDragEnd(event)"
                 onclick="openDealSidebar('${d.id}')" style="cursor:pointer">
               <div class="kanban-card-name">${d.name}</div>
-              <span class="kanban-card-wake sommeil" title="Sans relance depuis ${d.daysSinceTouch} jours, resté dans « ${d.stage} ». Il ne reviendra pas tout seul.">💤 ${d.daysSinceTouch != null ? d.daysSinceTouch + 'j sans relance' : 'en sommeil'}</span>
+              <span class="kanban-card-wake sommeil" title="Rien n'a repris sur ce deal depuis ${d.dormantSinceDays} jours. Il est resté dans « ${d.stage} », c'est l'affichage qui l'a déménagé ici. Le relancer ne le fait pas revenir dans le pipe : c'est « Remettre dans le pipe » qui décide.">💤 ${d.dormantSinceDays != null ? 'en sommeil depuis ' + d.dormantSinceDays + 'j' : 'en sommeil'}</span>
               ${_lastRelanceLineHtml(m)}
               <div class="kanban-card-meta">
                 <span class="kanban-card-amount">${formatEuro(d.amount)}</span>
                 <span class="kanban-card-won-date" title="Étape où il dort">${d.stage || ''}</span>
                 ${assigneeAvatarHtml(d.id, m.assignee)}
               </div>
+              <button class="kanban-card-unfreeze" onclick="wakeDormantDeal('${d.id}', '${_escapeHtml(d.stage || '')}', event)" title="Le remettre dans « ${_escapeHtml(d.stage || '')} » et repartir d'un compteur neuf">↩ Remettre dans le pipe</button>
             </div>`;
             continue;
           }
@@ -7915,11 +7951,13 @@
     // nouveau moteur : afficher l'info sans crier), et c'est `silenced` qui
     // porte le désamorçage. Tester le null ici mettrait en sommeil des deals
     // ayant un RDV la semaine prochaine, et les sortirait du pipeline pondéré.
+    // Le test porte sur sommeilNonLeve (le trou), pas sur daysSinceTouch : une
+    // relance repousse daysSinceTouch mais ne réveille pas le deal. Voir le
+    // calcul du trou dans computeDealHealth.
     function isDealDormant(h) {
       return !!h
         && h.silenced === null          // aucun RDV futur, aucune tâche future, ni grâce, ni gel
-        && h.daysSinceTouch !== null
-        && h.daysSinceTouch >= DORMANT_DAYS;
+        && h.sommeilNonLeve;
     }
 
     // Deals en sommeil, tous stages confondus. On applique les mêmes filtres
@@ -7932,7 +7970,7 @@
           if (kanbanAssigneeFilter && !_dealMatchesAssignee(d.id)) continue;
           if (kanbanSearchQuery && !_dealMatchesSearch(d)) continue;
           const h = computeDealHealth(d, dealMetadata[d.id] || {}, stageName);
-          if (isDealDormant(h)) out.push({ ...d, stage: stageName, daysSinceTouch: h.daysSinceTouch });
+          if (isDealDormant(h)) out.push({ ...d, stage: stageName, daysSinceTouch: h.daysSinceTouch, dormantSinceDays: h.dormantSinceDays });
         }
       }
       return out;
@@ -11505,6 +11543,18 @@
         if (card) card.classList.remove('kanban-saving');
         alert('Erreur lors du changement de stage');
       }
+    }
+
+    // Bouton « Remettre dans le pipe » des cartes en sommeil. Depuis que le
+    // sommeil se mesure au trou et non au dernier contact, relancer ne suffit
+    // plus à faire remonter la carte : il faut ce geste-là, ou le glisser vers
+    // une colonne. Les deux passent par _reveillerDealEnSommeil, donc écrivent
+    // reveille_at. Ici le deal retourne dans son propre stage : rien à écrire
+    // dans HubSpot, il n'en était jamais sorti.
+    function wakeDormantDeal(dealId, stage, ev) {
+      if (ev) ev.stopPropagation();
+      const cible = KANBAN_STAGES_ORDER.includes(stage) ? stage : KANBAN_STAGES_ORDER[0];
+      return _reveillerDealEnSommeil(dealId, stage, cible);
     }
 
     // Réveil d'un deal EN SOMMEIL sorti du bac à la main.
