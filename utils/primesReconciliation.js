@@ -43,6 +43,34 @@ function estLignePrimes(label) {
   return /prime/i.test(String(label || ''));
 }
 
+// Liste des sous-categories Qonto de primes A EXCLURE du reel des charges, DEDUITE du carnet de
+// dettes plutot que d'une variable d'environnement.
+//
+// Pourquoi (correctif de fond du 2026-09-10) : jusqu'ici cette liste venait de PRIMES_QONTO_SUBCATS,
+// une variable a poser A LA MAIN dans CHAQUE environnement et a completer a CHAQUE nouveau millesime.
+// L'oubli est silencieux et couteux : corrigee dans le .env local le 2026-09-07, elle manquait
+// toujours sur le serveur deploye le 2026-09-10, ou les 28 800 EUR de remboursement de la dette de
+// primes 2025 gonflaient donc les charges d'exploitation 2026 (510 869 affiches au lieu de 482 069).
+// Le carnet de dettes, lui, est saisi une seule fois et lu par toute l'application : c'est la bonne
+// source. La convention qui rend ce rattachement possible est celle de la spec du 2026-08-31 : la
+// sous-categorie Qonto porte le MEME NOM que la ligne de dette.
+//
+// `base` (defaut PRIMES_SUBCATS) est CONSERVEE dans le resultat, jamais remplacee : une sous-categorie
+// exclue aujourd'hui ne doit pas cesser de l'etre parce qu'elle n'a pas de ligne au carnet. Cette
+// fonction est donc toujours additive, ce qui la rend sure a brancher.
+// Un carnet vide, absent ou illisible redonne exactement `base` : l'appelant retombe alors sur le
+// comportement d'avant ce correctif, jamais sur une liste vide qui reintroduirait le double compte.
+function primesSubcatsDepuisDettes(dettes, base = PRIMES_SUBCATS) {
+  const liste = [...(base || [])];
+  for (const d of dettes || []) {
+    if (!estLignePrimes(d && d.label)) continue;
+    const cle = normalizeLabel(d.label);
+    if (!cle || liste.includes(cle)) continue;
+    liste.push(cle);
+  }
+  return liste;
+}
+
 // Somme des DEBITS Qonto par sous-categorie normalisee -> Map(cle -> { montant, nb }).
 // Les credits sont ignores : un virement entrant d'un associe ne doit jamais eteindre une dette.
 function agregerDebitsParSousCategorie(transactions) {
@@ -135,8 +163,10 @@ function reconcilePrimes({
       type: 'sous_categorie_non_exclue',
       label: l.label,
       montant: 0,
-      message: 'Ajouter « ' + l.label + ' » a PRIMES_QONTO_SUBCATS puis redemarrer le serveur : '
-        + 'sans cela ces virements creent un double compte dans les charges.',
+      message: '« ' + l.label + ' » n est pas couverte par la liste d exclusion des primes : ses '
+        + 'virements Qonto creent un double compte dans les charges. Depuis le correctif du '
+        + '2026-09-10 cette liste se deduit du carnet de dettes, donc ce cas ne devrait plus '
+        + 'survenir : verifier que le carnet est bien lu (sinon repli sur PRIMES_QONTO_SUBCATS).',
     });
   }
 
@@ -180,6 +210,7 @@ module.exports = {
   envNumber,
   estLignePrimes,
   agregerDebitsParSousCategorie,
+  primesSubcatsDepuisDettes,
   reconcilePrimes,
   fenetreReconciliation,
   PRIMES_TVA_TAUX,
