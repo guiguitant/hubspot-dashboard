@@ -4,6 +4,7 @@ const {
   envNumber,
   estLignePrimes,
   agregerDebitsParSousCategorie,
+  primesSubcatsDepuisDettes,
   PRIMES_TVA_TAUX,
   PRIMES_ECART_TOLERANCE,
 } = require('./primesReconciliation');
@@ -31,6 +32,57 @@ describe('estLignePrimes', () => {
     expect(estLignePrimes('Emprunt bancaire')).toBe(false);
     expect(estLignePrimes('')).toBe(false);
     expect(estLignePrimes(null)).toBe(false);
+  });
+});
+
+// Correctif de fond (2026-09-10) : la liste des sous-categories de primes a exclure du reel Qonto
+// ne doit plus dependre d'une variable d'environnement recopiee a la main dans CHAQUE
+// environnement. Elle se deduit du carnet de dettes, ou le libelle est deja saisi, et ou il porte
+// par convention le MEME NOM que la sous-categorie Qonto (decision actee dans la spec du
+// 2026-08-31). L'oubli de recopie avait fait entrer 28 800 EUR de remboursement de la dette 2025
+// dans les charges 2026 du serveur deploye.
+describe('primesSubcatsDepuisDettes', () => {
+  const dettes = [
+    { label: 'Primes associes 2025', montantInitial: 24000, restant: 0 },
+    { label: 'Avance remboursable BPI', montantInitial: 58800, restant: 19600 },
+    { label: 'Primes associes 2026', montantInitial: 30000, restant: 30000 },
+  ];
+
+  it('deduit une cle normalisee par ligne de primes du carnet', () => {
+    const liste = primesSubcatsDepuisDettes(dettes, []);
+    expect(liste).toContain('primes associes 2025');
+    expect(liste).toContain('primes associes 2026');
+  });
+
+  it('ignore les lignes de dette qui ne sont pas des primes', () => {
+    expect(primesSubcatsDepuisDettes(dettes, [])).not.toContain('avance remboursable bpi');
+  });
+
+  it('normalise accents et casse, pour que le libelle du Sheet matche celui de Qonto', () => {
+    const liste = primesSubcatsDepuisDettes([{ label: 'Primes ASSOCIÉS 2025' }], []);
+    expect(liste).toContain('primes associes 2025');
+  });
+
+  it('conserve la liste de base : rien de ce qui est exclu aujourd hui ne cesse de l etre', () => {
+    const liste = primesSubcatsDepuisDettes(dettes, ['primes commerciales']);
+    expect(liste).toContain('primes commerciales');
+    expect(liste).toContain('primes associes 2025');
+  });
+
+  it('ne produit jamais de doublon quand le carnet repete la liste de base', () => {
+    const liste = primesSubcatsDepuisDettes([{ label: 'Primes commerciales' }], ['primes commerciales']);
+    expect(liste.filter(c => c === 'primes commerciales')).toHaveLength(1);
+  });
+
+  it('retombe sur la liste de base si le carnet est vide, absent ou illisible', () => {
+    const base = ['primes associees', 'primes commerciales'];
+    expect(primesSubcatsDepuisDettes([], base)).toEqual(base);
+    expect(primesSubcatsDepuisDettes(null, base)).toEqual(base);
+    expect(primesSubcatsDepuisDettes(undefined, base)).toEqual(base);
+  });
+
+  it('ignore les lignes sans libelle exploitable', () => {
+    expect(primesSubcatsDepuisDettes([{ label: '' }, { label: null }, null], [])).toEqual([]);
   });
 });
 

@@ -4980,6 +4980,33 @@ async function fetchAndParseDettes() {
   return data;
 }
 
+// Liste EFFECTIVE des sous-categories Qonto de primes a exclure du reel des charges.
+//
+// Correctif de fond du 2026-09-10 : cette liste se deduit desormais du CARNET DE DETTES (onglet
+// Dettes du classeur), et non plus de la seule variable d'environnement PRIMES_QONTO_SUBCATS.
+// Motif : cette variable devait etre posee A LA MAIN dans CHAQUE environnement et completee a
+// CHAQUE nouveau millesime de primes. L'oubli est silencieux et cher : corrigee dans le .env local
+// le 2026-09-07, elle manquait toujours sur le serveur deploye le 2026-09-10, ou les 28 800 EUR de
+// remboursement de la dette de primes 2025 gonflaient les charges d'exploitation 2026 (510 869
+// affiches au lieu de 482 069). Le carnet, lui, est saisi une seule fois, par Nathan, au meme
+// endroit que le reste des engagements.
+//
+// La variable d'environnement reste HONOREE (primesSubcatsDepuisDettes est additive) : elle sert
+// desormais de complement pour une sous-categorie Qonto qui n'aurait pas de ligne au carnet.
+//
+// Tolerance : un classeur injoignable ne fait JAMAIS tomber le calcul des charges, on retombe sur
+// PRIMES_SUBCATS, c'est-a-dire exactement le comportement d'avant ce correctif. Le cache est celui
+// de fetchAndParseDettes (5 min), donc aucun fetch supplementaire en pratique.
+async function getPrimesSubcatsEffectives() {
+  try {
+    const { dettes } = await fetchAndParseDettes();
+    return primesReconciliation.primesSubcatsDepuisDettes(dettes, chargesPerimetre.PRIMES_SUBCATS);
+  } catch (e) {
+    console.error('[charges] carnet de dettes illisible, repli sur PRIMES_QONTO_SUBCATS :', e.message);
+    return chargesPerimetre.PRIMES_SUBCATS;
+  }
+}
+
 // --- Garde-fou : réconciliation "dette de primes" (Sheet) vs débits Qonto (réel) ---
 // Lecture seule, ne corrige AUCUN montant : le restant dû du carnet et la trésorerie nette de
 // dette restent calculés exactement comme avant. Voir la spec :
@@ -5008,7 +5035,13 @@ async function fetchPrimesReconciliation(dettesRes) {
   );
   const transactions = parCompte.flat();
 
-  const result = primesReconciliation.reconcilePrimes({ dettes, transactions });
+  // Meme liste que celle utilisee par le calcul des charges (getPrimesSubcatsEffectives), pour que
+  // `couvertParExclusion` decrive l'exclusion REELLEMENT appliquee et non une liste parallele.
+  const result = primesReconciliation.reconcilePrimes({
+    dettes,
+    transactions,
+    primesSubcats: primesReconciliation.primesSubcatsDepuisDettes(dettes, chargesPerimetre.PRIMES_SUBCATS),
+  });
   primesReconCache = result;
   primesReconCacheTime = Date.now();
   return result;
@@ -8266,6 +8299,9 @@ app.get('/api/charges', async (req, res) => {
     const { start, end } = req.query;
     if (!start || !end) return res.status(400).json({ error: 'Paramètres start et end requis' });
 
+    // Meme liste d'exclusion que computeChargesHybride (cf getPrimesSubcatsEffectives) : cette route
+    // legacy doit rester alignee sur le compte de resultat, une seule verite pour les deux.
+    const primesSubcats = await getPrimesSubcatsEffectives();
     const org = await qontoRequest('/v2/organization');
     const bankAccounts = org.organization.bank_accounts || [];
     if (bankAccounts.length === 0) return res.status(404).json({ error: 'Aucun compte Qonto' });
@@ -8295,7 +8331,7 @@ app.get('/api/charges', async (req, res) => {
         if (!tx.settled_at) continue;
         const cat = (tx.cashflow_category && tx.cashflow_category.name) || tx.category || 'Non catégorisé';
         const sousCat = (tx.cashflow_subcategory && tx.cashflow_subcategory.name) || null;
-        if (chargesPerimetre.isPrimeSubcategory(sousCat)) continue; // primes retirees du reel (portees par le calcul)
+        if (chargesPerimetre.isPrimeSubcategory(sousCat, primesSubcats)) continue; // primes retirees du reel (portees par le calcul)
         if (chargesPerimetre.isHorsExploitation(cat, sousCat)) continue; // TVA reversee / IS : pas des charges d'exploitation (PCG)
         const d = new Date(tx.settled_at);
         const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -8337,7 +8373,7 @@ app.get('/api/charges', async (req, res) => {
     for (const tx of txsN) {
       const cat = (tx.cashflow_category && tx.cashflow_category.name) || tx.category || 'Non catégorisé';
       const sousCat = (tx.cashflow_subcategory && tx.cashflow_subcategory.name) || null;
-      if (chargesPerimetre.isPrimeSubcategory(sousCat)) continue; // primes retirees du reel (portees par le calcul)
+      if (chargesPerimetre.isPrimeSubcategory(sousCat, primesSubcats)) continue; // primes retirees du reel (portees par le calcul)
       if (chargesPerimetre.isHorsExploitation(cat, sousCat)) continue; // TVA reversee / IS : pas des charges d'exploitation (PCG)
       const ht = montantHT(tx, tableTaux, indexExact); // Tache 6 : TTC -> HT (TVA exacte ou table)
       chargesParCategorie[cat] = (chargesParCategorie[cat] || 0) + ht;
@@ -8513,6 +8549,10 @@ async function computeChargesHybride(start, end) {
       (await fetchQontoTransactionsRange(ibanVal, from, to)).filter(t => t.side === 'debit');
 
     if (hasReal || hasPrev) {
+      // Liste d'exclusion des primes deduite du carnet de dettes (cf getPrimesSubcatsEffectives).
+      // Lue UNE fois ici, puis passee explicitement aux deux boucles ci-dessous : les deux doivent
+      // imperativement appliquer le meme perimetre, sinon la comparaison N / N-1 devient bancale.
+      const primesSubcats = await getPrimesSubcatsEffectives();
       const org = await qontoRequest('/v2/organization');
       const bankAccounts = org.organization.bank_accounts || [];
       const mainAccount  = bankAccounts.reduce((a, b) => (b.balance_cents > a.balance_cents ? b : a));
@@ -8555,7 +8595,7 @@ async function computeChargesHybride(start, end) {
       for (const tx of txsN) {
         const sousCat = (tx.cashflow_subcategory && tx.cashflow_subcategory.name) || null;
         const cat = (tx.cashflow_category && tx.cashflow_category.name) || tx.category || 'Non catégorisé';
-        if (chargesPerimetre.isPrimeSubcategory(sousCat)) { // primes retirees du reel (portees par le calcul)
+        if (chargesPerimetre.isPrimeSubcategory(sousCat, primesSubcats)) { // primes retirees du reel (portees par le calcul)
           primesExclues.nb++; primesExclues.montant += tx.amount;
           continue;
         }
@@ -8583,7 +8623,7 @@ async function computeChargesHybride(start, end) {
       for (const tx of txsNm1) {
         const sousCatNm1 = (tx.cashflow_subcategory && tx.cashflow_subcategory.name) || null;
         const catNm1 = (tx.cashflow_category && tx.cashflow_category.name) || tx.category || 'Non catégorisé';
-        if (chargesPerimetre.isPrimeSubcategory(sousCatNm1)) continue; // meme exclusion que la boucle N (primes portees par le calcul)
+        if (chargesPerimetre.isPrimeSubcategory(sousCatNm1, primesSubcats)) continue; // meme exclusion que la boucle N (primes portees par le calcul)
         if (chargesPerimetre.isHorsExploitation(catNm1, sousCatNm1)) continue; // meme exclusion que la boucle N (TVA reversee / IS)
         const d = new Date(tx.settled_at);
         const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
