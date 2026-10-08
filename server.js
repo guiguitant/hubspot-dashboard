@@ -11,6 +11,7 @@ const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
 const { computeKpi, totalCaAnnee, signedAmountForYear, signedByQuarter, clawbackCandidates, computePrimePool, computePrimePayments, endOfYearIso, computePrimesChargeMultiExercice } = require('./utils/kpiCompute');
 const { computeBillingForYear } = require('./utils/billing');
+const { hasTag, statutsDeals, validerCreation, echecCertainHubspot, vueDeal } = require('./utils/releafDeals');
 const { buildSalesNavUrl } = require('./utils/buildSalesNavUrl');
 const multer = require('multer');
 const { parse: parseCsv } = require('csv-parse/sync');
@@ -1527,33 +1528,173 @@ async function associateContactByEmail(dealId, email, name, company) {
   await hubspotWrite('PUT', `/crm/v4/objects/deals/${dealId}/associations/default/contacts/${contactId}`, {});
 }
 
-// POST /api/releaf-deals/deals — crée le deal dans HubSpot + tags + association contact.
+// Propriétés lues pour chaque deal (liste par tag, pipeline, lecture par id).
+const RELEAF_DEALS_PROPS = [
+  'dealname', 'amount', 'dealstage', 'closedate', 'createdate',
+  'hs_is_closed', 'hs_is_closed_won', 'hs_lastmodifieddate', 'hs_merged_object_ids',
+];
+
+// batch/read par lots de 100. HubSpot répond 207 en listant les ids absents ;
+// une réponse sans `results` est une anomalie et lève une erreur, pour que
+// l'appelant ne conclue jamais « supprimé » sur une panne.
+async function batchReadDeals(ids, archived, properties) {
+  const out = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    const r = await hubspotWrite('POST', `/crm/v3/objects/deals/batch/read${archived ? '?archived=true' : ''}`, {
+      properties, inputs: chunk.map((id) => ({ id: String(id) })),
+    });
+    if (!Array.isArray(r?.results)) throw new Error('HubSpot batch/read : réponse sans results');
+    out.push(...r.results);
+  }
+  return out;
+}
+
+// Statut de chaque id : existe, fusionne (id du deal conservé), corbeille, inconnu.
+async function lireDealsParId(ids) {
+  const actifs = await batchReadDeals(ids, false, RELEAF_DEALS_PROPS);
+  const trouves = new Set(statutsDeals(ids, actifs, []).filter((s) => s.statut !== 'inconnu').map((s) => s.id));
+  const restants = ids.map(String).filter((id) => !trouves.has(id));
+  const corbeille = restants.length ? await batchReadDeals(restants, true, ['dealname']) : [];
+  return { actifs, statuts: statutsDeals(ids, actifs, corbeille) };
+}
+
+// Notes, relances, tags et tâches n'écrivent que sur un deal vivant : avant,
+// un id supprimé recevait ses écritures dans le vide et répondait « ok ».
+async function exigerDealActif(req, res, next) {
+  try {
+    const { statuts } = await lireDealsParId([req.params.id]);
+    const s = statuts[0];
+    if (s.statut === 'existe') return next();
+    return res.status(404).json({ error: 'deal introuvable dans HubSpot', statut: s.statut, dealId: s.dealId });
+  } catch (e) {
+    return res.status(502).json({ error: `lecture HubSpot impossible : ${e.message}` });
+  }
+}
+
+function libellesEtapes() {
+  const stageLabel = {};
+  const stageProb = {};
+  for (const s of KANBAN_STAGES) { stageLabel[s.id] = s.label; stageProb[s.id] = s.probability; }
+  stageLabel['closedwon'] = 'Gagné';
+  stageLabel['closedlost'] = 'Perdu';
+  return { stageLabel, stageProb };
+}
+
+// POST /api/releaf-deals/deals — crée le deal dans HubSpot, sans doublon possible
+// quand Canopy envoie une `cle_externe` (migration 46). Règle : une fois le deal
+// créé dans HubSpot, la route ne renvoie JAMAIS d'erreur, sinon l'appelant
+// réessaie et crée un second deal ; les incidents suivants vont dans `avertissements`.
 app.post('/api/releaf-deals/deals', canopyAuth, async (req, res) => {
-  const { name, stage, contactEmail, contactName, company, tags } = req.body || {};
-  if (!name || !stage) return res.status(400).json({ error: 'name et stage requis' });
-  const stageId = STAGE_ID_MAP[stage];
-  if (!stageId) return res.status(400).json({ error: `stage inconnu: ${stage}` });
+  const v = validerCreation(req.body, STAGE_ID_MAP);
+  if (v.erreur) return res.status(400).json({ error: v.erreur });
+
+  // 1) Réservation de la clé, avant tout appel HubSpot.
+  if (v.cleExterne) {
+    const { data: deja, error: selErr } = await supabaseAdmin
+      .from('releaf_deal_creations').select('deal_id, statut').eq('cle_externe', v.cleExterne).maybeSingle();
+    if (selErr) return res.status(500).json({ error: selErr.message });
+    if (deja?.deal_id) return res.json({ ok: true, dealId: deja.deal_id, existant: true });
+    if (deja) {
+      return res.status(409).json({ error: 'création déjà en cours ou interrompue pour cette clé : vérifier dans HubSpot', cle_externe: v.cleExterne });
+    }
+    const { error: insErr } = await supabaseAdmin
+      .from('releaf_deal_creations').insert({ cle_externe: v.cleExterne, statut: 'en_cours' });
+    if (insErr) {
+      // 23505 = clé déjà prise par un appel simultané.
+      if (insErr.code === '23505') return res.status(409).json({ error: 'création déjà en cours pour cette clé', cle_externe: v.cleExterne });
+      return res.status(500).json({ error: insErr.message });
+    }
+  }
+
+  // 2) Création HubSpot.
+  let dealId;
   try {
     const result = await hubspotWrite('POST', '/crm/v3/objects/deals', {
-      properties: { dealname: name, dealstage: stageId, pipeline: 'default' },
+      properties: { dealname: v.name, dealstage: v.stageId, pipeline: 'default' },
     });
-    const dealId = result.id;
-    const meta = { deal_id: dealId, updated_at: new Date().toISOString() };
-    if (Array.isArray(tags) && tags.length) meta.tags = tags;
-    await supabaseAdmin.from('deal_metadata').upsert(meta, { onConflict: 'deal_id' });
-    if (contactEmail) {
-      associateContactByEmail(dealId, contactEmail, contactName, company).catch(
-        (e) => console.warn('releaf-deals: association contact échouée:', e.message)
-      );
-    }
-    res.json({ ok: true, dealId });
+    dealId = result?.id;
+    if (!dealId) throw new Error('HubSpot n\'a pas renvoyé d\'id');
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    // Refus HTTP de HubSpot : rien n'existe, la clé est libérée. Sinon (coupure,
+    // réponse illisible), le deal a pu être créé : la clé reste bloquée.
+    if (v.cleExterne && echecCertainHubspot(e)) {
+      await supabaseAdmin.from('releaf_deal_creations').delete().eq('cle_externe', v.cleExterne).eq('statut', 'en_cours');
+    }
+    return res.status(500).json({ error: e.message });
+  }
+
+  // 3) Après création : plus aucune erreur renvoyée.
+  const avertissements = [];
+  const now = new Date().toISOString();
+  if (v.cleExterne) {
+    const { error } = await supabaseAdmin.from('releaf_deal_creations')
+      .update({ deal_id: String(dealId), statut: 'cree', updated_at: now }).eq('cle_externe', v.cleExterne);
+    if (error) avertissements.push(`réservation non close : ${error.message}`);
+  }
+  const meta = { deal_id: String(dealId), updated_at: now };
+  if (v.tags.length) meta.tags = v.tags;
+  if (v.assignee) meta.assignee = v.assignee;
+  const { error: metaErr } = await supabaseAdmin.from('deal_metadata').upsert(meta, { onConflict: 'deal_id' });
+  if (metaErr) avertissements.push(`tags ou responsable non enregistrés : ${metaErr.message}`);
+  if (v.contactEmail) {
+    associateContactByEmail(dealId, v.contactEmail, v.contactName, v.company).catch(
+      (e) => console.warn('releaf-deals: association contact échouée:', e.message)
+    );
+  }
+  res.json({ ok: true, dealId: String(dealId), existant: false, avertissements });
+});
+
+// POST /api/releaf-deals/deals/lire — { ids: [...] } → statut de chaque deal
+// (existe, fusionne, corbeille, inconnu). Lecture seule. 502 si HubSpot ne
+// répond pas correctement : jamais de « supprimé » déduit d'une panne.
+app.post('/api/releaf-deals/deals/lire', canopyAuth, async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String).filter(Boolean) : null;
+  if (!ids || !ids.length) return res.status(400).json({ error: 'ids requis (tableau non vide)' });
+  if (ids.length > 1000) return res.status(400).json({ error: '1000 ids au plus' });
+  try {
+    const { statuts } = await lireDealsParId(ids);
+    res.json({ deals: statuts });
+  } catch (e) {
+    res.status(502).json({ error: `lecture HubSpot impossible : ${e.message}` });
+  }
+});
+
+// GET /api/releaf-deals/pipeline — TOUS les deals du pipeline `default` (ouverts
+// et clos, tagués ou non), avec leurs compléments Pilot. Lecture seule. Canopy
+// le lit chaque jour : un deal fait à la main sans tag doit exister pour lui.
+app.get('/api/releaf-deals/pipeline', canopyAuth, async (req, res) => {
+  try {
+    const hs = [];
+    let after;
+    for (let page = 0; page < 100; page++) {
+      const body = {
+        filterGroups: [{ filters: [{ propertyName: 'pipeline', operator: 'EQ', value: 'default' }] }],
+        properties: RELEAF_DEALS_PROPS,
+        sorts: [{ propertyName: 'createdate', direction: 'ASCENDING' }],
+        limit: 100,
+      };
+      if (after) body.after = after;
+      const r = await hubspotSearch(body);
+      if (!Array.isArray(r?.results)) throw new Error('HubSpot search : réponse sans results');
+      hs.push(...r.results);
+      after = r.paging?.next?.after;
+      if (!after) break;
+    }
+    const { data: metas, error } = await supabaseAdmin
+      .from('deal_metadata').select('deal_id, tags, relances, tasks, next_meeting_at, assignee');
+    if (error) throw new Error(error.message);
+    const metaParId = new Map((metas || []).map((m) => [String(m.deal_id), m]));
+    const { stageLabel, stageProb } = libellesEtapes();
+    const deals = hs.map((d) => vueDeal(d.id, d.properties || {}, metaParId.get(String(d.id)), stageLabel, stageProb));
+    res.json({ pipeline: 'default', count: deals.length, deals });
+  } catch (e) {
+    res.status(502).json({ error: `lecture du pipeline impossible : ${e.message}` });
   }
 });
 
 // POST /api/releaf-deals/deals/:id/notes
-app.post('/api/releaf-deals/deals/:id/notes', canopyAuth, async (req, res) => {
+app.post('/api/releaf-deals/deals/:id/notes', canopyAuth, exigerDealActif, async (req, res) => {
   const text = (req.body?.note || '').trim();
   if (!text) return res.status(400).json({ error: 'note obligatoire' });
   try {
@@ -1563,7 +1704,7 @@ app.post('/api/releaf-deals/deals/:id/notes', canopyAuth, async (req, res) => {
 });
 
 // POST /api/releaf-deals/deals/:id/relances
-app.post('/api/releaf-deals/deals/:id/relances', canopyAuth, async (req, res) => {
+app.post('/api/releaf-deals/deals/:id/relances', canopyAuth, exigerDealActif, async (req, res) => {
   const note = (req.body?.detail || 'Relance Canopy').trim() || 'Relance Canopy';
   try {
     await appendDealMetadata(req.params.id, 'relances', { type: 'email', at: new Date().toISOString(), note });
@@ -1572,7 +1713,7 @@ app.post('/api/releaf-deals/deals/:id/relances', canopyAuth, async (req, res) =>
 });
 
 // POST /api/releaf-deals/deals/:id/tags — fusion sans doublon
-app.post('/api/releaf-deals/deals/:id/tags', canopyAuth, async (req, res) => {
+app.post('/api/releaf-deals/deals/:id/tags', canopyAuth, exigerDealActif, async (req, res) => {
   const { tags } = req.body || {};
   if (!Array.isArray(tags)) return res.status(400).json({ error: 'tags doit être un tableau' });
   try {
@@ -1589,7 +1730,7 @@ app.post('/api/releaf-deals/deals/:id/tags', canopyAuth, async (req, res) => {
 });
 
 // POST /api/releaf-deals/deals/:id/tasks
-app.post('/api/releaf-deals/deals/:id/tasks', canopyAuth, async (req, res) => {
+app.post('/api/releaf-deals/deals/:id/tasks', canopyAuth, exigerDealActif, async (req, res) => {
   const { kind, title, due_date } = req.body || {};
   const type = kind === 'meeting' ? 'meeting' : 'custom';
   let dueIso = null;
@@ -1610,28 +1751,21 @@ app.post('/api/releaf-deals/deals/:id/tasks', canopyAuth, async (req, res) => {
 // dans Canopy (écran /closing, suivi de Léo). Aucune écriture.
 app.get('/api/releaf-deals/deals', canopyAuth, async (req, res) => {
   const tag = (req.query.tag || 'prospection').toString().trim();
-  const tagLc = tag.toLowerCase();
   try {
     // 1) deals taggés. NB : en prod `tags` peut être stocké en chaîne JSON et pas
     // en TEXT[] → on charge tout et on normalise/filtre en JS (même pattern que
     // /api/won-deals/range), au lieu d'un .contains() array qui ne matcherait pas.
     const { data: allRows, error } = await supabaseAdmin
       .from('deal_metadata')
-      .select('deal_id, tags, relances, tasks, next_meeting_at');
+      .select('deal_id, tags, relances, tasks, next_meeting_at, assignee');
     if (error) throw new Error(error.message);
-    const normTags = (raw) => {
-      let t = raw;
-      if (typeof t === 'string') { try { t = JSON.parse(t); } catch { t = [t]; } }
-      return Array.isArray(t) ? t : (t ? [t] : []);
-    };
     const metas = (allRows || [])
-      .map((r) => ({ ...r, _tags: normTags(r.tags) }))
-      .filter((r) => r._tags.some((x) => String(x).toLowerCase() === tagLc));
+      .filter((r) => hasTag(r.tags, tag));
     if (!metas.length) return res.json({ tag, deals: [] });
 
     // 2) propriétés HubSpot en batch (stage, montant, dates) — 100 ids max / appel
     const ids = metas.map((m) => m.deal_id);
-    const props = ['dealname', 'amount', 'dealstage', 'closedate', 'createdate', 'hs_is_closed', 'hs_is_closed_won'];
+    const props = RELEAF_DEALS_PROPS;
     const hsById = {};
     for (let i = 0; i < ids.length; i += 100) {
       const chunk = ids.slice(i, i + 100);
@@ -1642,38 +1776,14 @@ app.get('/api/releaf-deals/deals', canopyAuth, async (req, res) => {
       for (const d of (batch?.results || [])) hsById[d.id] = d.properties || {};
     }
 
-    const stageLabel = {};
-    const stageProb = {};
-    for (const s of KANBAN_STAGES) { stageLabel[s.id] = s.label; stageProb[s.id] = s.probability; }
-    stageLabel['closedwon'] = 'Gagné';
-    stageLabel['closedlost'] = 'Perdu';
-
+    const { stageLabel, stageProb } = libellesEtapes();
     const deals = metas
       .map((m) => {
         const p = hsById[m.deal_id];
         if (!p) return null; // deal supprimé dans HubSpot → ignoré
-        const relances = Array.isArray(m.relances) ? m.relances : [];
-        const tasks = Array.isArray(m.tasks) ? m.tasks : [];
-        const lastRelance = relances.length ? relances[relances.length - 1] : null;
-        const name = p.dealname || '';
-        return {
-          dealId: m.deal_id,
-          name,
-          company: name.includes(' – ') ? name.split(' – ')[0] : null,
-          stageId: p.dealstage || null,
-          stage: stageLabel[p.dealstage] || p.dealstage || '',
-          probability: stageProb[p.dealstage] ?? null,
-          amount: p.amount ? parseFloat(p.amount) : null,
-          isClosed: p.hs_is_closed === 'true',
-          isWon: p.hs_is_closed_won === 'true',
-          createdAt: p.createdate || null,
-          closeDate: p.closedate || null,
-          lastRelanceAt: lastRelance?.at || null,
-          relanceCount: relances.length,
-          nextMeetingAt: m.next_meeting_at || null,
-          openTasks: tasks.filter((t) => t.status !== 'done').length,
-          tags: m._tags,
-        };
+        const v = vueDeal(m.deal_id, p, m, stageLabel, stageProb);
+        // `company` gardé pour les appelants existants : partie du nom avant « – ».
+        return { ...v, company: v.name.includes(' – ') ? v.name.split(' – ')[0] : null };
       })
       .filter(Boolean);
 

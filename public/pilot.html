@@ -6290,12 +6290,15 @@
       const tag = ACQUISITION_TAGS[idx];
       if (!tag) return;
       const meta = dealMetadata[dealId] || {};
-      const tags = [...(meta.tags || [])];
-      const i = tags.indexOf(tag);
-      if (i >= 0) tags.splice(i, 1); else tags.push(tag);
+      // Casse ignorée : Canopy écrivait « prospection » quand l'UI écrit
+      // « Prospection » ; la puce paraissait inactive et un clic ajoutait un
+      // second tag au lieu de retirer le premier.
+      const memeTag = (x) => String(x).toLowerCase() === String(tag).toLowerCase();
+      let tags = [...(meta.tags || [])];
+      if (tags.some(memeTag)) tags = tags.filter((x) => !memeTag(x)); else tags.push(tag);
       saveDealMetadata(dealId, { tags });
       const el = document.getElementById('acqchip-' + dealId + '-' + idx);
-      if (el) el.style.cssText = _acqChipStyle(tags.includes(tag), TAG_STYLES[tag] || {});
+      if (el) el.style.cssText = _acqChipStyle(tags.some(memeTag), TAG_STYLES[tag] || {});
     }
 
     // --- Assignation d'un deal à une personne ---
@@ -9465,14 +9468,14 @@
         meta, deal.stage);
       const tags = meta.tags || [];
       // Tags "mission" uniquement (on exclut l'acquisition, affichée à part)
-      const missionTags = tags.filter(t => !ACQUISITION_TAGS.includes(t));
+      const missionTags = tags.filter(t => !ACQUISITION_TAGS.some(a => a.toLowerCase() === String(t).toLowerCase()));
       const tagsHtml = missionTags.length
         ? missionTags.map(t => { const s = TAG_STYLES[t] || {}; return `<span class="deal-tag" style="background:${s.bg||'#eee'};color:${s.color||'#555'}">${t}</span>`; }).join('')
         : '<span style="color:var(--text-secondary);font-size:0.8rem">Aucun tag</span>';
       // Chips d'acquisition cliquables (toggle)
       const acqHtml = ACQUISITION_TAGS.map((t, i) => {
         const s = TAG_STYLES[t] || {};
-        return `<span id="acqchip-${deal.id}-${i}" onclick="toggleAcquisitionTag('${deal.id}',${i})" style="${_acqChipStyle(tags.includes(t), s)}">${t}</span>`;
+        return `<span id="acqchip-${deal.id}-${i}" onclick="toggleAcquisitionTag('${deal.id}',${i})" style="${_acqChipStyle(tags.some((x) => String(x).toLowerCase() === String(t).toLowerCase()), s)}">${t}</span>`;
       }).join('');
 
       const closedateVal = deal.closedate ? deal.closedate.slice(0, 10) : '';
