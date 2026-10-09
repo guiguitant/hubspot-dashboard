@@ -1,6 +1,6 @@
 'use strict';
 const {
-  normTags, hasTag, statutsDeals, validerCreation, echecCertainHubspot, vueDeal,
+  normTags, hasTag, statutsDeals, validerCreation, echecCertainHubspot, vueDeal, avecReprise429,
 } = require('./releafDeals');
 
 const STAGES = { 'RDV Qualif': 'qualifiedtobuy', 'closedlost': 'closedlost' };
@@ -94,5 +94,35 @@ describe('vueDeal', () => {
   test('sans compléments Pilot', () => {
     const v = vueDeal('1', { dealname: 'Y', dealstage: 'qualifiedtobuy' }, undefined, {}, {});
     expect(v).toMatchObject({ tags: [], assignee: null, relanceCount: 0, mergedIds: [] });
+  });
+});
+
+describe('avecReprise429', () => {
+  const sansAttente = { attendre: async () => {} };
+  const limite = () => new Error('HubSpot Search API 429: {"message":"You have reached your secondly limit."}');
+
+  test('rejoue après un 429 et rend le résultat', async () => {
+    let appels = 0;
+    const r = await avecReprise429(async () => { appels++; if (appels < 3) throw limite(); return 'ok'; }, sansAttente);
+    expect(r).toBe('ok');
+    expect(appels).toBe(3);
+  });
+
+  test("abandonne après le nombre d'essais prévu", async () => {
+    let appels = 0;
+    await expect(avecReprise429(async () => { appels++; throw limite(); }, sansAttente)).rejects.toThrow('429');
+    expect(appels).toBe(3);
+  });
+
+  test('ne rejoue pas une autre erreur', async () => {
+    let appels = 0;
+    await expect(avecReprise429(async () => { appels++; throw new Error('HubSpot POST 400: bad'); }, sansAttente)).rejects.toThrow('400');
+    expect(appels).toBe(1);
+  });
+
+  test('reconnaît aussi un 429 des écritures batch', async () => {
+    let appels = 0;
+    const r = await avecReprise429(async () => { appels++; if (appels === 1) throw new Error('HubSpot POST 429: x'); return 1; }, sansAttente);
+    expect(r).toBe(1);
   });
 });
