@@ -11,7 +11,7 @@ const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
 const { computeKpi, totalCaAnnee, signedAmountForYear, signedByQuarter, clawbackCandidates, computePrimePool, computePrimePayments, endOfYearIso, computePrimesChargeMultiExercice } = require('./utils/kpiCompute');
 const { computeBillingForYear } = require('./utils/billing');
-const { hasTag, statutsDeals, validerCreation, echecCertainHubspot, vueDeal } = require('./utils/releafDeals');
+const { hasTag, statutsDeals, validerCreation, echecCertainHubspot, vueDeal, avecReprise429 } = require('./utils/releafDeals');
 const { buildSalesNavUrl } = require('./utils/buildSalesNavUrl');
 const multer = require('multer');
 const { parse: parseCsv } = require('csv-parse/sync');
@@ -1541,9 +1541,10 @@ async function batchReadDeals(ids, archived, properties) {
   const out = [];
   for (let i = 0; i < ids.length; i += 100) {
     const chunk = ids.slice(i, i + 100);
-    const r = await hubspotWrite('POST', `/crm/v3/objects/deals/batch/read${archived ? '?archived=true' : ''}`, {
+    // Lecture seule : la rejouer sur un 429 ne risque rien.
+    const r = await avecReprise429(() => hubspotWrite('POST', `/crm/v3/objects/deals/batch/read${archived ? '?archived=true' : ''}`, {
       properties, inputs: chunk.map((id) => ({ id: String(id) })),
-    });
+    }));
     if (!Array.isArray(r?.results)) throw new Error('HubSpot batch/read : réponse sans results');
     out.push(...r.results);
   }
@@ -1675,7 +1676,7 @@ app.get('/api/releaf-deals/pipeline', canopyAuth, async (req, res) => {
         limit: 100,
       };
       if (after) body.after = after;
-      const r = await hubspotSearch(body);
+      const r = await avecReprise429(() => hubspotSearch(body));
       if (!Array.isArray(r?.results)) throw new Error('HubSpot search : réponse sans results');
       hs.push(...r.results);
       after = r.paging?.next?.after;

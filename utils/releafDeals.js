@@ -117,8 +117,27 @@ function vueDeal(dealId, p, meta, stageLabel, stageProb) {
   };
 }
 
+/**
+ * Rejoue `fn` quand HubSpot répond 429 (limite de requêtes par seconde du
+ * compte, partagée avec les écrans de Pilot). Constaté le 09/10 : la lecture du
+ * pipeline par Canopy (4 recherches à la suite) tombait sur « secondly limit ».
+ * Toute autre erreur repart telle quelle.
+ */
+async function avecReprise429(fn, { essais = 3, attenteMs = 1100, attendre } = {}) {
+  const pause = attendre || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  for (let i = 1; ; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (i >= essais || !/^HubSpot [A-Za-z ]*429:/.test(String(e?.message || ''))) throw e;
+      await pause(attenteMs * i);
+    }
+  }
+}
+
 module.exports = {
   ASSIGNEES,
+  avecReprise429,
   normTags,
   hasTag,
   statutsDeals,
