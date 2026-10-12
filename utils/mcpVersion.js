@@ -14,7 +14,7 @@
 //   npm run mcp:kit -- --publish
 //
 // Fichier volontairement sans dépendance : il part tel quel dans le kit.
-const MCP_SERVER_VERSION = '1.1.0';
+const MCP_SERVER_VERSION = '1.2.0';
 
 // Compare deux versions « MAJEUR.MINEUR.CORRECTIF ».
 // -1 si a < b, 0 si égales, 1 si a > b. Comparaison NUMÉRIQUE segment par segment :

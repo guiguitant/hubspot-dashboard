@@ -11,6 +11,25 @@ const ASSIGNEES = ['Guillaume', 'Vincent', 'Nathan'];
 // Une clé externe identifie UNE création voulue par Canopy (sa réservation).
 const CLE_EXTERNE_MAX = 200;
 
+// Forme minimale d'une adresse : une partie locale, un @, un domaine avec un
+// point. Volontairement simple : on refuse les fautes de frappe évidentes
+// (« jean.perin », « jean@perin »), pas les adresses exotiques mais valides.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_MAX = 254;
+
+/**
+ * Email du contact d'un deal, normalisé (espaces retirés, minuscules), ou null
+ * s'il est absent ou mal formé. Spec Canopy « Consolider », étape 9 : plus
+ * aucun deal sans contact, l'email est gardé par Pilot dans
+ * deal_metadata.contact_email (HubSpot n'est qu'une copie, souvent refusée).
+ */
+function normEmail(raw) {
+  if (typeof raw !== 'string') return null;
+  const e = raw.trim().toLowerCase();
+  if (!e || e.length > EMAIL_MAX || !EMAIL_RE.test(e)) return null;
+  return e;
+}
+
 /** En prod, `tags` est parfois une chaîne JSON plutôt qu'un TEXT[]. */
 function normTags(raw) {
   let t = raw;
@@ -59,6 +78,8 @@ function validerCreation(body, stageIdMap) {
   if (!name || !stage) return { erreur: 'name et stage requis' };
   const stageId = stageIdMap[stage];
   if (!stageId) return { erreur: `stage inconnu: ${stage}` };
+  const email = normEmail(contactEmail);
+  if (!email) return { erreur: contactEmail ? `contactEmail invalide: ${contactEmail}` : 'contactEmail requis' };
   if (tags !== undefined && !Array.isArray(tags)) return { erreur: 'tags doit être un tableau' };
   if (assignee != null && assignee !== '' && !ASSIGNEES.includes(assignee)) {
     return { erreur: `assignee invalide: ${assignee}` };
@@ -71,7 +92,7 @@ function validerCreation(body, stageIdMap) {
   return {
     name: String(name).trim(),
     stageId,
-    contactEmail: contactEmail || null,
+    contactEmail: email,
     contactName: contactName || null,
     company: company || null,
     tags: Array.isArray(tags) ? tags.filter((t) => typeof t === 'string' && t.trim()) : [],
@@ -114,6 +135,25 @@ function vueDeal(dealId, p, meta, stageLabel, stageProb) {
     openTasks: tasks.filter((t) => t.status !== 'done').length,
     tags: normTags(meta?.tags),
     assignee: meta?.assignee || null,
+    contactEmail: meta?.contact_email || null,
+  };
+}
+
+/**
+ * Contrôle d'une écriture du contact sur un deal existant
+ * (POST /api/releaf-deals/deals/:id/contact). `remplacer` doit être explicite
+ * pour écraser un email différent déjà posé : sans lui, la route rend 409 avec
+ * l'email en place, et c'est à un humain de trancher.
+ */
+function validerContact(body) {
+  const { contactEmail, contactName, company, remplacer } = body || {};
+  const email = normEmail(contactEmail);
+  if (!email) return { erreur: contactEmail ? `contactEmail invalide: ${contactEmail}` : 'contactEmail requis' };
+  return {
+    contactEmail: email,
+    contactName: contactName || null,
+    company: company || null,
+    remplacer: remplacer === true,
   };
 }
 
@@ -138,10 +178,12 @@ async function avecReprise429(fn, { essais = 3, attenteMs = 1100, attendre } = {
 module.exports = {
   ASSIGNEES,
   avecReprise429,
+  normEmail,
   normTags,
   hasTag,
   statutsDeals,
   validerCreation,
+  validerContact,
   echecCertainHubspot,
   vueDeal,
 };

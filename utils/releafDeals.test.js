@@ -1,6 +1,7 @@
 'use strict';
 const {
   normTags, hasTag, statutsDeals, validerCreation, echecCertainHubspot, vueDeal, avecReprise429,
+  normEmail, validerContact,
 } = require('./releafDeals');
 
 const STAGES = { 'RDV Qualif': 'qualifiedtobuy', 'closedlost': 'closedlost' };
@@ -43,24 +44,54 @@ describe('validerCreation', () => {
   test('demande complète normalisée', () => {
     const v = validerCreation({
       name: ' FDES - Perin ', stage: 'RDV Qualif', tags: ['Prospection', '', 3],
-      assignee: 'Nathan', cle_externe: 'canopy:abc',
+      assignee: 'Nathan', cle_externe: 'canopy:abc', contactEmail: ' Jean.Dupont@Perin.fr ',
     }, STAGES);
     expect(v).toMatchObject({
       name: 'FDES - Perin', stageId: 'qualifiedtobuy', tags: ['Prospection'],
-      assignee: 'Nathan', cleExterne: 'canopy:abc',
+      assignee: 'Nathan', cleExterne: 'canopy:abc', contactEmail: 'jean.dupont@perin.fr',
     });
   });
   test('sans clé ni responsable : acceptée', () => {
-    const v = validerCreation({ name: 'X', stage: 'RDV Qualif' }, STAGES);
+    const v = validerCreation({ name: 'X', stage: 'RDV Qualif', contactEmail: 'a@b.fr' }, STAGES);
     expect(v.cleExterne).toBeNull();
     expect(v.assignee).toBeNull();
   });
   test('refus', () => {
     expect(validerCreation({ stage: 'RDV Qualif' }, STAGES).erreur).toMatch(/requis/);
     expect(validerCreation({ name: 'X', stage: 'Inconnue' }, STAGES).erreur).toMatch(/stage inconnu/);
-    expect(validerCreation({ name: 'X', stage: 'RDV Qualif', assignee: 'Léo' }, STAGES).erreur).toMatch(/assignee/);
-    expect(validerCreation({ name: 'X', stage: 'RDV Qualif', tags: 'a' }, STAGES).erreur).toMatch(/tags/);
-    expect(validerCreation({ name: 'X', stage: 'RDV Qualif', cle_externe: 'x'.repeat(201) }, STAGES).erreur).toMatch(/cle_externe/);
+    expect(validerCreation({ name: 'X', stage: 'RDV Qualif', contactEmail: 'a@b.fr', assignee: 'Léo' }, STAGES).erreur).toMatch(/assignee/);
+    expect(validerCreation({ name: 'X', stage: 'RDV Qualif', contactEmail: 'a@b.fr', tags: 'a' }, STAGES).erreur).toMatch(/tags/);
+    expect(validerCreation({ name: 'X', stage: 'RDV Qualif', contactEmail: 'a@b.fr', cle_externe: 'x'.repeat(201) }, STAGES).erreur).toMatch(/cle_externe/);
+  });
+  test('plus de deal sans contact (Consolider, étape 9)', () => {
+    expect(validerCreation({ name: 'X', stage: 'RDV Qualif' }, STAGES).erreur).toBe('contactEmail requis');
+    expect(validerCreation({ name: 'X', stage: 'RDV Qualif', contactEmail: '' }, STAGES).erreur).toBe('contactEmail requis');
+    expect(validerCreation({ name: 'X', stage: 'RDV Qualif', contactEmail: 'jean.perin' }, STAGES).erreur).toMatch(/contactEmail invalide/);
+  });
+});
+
+describe('normEmail', () => {
+  test('normalise une adresse valide', () => {
+    expect(normEmail('  Jean.Dupont@Perin.FR ')).toBe('jean.dupont@perin.fr');
+  });
+  test('refuse les fautes de frappe évidentes', () => {
+    for (const e of ['jean.perin', 'jean@perin', '@perin.fr', 'jean @perin.fr', 'a@b@c.fr', '', null, 42]) {
+      expect(normEmail(e)).toBeNull();
+    }
+  });
+});
+
+describe('validerContact', () => {
+  test('email normalisé, remplacement explicite seulement', () => {
+    expect(validerContact({ contactEmail: 'A@B.fr' })).toEqual({
+      contactEmail: 'a@b.fr', contactName: null, company: null, remplacer: false,
+    });
+    expect(validerContact({ contactEmail: 'a@b.fr', remplacer: 'true' }).remplacer).toBe(false);
+    expect(validerContact({ contactEmail: 'a@b.fr', remplacer: true }).remplacer).toBe(true);
+  });
+  test('refus', () => {
+    expect(validerContact({}).erreur).toBe('contactEmail requis');
+    expect(validerContact({ contactEmail: 'x' }).erreur).toMatch(/invalide/);
   });
 });
 
@@ -82,18 +113,18 @@ describe('vueDeal', () => {
       dealname: 'EPD - X', dealstage: 'closedlost', amount: '1200', hs_is_closed: 'true',
       hs_is_closed_won: 'false', hs_merged_object_ids: '7;8',
     }, {
-      tags: '["Prospection"]', assignee: 'Vincent',
+      tags: '["Prospection"]', assignee: 'Vincent', contact_email: 'jean@x.fr',
       relances: [{ at: 't1' }, { at: 't2' }], tasks: [{ status: 'todo' }, { status: 'done' }],
     }, { closedlost: 'Perdu' }, {});
     expect(v).toMatchObject({
       dealId: '42', name: 'EPD - X', stage: 'Perdu', amount: 1200, isClosed: true, isWon: false,
       mergedIds: ['7', '8'], relanceCount: 2, lastRelanceAt: 't2', openTasks: 1,
-      tags: ['Prospection'], assignee: 'Vincent',
+      tags: ['Prospection'], assignee: 'Vincent', contactEmail: 'jean@x.fr',
     });
   });
   test('sans compléments Pilot', () => {
     const v = vueDeal('1', { dealname: 'Y', dealstage: 'qualifiedtobuy' }, undefined, {}, {});
-    expect(v).toMatchObject({ tags: [], assignee: null, relanceCount: 0, mergedIds: [] });
+    expect(v).toMatchObject({ tags: [], assignee: null, contactEmail: null, relanceCount: 0, mergedIds: [] });
   });
 });
 

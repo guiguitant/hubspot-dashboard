@@ -5246,6 +5246,11 @@
           <input type="text" id="newDealName" placeholder="Ex: Wienerberger — EPD béton" autocomplete="off">
         </div>
         <div class="modal-field">
+          <label>Email du contact *</label>
+          <input type="email" id="newDealContactEmail" placeholder="Ex: jean.dupont@wienerberger.com" autocomplete="off">
+          <small style="color:var(--text-secondary)">La personne en face. Canopy s'en sert pour relier le deal à l'entreprise.</small>
+        </div>
+        <div class="modal-field">
           <label>Montant (€)</label>
           <input type="number" id="newDealAmount" placeholder="0" min="0">
         </div>
@@ -8883,6 +8888,8 @@
     function openNewDealModal() {
       selectedStage = null;
       document.getElementById('newDealName').value = '';
+      document.getElementById('newDealContactEmail').value = '';
+      document.getElementById('newDealContactEmail').style.outline = '';
       document.getElementById('newDealAmount').value = '';
       document.getElementById('newDealClosedate').value = '';
       document.querySelectorAll('.stage-option').forEach(el => el.classList.remove('selected'));
@@ -8904,9 +8911,18 @@
 
     async function submitNewDeal() {
       const name = document.getElementById('newDealName').value.trim();
+      const champEmail = document.getElementById('newDealContactEmail');
+      const contactEmail = champEmail.value.trim();
       const amount = document.getElementById('newDealAmount').value;
       const closedate = document.getElementById('newDealClosedate').value;
       if (!name) { document.getElementById('newDealName').focus(); return; }
+      // Plus de deal sans contact : même contrôle que le serveur (utils/releafDeals.js).
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) {
+        champEmail.style.outline = '2px solid var(--danger)';
+        champEmail.focus();
+        return;
+      }
+      champEmail.style.outline = '';
       if (!selectedStage) { document.querySelector('.stage-selector').style.outline = '2px solid var(--danger)'; return; }
       document.querySelector('.stage-selector').style.outline = '';
       const btn = document.getElementById('newDealSubmit');
@@ -8916,10 +8932,12 @@
         const res = await fetch('/api/deals', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, amount: amount || undefined, stage: selectedStage, closedate: closedate || undefined }),
+          body: JSON.stringify({ name, contactEmail, amount: amount || undefined, stage: selectedStage, closedate: closedate || undefined }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
+        // Deal créé, mais un complément n'a pas suivi (ex. migration 47 absente).
+        if (data.avertissements?.length) alert('Deal créé. Attention : ' + data.avertissements.join(' ; '));
         // Ajout local immédiat
         dashboardData.pipelineDeals[selectedStage].unshift({
           id: data.id,
