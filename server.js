@@ -11,7 +11,7 @@ const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
 const { computeKpi, totalCaAnnee, signedAmountForYear, signedByQuarter, clawbackCandidates, computePrimePool, computePrimePayments, endOfYearIso, computePrimesChargeMultiExercice } = require('./utils/kpiCompute');
 const { computeBillingForYear } = require('./utils/billing');
-const { hasTag, statutsDeals, validerCreation, echecCertainHubspot, vueDeal, avecReprise429 } = require('./utils/releafDeals');
+const { hasTag, statutsDeals, validerCreation, validerContact, normEmail, echecCertainHubspot, vueDeal, avecReprise429 } = require('./utils/releafDeals');
 const { buildSalesNavUrl } = require('./utils/buildSalesNavUrl');
 const multer = require('multer');
 const { parse: parseCsv } = require('csv-parse/sync');
@@ -1413,11 +1413,16 @@ app.get('/api/won-deals/range', async (req, res) => {
   }
 });
 
+// Création depuis l'écran de Pilot. L'email du contact est obligatoire (spec
+// Canopy « Consolider », étape 9) : il est gardé dans deal_metadata.contact_email,
+// et c'est par lui que Canopy rattache le deal à son entreprise.
 app.post('/api/deals', async (req, res) => {
-  const { name, amount, stage, closedate } = req.body;
+  const { name, amount, stage, closedate, contactEmail } = req.body;
   if (!name || !stage) return res.status(400).json({ error: 'Nom et stage requis' });
   const stageId = STAGE_ID_MAP[stage];
   if (!stageId) return res.status(400).json({ error: 'Stage invalide' });
+  const email = normEmail(contactEmail);
+  if (!email) return res.status(400).json({ error: contactEmail ? 'Email du contact invalide' : 'Email du contact requis' });
   const properties = {
     dealname: name,
     dealstage: stageId,
@@ -1425,12 +1430,26 @@ app.post('/api/deals', async (req, res) => {
   };
   if (amount) properties.amount = String(parseFloat(amount));
   if (closedate) properties.closedate = closedate;
+  let result;
   try {
-    const result = await hubspotWrite('POST', '/crm/v3/objects/deals', { properties });
-    res.json({ ok: true, id: result.id });
+    result = await hubspotWrite('POST', '/crm/v3/objects/deals', { properties });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    return res.status(500).json({ error: e.message });
   }
+  // Le deal existe dans HubSpot : plus d'erreur renvoyée (l'écran réessaierait
+  // et créerait un second deal), seulement des avertissements.
+  const avertissements = [];
+  if (result?.id) {
+    const { error: metaErr, contactPerdu } = await upsertMetaAvecContact({
+      deal_id: String(result.id), contact_email: email, updated_at: new Date().toISOString(),
+    });
+    if (metaErr) avertissements.push(`email du contact non enregistré : ${metaErr.message}`);
+    else if (contactPerdu) avertissements.push('email du contact non enregistré : migration 47 à appliquer');
+    associateContactByEmail(result.id, email).catch(
+      (e) => console.warn('deals: association contact HubSpot échouée:', e.message)
+    );
+  }
+  res.json({ ok: true, id: result?.id, avertissements });
 });
 
 app.patch('/api/deals/:id', async (req, res) => {
@@ -1526,6 +1545,38 @@ async function associateContactByEmail(dealId, email, name, company) {
   }
   if (!contactId) return;
   await hubspotWrite('PUT', `/crm/v4/objects/deals/${dealId}/associations/default/contacts/${contactId}`, {});
+}
+
+// Migration 47 (deal_metadata.contact_email). Tant qu'elle n'est pas appliquée,
+// Supabase refuse toute requête qui nomme la colonne : Pilot reste alors debout
+// (lecture sans l'email, écriture sans lui) au lieu de casser le pipeline que
+// Canopy lit chaque jour.
+function colonneContactAbsente(err) {
+  return /contact_email/.test(String(err?.message || ''));
+}
+
+const META_CANOPY = 'deal_id, tags, relances, tasks, next_meeting_at, assignee';
+
+// Compléments Pilot lus par les routes Canopy, email du contact compris.
+async function lireMetasCanopy() {
+  let r = await supabaseAdmin.from('deal_metadata').select(`${META_CANOPY}, contact_email`);
+  if (r.error && colonneContactAbsente(r.error)) {
+    r = await supabaseAdmin.from('deal_metadata').select(META_CANOPY);
+  }
+  if (r.error) throw new Error(r.error.message);
+  return r.data || [];
+}
+
+// Upsert de deal_metadata qui survit à l'absence de la colonne : sans elle,
+// tags et responsable sont quand même écrits, et `contactPerdu` le signale.
+async function upsertMetaAvecContact(meta) {
+  let { error } = await supabaseAdmin.from('deal_metadata').upsert(meta, { onConflict: 'deal_id' });
+  if (error && 'contact_email' in meta && colonneContactAbsente(error)) {
+    const { contact_email: _ignore, ...reste } = meta;
+    ({ error } = await supabaseAdmin.from('deal_metadata').upsert(reste, { onConflict: 'deal_id' }));
+    return { error, contactPerdu: true };
+  }
+  return { error, contactPerdu: false };
 }
 
 // Propriétés lues pour chaque deal (liste par tag, pipeline, lecture par id).
@@ -1633,16 +1684,17 @@ app.post('/api/releaf-deals/deals', canopyAuth, async (req, res) => {
       .update({ deal_id: String(dealId), statut: 'cree', updated_at: now }).eq('cle_externe', v.cleExterne);
     if (error) avertissements.push(`réservation non close : ${error.message}`);
   }
-  const meta = { deal_id: String(dealId), updated_at: now };
+  const meta = { deal_id: String(dealId), contact_email: v.contactEmail, updated_at: now };
   if (v.tags.length) meta.tags = v.tags;
   if (v.assignee) meta.assignee = v.assignee;
-  const { error: metaErr } = await supabaseAdmin.from('deal_metadata').upsert(meta, { onConflict: 'deal_id' });
-  if (metaErr) avertissements.push(`tags ou responsable non enregistrés : ${metaErr.message}`);
-  if (v.contactEmail) {
-    associateContactByEmail(dealId, v.contactEmail, v.contactName, v.company).catch(
-      (e) => console.warn('releaf-deals: association contact échouée:', e.message)
-    );
-  }
+  const { error: metaErr, contactPerdu } = await upsertMetaAvecContact(meta);
+  if (metaErr) avertissements.push(`contact, tags ou responsable non enregistrés : ${metaErr.message}`);
+  else if (contactPerdu) avertissements.push('email du contact non enregistré : migration 47 à appliquer');
+  // Copie dans HubSpot, que personne n'ouvre : son échec (403 tant que l'app
+  // n'a pas les droits contacts) ne bloque rien, l'email est déjà chez Pilot.
+  associateContactByEmail(dealId, v.contactEmail, v.contactName, v.company).catch(
+    (e) => console.warn('releaf-deals: association contact échouée:', e.message)
+  );
   res.json({ ok: true, dealId: String(dealId), existant: false, avertissements });
 });
 
@@ -1682,9 +1734,7 @@ app.get('/api/releaf-deals/pipeline', canopyAuth, async (req, res) => {
       after = r.paging?.next?.after;
       if (!after) break;
     }
-    const { data: metas, error } = await supabaseAdmin
-      .from('deal_metadata').select('deal_id, tags, relances, tasks, next_meeting_at, assignee');
-    if (error) throw new Error(error.message);
+    const metas = await lireMetasCanopy();
     const metaParId = new Map((metas || []).map((m) => [String(m.deal_id), m]));
     const { stageLabel, stageProb } = libellesEtapes();
     const deals = hs.map((d) => vueDeal(d.id, d.properties || {}, metaParId.get(String(d.id)), stageLabel, stageProb));
@@ -1692,6 +1742,38 @@ app.get('/api/releaf-deals/pipeline', canopyAuth, async (req, res) => {
   } catch (e) {
     res.status(502).json({ error: `lecture du pipeline impossible : ${e.message}` });
   }
+});
+
+// POST /api/releaf-deals/deals/:id/contact : { contactEmail, contactName?,
+// company?, remplacer? }. Pose l'email du contact d'un deal existant : clic
+// « Oui, c'est lui » dans Canopy, ou recopie des deals créés par Canopy avant la
+// migration 47. Rejouer le même email répond ok (idempotent) ; un email
+// DIFFÉRENT déjà posé n'est remplacé que sur `remplacer: true`, sinon 409 avec
+// l'email en place, pour qu'un humain tranche.
+app.post('/api/releaf-deals/deals/:id/contact', canopyAuth, exigerDealActif, async (req, res) => {
+  const v = validerContact(req.body);
+  if (v.erreur) return res.status(400).json({ error: v.erreur });
+  const dealId = String(req.params.id);
+  const { data: existant, error: selErr } = await supabaseAdmin
+    .from('deal_metadata').select('contact_email').eq('deal_id', dealId).maybeSingle();
+  if (selErr) {
+    if (colonneContactAbsente(selErr)) return res.status(503).json({ error: 'migration 47 non appliquée (deal_metadata.contact_email)' });
+    return res.status(500).json({ error: selErr.message });
+  }
+  const enPlace = existant?.contact_email || null;
+  if (enPlace === v.contactEmail) return res.json({ ok: true, contactEmail: enPlace, inchange: true });
+  if (enPlace && !v.remplacer) {
+    return res.status(409).json({ error: 'un autre contact est déjà posé sur ce deal', contactEmail: enPlace });
+  }
+  const { error } = await supabaseAdmin.from('deal_metadata').upsert(
+    { deal_id: dealId, contact_email: v.contactEmail, updated_at: new Date().toISOString() },
+    { onConflict: 'deal_id' }
+  );
+  if (error) return res.status(500).json({ error: error.message });
+  associateContactByEmail(dealId, v.contactEmail, v.contactName, v.company).catch(
+    (e) => console.warn('releaf-deals: association contact échouée:', e.message)
+  );
+  res.json({ ok: true, contactEmail: v.contactEmail, remplace: enPlace });
 });
 
 // POST /api/releaf-deals/deals/:id/notes
@@ -1756,11 +1838,8 @@ app.get('/api/releaf-deals/deals', canopyAuth, async (req, res) => {
     // 1) deals taggés. NB : en prod `tags` peut être stocké en chaîne JSON et pas
     // en TEXT[] → on charge tout et on normalise/filtre en JS (même pattern que
     // /api/won-deals/range), au lieu d'un .contains() array qui ne matcherait pas.
-    const { data: allRows, error } = await supabaseAdmin
-      .from('deal_metadata')
-      .select('deal_id, tags, relances, tasks, next_meeting_at, assignee');
-    if (error) throw new Error(error.message);
-    const metas = (allRows || [])
+    const allRows = await lireMetasCanopy();
+    const metas = allRows
       .filter((r) => hasTag(r.tags, tag));
     if (!metas.length) return res.json({ tag, deals: [] });
 

@@ -1037,16 +1037,18 @@ server.registerTool(
     description:
       "Crée un nouveau deal dans le pipeline 'default' de HubSpot. ⚠️ Écrit dans le CRM réel. " +
       "Le stage doit être un label connu : " + STAGE_LABELS.join(', ') + ". " +
-      "Optionnel : poser des tags (stockés dans Supabase) à la création.",
+      "Optionnel : poser des tags (stockés dans Supabase) à la création. " +
+      "Obligatoire : l'email du contact (la personne en face), gardé par Pilot : c'est par lui que Canopy relie le deal à l'entreprise.",
     inputSchema: {
       name: z.string().describe('Nom du deal (dealname)'),
       stage: z.string().describe("Stage, ex 'RDV Qualif' (label) — un de : " + STAGE_LABELS.join(', ')),
+      contactEmail: z.string().trim().toLowerCase().email().describe("Email du contact du deal, ex 'jean.dupont@perin.fr' (obligatoire)"),
       amount: z.number().optional().describe('Montant en € (optionnel)'),
       closedate: z.string().optional().describe('Date de clôture prévue YYYY-MM-DD (optionnel)'),
       tags: z.array(z.string()).optional().describe("Tags à poser, ex ['EPD'] (optionnel)"),
     },
   },
-  async ({ name, stage, amount, closedate, tags }) => {
+  async ({ name, stage, contactEmail, amount, closedate, tags }) => {
     const stageId = STAGE_ID_MAP[stage];
     if (!stageId) throw new Error(`Stage invalide: "${stage}". Valeurs: ${STAGE_LABELS.join(', ')}`);
     const properties = { dealname: name, dealstage: stageId, pipeline: 'default' };
@@ -1055,11 +1057,20 @@ server.registerTool(
 
     const result = await hubspotWrite('POST', '/crm/v3/objects/deals', { properties });
     let tagNote = null;
-    if (tags && tags.length && result.id) {
-      await upsertMeta({ deal_id: String(result.id), tags });
-      tagNote = tags;
+    let avertissement = null;
+    if (result.id) {
+      // Le deal existe : un échec ici ne doit pas faire croire qu'il n'a pas été
+      // créé (Claude le recréerait). Il est rapporté, pas levé.
+      const meta = { deal_id: String(result.id), contact_email: contactEmail };
+      if (tags && tags.length) meta.tags = tags;
+      try {
+        await upsertMeta(meta);
+        if (meta.tags) tagNote = tags;
+      } catch (e) {
+        avertissement = `Deal créé, mais contact et tags non enregistrés : ${e.message}`;
+      }
     }
-    return { content: [{ type: 'text', text: JSON.stringify({ ok: true, id: result.id, name, stage, amount: amount ?? null, tags: tagNote }, null, 2) }] };
+    return { content: [{ type: 'text', text: JSON.stringify({ ok: true, id: result.id, name, stage, contactEmail, amount: amount ?? null, tags: tagNote, avertissement }, null, 2) }] };
   }
 );
 
