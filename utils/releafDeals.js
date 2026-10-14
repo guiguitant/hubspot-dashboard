@@ -175,8 +175,21 @@ async function avecReprise429(fn, { essais = 3, attenteMs = 1100, attendre } = {
   }
 }
 
+/**
+ * Changement de l'email du contact d'un deal par un utilisateur de Pilot
+ * (14/10/2026). Rend l'email normalisé, si rien ne change, et la note qui
+ * garde l'ancien email (null s'il n'y en avait pas). Pure.
+ */
+function changementContact(ancien, saisi) {
+  const email = normEmail(saisi);
+  if (!email) return { erreur: 'Email du contact invalide' };
+  if (ancien === email) return { email, inchange: true, note: null };
+  return { email, inchange: false, note: ancien ? `Email du contact changé : ${ancien} → ${email}` : null };
+}
+
 module.exports = {
   ASSIGNEES,
+  changementContact,
   avecReprise429,
   normEmail,
   normTags,
