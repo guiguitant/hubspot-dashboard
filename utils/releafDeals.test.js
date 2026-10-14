@@ -1,7 +1,7 @@
 'use strict';
 const {
   normTags, hasTag, statutsDeals, validerCreation, echecCertainHubspot, vueDeal, avecReprise429,
-  normEmail, validerContact,
+  normEmail, validerContact, changementContact,
 } = require('./releafDeals');
 
 const STAGES = { 'RDV Qualif': 'qualifiedtobuy', 'closedlost': 'closedlost' };
@@ -155,5 +155,23 @@ describe('avecReprise429', () => {
     let appels = 0;
     const r = await avecReprise429(async () => { appels++; if (appels === 1) throw new Error('HubSpot POST 429: x'); return 1; }, sansAttente);
     expect(r).toBe(1);
+  });
+});
+
+// 14/10/2026 : l'utilisateur corrige l'email du contact d'un deal dans Pilot.
+describe('changementContact', () => {
+  test('email invalide refusé', () => {
+    expect(changementContact('a@b.fr', 'pas un email')).toEqual({ erreur: 'Email du contact invalide' });
+  });
+  test('même email (casse et espaces compris) : rien ne change', () => {
+    expect(changementContact('jean@acme.fr', '  Jean@ACME.fr ')).toEqual({ email: 'jean@acme.fr', inchange: true, note: null });
+  });
+  test("nouvel email : l'ancien est gardé dans une note", () => {
+    expect(changementContact('faux@acme.fr', 'jean@acme.fr')).toEqual({
+      email: 'jean@acme.fr', inchange: false, note: 'Email du contact changé : faux@acme.fr → jean@acme.fr',
+    });
+  });
+  test('premier email posé : pas de note', () => {
+    expect(changementContact(null, 'jean@acme.fr')).toEqual({ email: 'jean@acme.fr', inchange: false, note: null });
   });
 });

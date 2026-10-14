@@ -9047,6 +9047,40 @@
       }
     }
 
+    // Email du contact du deal (14/10/2026) : modifiable par l'utilisateur,
+    // y compris sur un deal créé par Claude. Même contrôle que le serveur.
+    async function saveContactEmail(dealId) {
+      const input = document.getElementById('sbContactEmail');
+      const btn = document.getElementById('sbContactEmailSaveBtn');
+      const email = input ? input.value.trim() : '';
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        if (input) { input.style.outline = '2px solid var(--danger)'; input.focus(); }
+        return;
+      }
+      input.style.outline = '';
+      if (btn) { btn.disabled = true; btn.textContent = '…'; }
+      try {
+        const res = await fetch(`/api/deals/${dealId}/contact`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contactEmail: email }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Erreur');
+        const meta = { ...(dealMetadata[dealId] || {}), contact_email: data.contactEmail };
+        // La trace de l'ancien email apparaît dans les notes sans recharger.
+        if (data.ancien) {
+          meta.notes = [...(Array.isArray(meta.notes) ? meta.notes : []),
+            { at: new Date().toISOString(), text: `Email du contact changé : ${data.ancien} → ${data.contactEmail}` }];
+        }
+        dealMetadata[dealId] = meta;
+        if (btn) { btn.textContent = 'Enregistré ✓'; setTimeout(() => { if (btn) { btn.textContent = 'Enregistrer'; btn.disabled = false; } }, 1200); }
+      } catch (e) {
+        if (btn) { btn.textContent = 'Enregistrer'; btn.disabled = false; }
+        alert('Email non enregistré : ' + e.message);
+      }
+    }
+
     async function clearNextMeeting(dealId) {
       try {
         const res = await fetch(`/api/deals/${dealId}/metadata`, {
@@ -9537,6 +9571,14 @@
         <div class="deal-sidebar-field">
           <div class="deal-sidebar-label">Assigné à</div>
           <div class="assignee-seg" id="sbAssigneeSeg">${_renderAssigneeSeg(deal.id, meta.assignee)}</div>
+        </div>
+
+        <div class="deal-sidebar-field">
+          <div class="deal-sidebar-label">Email du contact ${meta.contact_email ? '' : '<span style="color:#b91c1c;font-weight:600">· manquant</span>'}</div>
+          <div style="display:flex;gap:0.4rem;align-items:center">
+            <input class="deal-sidebar-input" id="sbContactEmail" type="email" value="${_escapeHtml(meta.contact_email || '')}" placeholder="prenom.nom@entreprise.com" style="flex:1" aria-label="Email du contact">
+            <button class="relance-btn" id="sbContactEmailSaveBtn" onclick="saveContactEmail('${deal.id}')" style="flex:0 0 auto;padding:0.45rem 0.8rem" title="Change le contact du deal ; l'ancien email est gardé dans les notes, et Canopy suit le nouveau.">Enregistrer</button>
+          </div>
         </div>
 
         <div class="sb-section open">

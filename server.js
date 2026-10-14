@@ -11,7 +11,7 @@ const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
 const { computeKpi, totalCaAnnee, signedAmountForYear, signedByQuarter, clawbackCandidates, computePrimePool, computePrimePayments, endOfYearIso, computePrimesChargeMultiExercice } = require('./utils/kpiCompute');
 const { computeBillingForYear } = require('./utils/billing');
-const { hasTag, statutsDeals, validerCreation, validerContact, normEmail, echecCertainHubspot, vueDeal, avecReprise429 } = require('./utils/releafDeals');
+const { hasTag, statutsDeals, validerCreation, validerContact, normEmail, changementContact, echecCertainHubspot, vueDeal, avecReprise429 } = require('./utils/releafDeals');
 const { buildSalesNavUrl } = require('./utils/buildSalesNavUrl');
 const multer = require('multer');
 const { parse: parseCsv } = require('csv-parse/sync');
@@ -1481,6 +1481,38 @@ app.patch('/api/deals/:id', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// Email du contact d'un deal, modifiable par un utilisateur de Pilot (demande
+// de Nathan, 14/10/2026). Jusqu'ici seul Canopy pouvait le poser
+// (POST /api/releaf-deals/deals/:id/contact) : un deal créé par Claude (MCP)
+// avec un mauvais contact ne pouvait plus être corrigé. L'ancien email est
+// gardé dans les notes du deal (rien ne se perd) et le nouveau contact est
+// associé au deal dans HubSpot ; Canopy relit l'email à la lecture du pipeline.
+app.put('/api/deals/:id/contact', async (req, res) => {
+  const dealId = String(req.params.id);
+  if (!normEmail(req.body?.contactEmail)) return res.status(400).json({ error: 'Email du contact invalide' });
+  const { data: existant, error: selErr } = await supabaseAdmin
+    .from('deal_metadata').select('contact_email').eq('deal_id', dealId).maybeSingle();
+  if (selErr) {
+    if (colonneContactAbsente(selErr)) return res.status(503).json({ error: 'migration 47 non appliquée (deal_metadata.contact_email)' });
+    return res.status(500).json({ error: selErr.message });
+  }
+  const ancien = existant?.contact_email || null;
+  const { email, inchange, note } = changementContact(ancien, req.body?.contactEmail);
+  if (inchange) return res.json({ ok: true, contactEmail: email, inchange: true });
+  const { error } = await supabaseAdmin.from('deal_metadata').upsert(
+    { deal_id: dealId, contact_email: email, updated_at: new Date().toISOString() },
+    { onConflict: 'deal_id' }
+  );
+  if (error) return res.status(500).json({ error: error.message });
+  if (note) {
+    await appendDealMetadata(dealId, 'notes', { at: new Date().toISOString(), text: note }).catch((e) => console.warn('deals: trace du changement de contact non écrite:', e.message));
+  }
+  associateContactByEmail(dealId, email).catch(
+    (e) => console.warn('deals: association contact HubSpot échouée:', e.message)
+  );
+  res.json({ ok: true, contactEmail: email, ancien });
 });
 
 // Suppression (archivage) d'un deal HubSpot + nettoyage des métadonnées Supabase associées.
